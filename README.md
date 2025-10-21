@@ -90,10 +90,6 @@ OGScope/
 └── web/              # Web 前端资源
 ```
 
-## 参考项目
-
-- [PiFinder](https://github.com/brickbots/PiFinder) - 板块求解寻星器
-- [OpenMV Polar Scope](https://frank26080115.github.io/OpenMV-Astrophotography-Gear/doc/Polar-Scope.html) - 极轴镜参考
 
 ## 许可证
 
@@ -109,6 +105,3 @@ OGScope/
 
 欢迎提交 Issue 和 Pull Request！
 
-## 致谢
-
-感谢 PiFinder 项目的开源贡献，为本项目提供了宝贵的参考。

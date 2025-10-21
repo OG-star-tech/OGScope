@@ -24,12 +24,11 @@ aiofiles = "^23.2.1"         # 异步文件操作
 
 # 图像处理
 numpy = ">=2,<3"
-opencv-python-headless = ">=4.12,<5"
 pillow = ">=10,<13"
 
 # 相机支持 (Raspberry Pi MIPI)
 # picamera2 = "^0.3.0"       # 树莓派 MIPI 相机支持 (仅Linux)
-# 备选: opencv-python (用于图像处理)
+# 图像处理已改为前端JavaScript实现，无需OpenCV
 
 # 天文计算
 astropy = "^6.0.0"

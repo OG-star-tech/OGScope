@@ -178,6 +178,74 @@
                         </div>
                     </div>
                     
+                    <!-- 夜间模式控制 -->
+                    <div class="night-mode-controls">
+                        <h4>🌙 夜间模式</h4>
+                        <div class="night-mode-actions">
+                            <button class="btn btn-primary btn-large" id="night-mode-preset">
+                                <span class="btn-icon">🌙</span>
+                                一键夜间模式
+                            </button>
+                            <button class="btn btn-secondary btn-small" id="toggle-night-mode">
+                                <span class="btn-icon">🌓</span>
+                                切换夜间模式
+                            </button>
+                        </div>
+                        <div class="night-mode-info">
+                            <div class="info-item">
+                                <span class="info-label">夜间模式:</span>
+                                <span class="info-value" id="night-mode-status">关闭</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 图像质量监控 -->
+                    <div class="quality-monitoring">
+                        <h4>📊 图像质量监控</h4>
+                        <div class="quality-grid">
+                            <div class="quality-item">
+                                <span class="quality-label">噪点水平</span>
+                                <div class="quality-bar">
+                                    <div class="quality-fill" id="noise-level-bar"></div>
+                                </div>
+                                <span class="quality-value" id="noise-level">--</span>
+                            </div>
+                            <div class="quality-item">
+                                <span class="quality-label">曝光充足度</span>
+                                <div class="quality-bar">
+                                    <div class="quality-fill" id="exposure-bar"></div>
+                                </div>
+                                <span class="quality-value" id="exposure-level">--</span>
+                            </div>
+                            <div class="quality-item">
+                                <span class="quality-label">增益水平</span>
+                                <div class="quality-bar">
+                                    <div class="quality-fill" id="gain-bar"></div>
+                                </div>
+                                <span class="quality-value" id="gain-level">--</span>
+                            </div>
+                        </div>
+                        <div class="quality-recommendations" id="quality-recommendations">
+                            <!-- 建议将动态生成 -->
+                        </div>
+                        
+                        <!-- 直方图显示 -->
+                        <div class="histogram-container">
+                            <h4>📈 曝光直方图</h4>
+                            <div class="histogram-controls">
+                                <button id="toggle-histogram" class="btn btn-secondary">显示直方图</button>
+                                <select id="histogram-type">
+                                    <option value="grayscale">灰度直方图</option>
+                                    <option value="rgb">RGB直方图</option>
+                                </select>
+                            </div>
+                            <div class="histogram-display" id="histogram-display" style="display: none;">
+                                <canvas id="histogram-canvas" width="400" height="200"></canvas>
+                                <div class="histogram-stats" id="histogram-stats"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 旋转控制 -->
                     <div class="rotation-controls">
                         <h4>🔄 画面旋转控制</h4>
@@ -269,27 +337,118 @@
                     </div>
                     
                     <div class="settings-controls">
-                        <div class="control-group">
-                            <label for="exposure-setting">曝光时间 (μs)</label>
-                            <div class="control-row">
-                                <input type="range" id="exposure-setting" min="1000" max="100000" value="10000" step="1000">
-                                <span class="control-value" id="exposure-value">10000</span>
+                        <!-- 基础参数 -->
+                        <div class="settings-section">
+                            <h3>📸 基础参数</h3>
+                            <div class="control-group">
+                                <label for="exposure-setting">曝光时间 (μs)</label>
+                                <div class="control-row">
+                                    <input type="range" id="exposure-setting" min="1000" max="100000" value="10000" step="1000">
+                                    <span class="control-value" id="exposure-value">10000</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="gain-setting">模拟增益</label>
+                                <div class="control-row">
+                                    <input type="range" id="gain-setting" min="1" max="16" step="0.1" value="1.0">
+                                    <span class="control-value" id="gain-value">1.0</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="digital-gain-setting">数字增益</label>
+                                <div class="control-row">
+                                    <input type="range" id="digital-gain-setting" min="1" max="4" step="0.1" value="1.0">
+                                    <span class="control-value" id="digital-gain-value">1.0</span>
+                                </div>
                             </div>
                         </div>
-                        
-                        <div class="control-group">
-                            <label for="gain-setting">模拟增益</label>
-                            <div class="control-row">
-                                <input type="range" id="gain-setting" min="1" max="16" step="0.1" value="1.0">
-                                <span class="control-value" id="gain-value">1.0</span>
+
+                        <!-- 图像增强 -->
+                        <div class="settings-section">
+                            <h3>🎨 图像增强</h3>
+                            <div class="control-group">
+                                <label for="contrast-setting">对比度</label>
+                                <div class="control-row">
+                                    <input type="range" id="contrast-setting" min="0.5" max="2.0" step="0.1" value="1.0">
+                                    <span class="control-value" id="contrast-value">1.0</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="brightness-setting">亮度</label>
+                                <div class="control-row">
+                                    <input type="range" id="brightness-setting" min="-1.0" max="1.0" step="0.1" value="0.0">
+                                    <span class="control-value" id="brightness-value">0.0</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="saturation-setting">饱和度</label>
+                                <div class="control-row">
+                                    <input type="range" id="saturation-setting" min="0.0" max="2.0" step="0.1" value="1.0">
+                                    <span class="control-value" id="saturation-value">1.0</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="sharpness-setting">锐度</label>
+                                <div class="control-row">
+                                    <input type="range" id="sharpness-setting" min="0.0" max="2.0" step="0.1" value="1.0">
+                                    <span class="control-value" id="sharpness-value">1.0</span>
+                                </div>
                             </div>
                         </div>
-                        
-                        <div class="control-group">
-                            <label for="digital-gain-setting">数字增益</label>
-                            <div class="control-row">
-                                <input type="range" id="digital-gain-setting" min="1" max="4" step="0.1" value="1.0">
-                                <span class="control-value" id="digital-gain-value">1.0</span>
+
+                        <!-- 降噪和白平衡 -->
+                        <div class="settings-section">
+                            <h3>🔧 降噪和白平衡</h3>
+                            <div class="control-group">
+                                <label for="noise-reduction-setting">降噪级别</label>
+                                <div class="control-row">
+                                    <input type="range" id="noise-reduction-setting" min="0" max="4" step="1" value="0">
+                                    <span class="control-value" id="noise-reduction-value">0</span>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group">
+                                <label for="white-balance-mode">白平衡模式</label>
+                                <div class="control-row">
+                                    <select id="white-balance-mode">
+                                        <option value="auto">自动</option>
+                                        <option value="manual">手动</option>
+                                        <option value="night">夜间</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="control-group" id="white-balance-gains" style="display: none;">
+                                <label for="wb-gain-r">红色增益</label>
+                                <div class="control-row">
+                                    <input type="range" id="wb-gain-r" min="0.1" max="3.0" step="0.1" value="1.0">
+                                    <span class="control-value" id="wb-gain-r-value">1.0</span>
+                                </div>
+                                <label for="wb-gain-b">蓝色增益</label>
+                                <div class="control-row">
+                                    <input type="range" id="wb-gain-b" min="0.1" max="3.0" step="0.1" value="1.0">
+                                    <span class="control-value" id="wb-gain-b-value">1.0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 安全机制 -->
+                        <div class="settings-section">
+                            <h3>🛡️ 安全机制</h3>
+                            <div class="safety-controls">
+                                <button class="btn btn-info" id="backup-settings">
+                                    <span class="btn-icon">💾</span>
+                                    备份当前设置
+                                </button>
+                                <button class="btn btn-warning" id="restore-settings">
+                                    <span class="btn-icon">🔄</span>
+                                    恢复备份设置
+                                </button>
                             </div>
                         </div>
                         

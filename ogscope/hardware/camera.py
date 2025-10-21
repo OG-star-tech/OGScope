@@ -6,7 +6,7 @@
 """
 
 import logging
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -74,6 +74,19 @@ class IMX327MIPICamera(CameraInterface):
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率）
         self.sampling_mode = config.get('sampling_mode', 'supersample')  # supersample | native | crop
         
+        # 新增参数 - 夜间模式优化
+        self.noise_reduction = config.get('noise_reduction', 0)  # 0-4, 0=关闭
+        self.white_balance_mode = config.get('white_balance_mode', 'auto')  # auto, manual, night
+        self.white_balance_gain_r = config.get('white_balance_gain_r', 1.0)
+        self.white_balance_gain_b = config.get('white_balance_gain_b', 1.0)
+        self.contrast = config.get('contrast', 1.0)  # 0.5-2.0
+        self.brightness = config.get('brightness', 0.0)  # -1.0 to 1.0
+        self.saturation = config.get('saturation', 1.0)  # 0.0-2.0
+        self.sharpness = config.get('sharpness', 1.0)  # 0.0-2.0
+        
+        # 夜间模式标志
+        self.night_mode = config.get('night_mode', False)
+        
         # 根据采样模式设置捕获和输出分辨率
         if self.sampling_mode == 'supersample':
             # 超采样模式：设置更高的捕获分辨率，输出分辨率为配置的分辨率
@@ -126,9 +139,22 @@ class IMX327MIPICamera(CameraInterface):
                 "ExposureTime": self.exposure_us,
                 "AnalogueGain": self.analogue_gain,
                 "AeEnable": self.auto_exposure,
-                "AwbEnable": False,  # 禁用自动白平衡
-                "NoiseReductionMode": 0,  # 禁用降噪以获得原始数据
+                "AwbEnable": self.white_balance_mode == 'auto',  # 根据模式设置白平衡
+                "NoiseReductionMode": self.noise_reduction,  # 降噪设置
+                "Contrast": self.contrast,
+                "Brightness": self.brightness,
+                "Saturation": self.saturation,
+                "Sharpness": self.sharpness,
             }
+            
+            # 夜间模式特殊设置
+            if self.night_mode:
+                controls.update({
+                    "AeEnable": False,  # 夜间模式关闭自动曝光
+                    "AwbEnable": False,  # 夜间模式关闭自动白平衡
+                    "NoiseReductionMode": min(self.noise_reduction + 1, 4),  # 增强降噪
+                })
+            
             try:
                 self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
             except Exception:
@@ -456,6 +482,292 @@ class IMX327MIPICamera(CameraInterface):
             logger.error(f"设置采样模式失败: {e}")
             return False
     
+    def set_noise_reduction(self, level: int) -> bool:
+        """设置降噪级别 (0-4)"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+            
+        if not 0 <= level <= 4:
+            logger.error(f"降噪级别超出范围: {level} (应在0-4之间)")
+            return False
+        
+        try:
+            self.noise_reduction = level
+            self.camera.set_controls({"NoiseReductionMode": level})
+            logger.info(f"降噪级别设置为: {level}")
+            return True
+        except Exception as e:
+            logger.error(f"设置降噪级别失败: {e}")
+            return False
+    
+    def set_white_balance(self, mode: str, gain_r: float = 1.0, gain_b: float = 1.0) -> bool:
+        """设置白平衡模式"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+            
+        if mode not in ['auto', 'manual', 'night']:
+            logger.error(f"不支持的白平衡模式: {mode}")
+            return False
+        
+        try:
+            self.white_balance_mode = mode
+            self.white_balance_gain_r = gain_r
+            self.white_balance_gain_b = gain_b
+            
+            if mode == 'auto':
+                self.camera.set_controls({"AwbEnable": True})
+            elif mode == 'night':
+                # 夜间模式：偏暖色调
+                self.camera.set_controls({
+                    "AwbEnable": False,
+                    "ColourGains": (1.2, 0.8)  # R增益增加，B增益减少
+                })
+            else:  # manual
+                self.camera.set_controls({
+                    "AwbEnable": False,
+                    "ColourGains": (gain_r, gain_b)
+                })
+            
+            logger.info(f"白平衡模式设置为: {mode}")
+            return True
+        except Exception as e:
+            logger.error(f"设置白平衡失败: {e}")
+            return False
+    
+    def set_image_enhancement(self, contrast: float = 1.0, brightness: float = 0.0, 
+                            saturation: float = 1.0, sharpness: float = 1.0) -> bool:
+        """设置图像增强参数"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+        
+        try:
+            self.contrast = max(0.5, min(2.0, contrast))
+            self.brightness = max(-1.0, min(1.0, brightness))
+            self.saturation = max(0.0, min(2.0, saturation))
+            self.sharpness = max(0.0, min(2.0, sharpness))
+            
+            self.camera.set_controls({
+                "Contrast": self.contrast,
+                "Brightness": self.brightness,
+                "Saturation": self.saturation,
+                "Sharpness": self.sharpness,
+            })
+            
+            logger.info(f"图像增强参数设置: 对比度={self.contrast}, 亮度={self.brightness}, "
+                       f"饱和度={self.saturation}, 锐度={self.sharpness}")
+            return True
+        except Exception as e:
+            logger.error(f"设置图像增强参数失败: {e}")
+            return False
+    
+    def set_night_mode(self, enabled: bool) -> bool:
+        """设置夜间模式"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+        
+        try:
+            self.night_mode = enabled
+            
+            if enabled:
+                # 夜间模式：优化低光环境参数
+                self.camera.set_controls({
+                    "AeEnable": False,  # 关闭自动曝光
+                    "AwbEnable": False,  # 关闭自动白平衡
+                    "NoiseReductionMode": min(self.noise_reduction + 1, 4),  # 增强降噪
+                    "ExposureTime": max(self.exposure_us, 20000),  # 确保足够曝光
+                    "AnalogueGain": max(self.analogue_gain, 4.0),  # 确保足够增益
+                })
+                logger.info("夜间模式已启用")
+            else:
+                # 恢复正常模式
+                self.camera.set_controls({
+                    "AeEnable": self.auto_exposure,
+                    "AwbEnable": self.white_balance_mode == 'auto',
+                    "NoiseReductionMode": self.noise_reduction,
+                })
+                logger.info("夜间模式已关闭")
+            
+            return True
+        except Exception as e:
+            logger.error(f"设置夜间模式失败: {e}")
+            return False
+    
+    def get_image_quality_metrics(self) -> Dict[str, Any]:
+        """获取图像质量指标 - 基于相机参数计算基础指标"""
+        if not self.is_initialized:
+            return {
+                "noise_level": 0.0,
+                "exposure_adequacy": 0.0,
+                "gain_level": 0.0,
+                "night_mode": False,
+                "recommended_adjustments": ["相机未初始化"],
+                "camera_params": {}
+            }
+        
+        try:
+            # 计算基于参数的噪点水平
+            noise_level = self._calculate_noise_level_from_params()
+            
+            # 计算基于参数的曝光充足度
+            exposure_adequacy = self._calculate_exposure_adequacy_from_params()
+            
+            # 获取建议
+            recommendations = self._get_recommendations()
+            
+            return {
+                "noise_level": noise_level,
+                "exposure_adequacy": exposure_adequacy,
+                "gain_level": min(1.0, self.analogue_gain / 16.0),
+                "night_mode": self.night_mode,
+                "recommended_adjustments": recommendations,
+                "camera_params": {
+                    "exposure_us": self.exposure_us,
+                    "analogue_gain": self.analogue_gain,
+                    "digital_gain": self.digital_gain,
+                    "noise_reduction": self.noise_reduction,
+                    "white_balance_mode": self.white_balance_mode,
+                    "contrast": self.contrast,
+                    "brightness": self.brightness,
+                    "saturation": self.saturation,
+                    "sharpness": self.sharpness,
+                    "width": self.width,
+                    "height": self.height,
+                    "fps": self.fps
+                }
+            }
+        except Exception as e:
+            logger.error(f"获取图像质量指标失败: {e}")
+            return {
+                "noise_level": 0.0,
+                "exposure_adequacy": 0.0,
+                "gain_level": 0.0,
+                "night_mode": False,
+                "recommended_adjustments": [f"获取质量指标失败: {str(e)}"],
+                "camera_params": {}
+            }
+    
+
+    def _calculate_noise_level_from_params(self) -> float:
+        """基于相机参数计算噪点水平"""
+        # 基础噪点水平（即使增益很低也有基础噪点）
+        noise_level = 0.08  # 提高基础噪点，确保不会为0
+        
+        # 根据增益增加噪点
+        if self.analogue_gain >= 16.0:
+            noise_level += 0.6
+        elif self.analogue_gain >= 12.0:
+            noise_level += 0.5
+        elif self.analogue_gain >= 8.0:
+            noise_level += 0.4
+        elif self.analogue_gain >= 4.0:
+            noise_level += 0.3
+        elif self.analogue_gain >= 2.0:
+            noise_level += 0.2
+        elif self.analogue_gain >= 1.5:
+            noise_level += 0.1
+        else:
+            noise_level += 0.05
+        
+        # 夜间模式会增加噪点
+        if self.night_mode:
+            noise_level += 0.2
+        
+        # 数字增益也会增加噪点
+        if self.digital_gain > 1.0:
+            noise_level += (self.digital_gain - 1.0) * 0.1
+        
+        # 降噪效果
+        noise_reduction_effect = self.noise_reduction * 0.2
+        noise_level = max(0.05, noise_level - noise_reduction_effect)  # 确保最小值为0.05
+        
+        # 曝光时间过短也会增加噪点
+        if self.exposure_us < 5000:
+            noise_level += 0.1
+        elif self.exposure_us < 10000:
+            noise_level += 0.05
+        
+        return min(1.0, noise_level)
+    
+    def _calculate_exposure_adequacy_from_params(self) -> float:
+        """基于相机参数计算曝光充足度"""
+        # 基础曝光充足度
+        exposure_score = 1.0
+        
+        # 根据曝光时间评估
+        if self.exposure_us < 5000:
+            exposure_score = 0.3  # 严重曝光不足
+        elif self.exposure_us < 10000:
+            exposure_score = 0.5  # 曝光不足
+        elif self.exposure_us < 20000:
+            exposure_score = 0.7  # 轻微曝光不足
+        elif self.exposure_us < 50000:
+            exposure_score = 0.9  # 基本充足
+        elif self.exposure_us < 100000:
+            exposure_score = 1.0  # 充足
+        else:
+            exposure_score = 0.8  # 可能过曝
+        
+        # 考虑增益对曝光的影响
+        if self.analogue_gain < 1.0:
+            exposure_score *= 0.8  # 增益过低影响曝光
+        elif self.analogue_gain > 8.0:
+            exposure_score *= 0.9  # 高增益时曝光效果会打折扣
+        
+        # 夜间模式调整
+        if self.night_mode:
+            if self.exposure_us < 20000:
+                exposure_score *= 0.6  # 夜间模式需要更长曝光
+            elif self.exposure_us < 50000:
+                exposure_score *= 0.8
+        
+        return max(0.0, min(1.0, exposure_score))
+    
+    def _get_recommendations(self) -> List[str]:
+        """获取参数调整建议"""
+        recommendations = []
+        
+        # 计算当前噪点水平
+        noise_level = self._calculate_noise_level_from_params()
+        
+        # 基于噪点水平的建议
+        if noise_level > 0.6:
+            recommendations.append("噪点水平较高，建议降低增益或启用降噪")
+        elif noise_level > 0.4:
+            recommendations.append("噪点水平中等，可考虑适当降低增益")
+        elif noise_level < 0.15:
+            recommendations.append("噪点水平很低，图像质量良好")
+        
+        # 曝光建议
+        exposure_adequacy = self._calculate_exposure_adequacy_from_params()
+        if exposure_adequacy < 0.5:
+            recommendations.append("曝光不足，建议增加曝光时间或增益")
+        elif exposure_adequacy > 0.9:
+            recommendations.append("曝光充足，图像质量良好")
+        
+        # 增益建议
+        if self.analogue_gain > 12.0:
+            recommendations.append("增益过高，建议降低以减少噪点")
+        elif self.analogue_gain < 1.5 and self.night_mode:
+            recommendations.append("夜间模式建议适当增加增益")
+        
+        # 降噪建议
+        if self.noise_reduction == 0 and noise_level > 0.3:
+            recommendations.append("建议启用降噪功能")
+        
+        # 白平衡建议
+        if self.white_balance_mode == 'auto' and self.night_mode:
+            recommendations.append("夜间模式建议使用手动白平衡")
+        
+        # 如果没有建议，提供正面反馈
+        if not recommendations:
+            recommendations.append("当前设置良好，图像质量稳定")
+        
+        return recommendations
+    
     def get_camera_info(self) -> Dict[str, Any]:
         """获取相机信息"""
         if not self.is_initialized:
@@ -463,7 +775,7 @@ class IMX327MIPICamera(CameraInterface):
         
         try:
             camera_properties = self.camera.camera_properties
-            return {
+            base_info = {
                 "sensor": camera_properties.get("Model", "Unknown"),
                 "resolution": f"{self.width}x{self.height}",
                 "fps": self.fps,
@@ -481,6 +793,23 @@ class IMX327MIPICamera(CameraInterface):
                 "output_width": self.output_width,
                 "output_height": self.output_height,
             }
+            
+            # 添加新增参数
+            enhanced_info = {
+                **base_info,
+                "noise_reduction": self.noise_reduction,
+                "white_balance_mode": self.white_balance_mode,
+                "white_balance_gain_r": self.white_balance_gain_r,
+                "white_balance_gain_b": self.white_balance_gain_b,
+                "contrast": self.contrast,
+                "brightness": self.brightness,
+                "saturation": self.saturation,
+                "sharpness": self.sharpness,
+                "night_mode": self.night_mode,
+                "image_quality": self.get_image_quality_metrics()
+            }
+            
+            return enhanced_info
         except Exception as e:
             logger.error(f"获取相机信息失败: {e}")
             return {}

@@ -90,10 +90,6 @@ OGScope/
 └── web/              # Web frontend resources
 ```
 
-## Reference Projects
-
-- [PiFinder](https://github.com/brickbots/PiFinder) - Plate solving star finder
-- [OpenMV Polar Scope](https://frank26080115.github.io/OpenMV-Astrophotography-Gear/doc/Polar-Scope.html) - Polar scope reference
 
 ## License
 
@@ -109,6 +105,3 @@ See [LICENSE](LICENSE) file for details.
 
 Issues and Pull Requests are welcome!
 
-## Acknowledgments
-
-Thanks to the PiFinder project for its open-source contributions, which provided valuable reference for this project.

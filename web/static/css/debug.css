@@ -438,10 +438,25 @@
   gap: var(--debug-spacing);
 }
 
+.settings-section {
+  padding: var(--debug-spacing);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--debug-radius);
+  border: 1px solid var(--debug-border);
+}
+
+.settings-section h3 {
+  font-size: 1.1rem;
+  color: var(--debug-text);
+  margin: 0 0 12px 0;
+  font-weight: 600;
+}
+
 .control-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .control-group label {
@@ -488,6 +503,16 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
+.control-row select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius);
+  background: var(--debug-bg);
+  color: var(--debug-text);
+  font-size: 1rem;
+}
+
 .control-value {
   min-width: 80px;
   text-align: right;
@@ -499,10 +524,129 @@
   border-radius: var(--debug-radius);
 }
 
+.safety-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .settings-actions {
   display: flex;
   gap: 12px;
   margin-top: var(--debug-spacing);
+}
+
+/* 夜间模式控制 */
+.night-mode-controls {
+  margin-top: var(--debug-spacing);
+  padding: var(--debug-spacing);
+  background: var(--debug-surface);
+  border-radius: var(--debug-radius);
+  border: 1px solid var(--debug-border);
+}
+
+.night-mode-controls h4 {
+  margin: 0 0 var(--debug-spacing) 0;
+  color: var(--debug-primary);
+  font-size: 1.1rem;
+}
+
+.night-mode-actions {
+  display: flex;
+  gap: var(--debug-spacing);
+  margin-bottom: var(--debug-spacing);
+  align-items: center;
+}
+
+.night-mode-info {
+  padding: 8px;
+  background: var(--debug-bg);
+  border-radius: 8px;
+  border: 1px solid var(--debug-border);
+}
+
+/* 图像质量监控 */
+.quality-monitoring {
+  margin-top: var(--debug-spacing);
+  padding: var(--debug-spacing);
+  background: var(--debug-surface);
+  border-radius: var(--debug-radius);
+  border: 1px solid var(--debug-border);
+}
+
+.quality-monitoring h4 {
+  margin: 0 0 var(--debug-spacing) 0;
+  color: var(--debug-primary);
+  font-size: 1.1rem;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--debug-spacing);
+  margin-bottom: var(--debug-spacing);
+}
+
+.quality-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--debug-bg);
+  border-radius: 8px;
+  border: 1px solid var(--debug-border);
+}
+
+.quality-label {
+  font-size: 0.9rem;
+  color: var(--debug-text-secondary);
+  font-weight: 500;
+}
+
+.quality-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--debug-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.quality-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--debug-success), var(--debug-warning), var(--debug-error));
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.quality-value {
+  font-size: 0.9rem;
+  color: var(--debug-primary);
+  font-weight: 600;
+  text-align: center;
+}
+
+.quality-recommendations {
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border: 1px solid var(--debug-border);
+}
+
+.quality-recommendations h5 {
+  margin: 0 0 8px 0;
+  color: var(--debug-warning);
+  font-size: 1rem;
+}
+
+.recommendation-item {
+  padding: 4px 0;
+  font-size: 0.9rem;
+  color: var(--debug-text-secondary);
+}
+
+.recommendation-item::before {
+  content: "💡 ";
+  margin-right: 4px;
 }
 
 /* 预设管理 */
@@ -957,6 +1101,103 @@
   }
   /* 标签导航居中显示，避免贴边 */
   #debug-app .tab-navigation { justify-content: center; }
+}
+
+/* 直方图样式 */
+.histogram-container {
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.histogram-container h4 {
+    margin: 0 0 15px 0;
+    color: #e0e0e0;
+    font-size: 14px;
+}
+
+.histogram-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.histogram-controls select {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #e0e0e0;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.histogram-controls select:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.histogram-display {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    padding: 10px;
+}
+
+#histogram-canvas {
+    width: 100%;
+    height: 200px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.histogram-stats {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #b0b0b0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.histogram-stat-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+}
+
+.histogram-stat-label {
+    color: #888;
+}
+
+.histogram-stat-value {
+    color: #e0e0e0;
+    font-weight: 500;
+}
+
+.histogram-exposure-analysis {
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.histogram-exposure-analysis.well-exposed {
+    border-left: 3px solid #4CAF50;
+    background: rgba(76, 175, 80, 0.1);
+}
+
+.histogram-exposure-analysis.underexposed {
+    border-left: 3px solid #FF9800;
+    background: rgba(255, 152, 0, 0.1);
+}
+
+.histogram-exposure-analysis.overexposed {
+    border-left: 3px solid #F44336;
+    background: rgba(244, 67, 54, 0.1);
 }
 
 /* 实时数据流分析样式 */

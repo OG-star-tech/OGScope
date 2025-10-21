@@ -210,6 +210,87 @@ async def reset_debug_camera():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/debug/camera/noise-reduction")
+async def set_noise_reduction(level: int = Query(..., ge=0, le=4)):
+    """设置降噪级别 (0-4)"""
+    try:
+        return await DebugCameraService.set_noise_reduction(level)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/white-balance")
+async def set_white_balance(
+    mode: str = Query(..., pattern="^(auto|manual|night)$"),
+    gain_r: float = Query(1.0, ge=0.1, le=3.0),
+    gain_b: float = Query(1.0, ge=0.1, le=3.0)
+):
+    """设置白平衡模式"""
+    try:
+        return await DebugCameraService.set_white_balance(mode, gain_r, gain_b)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/image-enhancement")
+async def set_image_enhancement(
+    contrast: float = Query(1.0, ge=0.5, le=2.0),
+    brightness: float = Query(0.0, ge=-1.0, le=1.0),
+    saturation: float = Query(1.0, ge=0.0, le=2.0),
+    sharpness: float = Query(1.0, ge=0.0, le=2.0)
+):
+    """设置图像增强参数"""
+    try:
+        return await DebugCameraService.set_image_enhancement(contrast, brightness, saturation, sharpness)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/night-mode")
+async def set_night_mode(enabled: bool = Query(True)):
+    """设置夜间模式"""
+    try:
+        return await DebugCameraService.set_night_mode(enabled)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/camera/image-quality")
+async def get_image_quality():
+    """获取图像质量指标"""
+    try:
+        return await DebugCameraService.get_image_quality()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/night-mode-preset")
+async def apply_night_mode_preset():
+    """应用夜间模式预设"""
+    try:
+        return await DebugCameraService.apply_night_mode_preset()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/backup-settings")
+async def backup_camera_settings():
+    """备份当前相机设置"""
+    try:
+        return await DebugCameraService.save_current_settings_backup()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/restore-settings")
+async def restore_camera_settings():
+    """从备份恢复相机设置"""
+    try:
+        return await DebugCameraService.restore_settings_backup()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/debug/camera/verify-supersample")
 async def verify_supersample_settings():
     """验证超采样设置的有效性"""
