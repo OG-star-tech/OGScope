@@ -159,7 +159,7 @@ python -m ogscope.main
 
 ## Git 工作流
 
-目前还没上传到Git
+项目已上传到GitHub: https://github.com/OG-star-tech/OGScope
 - 主分支: `main` (稳定版本)
 - 开发分支: `dev` (开发版本)
 - 功能分支: `feature/xxx`

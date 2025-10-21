@@ -8,7 +8,7 @@
 
 如果你发现了 bug，请：
 
-1. 在 [Issues](https://github.com/your-username/OGScope/issues) 页面搜索是否已有相关问题
+1. 在 [Issues](https://github.com/OG-star-tech/OGScope/issues) 页面搜索是否已有相关问题
 2. 如果没有，创建新 Issue，包含：
    - 详细的问题描述
    - 复现步骤
@@ -27,7 +27,7 @@
 1. **Fork 项目**
    ```bash
    # 在 GitHub 上点击 Fork 按钮
-   git clone https://github.com/your-username/OGScope.git
+   git clone https://github.com/OG-star-tech/OGScope.git
    cd OGScope
    ```
 
@@ -129,7 +129,7 @@
 如果你在贡献过程中遇到问题：
 
 - 查看 [开发文档](docs/development/README.md)
-- 在 [Discussions](https://github.com/your-username/OGScope/discussions) 提问
+- 在 [Discussions](https://github.com/OG-star-tech/OGScope/discussions) 提问
 - 联系维护者
 
 感谢你的贡献！🎉

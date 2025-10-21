@@ -2,9 +2,11 @@
 
 本指南将帮助你快速搭建 OGScope 开发环境。
 
+English | [中文](QUICK_START.md)
+
 ## 🎯 目标
 
-- ✅ 在 Raspberry Pi Zero 2W 上运行 OGScope
+- ✅ 在 Orange Pi Zero 2W 上运行 OGScope
 - ✅ 配置 PyCharm Professional 远程开发
 - ✅ 通过 Web 界面访问系统
 

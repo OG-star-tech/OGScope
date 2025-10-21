@@ -1,6 +1,6 @@
-# PyCharm Professional 远程开发配置指南
+# PyCharm Professional 文件同步开发配置指南
 
-本指南适用于 **PyCharm Professional 2021.1.3** 版本
+本指南适用于 **PyCharm Professional 2025** 版本，推荐使用文件同步方式进行开发
 
 ## 前置准备
 
@@ -49,44 +49,13 @@ ssh orangepi
 
 ## PyCharm Professional 配置步骤
 
-### 步骤 1: 配置远程解释器
+### 步骤 1: 配置文件同步（推荐方式）
 
 1. **打开项目**
    - 在 Mac 上用 PyCharm 打开 OGScope 项目目录
 
-2. **添加远程解释器**
-   - `File` → `Settings` (macOS: `PyCharm` → `Preferences`)
-   - 导航到: `Project: OGScope` → `Python Interpreter`
-   - 点击右上角 ⚙️ 图标 → `Add...`
-
-3. **配置 SSH 连接**
-   - 选择 `SSH Interpreter`
-   - **New server configuration:**
-     - Host: `orangepi.local` (或 IP 地址)
-     - Port: `22`
-     - Username: `pi`
-   - 点击 `Next`
-
-4. **认证方式**
-   - 选择 `Key pair`
-   - Private key file: `~/.ssh/id_ed25519`
-   - 或选择 `Password` 输入密码
-   - 点击 `Next`
-
-5. **选择解释器**
-   - Interpreter: `/home/pi/.local/bin/poetry`
-   - 或使用虚拟环境: `/home/pi/OGScope/.venv/bin/python`
-   - Sync folders:
-     - Local: `/Users/你的用户名/Desktop/ogs proj/OGScope`
-     - Remote: `/home/pi/OGScope`
-   - 点击 `Finish`
-
-### 步骤 2: 配置自动部署
-
-1. **打开部署配置**
+2. **配置部署服务器**
    - `Tools` → `Deployment` → `Configuration`
-   
-2. **添加 SFTP 服务器**
    - 点击 `+` 添加服务器
    - Name: `Orange Pi Zero 2W`
    - Type: `SFTP`
@@ -113,25 +82,47 @@ ssh orangepi
    .mypy_cache
    *.pyc
    .git
+   node_modules
    ```
 
 6. **启用自动上传**
    - `Tools` → `Deployment` → `Automatic Upload` (打勾)
    - 或设置为 `On explicit save action` (Cmd+S 时上传)
 
-### 步骤 3: 配置运行/调试
+### 步骤 2: 配置本地运行环境
 
-1. **创建运行配置**
+1. **配置本地Python解释器**
+   - `File` → `Settings` (macOS: `PyCharm` → `Preferences`)
+   - 导航到: `Project: OGScope` → `Python Interpreter`
+   - 选择本地 Poetry 虚拟环境: `~/.cache/pypoetry/virtualenvs/ogscope-xxx/bin/python`
+
+2. **配置运行配置**
+   - `Run` → `Edit Configurations...`
+   - 点击 `+` → `Python`
+
+3. **配置参数**
+   ```
+   Name: OGScope Local
+   Script path: (留空)
+   Module name: ogscope.main
+   Parameters: --host 0.0.0.0 --port 8000 --reload
+   Python interpreter: <选择本地Poetry解释器>
+   Working directory: /Users/你的用户名/Desktop/ogs proj/OGScope
+   ```
+
+### 步骤 3: 配置远程运行（可选）
+
+1. **创建远程运行配置**
    - `Run` → `Edit Configurations...`
    - 点击 `+` → `Python`
 
 2. **配置参数**
    ```
-   Name: OGScope Main
+   Name: OGScope Remote
    Script path: (留空)
    Module name: ogscope.main
    Parameters: --host 0.0.0.0 --port 8000 --reload
-   Python interpreter: <选择之前配置的远程解释器>
+   Python interpreter: <选择远程解释器>
    Working directory: /home/pi/OGScope
    ```
 
@@ -158,12 +149,23 @@ ssh orangepi
    - 打开 Terminal 面板 (Alt+F12 或 ⌥F12)
    - PyCharm 会自动连接到远程服务器
 
-## 常用操作
+## 推荐开发工作流程
 
-### 同步文件
+### 1. 本地开发（主要方式）
 
 ```bash
-# 手动上传当前文件
+# 在本地进行代码开发和测试
+# 使用本地运行配置 "OGScope Local"
+# 大部分功能可以在本地测试（除了硬件相关功能）
+```
+
+### 2. 文件同步
+
+```bash
+# 自动同步（推荐）
+# 保存文件时自动上传到开发板
+
+# 手动同步
 Tools → Deployment → Upload to Orange Pi Zero 2W
 
 # 上传整个项目
@@ -176,12 +178,26 @@ Tools → Deployment → Download from Orange Pi Zero 2W
 Tools → Deployment → Compare with Deployed Version on Orange Pi Zero 2W
 ```
 
+### 3. 远程测试
+
+```bash
+# 需要测试硬件功能时
+# 1. 先同步文件到开发板
+# 2. 使用远程运行配置 "OGScope Remote"
+# 3. 或通过SSH终端手动运行
+```
+
 ### 运行和调试
 
 ```bash
-# 运行程序
+# 本地运行（推荐）
+选择 "OGScope Local" 配置
 点击工具栏的 ▶️ 运行按钮
 或按 Shift+F10 (macOS: ^R)
+
+# 远程运行（硬件测试）
+选择 "OGScope Remote" 配置
+点击工具栏的 ▶️ 运行按钮
 
 # 调试程序
 点击工具栏的 🐞 调试按钮
@@ -280,14 +296,23 @@ Tools → Deployment → Options:
 
 如果 WiFi 不稳定，考虑使用 USB 网卡 + 有线连接
 
-### 4. 本地开发，远程测试
+### 4. 混合开发模式
 
 ```python
-# 在本地快速开发和测试
+# 本地开发（推荐）
+# 1. 在本地进行代码编写和单元测试
 poetry run pytest tests/unit/
 
-# 需要硬件时再同步到远程运行
+# 2. 本地运行Web服务测试API
+python -m ogscope.main
+
+# 3. 需要硬件测试时同步到远程
 Tools → Deployment → Upload to Orange Pi Zero 2W
+
+# 4. 远程运行测试硬件功能
+ssh orangepi
+cd /home/pi/OGScope
+poetry run python -m ogscope.main
 ```
 
 ## 快捷键速查表
