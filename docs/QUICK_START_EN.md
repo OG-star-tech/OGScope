@@ -6,7 +6,7 @@ English | [中文](QUICK_START.md)
 
 ## 🎯 Goals
 
-- ✅ Run OGScope on Orange Pi Zero 2W
+- ✅ Run OGScope on Raspberry Pi Zero 2W
 - ✅ Configure PyCharm Professional remote development
 - ✅ Access the system through web interface
 
@@ -14,7 +14,7 @@ English | [中文](QUICK_START.md)
 
 ### Hardware Requirements
 
-- Orange Pi Zero 2W development board
+- Raspberry Pi Zero 2W development board
 - IMX327 camera module
 - 2.4" SPI LCD display
 - MicroSD card (32GB+)
@@ -29,11 +29,11 @@ English | [中文](QUICK_START.md)
 
 ## 🚀 Installation Steps
 
-### Step 1: Prepare Orange Pi Zero 2W
+### Step 1: Prepare Raspberry Pi Zero 2W
 
 1. **Flash the OS**
    ```bash
-   # Download Ubuntu/Debian image for Orange Pi Zero 2W
+   # Download Raspberry Pi OS image for Raspberry Pi Zero 2W
    # Flash to microSD card using balenaEtcher
    ```
 
@@ -78,7 +78,7 @@ poetry shell
 
 2. **Configure File Sync**
    - Go to `Tools` → `Deployment` → `Configuration`
-   - Add SFTP server for Orange Pi Zero 2W
+   - Add SFTP server for Raspberry Pi Zero 2W
    - Configure automatic file synchronization
 
 3. **Setup Run Configurations**
@@ -91,7 +91,7 @@ poetry shell
 # Local development
 python -m ogscope.main
 
-# Remote testing (on Orange Pi)
+# Remote testing (on Raspberry Pi)
 ssh orangepi
 cd /home/pi/OGScope
 poetry run python -m ogscope.main
@@ -111,7 +111,7 @@ After starting the application, access:
    - Use local run configuration
 
 2. **File Synchronization**
-   - Files automatically sync to Orange Pi
+   - Files automatically sync to Raspberry Pi
    - Manual sync when needed
 
 3. **Hardware Testing**

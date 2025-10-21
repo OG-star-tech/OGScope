@@ -4,11 +4,11 @@
 
 ## 项目概述
 
-OGScope 是一个基于 Orange Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
+OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
 ## 技术栈
 
-- **硬件**: Orange Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
+- **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
 - **语言**: Python 3.9+
 - **包管理**: Poetry
 - **Web 框架**: FastAPI + Uvicorn
@@ -101,7 +101,7 @@ ogscope/
 - **虚拟环境**: Poetry 管理
 
 ### 部署配置
-- **生产环境**: Orange Pi Zero 2W 开发板
+- **生产环境**: Raspberry Pi Zero 2W 开发板
 - **测试环境**: [与生产环境相同]
 - **虚拟环境目录**: [用户自定义]
 

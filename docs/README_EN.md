@@ -24,7 +24,7 @@ English | [中文](README.md)
 
 ## Project Overview
 
-OGScope is an electronic polar scope system based on Orange Pi Zero 2W, designed specifically for astrophotography enthusiasts.
+OGScope is an electronic polar scope system based on Raspberry Pi Zero 2W, designed specifically for astrophotography enthusiasts.
 
 ### Key Features
 
@@ -35,7 +35,7 @@ OGScope is an electronic polar scope system based on Orange Pi Zero 2W, designed
 
 ### Technical Specifications
 
-- **Processor**: Orange Pi Zero 2W (Allwinner H618)
+- **Processor**: Raspberry Pi Zero 2W (ARM Cortex-A53)
 - **Camera**: IMX327 sensor (1920x1080)
 - **Display**: 2.4" SPI LCD (240x320)
 - **Software**: Python 3.9 + FastAPI

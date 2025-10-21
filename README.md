@@ -1,13 +1,13 @@
 # OGScope - 电子极轴镜
 
-基于 Orange Pi Zero 2W 的智能电子极轴镜系统，用于天文摄影中的精确极轴校准。
+基于 Raspberry Pi Zero 2W 的智能电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
 [English](README_EN.md) | 中文
 
 ## 硬件平台
 
-- **主控**: Orange Pi Zero 2W
-- **操作系统**: Ubuntu/Debian Linux
+- **主控**: Raspberry Pi Zero 2W
+- **操作系统**: Raspberry Pi OS
 - **摄像头**: IMX327 MIPI 传感器
 - **显示屏**: 2.4寸 SPI LCD
 - **通信**: WiFi 无线控制
@@ -37,7 +37,7 @@
 
 - Python 3.9+
 - Poetry 1.2+
-- Orange Pi Zero 2W (Ubuntu/Debian Linux)
+- Raspberry Pi Zero 2W (Raspberry Pi OS)
 
 ### 安装
 
@@ -58,7 +58,7 @@ python -m ogscope.main
 
 ### Web 界面访问
 
-启动后访问: http://orangepi.local:8000 或 http://<IP>:8000
+启动后访问: http://raspberrypi.local:8000 或 http://<IP>:8000
 
 ## 开发
 
@@ -68,7 +68,7 @@ python -m ogscope.main
 
 推荐使用 PyCharm 的文件同步功能进行开发：
 
-1. 配置 SSH 连接到 Orange Pi Zero 2W
+1. 配置 SSH 连接到 Raspberry Pi Zero 2W
 2. 设置文件自动同步到开发板
 3. 在本地开发，远程测试硬件功能
 4. 详细步骤见 [PyCharm 文件同步开发指南](docs/development/pycharm-remote.md)

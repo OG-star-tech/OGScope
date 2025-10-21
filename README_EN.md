@@ -1,13 +1,13 @@
 # OGScope - Electronic Polar Scope
 
-An intelligent electronic polar scope system based on Orange Pi Zero 2W for precise polar alignment in astrophotography.
+An intelligent electronic polar scope system based on Raspberry Pi Zero 2W for precise polar alignment in astrophotography.
 
 English | [中文](README.md)
 
 ## Hardware Platform
 
-- **Main Controller**: Orange Pi Zero 2W
-- **Operating System**: Ubuntu/Debian Linux
+- **Main Controller**: Raspberry Pi Zero 2W
+- **Operating System**: Raspberry Pi OS
 - **Camera**: IMX327 MIPI sensor
 - **Display**: 2.4" SPI LCD
 - **Communication**: WiFi wireless control
@@ -37,7 +37,7 @@ English | [中文](README.md)
 
 - Python 3.9+
 - Poetry 1.2+
-- Orange Pi Zero 2W (Ubuntu/Debian Linux)
+- Raspberry Pi Zero 2W (Raspberry Pi OS)
 
 ### Installation
 
@@ -58,7 +58,7 @@ python -m ogscope.main
 
 ### Web Interface Access
 
-After startup, visit: http://orangepi.local:8000 or http://<IP>:8000
+After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
 
 ## Development
 
@@ -68,7 +68,7 @@ See [Development Documentation](docs/development/README.md) for details.
 
 Recommended approach using PyCharm's file synchronization:
 
-1. Configure SSH connection to Orange Pi Zero 2W
+1. Configure SSH connection to Raspberry Pi Zero 2W
 2. Set up automatic file synchronization to the development board
 3. Develop locally, test hardware functions remotely
 4. Detailed steps in [PyCharm File Sync Development Guide](docs/development/pycharm-remote.md)

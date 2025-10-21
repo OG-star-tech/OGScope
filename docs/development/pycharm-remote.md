@@ -4,11 +4,11 @@
 
 ## 前置准备
 
-### 1. Orange Pi Zero 2W 配置
+### 1. Raspberry Pi Zero 2W 配置
 
 ```bash
-# SSH 连接到 Orange Pi
-ssh pi@orangepi.local  # 或使用 IP 地址
+# SSH 连接到 Raspberry Pi
+ssh pi@raspberrypi.local  # 或使用 IP 地址
 
 # 更新系统
 sudo apt update && sudo apt upgrade -y
@@ -57,7 +57,7 @@ ssh orangepi
 2. **配置部署服务器**
    - `Tools` → `Deployment` → `Configuration`
    - 点击 `+` 添加服务器
-   - Name: `Orange Pi Zero 2W`
+   - Name: `Raspberry Pi Zero 2W`
    - Type: `SFTP`
 
 3. **Connection 标签配置**
@@ -166,16 +166,16 @@ ssh orangepi
 # 保存文件时自动上传到开发板
 
 # 手动同步
-Tools → Deployment → Upload to Orange Pi Zero 2W
+Tools → Deployment → Upload to Raspberry Pi Zero 2W
 
 # 上传整个项目
 右键项目根目录 → Deployment → Upload to Orange Pi Zero 2W
 
 # 从远程下载
-Tools → Deployment → Download from Orange Pi Zero 2W
+Tools → Deployment → Download from Raspberry Pi Zero 2W
 
 # 比较本地和远程
-Tools → Deployment → Compare with Deployed Version on Orange Pi Zero 2W
+Tools → Deployment → Compare with Deployed Version on Raspberry Pi Zero 2W
 ```
 
 ### 3. 远程测试
@@ -224,7 +224,7 @@ poetry shell            # 激活虚拟环境
 
 **解决方案**:
 ```bash
-# 检查 Orange Pi 网络
+# 检查 Raspberry Pi 网络
 ping orangepi.local
 
 # 检查 SSH 服务
@@ -275,7 +275,7 @@ Run → Edit Configurations → Path mappings
 确保本地和远程路径正确对应
 
 # 重新同步项目
-Tools → Deployment → Sync with Deployed to Orange Pi Zero 2W
+Tools → Deployment → Sync with Deployed to Raspberry Pi Zero 2W
 ```
 
 ## 性能优化建议
@@ -307,7 +307,7 @@ poetry run pytest tests/unit/
 python -m ogscope.main
 
 # 3. 需要硬件测试时同步到远程
-Tools → Deployment → Upload to Orange Pi Zero 2W
+Tools → Deployment → Upload to Raspberry Pi Zero 2W
 
 # 4. 远程运行测试硬件功能
 ssh orangepi
