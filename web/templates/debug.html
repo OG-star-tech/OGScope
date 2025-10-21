@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>OGScope 调试控制台</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#ff6b35">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="OGScope Debug">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/icon-32x32.png">
+    
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
+    <link rel="stylesheet" href="/static/css/debug.css?v={{ version }}">
+    
+    <!-- Preload Critical Resources -->
+    <link rel="preload" href="/static/js/debug.js" as="script">
+</head>
+<body>
+    <div id="debug-app">
+        <!-- 头部 -->
+        <header class="debug-header">
+            <div class="header-content">
+                <h1>🔧 OGScope 调试控制台</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="window.location.href='/'">← 返回主界面</button>
+                    <div class="status-indicator" id="camera-status">
+                        <span class="status-dot offline"></span>
+                        <span class="status-text">相机离线</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区域 -->
+        <main class="debug-main">
+            <!-- 实时预览置顶 -->
+            <div class="card preview-top">
+                <div class="card-header">
+                    <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                    </svg>
+                    <h2>实时预览</h2>
+                </div>
+                <div class="preview-container">
+                    <div class="video-container" id="video-container">
+                        <img id="preview-image" src="/static/images/placeholder-camera.png" alt="相机预览">
+                        <div class="rec-badge" id="rec-badge">
+                            <span class="rec-dot"></span>
+                            <span class="rec-text">REC</span>
+                            <span class="rec-time" id="rec-badge-time">00:00</span>
+                        </div>
+                        <div class="video-overlay" id="preview-overlay">
+                            <div class="overlay-content">
+                                <div class="overlay-icon">📷</div>
+                                <div class="overlay-text">点击启动相机预览</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="preview-controls">
+                        <button class="btn btn-primary" id="start-preview">
+                            <span class="btn-icon">▶️</span>
+                            启动预览
+                        </button>
+                        <button class="btn btn-secondary" id="stop-preview" disabled>
+                            <span class="btn-icon">⏹️</span>
+                            停止预览
+                        </button>
+                    </div>
+                    <div class="preview-info">
+                        <div class="info-item">
+                            <span class="info-label">分辨率:</span>
+                            <span class="info-value" id="resolution">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">帧率:</span>
+                            <span class="info-value" id="fps">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">采样模式:</span>
+                            <span class="info-value" id="sampling-mode">--</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">状态:</span>
+                            <span class="info-value" id="preview-status">未启动</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 分辨率 / 帧率 / 采样模式 控制（互不影响，各有确认） -->
+                    <div class="resolution-controls">
+                        <h4>🖼️ 分辨率</h4>
+                        <div class="resolution-row">
+                            <div class="preset-buttons">
+                                <button class="btn btn-secondary btn-small" data-res="640x360">640×360</button>
+                                <button class="btn btn-secondary btn-small" data-res="1280x720">1280×720</button>
+                                <button class="btn btn-secondary btn-small" data-res="1600x900">1600×900</button>
+                                <button class="btn btn-secondary btn-small" data-res="1920x1080">1920×1080</button>
+                            </div>
+                            <button class="btn btn-primary btn-small" id="apply-resolution">
+                                <span class="btn-icon">✅</span>
+                                应用分辨率
+                            </button>
+                        </div>
+                        <div class="resolution-hint">所有分辨率均为16:9比例，符合IMX327传感器原生比例，避免画面变形</div>
+                    </div>
+
+                    <div class="resolution-controls">
+                        <h4>⏱️ 帧率</h4>
+                        <div class="resolution-row">
+                            <div class="fps-input">
+                                <label for="fps-input">FPS</label>
+                                <input type="number" id="fps-input" min="1" max="60" step="1" value="5">
+                            </div>
+                            <button class="btn btn-secondary btn-small" id="apply-fps">
+                                <span class="btn-icon">⏱️</span>
+                                应用帧率
+                            </button>
+                        </div>
+                        <div class="resolution-hint">单独设置帧率，尽量不重启预览</div>
+                    </div>
+
+                    <div class="resolution-controls">
+                        <h4>🔄 采样模式</h4>
+                        <div class="resolution-row">
+                            <div class="fps-input">
+                                <label for="sampling-select">模式</label>
+                                <select id="sampling-select">
+                                    <option value="supersample" selected>超采样</option>
+                                    <option value="native">原生</option>
+                                    <option value="crop">裁切（预留）</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-secondary btn-small" id="apply-sampling">
+                                <span class="btn-icon">🔄</span>
+                                切换采样
+                            </button>
+                        </div>
+                        <div class="resolution-hint">切换模式可能调整输出尺寸</div>
+                    </div>
+                    
+                    <!-- 实时数据流分析 -->
+                    <div class="stream-analysis">
+                        <h4>📊 实时数据流分析</h4>
+                        <div class="analysis-grid">
+                            <div class="info-item">
+                                <span class="info-label">检测分辨率</span>
+                                <span class="info-value" id="detected-resolution">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">计算帧率</span>
+                                <span class="info-value" id="calculated-fps">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">帧计数</span>
+                                <span class="info-value" id="frame-count">0</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">数据大小</span>
+                                <span class="info-value" id="data-size">0 MB</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">流状态</span>
+                                <span class="info-value" id="stream-status">非活跃</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">运行时长</span>
+                                <span class="info-value" id="runtime">--</span>
+                            </div>
+                        </div>
+                        <div class="analysis-actions">
+                            <button class="btn btn-secondary btn-small" id="reset-stats">重置统计</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 旋转控制 -->
+                    <div class="rotation-controls">
+                        <h4>🔄 画面旋转控制</h4>
+                        <div class="rotation-buttons">
+                            <button class="btn btn-secondary btn-small" data-rotation="0">0°</button>
+                            <button class="btn btn-secondary btn-small" data-rotation="90">90°</button>
+                            <button class="btn btn-primary btn-small" data-rotation="180">180°</button>
+                            <button class="btn btn-secondary btn-small" data-rotation="270">270°</button>
+                        </div>
+                        <div class="rotation-info">
+                            <span class="info-label">当前角度:</span>
+                            <span class="info-value" id="current-rotation">180°</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 标签页导航（移除预览） -->
+            <div class="tab-navigation">
+                <button class="tab-button active" data-tab="capture">📸 拍摄控制</button>
+                <button class="tab-button" data-tab="settings">⚙️ 参数设置</button>
+                <button class="tab-button" data-tab="presets">💾 预设管理</button>
+                <button class="tab-button" data-tab="files">📁 文件管理</button>
+            </div>
+
+            <!-- 拍摄控制标签页 -->
+            <div id="tab-capture" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M4,4H7L9,2H15L17,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M12,7A5,5 0 0,0 7,12A5,5 0 0,0 12,17A5,5 0 0,0 17,12A5,5 0 0,0 12,7M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9Z"/>
+                        </svg>
+                        <h2>拍摄控制</h2>
+                    </div>
+                    
+                    <div class="capture-controls">
+                        <div class="capture-section">
+                            <h3>📸 单张拍摄</h3>
+                            <div class="capture-actions">
+                                <button class="btn btn-primary btn-large" id="capture-image">
+                                    <span class="btn-icon">📷</span>
+                                    拍摄照片
+                                </button>
+                                <div class="capture-info">
+                                    <div class="info-item">
+                                        <span class="info-label">最后拍摄:</span>
+                                        <span class="info-value" id="last-capture">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="capture-section">
+                            <h3>🎥 视频录制</h3>
+                            <div class="recording-controls">
+                                <button class="btn btn-success btn-large" id="start-recording">
+                                    <span class="btn-icon">🔴</span>
+                                    开始录制
+                                </button>
+                                <button class="btn btn-error btn-large" id="stop-recording" disabled>
+                                    <span class="btn-icon">⏹️</span>
+                                    停止录制
+                                </button>
+                            </div>
+                            
+                            <div class="recording-info">
+                                <div class="info-item">
+                                    <span class="info-label">录制状态:</span>
+                                    <span class="info-value" id="recording-status">未录制</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">录制时长:</span>
+                                    <span class="info-value" id="recording-duration">00:00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 参数设置标签页 -->
+            <div id="tab-settings" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                        </svg>
+                        <h2>参数设置</h2>
+                    </div>
+                    
+                    <div class="settings-controls">
+                        <div class="control-group">
+                            <label for="exposure-setting">曝光时间 (μs)</label>
+                            <div class="control-row">
+                                <input type="range" id="exposure-setting" min="1000" max="100000" value="10000" step="1000">
+                                <span class="control-value" id="exposure-value">10000</span>
+                            </div>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="gain-setting">模拟增益</label>
+                            <div class="control-row">
+                                <input type="range" id="gain-setting" min="1" max="16" step="0.1" value="1.0">
+                                <span class="control-value" id="gain-value">1.0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="digital-gain-setting">数字增益</label>
+                            <div class="control-row">
+                                <input type="range" id="digital-gain-setting" min="1" max="4" step="0.1" value="1.0">
+                                <span class="control-value" id="digital-gain-value">1.0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-actions">
+                            <button class="btn btn-primary" id="apply-settings">
+                                <span class="btn-icon">✅</span>
+                                应用设置
+                            </button>
+                            <button class="btn btn-secondary" id="reset-settings">
+                                <span class="btn-icon">🔄</span>
+                                重置默认
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 预设管理标签页 -->
+            <div id="tab-presets" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+                        </svg>
+                        <h2>预设管理</h2>
+                    </div>
+                    
+                    <div class="presets-controls">
+                        <div class="preset-form">
+                            <h3>💾 保存当前设置为预设</h3>
+                            <div class="form-group">
+                                <label for="preset-name">预设名称</label>
+                                <input type="text" id="preset-name" placeholder="例如：白天拍摄" maxlength="20">
+                            </div>
+                            <div class="form-group">
+                                <label for="preset-description">描述 (可选)</label>
+                                <input type="text" id="preset-description" placeholder="例如：适合白天光线充足的环境" maxlength="50">
+                            </div>
+                            <button class="btn btn-primary" id="save-preset">
+                                <span class="btn-icon">💾</span>
+                                保存预设
+                            </button>
+                        </div>
+                        
+                        <div class="presets-list">
+                            <h3>📋 已保存的预设</h3>
+                            <div class="presets-grid" id="presets-grid">
+                                <!-- 预设列表将通过JavaScript动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文件管理标签页 -->
+            <div id="tab-files" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                        </svg>
+                        <h2>文件管理</h2>
+                    </div>
+                    
+                    <div class="files-controls">
+                        <div class="files-header">
+                            <h3>📁 拍摄文件</h3>
+                            <button class="btn btn-secondary" id="refresh-files">
+                                <span class="btn-icon">🔄</span>
+                                刷新列表
+                            </button>
+                        </div>
+                        
+                        <div class="files-list" id="files-list">
+                            <!-- 文件列表将通过JavaScript动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 通知区域 -->
+        <div class="notifications" id="notifications"></div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="/static/js/debug.js?v={{ version }}"></script>
+</body>
+</html>

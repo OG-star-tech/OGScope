@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 设置 Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: 安装 Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 1.7.1
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: 加载缓存依赖
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+    - name: 安装依赖
+      run: poetry install --no-interaction --no-root
+
+    - name: 代码格式检查 (Black)
+      run: poetry run black --check ogscope tests
+
+    - name: 代码规范检查 (Ruff)
+      run: poetry run ruff check ogscope tests
+
+    - name: 类型检查 (MyPy)
+      run: poetry run mypy ogscope
+      continue-on-error: true  # 初期允许失败
+
+    - name: 运行测试
+      run: poetry run pytest --cov=ogscope --cov-report=xml
+
+    - name: 上传覆盖率报告
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 设置 Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.9"
+
+    - name: 安装 Poetry
+      uses: snok/install-poetry@v1
+
+    - name: 安装依赖
+      run: poetry install --no-interaction
+
+    - name: 运行 Ruff
+      run: poetry run ruff check ogscope tests
+
+    - name: 运行 Black
+      run: poetry run black --check ogscope tests
+

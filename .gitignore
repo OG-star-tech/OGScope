@@ -1,0 +1,187 @@
+# ====================
+# Python
+# ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ====================
+# 虚拟环境
+# ====================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ====================
+# Poetry
+# ====================
+poetry.lock  # 在开发机和 Orange Pi 上可能不一致，建议忽略
+.poetry/
+
+# ====================
+# IDE - PyCharm
+# ====================
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+# 但保留 run configurations 可以提交（可选）
+# !.idea/runConfigurations
+
+# ====================
+# IDE - VSCode (备用)
+# ====================
+.vscode/
+*.code-workspace
+# 但保留 settings 可以提交（可选）
+# !.vscode/settings.json
+
+# ====================
+# 测试和覆盖率
+# ====================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ====================
+# 日志文件
+# ====================
+*.log
+logs/
+*.log.*
+
+# ====================
+# 数据库
+# ====================
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# ====================
+# 配置文件（敏感信息）
+# ====================
+config.json
+config.local.json
+.env.local
+*.secret
+*.key
+
+# 但保留默认配置
+!default_config.json
+!config.example.json
+
+# ====================
+# 临时文件
+# ====================
+temp/
+tmp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ====================
+# 系统文件
+# ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ====================
+# 项目特定
+# ====================
+# 用户上传的图像
+uploads/
+captured_images/
+*.fits
+*.fit
+
+# 星表数据（太大，不提交）
+star_catalogs/*.dat
+star_catalogs/*.bin
+!star_catalogs/README.md
+
+# 测试图像（除了示例）
+test_images/*.jpg
+test_images/*.png
+!test_images/sample_*.jpg
+
+# 硬件测试相关
+hardware_test_logs/
+calibration_data/*.json
+!calibration_data/example.json
+
+# 3D 打印文件
+*.stl.bak
+*.3mf
+*.gcode
+
+# 文档构建输出
+docs/_build/
+docs/_static/
+docs/_templates/
+site/
+
+# ====================
+# PyCharm 远程开发
+# ====================
+# 远程部署配置（包含 IP 等敏感信息）
+.idea/deployment.xml
+.idea/webServers.xml
+.idea/remote-mappings.xml
+
+# ====================
+# Git 备份
+# ====================
+*.orig
+*.rej
+
+# ====================
+# 开发笔记
+# ====================
+TODO.md
+NOTES.md
+.obsidian/
+PiFinder-release
+

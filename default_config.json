@@ -1,0 +1,92 @@
+{
+  "version": "0.1.0",
+  "last_updated": "2025-01-01",
+  
+  "camera": {
+    "type": "imx327_mipi",
+    "interface": "mipi_csi",
+    "width": 640,
+    "height": 360,
+    "fps": 5,
+    "exposure_us": 10000,
+    "analogue_gain": 1.0,
+    "digital_gain": 1.0,
+    "flip_horizontal": false,
+    "flip_vertical": false,
+    "rotation": 180,
+    "auto_exposure": false,
+    "auto_gain": false
+  },
+  
+  "display": {
+    "enabled": false,
+    "type": "st7789",
+    "width": 240,
+    "height": 320,
+    "rotation": 0,
+    "brightness": 128,
+    "spi_bus": 0,
+    "spi_device": 0,
+    "dc_pin": 25,
+    "rst_pin": 27
+  },
+  
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "cors_origins": ["*"],
+    "stream_quality": 60,
+    "stream_fps": 5
+  },
+  
+  "polar_alignment": {
+    "timeout_seconds": 300,
+    "target_precision_arcmin": 1.0,
+    "drift_test_duration": 60,
+    "auto_solve": false
+  },
+  
+  "location": {
+    "latitude": 0.0,
+    "longitude": 0.0,
+    "elevation_m": 0,
+    "timezone": "UTC"
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "file": "./logs/ogscope.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  },
+  
+  "gpio": {
+    "display": {
+      "enabled": false,
+      "type": "st7789",
+      "dc_pin": 25,
+      "rst_pin": 27,
+      "cs_pin": 8,
+      "backlight_pin": 18,
+      "width": 240,
+      "height": 320,
+      "rotation": 0
+    },
+    "buttons": {
+      "enabled": false,
+      "button1_pin": 4,
+      "button2_pin": 5,
+      "button3_pin": 6,
+      "button4_pin": 12,
+      "pull_up": true,
+      "debounce_ms": 50
+    },
+    "leds": {
+      "enabled": true,
+      "status_led_pin": 16,
+      "activity_led_pin": 20,
+      "error_led_pin": 21
+    }
+  }
+}
+
