@@ -902,12 +902,12 @@
   opacity: 0.7;
 }
 
-/* ============ 桌面端与命名空间覆盖，修复菜单在左侧被拉长 ============ */
+/* ============ 桌面端布局重构 ============ */
 #debug-app .tab-navigation {
   max-width: 100%;
   margin: 0 0 var(--debug-spacing);
   flex-wrap: nowrap;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 8px;
   overflow-x: auto;
   align-items: center;
@@ -918,45 +918,103 @@
   flex: 0 0 auto;
   padding: 10px 14px;
   line-height: 1.2;
+  min-width: 120px;
 }
 
 @media (min-width: 1024px) {
-  /* 让预览区域与控制信息并排，避免左侧导航占据过多空间 */
-  .preview-container {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
+  /* 桌面端主布局：左右分栏 */
+  .debug-main {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid !important;
+    grid-template-columns: 1fr 350px;
     gap: var(--debug-spacing);
     align-items: start;
-    position: relative; /* 供绝对定位的信息面板使用 */
   }
-  .video-container { grid-column: 1 / 2; }
-  .preview-controls { grid-column: 2 / 3; }
-  /* 在桌面端将参数信息固定在卡片右下角，避免错位 */
-  .preview-info {
-    position: absolute;
-    right: var(--debug-spacing);
-    bottom: var(--debug-spacing);
-    /* 自适应宽度：在 280px 和 520px 之间，优先占用视口宽度的 30% 左右 */
-    width: clamp(280px, 30vw, 520px);
-    max-width: 45%;
-    z-index: 2;
-    grid-template-columns: 1fr; /* 每行一个 info-item */
-    grid-auto-rows: min-content;
+  
+  /* 左侧主要内容区域 */
+  .debug-main > .preview-top {
+    grid-column: 1;
+    grid-row: 1;
   }
+  
+  .debug-main > .tab-navigation {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  
+  .debug-main > .tab-content {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  
+  /* 右侧控制面板 */
+  .debug-main::after {
+    content: '';
+    grid-column: 2;
+    grid-row: 1 / 4;
+    background: var(--debug-surface);
+    border-radius: var(--debug-radius);
+    border: 1px solid var(--debug-border);
+    position: relative;
+  }
+  
+  /* 预览容器在桌面端的布局 */
+  .preview-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--debug-spacing);
+  }
+  
+  .video-container {
+    width: 100%;
+    aspect-ratio: 16/9;
+  }
+  
+  /* 预览控制按钮 */
   .preview-controls {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
-  /* 调试页主容器限定宽度并居中，并覆盖全局 main 的两列布局 */
-  .debug-main { 
-    max-width: 1200px; 
-    margin: 0 auto; 
-    display: block !important;            /* 覆盖 style.css 中的 main 网格布局 */
-    grid-template-columns: none !important;
+  
+  /* 预览信息网格 */
+  .preview-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: var(--debug-radius);
   }
-  /* 标签导航居中显示，避免贴边 */
-  #debug-app .tab-navigation { justify-content: center; }
+  
+  /* 分辨率控制等设置项 */
+  .resolution-controls,
+  .stream-analysis,
+  .rotation-controls {
+    margin-top: var(--debug-spacing);
+  }
+}
+
+@media (min-width: 1400px) {
+  /* 超大屏幕：三栏布局 */
+  .debug-main {
+    grid-template-columns: 1fr 400px 300px;
+  }
+  
+  .debug-main::after {
+    grid-column: 2;
+  }
+  
+  /* 添加第三个面板用于高级控制 */
+  .debug-main::before {
+    content: '';
+    grid-column: 3;
+    grid-row: 1 / 4;
+    background: var(--debug-surface);
+    border-radius: var(--debug-radius);
+    border: 1px solid var(--debug-border);
+  }
 }
 
 /* 实时数据流分析样式 */
@@ -1054,6 +1112,149 @@
   background: var(--debug-bg);
   border-radius: 8px;
   border: 1px solid var(--debug-border);
+}
+
+/* 直方图样式 */
+.histogram-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 200px;
+  height: 100px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 8px;
+  padding: 8px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.histogram-overlay.visible {
+  opacity: 1;
+}
+
+.histogram-canvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.histogram-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 8px;
+  z-index: 15;
+}
+
+.histogram-toggle {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--debug-primary);
+  border-radius: 6px;
+  color: var(--debug-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(5px);
+}
+
+.histogram-toggle:hover {
+  background: rgba(255, 107, 53, 0.2);
+}
+
+.histogram-toggle.active {
+  background: var(--debug-primary);
+  color: white;
+}
+
+.histogram-info {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--debug-text-secondary);
+  z-index: 15;
+  pointer-events: none;
+}
+
+/* 直方图控制面板 */
+.histogram-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 250px;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius);
+  padding: 12px;
+  box-shadow: var(--debug-shadow);
+  opacity: 0;
+  transform: translateX(100%);
+  transition: all 0.3s ease;
+  z-index: 20;
+}
+
+.histogram-panel.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.histogram-panel h4 {
+  margin: 0 0 12px 0;
+  color: var(--debug-primary);
+  font-size: 1rem;
+}
+
+.histogram-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.histogram-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.histogram-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.histogram-option label {
+  font-size: 0.9rem;
+  color: var(--debug-text);
+  cursor: pointer;
+}
+
+.histogram-stats {
+  margin-top: 12px;
+  padding: 8px;
+  background: var(--debug-bg);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.histogram-stats .stat-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.histogram-stats .stat-label {
+  color: var(--debug-text-secondary);
+}
+
+.histogram-stats .stat-value {
+  color: var(--debug-primary);
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

@@ -19,6 +19,15 @@ class DebugConsole {
             rotation: 180
         };
         
+        // 直方图相关设置
+        this.histogramSettings = {
+            visible: false,
+            showRGB: true,
+            showLuminance: false,
+            showOverexposure: false,
+            panelVisible: false
+        };
+        
         this.presets = [];
         this.files = [];
         this.recordingStartTime = null;
@@ -37,6 +46,17 @@ class DebugConsole {
             startTime: null
         };
         
+        // 网络带宽监控
+        this.networkStats = {
+            startTime: null,
+            lastCheckTime: null,
+            totalBytesTransferred: 0,
+            bytesPerSecond: 0,
+            lastBytesCount: 0,
+            checkInterval: 2000, // 每2秒检查一次，监控下行流量
+            isMonitoring: false
+        };
+        
         this.init();
     }
     
@@ -53,6 +73,8 @@ class DebugConsole {
         
         // 更新帧计数
         this.streamStats.frameCount++;
+        
+        // 注意：数据大小现在通过网络监控获取，不再需要手动计算
         
         // 检测分辨率并调整容器宽高比
         if (imageElement && imageElement.naturalWidth && imageElement.naturalHeight) {
@@ -91,6 +113,165 @@ class DebugConsole {
         
         // 更新UI显示
         this.updateStreamStatsDisplay();
+    }
+    
+    /**
+     * 计算帧数据大小
+     */
+    calculateFrameDataSize(imageElement) {
+        try {
+            let frameSize = 0;
+            
+            // 方法1: 尝试获取真实的图像数据大小
+            const realSize = this.tryGetRealImageSize(imageElement);
+            if (realSize > 0) {
+                frameSize = realSize;
+            } else {
+                // 方法2: 尝试从图片的src URL获取数据大小
+                if (imageElement.src) {
+                    if (imageElement.src.startsWith('data:')) {
+                        // 对于base64编码的图片，计算实际数据大小
+                        const base64Data = imageElement.src.split(',')[1];
+                        if (base64Data) {
+                            frameSize = (base64Data.length * 3) / 4; // base64解码后的大小
+                        }
+                    } else if (imageElement.src.startsWith('blob:')) {
+                        // 对于blob URL，使用基于分辨率的估算
+                        frameSize = this.estimateFrameSizeFromResolution(imageElement);
+                    } else {
+                        // 对于普通URL，使用基于分辨率的估算
+                        frameSize = this.estimateFrameSizeFromResolution(imageElement);
+                    }
+                } else {
+                    // 使用基于分辨率的估算
+                    frameSize = this.estimateFrameSizeFromResolution(imageElement);
+                }
+            }
+            
+            // 如果估算失败，使用默认值
+            if (frameSize === 0) {
+                frameSize = this.getDefaultFrameSize(imageElement);
+            }
+            
+            // 强制确保有数据大小（调试用）
+            if (frameSize === 0) {
+                frameSize = 25000; // 强制25KB（更合理的默认值）
+                console.warn('[DebugConsole] 强制设置帧大小为25KB');
+            }
+            
+            // 更新统计数据
+            this.streamStats.dataSize += frameSize;
+            this.streamStats.avgFrameSize = this.streamStats.dataSize / this.streamStats.frameCount;
+            
+            // 调试信息 - 每10帧输出一次，便于调试
+            if (this.streamStats.frameCount % 10 === 0) {
+                const pixels = imageElement.naturalWidth * imageElement.naturalHeight;
+                const bytesPerPixel = pixels > 0 ? (frameSize / pixels).toFixed(3) : 'N/A';
+                console.log(`[Stream] 帧 ${this.streamStats.frameCount}: 大小=${this.formatDataSize(frameSize)}, 总计=${this.formatDataSize(this.streamStats.dataSize)}, 分辨率=${imageElement.naturalWidth}x${imageElement.naturalHeight}, 每像素=${bytesPerPixel}B`);
+            }
+            
+        } catch (error) {
+            console.warn('[DebugConsole] 计算帧数据大小失败:', error);
+            // 使用保守估算
+            const fallbackFrameSize = this.getDefaultFrameSize(imageElement);
+            this.streamStats.dataSize += fallbackFrameSize;
+            this.streamStats.avgFrameSize = this.streamStats.dataSize / this.streamStats.frameCount;
+        }
+    }
+    
+    /**
+     * 尝试获取真实的图像数据大小
+     */
+    tryGetRealImageSize(imageElement) {
+        try {
+            // 方法1: 尝试通过fetch获取图像大小
+            if (imageElement.src && !imageElement.src.startsWith('data:')) {
+                // 对于HTTP URL，尝试获取Content-Length
+                fetch(imageElement.src, { method: 'HEAD' })
+                    .then(response => {
+                        const contentLength = response.headers.get('content-length');
+                        if (contentLength) {
+                            console.log(`[Stream] 检测到真实图像大小: ${this.formatDataSize(parseInt(contentLength))}`);
+                        }
+                    })
+                    .catch(() => {
+                        // 忽略错误，使用估算值
+                    });
+            }
+            
+            // 方法2: 尝试从canvas获取图像数据大小
+            if (imageElement.naturalWidth && imageElement.naturalHeight) {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = imageElement.naturalWidth;
+                canvas.height = imageElement.naturalHeight;
+                
+                ctx.drawImage(imageElement, 0, 0);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const rawSize = imageData.data.length;
+                
+                // JPEG压缩比估算：原始数据通常是压缩后数据的10-20倍
+                const compressedSize = rawSize / 15; // 假设15:1压缩比
+                
+                if (compressedSize > 0 && compressedSize < 1000000) { // 小于1MB才认为是合理的
+                    return compressedSize;
+                }
+            }
+            
+            return 0;
+        } catch (error) {
+            console.warn('[DebugConsole] 获取真实图像大小失败:', error);
+            return 0;
+        }
+    }
+    
+    /**
+     * 基于分辨率估算帧大小
+     */
+    estimateFrameSizeFromResolution(imageElement) {
+        if (!imageElement.naturalWidth || !imageElement.naturalHeight) {
+            return 0;
+        }
+        
+        const width = imageElement.naturalWidth;
+        const height = imageElement.naturalHeight;
+        const pixels = width * height;
+        
+        // 更准确的JPEG压缩比估算（基于实际经验）
+        // JPEG压缩比通常在10:1到50:1之间，取决于图像复杂度
+        let bytesPerPixel;
+        if (pixels < 640 * 480) {
+            bytesPerPixel = 0.05; // 约50KB for 640x480 (低分辨率，简单压缩)
+        } else if (pixels < 1280 * 720) {
+            bytesPerPixel = 0.08; // 约75KB for 1280x720
+        } else if (pixels < 1920 * 1080) {
+            bytesPerPixel = 0.12; // 约250KB for 1920x1080
+        } else {
+            bytesPerPixel = 0.15; // 更高分辨率
+        }
+        
+        const estimatedSize = pixels * bytesPerPixel;
+        
+        // 设置合理的上下限
+        const minSize = 10000;  // 最小10KB
+        const maxSize = 500000; // 最大500KB
+        
+        return Math.max(minSize, Math.min(maxSize, estimatedSize));
+    }
+    
+    /**
+     * 获取默认帧大小
+     */
+    getDefaultFrameSize(imageElement) {
+        // 基于图像尺寸的默认估算
+        if (imageElement.naturalWidth && imageElement.naturalHeight) {
+            const pixels = imageElement.naturalWidth * imageElement.naturalHeight;
+            const estimatedSize = pixels * 0.08; // 更保守的估算
+            return Math.max(estimatedSize, 15000); // 最小15KB
+        }
+        
+        // 基于常见分辨率的默认值
+        return 30000; // 默认30KB（更合理的估算）
     }
     
     /**
@@ -152,11 +333,14 @@ class DebugConsole {
             frameCountElement.textContent = this.streamStats.frameCount;
         }
         
-        // 更新数据大小显示
-        const dataSizeElement = document.getElementById('data-size');
-        if (dataSizeElement) {
-            const dataSizeMB = (this.streamStats.dataSize / (1024 * 1024)).toFixed(2);
-            dataSizeElement.textContent = `${dataSizeMB} MB`;
+        // 数据大小、传输速率和平均帧大小现在通过网络监控显示
+        // 这些数据由 updateNetworkStatsDisplay() 方法更新
+        
+        // 更新调试信息显示
+        const debugInfoElement = document.getElementById('debug-info');
+        if (debugInfoElement) {
+            const debugText = this.getDebugInfo();
+            debugInfoElement.textContent = debugText;
         }
         
         // 更新流状态显示
@@ -177,6 +361,197 @@ class DebugConsole {
     }
     
     /**
+     * 格式化数据大小显示
+     */
+    formatDataSize(bytes) {
+        if (bytes === 0) return '0 B';
+        
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        const value = bytes / Math.pow(k, i);
+        return `${value.toFixed(2)} ${sizes[i]}`;
+    }
+    
+    /**
+     * 计算传输速率
+     */
+    calculateTransferRate() {
+        if (!this.streamStats.startTime || this.streamStats.frameCount === 0) {
+            return '--';
+        }
+        
+        const currentTime = performance.now();
+        const elapsedSeconds = (currentTime - this.streamStats.startTime) / 1000;
+        
+        if (elapsedSeconds === 0) return '--';
+        
+        const bytesPerSecond = this.streamStats.dataSize / elapsedSeconds;
+        return `${this.formatDataSize(bytesPerSecond)}/s`;
+    }
+    
+    /**
+     * 获取调试信息
+     */
+    getDebugInfo() {
+        if (this.streamStats.frameCount === 0) {
+            return '无数据';
+        }
+        
+        const lastFrameTime = this.streamStats.lastFrameTime ? 
+            Math.round((performance.now() - this.streamStats.lastFrameTime)) : '--';
+        
+        return `上次更新:${lastFrameTime}ms`;
+    }
+    
+    /**
+     * 启动网络带宽监控
+     */
+    startNetworkMonitoring() {
+        if (this.networkStats.isMonitoring) return;
+        
+        this.networkStats.isMonitoring = true;
+        this.networkStats.startTime = performance.now();
+        this.networkStats.lastCheckTime = performance.now();
+        
+        console.log('[DebugConsole] 启动下行流量监控');
+        
+        // 使用Performance API监控网络活动
+        this.networkMonitoringInterval = setInterval(() => {
+            this.updateNetworkStats();
+        }, this.networkStats.checkInterval);
+    }
+    
+    /**
+     * 停止网络带宽监控
+     */
+    stopNetworkMonitoring() {
+        if (!this.networkStats.isMonitoring) return;
+        
+        this.networkStats.isMonitoring = false;
+        
+        if (this.networkMonitoringInterval) {
+            clearInterval(this.networkMonitoringInterval);
+            this.networkMonitoringInterval = null;
+        }
+        
+        console.log('[DebugConsole] 停止下行流量监控');
+    }
+    
+    /**
+     * 更新网络统计信息
+     */
+    updateNetworkStats() {
+        try {
+            const currentTime = performance.now();
+            
+            // 使用Performance API获取网络资源信息
+            const resources = performance.getEntriesByType('resource');
+            const currentBytesCount = this.estimateTotalTransferSize(resources);
+            
+            if (this.networkStats.lastBytesCount > 0) {
+                const timeDiff = (currentTime - this.networkStats.lastCheckTime) / 1000; // 转换为秒
+                const bytesDiff = currentBytesCount - this.networkStats.lastBytesCount;
+                
+                if (timeDiff > 0) {
+                    this.networkStats.bytesPerSecond = bytesDiff / timeDiff;
+                    this.networkStats.totalBytesTransferred += bytesDiff;
+                }
+            }
+            
+            this.networkStats.lastBytesCount = currentBytesCount;
+            this.networkStats.lastCheckTime = currentTime;
+            
+            // 更新UI显示
+            this.updateNetworkStatsDisplay();
+            
+            // 调试信息：每10次检查输出一次详细信息
+            if (this.networkStats.totalBytesTransferred > 0 && 
+                Math.floor(currentTime / (this.networkStats.checkInterval * 10)) !== 
+                Math.floor(this.networkStats.lastCheckTime / (this.networkStats.checkInterval * 10))) {
+                const resources = performance.getEntriesByType('resource');
+                const cameraResources = resources.filter(resource => {
+                    const url = resource.name;
+                    return url.includes('/api/debug/camera/');
+                });
+                console.log(`[DebugConsole] 下行流量统计: 总计=${this.formatDataSize(this.networkStats.totalBytesTransferred)}, 速率=${this.formatDataSize(this.networkStats.bytesPerSecond)}/s, 相机资源数=${cameraResources.length}`);
+            }
+            
+        } catch (error) {
+            console.warn('[DebugConsole] 更新网络统计失败:', error);
+        }
+    }
+    
+    /**
+     * 估算总下行传输大小（接收的数据）
+     */
+    estimateTotalTransferSize(resources) {
+        let totalSize = 0;
+        
+        // 只计算最近的资源（避免计算所有历史资源）
+        const recentResources = resources.filter(resource => {
+            const resourceTime = resource.startTime;
+            const currentTime = performance.now();
+            return (currentTime - resourceTime) < 30000; // 只计算最近30秒的资源
+        });
+        
+        // 过滤出相机相关的资源（主要是图像数据）
+        const cameraResources = recentResources.filter(resource => {
+            const url = resource.name;
+            return url.includes('/api/debug/camera/preview') || 
+                   url.includes('/api/debug/camera/capture') ||
+                   url.includes('/api/debug/camera/size') ||
+                   url.includes('/api/debug/camera/fps') ||
+                   url.includes('/api/debug/camera/sampling') ||
+                   (url.includes('preview') && url.includes('/api/debug/')) ||
+                   (url.includes('capture') && url.includes('/api/debug/'));
+        });
+        
+        cameraResources.forEach(resource => {
+            // 优先使用transferSize（实际传输大小），其次使用decodedBodySize（解码后大小）
+            if (resource.transferSize && resource.transferSize > 0) {
+                totalSize += resource.transferSize;
+            } else if (resource.decodedBodySize && resource.decodedBodySize > 0) {
+                totalSize += resource.decodedBodySize;
+            }
+        });
+        
+        return totalSize;
+    }
+    
+    /**
+     * 更新网络统计显示
+     */
+    updateNetworkStatsDisplay() {
+        // 更新数据大小显示
+        const dataSizeElement = document.getElementById('data-size');
+        if (dataSizeElement) {
+            const dataSizeText = this.formatDataSize(this.networkStats.totalBytesTransferred);
+            dataSizeElement.textContent = dataSizeText;
+        }
+        
+        // 更新传输速率显示
+        const transferRateElement = document.getElementById('transfer-rate');
+        if (transferRateElement) {
+            const transferRateText = this.formatDataSize(this.networkStats.bytesPerSecond) + '/s';
+            transferRateElement.textContent = transferRateText;
+        }
+        
+        // 更新平均帧大小显示
+        const avgFrameSizeElement = document.getElementById('avg-frame-size');
+        if (avgFrameSizeElement) {
+            if (this.streamStats.frameCount > 0 && this.networkStats.totalBytesTransferred > 0) {
+                const avgFrameSize = this.networkStats.totalBytesTransferred / this.streamStats.frameCount;
+                const avgFrameSizeText = this.formatDataSize(avgFrameSize);
+                avgFrameSizeElement.textContent = avgFrameSizeText;
+            } else {
+                avgFrameSizeElement.textContent = '--';
+            }
+        }
+    }
+    
+    /**
      * 重置数据流统计
      */
     resetStreamStats() {
@@ -190,7 +565,40 @@ class DebugConsole {
             frameTimes: [],
             startTime: null
         };
+        
+        // 重置网络统计
+        this.networkStats = {
+            startTime: null,
+            lastCheckTime: null,
+            totalBytesTransferred: 0,
+            bytesPerSecond: 0,
+            lastBytesCount: 0,
+            checkInterval: 2000,
+            isMonitoring: false
+        };
+        
         this.updateStreamStatsDisplay();
+    }
+    
+    /**
+     * 重置网络统计（用于分辨率切换）
+     */
+    resetNetworkStatsForResolutionChange() {
+        // 重置网络统计数据，但保持监控状态
+        if (this.networkStats.isMonitoring) {
+            this.networkStats.totalBytesTransferred = 0;
+            this.networkStats.bytesPerSecond = 0;
+            this.networkStats.lastBytesCount = 0;
+            this.networkStats.startTime = performance.now();
+            this.networkStats.lastCheckTime = performance.now();
+            
+            // 清除旧的网络资源记录，避免影响新的统计
+            if (performance.clearResourceTimings) {
+                performance.clearResourceTimings();
+            }
+            
+            console.log('[DebugConsole] 分辨率切换后重置网络统计');
+        }
     }
     
     /**
@@ -257,6 +665,9 @@ class DebugConsole {
         
         // 初始化UI
         this.initUI();
+        
+        // 初始化直方图
+        this.initHistogram();
         
         // 加载数据
         await this.loadPresets();
@@ -431,6 +842,36 @@ class DebugConsole {
             } finally {
                 if (btn) btn.disabled = false;
             }
+        });
+        
+        // 直方图控制
+        document.getElementById('histogram-toggle')?.addEventListener('click', () => {
+            this.toggleHistogram();
+        });
+        
+        document.getElementById('histogram-settings')?.addEventListener('click', () => {
+            this.toggleHistogramPanel();
+        });
+        
+        // 直方图设置选项
+        document.getElementById('show-histogram')?.addEventListener('change', (e) => {
+            this.histogramSettings.visible = e.target.checked;
+            this.updateHistogramVisibility();
+        });
+        
+        document.getElementById('show-rgb')?.addEventListener('change', (e) => {
+            this.histogramSettings.showRGB = e.target.checked;
+            this.updateHistogramDisplay();
+        });
+        
+        document.getElementById('show-luminance')?.addEventListener('change', (e) => {
+            this.histogramSettings.showLuminance = e.target.checked;
+            this.updateHistogramDisplay();
+        });
+        
+        document.getElementById('show-overexposure')?.addEventListener('change', (e) => {
+            this.histogramSettings.showOverexposure = e.target.checked;
+            this.updateHistogramDisplay();
         });
         
         // 键盘快捷键
@@ -629,6 +1070,7 @@ class DebugConsole {
         // 启动前立即隐藏覆盖层，并重置统计，避免提示一直停留
         overlay.classList.add('hidden');
         this.resetStreamStats();
+        this.startNetworkMonitoring();
 
         // 使用单次请求循环（避免并发取消）：每次等上一帧 onload/onerror/超时 后再发起下一帧
         this.previewActive = true;
@@ -654,7 +1096,8 @@ class DebugConsole {
             loader.onload = () => {
                 // 交换显示源，避免中途取消请求
                 previewImg.src = loader.src;
-                this.analyzeStreamData(loader);
+                // 使用previewImg而不是loader进行分析，因为previewImg有naturalWidth/naturalHeight属性
+                this.analyzeStreamData(previewImg);
                 if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
                 consecutiveFailures = 0;
                 const elapsed = performance.now() - startedAt;
@@ -707,6 +1150,9 @@ class DebugConsole {
         }
         // 显示覆盖层
         document.getElementById('preview-overlay').classList.remove('hidden');
+        
+        // 停止网络监控
+        this.stopNetworkMonitoring();
     }
     
     /**
@@ -868,10 +1314,12 @@ class DebugConsole {
             this.showNotification('正在设置分辨率...', 'info');
             
             const params = new URLSearchParams({ width: String(width), height: String(height) });
-            // 先停止预览，避免浏览器持有旧图像源导致卡死
-            try { await this.stopPreview(); } catch(_){}
             const url = `/api/debug/camera/size?${params.toString()}`;
             console.debug('[applySizeOnly] POST', url);
+            
+            // 先停止预览，避免浏览器持有旧图像源导致卡死
+            try { await this.stopPreview(); } catch(_){}
+            
             const resp = await fetch(url, { method: 'POST' });
             if (!resp.ok) {
                 let detail = '设置分辨率失败';
@@ -887,9 +1335,13 @@ class DebugConsole {
             const info = data?.info || {};
             const applied = info?.width && info?.height ? `${info.width}x${info.height}` : `${width}x${height}`;
             this.showNotification(`分辨率已应用: ${applied}`, 'success');
+            
             // 重新启动预览，确保新分辨率生效
             await this.updateCameraStatus();
             await this.startPreview();
+            
+            // 重置网络监控，确保新的分辨率设置后的数据传输被正确统计
+            this.resetNetworkStatsForResolutionChange();
         } catch (e) {
             console.error('[applySizeOnly] error:', e);
             this.showNotification(`设置分辨率失败: ${e.message}`, 'error');
@@ -1558,3 +2010,273 @@ const modalStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = modalStyles;
 document.head.appendChild(styleSheet);
+
+// 在DebugConsole类中添加直方图相关方法
+DebugConsole.prototype.initHistogram = function() {
+    console.log('[DebugConsole] 初始化直方图...');
+    
+    this.histogramCanvas = document.getElementById('histogram-canvas');
+    this.histogramOverlay = document.getElementById('histogram-overlay');
+    this.histogramPanel = document.getElementById('histogram-panel');
+    
+    if (this.histogramCanvas) {
+        this.histogramContext = this.histogramCanvas.getContext('2d');
+        this.setupHistogramCanvas();
+    }
+    
+    // 初始化直方图状态
+    this.updateHistogramVisibility();
+};
+
+DebugConsole.prototype.setupHistogramCanvas = function() {
+    if (!this.histogramCanvas || !this.histogramContext) return;
+    
+    // 设置canvas尺寸
+    const rect = this.histogramCanvas.getBoundingClientRect();
+    this.histogramCanvas.width = rect.width * window.devicePixelRatio;
+    this.histogramCanvas.height = rect.height * window.devicePixelRatio;
+    this.histogramContext.scale(window.devicePixelRatio, window.devicePixelRatio);
+    
+    // 设置canvas样式
+    this.histogramCanvas.style.width = rect.width + 'px';
+    this.histogramCanvas.style.height = rect.height + 'px';
+};
+
+DebugConsole.prototype.toggleHistogram = function() {
+    this.histogramSettings.visible = !this.histogramSettings.visible;
+    this.updateHistogramVisibility();
+    
+    const toggleBtn = document.getElementById('histogram-toggle');
+    if (toggleBtn) {
+        toggleBtn.classList.toggle('active', this.histogramSettings.visible);
+    }
+    
+    this.showNotification(
+        this.histogramSettings.visible ? '直方图已显示' : '直方图已隐藏', 
+        'info'
+    );
+};
+
+DebugConsole.prototype.toggleHistogramPanel = function() {
+    this.histogramSettings.panelVisible = !this.histogramSettings.panelVisible;
+    
+    if (this.histogramPanel) {
+        this.histogramPanel.classList.toggle('visible', this.histogramSettings.panelVisible);
+    }
+};
+
+DebugConsole.prototype.updateHistogramVisibility = function() {
+    if (this.histogramOverlay) {
+        this.histogramOverlay.classList.toggle('visible', this.histogramSettings.visible);
+    }
+    
+    // 如果直方图可见且有预览图像，则更新直方图
+    if (this.histogramSettings.visible && this.previewActive) {
+        this.updateHistogramFromImage();
+    }
+};
+
+DebugConsole.prototype.updateHistogramDisplay = function() {
+    if (this.histogramSettings.visible && this.previewActive) {
+        this.updateHistogramFromImage();
+    }
+};
+
+DebugConsole.prototype.updateHistogramFromImage = function() {
+    const previewImg = document.getElementById('preview-image');
+    if (!previewImg || !this.histogramCanvas || !this.histogramContext) return;
+    
+    try {
+        // 创建临时canvas来分析图像
+        const tempCanvas = document.createElement('canvas');
+        const tempContext = tempCanvas.getContext('2d');
+        
+        // 设置临时canvas尺寸
+        tempCanvas.width = previewImg.naturalWidth || previewImg.width;
+        tempCanvas.height = previewImg.naturalHeight || previewImg.height;
+        
+        // 绘制图像到临时canvas
+        tempContext.drawImage(previewImg, 0, 0);
+        
+        // 获取图像数据
+        const imageData = tempContext.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imageData.data;
+        
+        // 计算直方图
+        const histogram = this.calculateHistogram(data);
+        
+        // 绘制直方图
+        this.drawHistogram(histogram);
+        
+        // 更新统计信息
+        this.updateHistogramStats(histogram);
+        
+    } catch (error) {
+        console.error('[DebugConsole] 更新直方图失败:', error);
+    }
+};
+
+DebugConsole.prototype.calculateHistogram = function(imageData) {
+    const histogram = {
+        red: new Array(256).fill(0),
+        green: new Array(256).fill(0),
+        blue: new Array(256).fill(0),
+        luminance: new Array(256).fill(0)
+    };
+    
+    for (let i = 0; i < imageData.length; i += 4) {
+        const r = imageData[i];
+        const g = imageData[i + 1];
+        const b = imageData[i + 2];
+        
+        // 计算亮度 (使用标准的亮度公式)
+        const luminance = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+        
+        histogram.red[r]++;
+        histogram.green[g]++;
+        histogram.blue[b]++;
+        histogram.luminance[luminance]++;
+    }
+    
+    return histogram;
+};
+
+DebugConsole.prototype.drawHistogram = function(histogram) {
+    if (!this.histogramCanvas || !this.histogramContext) return;
+    
+    const canvas = this.histogramCanvas;
+    const ctx = this.histogramContext;
+    const width = canvas.width / window.devicePixelRatio;
+    const height = canvas.height / window.devicePixelRatio;
+    
+    // 清除canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    // 设置背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, 0, width, height);
+    
+    // 找到最大计数值用于归一化
+    const maxCount = Math.max(
+        ...histogram.red,
+        ...histogram.green,
+        ...histogram.blue,
+        ...histogram.luminance
+    );
+    
+    if (maxCount === 0) return;
+    
+    // 绘制直方图
+    const barWidth = width / 256;
+    
+    for (let i = 0; i < 256; i++) {
+        const x = i * barWidth;
+        
+        // 绘制RGB通道
+        if (this.histogramSettings.showRGB) {
+            const redHeight = (histogram.red[i] / maxCount) * height;
+            const greenHeight = (histogram.green[i] / maxCount) * height;
+            const blueHeight = (histogram.blue[i] / maxCount) * height;
+            
+            // 红色通道
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.fillRect(x, height - redHeight, barWidth, redHeight);
+            
+            // 绿色通道
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.6)';
+            ctx.fillRect(x, height - greenHeight, barWidth, greenHeight);
+            
+            // 蓝色通道
+            ctx.fillStyle = 'rgba(0, 0, 255, 0.6)';
+            ctx.fillRect(x, height - blueHeight, barWidth, blueHeight);
+        }
+        
+        // 绘制亮度通道
+        if (this.histogramSettings.showLuminance) {
+            const luminanceHeight = (histogram.luminance[i] / maxCount) * height;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fillRect(x, height - luminanceHeight, barWidth, luminanceHeight);
+        }
+        
+        // 过曝警告
+        if (this.histogramSettings.showOverexposure && i >= 250) {
+            const overexposedHeight = (histogram.luminance[i] / maxCount) * height;
+            if (overexposedHeight > 0) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+                ctx.fillRect(x, height - overexposedHeight, barWidth, overexposedHeight);
+            }
+        }
+    }
+    
+    // 绘制网格线
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 1;
+    
+    // 垂直线
+    for (let i = 0; i <= 4; i++) {
+        const x = (i * width) / 4;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    }
+    
+    // 水平线
+    for (let i = 0; i <= 4; i++) {
+        const y = (i * height) / 4;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+};
+
+DebugConsole.prototype.updateHistogramStats = function(histogram) {
+    // 计算统计信息
+    const totalPixels = histogram.luminance.reduce((sum, count) => sum + count, 0);
+    
+    if (totalPixels === 0) return;
+    
+    // 计算平均值
+    let mean = 0;
+    for (let i = 0; i < 256; i++) {
+        mean += i * histogram.luminance[i];
+    }
+    mean /= totalPixels;
+    
+    // 计算标准差
+    let variance = 0;
+    for (let i = 0; i < 256; i++) {
+        variance += Math.pow(i - mean, 2) * histogram.luminance[i];
+    }
+    variance /= totalPixels;
+    const stdDev = Math.sqrt(variance);
+    
+    // 计算过曝像素数量
+    let overexposedPixels = 0;
+    for (let i = 250; i < 256; i++) {
+        overexposedPixels += histogram.luminance[i];
+    }
+    const overexposedPercent = (overexposedPixels / totalPixels) * 100;
+    
+    // 更新UI
+    const meanElement = document.getElementById('histogram-mean');
+    const stdElement = document.getElementById('histogram-std');
+    const overexposedElement = document.getElementById('histogram-overexposed');
+    
+    if (meanElement) meanElement.textContent = mean.toFixed(1);
+    if (stdElement) stdElement.textContent = stdDev.toFixed(1);
+    if (overexposedElement) overexposedElement.textContent = `${overexposedPercent.toFixed(1)}%`;
+};
+
+// 重写analyzeStreamData方法以包含直方图更新
+const originalAnalyzeStreamData = DebugConsole.prototype.analyzeStreamData;
+DebugConsole.prototype.analyzeStreamData = function(imageElement) {
+    // 调用原始方法
+    originalAnalyzeStreamData.call(this, imageElement);
+    
+    // 更新直方图
+    if (this.histogramSettings.visible) {
+        this.updateHistogramFromImage();
+    }
+};

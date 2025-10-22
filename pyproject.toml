@@ -12,7 +12,7 @@ keywords = ["astronomy", "polar-alignment", "astrophotography", "raspberry-pi", 
 packages = [{include = "ogscope"}]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 
 # Web 框架 - FastAPI
 fastapi = "^0.109.0"

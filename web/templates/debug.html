@@ -62,6 +62,61 @@
                                 <div class="overlay-text">点击启动相机预览</div>
                             </div>
                         </div>
+                        
+                        <!-- 直方图控制按钮 -->
+                        <div class="histogram-controls">
+                            <button class="histogram-toggle" id="histogram-toggle">
+                                📊 直方图
+                            </button>
+                            <button class="histogram-toggle" id="histogram-settings">
+                                ⚙️
+                            </button>
+                        </div>
+                        
+                        <!-- 直方图叠加显示 -->
+                        <div class="histogram-overlay" id="histogram-overlay">
+                            <canvas class="histogram-canvas" id="histogram-canvas"></canvas>
+                            <div class="histogram-info" id="histogram-info">
+                                <div>RGB 直方图</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 直方图控制面板 -->
+                        <div class="histogram-panel" id="histogram-panel">
+                            <h4>📊 直方图设置</h4>
+                            <div class="histogram-options">
+                                <div class="histogram-option">
+                                    <input type="checkbox" id="show-histogram" checked>
+                                    <label for="show-histogram">显示直方图</label>
+                                </div>
+                                <div class="histogram-option">
+                                    <input type="checkbox" id="show-rgb" checked>
+                                    <label for="show-rgb">RGB 通道</label>
+                                </div>
+                                <div class="histogram-option">
+                                    <input type="checkbox" id="show-luminance">
+                                    <label for="show-luminance">亮度通道</label>
+                                </div>
+                                <div class="histogram-option">
+                                    <input type="checkbox" id="show-overexposure">
+                                    <label for="show-overexposure">过曝警告</label>
+                                </div>
+                            </div>
+                            <div class="histogram-stats" id="histogram-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">平均值:</span>
+                                    <span class="stat-value" id="histogram-mean">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">标准差:</span>
+                                    <span class="stat-value" id="histogram-std">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">过曝像素:</span>
+                                    <span class="stat-value" id="histogram-overexposed">--</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="preview-controls">
                         <button class="btn btn-primary" id="start-preview">
@@ -161,8 +216,16 @@
                                 <span class="info-value" id="frame-count">0</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">数据大小</span>
-                                <span class="info-value" id="data-size">0 MB</span>
+                                <span class="info-label">接收数据</span>
+                                <span class="info-value" id="data-size">0 B</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">平均帧大小</span>
+                                <span class="info-value" id="avg-frame-size">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">下行速率</span>
+                                <span class="info-value" id="transfer-rate">--</span>
                             </div>
                             <div class="info-item">
                                 <span class="info-label">流状态</span>
@@ -171,6 +234,10 @@
                             <div class="info-item">
                                 <span class="info-label">运行时长</span>
                                 <span class="info-value" id="runtime">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">调试信息</span>
+                                <span class="info-value" id="debug-info">--</span>
                             </div>
                         </div>
                         <div class="analysis-actions">
