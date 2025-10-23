@@ -16,16 +16,17 @@ class DebugConsole {
             exposure: 10000,
             gain: 1.0,
             digitalGain: 1.0,
-            rotation: 180
-        };
-        
-        // 直方图相关设置
-        this.histogramSettings = {
-            visible: false,
-            showRGB: true,
-            showLuminance: false,
-            showOverexposure: false,
-            panelVisible: false
+            rotation: 180,
+            // 新增参数
+            contrast: 1.0,
+            brightness: 0.0,
+            saturation: 1.0,
+            sharpness: 1.0,
+            noiseReduction: 0,
+            whiteBalanceMode: 'auto',
+            whiteBalanceGainR: 1.0,
+            whiteBalanceGainB: 1.0,
+            nightMode: false
         };
         
         this.presets = [];
@@ -46,17 +47,6 @@ class DebugConsole {
             startTime: null
         };
         
-        // 网络带宽监控
-        this.networkStats = {
-            startTime: null,
-            lastCheckTime: null,
-            totalBytesTransferred: 0,
-            bytesPerSecond: 0,
-            lastBytesCount: 0,
-            checkInterval: 2000, // 每2秒检查一次，监控下行流量
-            isMonitoring: false
-        };
-        
         this.init();
     }
     
@@ -74,8 +64,6 @@ class DebugConsole {
         // 更新帧计数
         this.streamStats.frameCount++;
         
-        // 注意：数据大小现在通过网络监控获取，不再需要手动计算
-        
         // 检测分辨率并调整容器宽高比
         if (imageElement && imageElement.naturalWidth && imageElement.naturalHeight) {
             const detectedRes = `${imageElement.naturalWidth}x${imageElement.naturalHeight}`;
@@ -89,7 +77,7 @@ class DebugConsole {
         // 计算帧率
         if (this.streamStats.lastFrameTime !== null) {
             const timeDiff = currentTime - this.streamStats.lastFrameTime;
-            // 忽略过小的时间差（可能由浏览器缓存/事件合并导致的“超高FPS”）
+            // 忽略过小的时间差（可能由浏览器缓存/事件合并导致的"超高FPS"）
             if (timeDiff > 10) {
                 let fps = 1000 / timeDiff; // 转换为每秒帧数
                 // 上限保护：以相机报告 fps 的 2 倍或默认 10fps 作为硬上限
@@ -116,165 +104,6 @@ class DebugConsole {
     }
     
     /**
-     * 计算帧数据大小
-     */
-    calculateFrameDataSize(imageElement) {
-        try {
-            let frameSize = 0;
-            
-            // 方法1: 尝试获取真实的图像数据大小
-            const realSize = this.tryGetRealImageSize(imageElement);
-            if (realSize > 0) {
-                frameSize = realSize;
-            } else {
-                // 方法2: 尝试从图片的src URL获取数据大小
-                if (imageElement.src) {
-                    if (imageElement.src.startsWith('data:')) {
-                        // 对于base64编码的图片，计算实际数据大小
-                        const base64Data = imageElement.src.split(',')[1];
-                        if (base64Data) {
-                            frameSize = (base64Data.length * 3) / 4; // base64解码后的大小
-                        }
-                    } else if (imageElement.src.startsWith('blob:')) {
-                        // 对于blob URL，使用基于分辨率的估算
-                        frameSize = this.estimateFrameSizeFromResolution(imageElement);
-                    } else {
-                        // 对于普通URL，使用基于分辨率的估算
-                        frameSize = this.estimateFrameSizeFromResolution(imageElement);
-                    }
-                } else {
-                    // 使用基于分辨率的估算
-                    frameSize = this.estimateFrameSizeFromResolution(imageElement);
-                }
-            }
-            
-            // 如果估算失败，使用默认值
-            if (frameSize === 0) {
-                frameSize = this.getDefaultFrameSize(imageElement);
-            }
-            
-            // 强制确保有数据大小（调试用）
-            if (frameSize === 0) {
-                frameSize = 25000; // 强制25KB（更合理的默认值）
-                console.warn('[DebugConsole] 强制设置帧大小为25KB');
-            }
-            
-            // 更新统计数据
-            this.streamStats.dataSize += frameSize;
-            this.streamStats.avgFrameSize = this.streamStats.dataSize / this.streamStats.frameCount;
-            
-            // 调试信息 - 每10帧输出一次，便于调试
-            if (this.streamStats.frameCount % 10 === 0) {
-                const pixels = imageElement.naturalWidth * imageElement.naturalHeight;
-                const bytesPerPixel = pixels > 0 ? (frameSize / pixels).toFixed(3) : 'N/A';
-                console.log(`[Stream] 帧 ${this.streamStats.frameCount}: 大小=${this.formatDataSize(frameSize)}, 总计=${this.formatDataSize(this.streamStats.dataSize)}, 分辨率=${imageElement.naturalWidth}x${imageElement.naturalHeight}, 每像素=${bytesPerPixel}B`);
-            }
-            
-        } catch (error) {
-            console.warn('[DebugConsole] 计算帧数据大小失败:', error);
-            // 使用保守估算
-            const fallbackFrameSize = this.getDefaultFrameSize(imageElement);
-            this.streamStats.dataSize += fallbackFrameSize;
-            this.streamStats.avgFrameSize = this.streamStats.dataSize / this.streamStats.frameCount;
-        }
-    }
-    
-    /**
-     * 尝试获取真实的图像数据大小
-     */
-    tryGetRealImageSize(imageElement) {
-        try {
-            // 方法1: 尝试通过fetch获取图像大小
-            if (imageElement.src && !imageElement.src.startsWith('data:')) {
-                // 对于HTTP URL，尝试获取Content-Length
-                fetch(imageElement.src, { method: 'HEAD' })
-                    .then(response => {
-                        const contentLength = response.headers.get('content-length');
-                        if (contentLength) {
-                            console.log(`[Stream] 检测到真实图像大小: ${this.formatDataSize(parseInt(contentLength))}`);
-                        }
-                    })
-                    .catch(() => {
-                        // 忽略错误，使用估算值
-                    });
-            }
-            
-            // 方法2: 尝试从canvas获取图像数据大小
-            if (imageElement.naturalWidth && imageElement.naturalHeight) {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = imageElement.naturalWidth;
-                canvas.height = imageElement.naturalHeight;
-                
-                ctx.drawImage(imageElement, 0, 0);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const rawSize = imageData.data.length;
-                
-                // JPEG压缩比估算：原始数据通常是压缩后数据的10-20倍
-                const compressedSize = rawSize / 15; // 假设15:1压缩比
-                
-                if (compressedSize > 0 && compressedSize < 1000000) { // 小于1MB才认为是合理的
-                    return compressedSize;
-                }
-            }
-            
-            return 0;
-        } catch (error) {
-            console.warn('[DebugConsole] 获取真实图像大小失败:', error);
-            return 0;
-        }
-    }
-    
-    /**
-     * 基于分辨率估算帧大小
-     */
-    estimateFrameSizeFromResolution(imageElement) {
-        if (!imageElement.naturalWidth || !imageElement.naturalHeight) {
-            return 0;
-        }
-        
-        const width = imageElement.naturalWidth;
-        const height = imageElement.naturalHeight;
-        const pixels = width * height;
-        
-        // 更准确的JPEG压缩比估算（基于实际经验）
-        // JPEG压缩比通常在10:1到50:1之间，取决于图像复杂度
-        let bytesPerPixel;
-        if (pixels < 640 * 480) {
-            bytesPerPixel = 0.05; // 约50KB for 640x480 (低分辨率，简单压缩)
-        } else if (pixels < 1280 * 720) {
-            bytesPerPixel = 0.08; // 约75KB for 1280x720
-        } else if (pixels < 1920 * 1080) {
-            bytesPerPixel = 0.12; // 约250KB for 1920x1080
-        } else {
-            bytesPerPixel = 0.15; // 更高分辨率
-        }
-        
-        const estimatedSize = pixels * bytesPerPixel;
-        
-        // 设置合理的上下限
-        const minSize = 10000;  // 最小10KB
-        const maxSize = 500000; // 最大500KB
-        
-        return Math.max(minSize, Math.min(maxSize, estimatedSize));
-    }
-    
-    /**
-     * 获取默认帧大小
-     */
-    getDefaultFrameSize(imageElement) {
-        // 基于图像尺寸的默认估算
-        if (imageElement.naturalWidth && imageElement.naturalHeight) {
-            const pixels = imageElement.naturalWidth * imageElement.naturalHeight;
-            const estimatedSize = pixels * 0.08; // 更保守的估算
-            return Math.max(estimatedSize, 15000); // 最小15KB
-        }
-        
-        // 基于常见分辨率的默认值
-        return 30000; // 默认30KB（更合理的估算）
-    }
-    
-    /**
      * 根据相机分辨率动态调整视频容器的宽高比
      * 考虑传感器原生宽高比，避免画面被压缩
      */
@@ -292,7 +121,7 @@ class DebugConsole {
         if (Math.abs(outputAspectRatio - sensorAspectRatio) > 0.1) {
             // 使用传感器原生比例
             targetAspectRatio = sensorAspectRatio;
-            console.log(`[UI] 输出分辨率${width}x${height}与传感器比例差异较大，使用传感器比例: ${sensorAspectRatio.toFixed(3)}`);
+            console.log(`[UI] 输出分辨率${width}x${height}与传感器比例差异较大，使用传感器比例: ${targetAspectRatio.toFixed(3)}`);
         } else {
             // 使用输出分辨率比例
             targetAspectRatio = outputAspectRatio;
@@ -333,14 +162,11 @@ class DebugConsole {
             frameCountElement.textContent = this.streamStats.frameCount;
         }
         
-        // 数据大小、传输速率和平均帧大小现在通过网络监控显示
-        // 这些数据由 updateNetworkStatsDisplay() 方法更新
-        
-        // 更新调试信息显示
-        const debugInfoElement = document.getElementById('debug-info');
-        if (debugInfoElement) {
-            const debugText = this.getDebugInfo();
-            debugInfoElement.textContent = debugText;
+        // 更新数据大小显示
+        const dataSizeElement = document.getElementById('data-size');
+        if (dataSizeElement) {
+            const dataSizeMB = (this.streamStats.dataSize / (1024 * 1024)).toFixed(2);
+            dataSizeElement.textContent = `${dataSizeMB} MB`;
         }
         
         // 更新流状态显示
@@ -361,197 +187,6 @@ class DebugConsole {
     }
     
     /**
-     * 格式化数据大小显示
-     */
-    formatDataSize(bytes) {
-        if (bytes === 0) return '0 B';
-        
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        
-        const value = bytes / Math.pow(k, i);
-        return `${value.toFixed(2)} ${sizes[i]}`;
-    }
-    
-    /**
-     * 计算传输速率
-     */
-    calculateTransferRate() {
-        if (!this.streamStats.startTime || this.streamStats.frameCount === 0) {
-            return '--';
-        }
-        
-        const currentTime = performance.now();
-        const elapsedSeconds = (currentTime - this.streamStats.startTime) / 1000;
-        
-        if (elapsedSeconds === 0) return '--';
-        
-        const bytesPerSecond = this.streamStats.dataSize / elapsedSeconds;
-        return `${this.formatDataSize(bytesPerSecond)}/s`;
-    }
-    
-    /**
-     * 获取调试信息
-     */
-    getDebugInfo() {
-        if (this.streamStats.frameCount === 0) {
-            return '无数据';
-        }
-        
-        const lastFrameTime = this.streamStats.lastFrameTime ? 
-            Math.round((performance.now() - this.streamStats.lastFrameTime)) : '--';
-        
-        return `上次更新:${lastFrameTime}ms`;
-    }
-    
-    /**
-     * 启动网络带宽监控
-     */
-    startNetworkMonitoring() {
-        if (this.networkStats.isMonitoring) return;
-        
-        this.networkStats.isMonitoring = true;
-        this.networkStats.startTime = performance.now();
-        this.networkStats.lastCheckTime = performance.now();
-        
-        console.log('[DebugConsole] 启动下行流量监控');
-        
-        // 使用Performance API监控网络活动
-        this.networkMonitoringInterval = setInterval(() => {
-            this.updateNetworkStats();
-        }, this.networkStats.checkInterval);
-    }
-    
-    /**
-     * 停止网络带宽监控
-     */
-    stopNetworkMonitoring() {
-        if (!this.networkStats.isMonitoring) return;
-        
-        this.networkStats.isMonitoring = false;
-        
-        if (this.networkMonitoringInterval) {
-            clearInterval(this.networkMonitoringInterval);
-            this.networkMonitoringInterval = null;
-        }
-        
-        console.log('[DebugConsole] 停止下行流量监控');
-    }
-    
-    /**
-     * 更新网络统计信息
-     */
-    updateNetworkStats() {
-        try {
-            const currentTime = performance.now();
-            
-            // 使用Performance API获取网络资源信息
-            const resources = performance.getEntriesByType('resource');
-            const currentBytesCount = this.estimateTotalTransferSize(resources);
-            
-            if (this.networkStats.lastBytesCount > 0) {
-                const timeDiff = (currentTime - this.networkStats.lastCheckTime) / 1000; // 转换为秒
-                const bytesDiff = currentBytesCount - this.networkStats.lastBytesCount;
-                
-                if (timeDiff > 0) {
-                    this.networkStats.bytesPerSecond = bytesDiff / timeDiff;
-                    this.networkStats.totalBytesTransferred += bytesDiff;
-                }
-            }
-            
-            this.networkStats.lastBytesCount = currentBytesCount;
-            this.networkStats.lastCheckTime = currentTime;
-            
-            // 更新UI显示
-            this.updateNetworkStatsDisplay();
-            
-            // 调试信息：每10次检查输出一次详细信息
-            if (this.networkStats.totalBytesTransferred > 0 && 
-                Math.floor(currentTime / (this.networkStats.checkInterval * 10)) !== 
-                Math.floor(this.networkStats.lastCheckTime / (this.networkStats.checkInterval * 10))) {
-                const resources = performance.getEntriesByType('resource');
-                const cameraResources = resources.filter(resource => {
-                    const url = resource.name;
-                    return url.includes('/api/debug/camera/');
-                });
-                console.log(`[DebugConsole] 下行流量统计: 总计=${this.formatDataSize(this.networkStats.totalBytesTransferred)}, 速率=${this.formatDataSize(this.networkStats.bytesPerSecond)}/s, 相机资源数=${cameraResources.length}`);
-            }
-            
-        } catch (error) {
-            console.warn('[DebugConsole] 更新网络统计失败:', error);
-        }
-    }
-    
-    /**
-     * 估算总下行传输大小（接收的数据）
-     */
-    estimateTotalTransferSize(resources) {
-        let totalSize = 0;
-        
-        // 只计算最近的资源（避免计算所有历史资源）
-        const recentResources = resources.filter(resource => {
-            const resourceTime = resource.startTime;
-            const currentTime = performance.now();
-            return (currentTime - resourceTime) < 30000; // 只计算最近30秒的资源
-        });
-        
-        // 过滤出相机相关的资源（主要是图像数据）
-        const cameraResources = recentResources.filter(resource => {
-            const url = resource.name;
-            return url.includes('/api/debug/camera/preview') || 
-                   url.includes('/api/debug/camera/capture') ||
-                   url.includes('/api/debug/camera/size') ||
-                   url.includes('/api/debug/camera/fps') ||
-                   url.includes('/api/debug/camera/sampling') ||
-                   (url.includes('preview') && url.includes('/api/debug/')) ||
-                   (url.includes('capture') && url.includes('/api/debug/'));
-        });
-        
-        cameraResources.forEach(resource => {
-            // 优先使用transferSize（实际传输大小），其次使用decodedBodySize（解码后大小）
-            if (resource.transferSize && resource.transferSize > 0) {
-                totalSize += resource.transferSize;
-            } else if (resource.decodedBodySize && resource.decodedBodySize > 0) {
-                totalSize += resource.decodedBodySize;
-            }
-        });
-        
-        return totalSize;
-    }
-    
-    /**
-     * 更新网络统计显示
-     */
-    updateNetworkStatsDisplay() {
-        // 更新数据大小显示
-        const dataSizeElement = document.getElementById('data-size');
-        if (dataSizeElement) {
-            const dataSizeText = this.formatDataSize(this.networkStats.totalBytesTransferred);
-            dataSizeElement.textContent = dataSizeText;
-        }
-        
-        // 更新传输速率显示
-        const transferRateElement = document.getElementById('transfer-rate');
-        if (transferRateElement) {
-            const transferRateText = this.formatDataSize(this.networkStats.bytesPerSecond) + '/s';
-            transferRateElement.textContent = transferRateText;
-        }
-        
-        // 更新平均帧大小显示
-        const avgFrameSizeElement = document.getElementById('avg-frame-size');
-        if (avgFrameSizeElement) {
-            if (this.streamStats.frameCount > 0 && this.networkStats.totalBytesTransferred > 0) {
-                const avgFrameSize = this.networkStats.totalBytesTransferred / this.streamStats.frameCount;
-                const avgFrameSizeText = this.formatDataSize(avgFrameSize);
-                avgFrameSizeElement.textContent = avgFrameSizeText;
-            } else {
-                avgFrameSizeElement.textContent = '--';
-            }
-        }
-    }
-    
-    /**
      * 重置数据流统计
      */
     resetStreamStats() {
@@ -565,40 +200,7 @@ class DebugConsole {
             frameTimes: [],
             startTime: null
         };
-        
-        // 重置网络统计
-        this.networkStats = {
-            startTime: null,
-            lastCheckTime: null,
-            totalBytesTransferred: 0,
-            bytesPerSecond: 0,
-            lastBytesCount: 0,
-            checkInterval: 2000,
-            isMonitoring: false
-        };
-        
         this.updateStreamStatsDisplay();
-    }
-    
-    /**
-     * 重置网络统计（用于分辨率切换）
-     */
-    resetNetworkStatsForResolutionChange() {
-        // 重置网络统计数据，但保持监控状态
-        if (this.networkStats.isMonitoring) {
-            this.networkStats.totalBytesTransferred = 0;
-            this.networkStats.bytesPerSecond = 0;
-            this.networkStats.lastBytesCount = 0;
-            this.networkStats.startTime = performance.now();
-            this.networkStats.lastCheckTime = performance.now();
-            
-            // 清除旧的网络资源记录，避免影响新的统计
-            if (performance.clearResourceTimings) {
-                performance.clearResourceTimings();
-            }
-            
-            console.log('[DebugConsole] 分辨率切换后重置网络统计');
-        }
     }
     
     /**
@@ -666,15 +268,15 @@ class DebugConsole {
         // 初始化UI
         this.initUI();
         
-        // 初始化直方图
-        this.initHistogram();
-        
         // 加载数据
         await this.loadPresets();
         await this.loadFiles();
         
         // 更新相机状态
         await this.updateCameraStatus();
+        
+        // 启动图像质量监控
+        this.startQualityMonitoring();
         
         console.log('[DebugConsole] 调试控制台初始化完成');
     }
@@ -754,6 +356,57 @@ class DebugConsole {
                 const rotation = parseInt(e.target.dataset.rotation);
                 this.setRotation(rotation);
             });
+        });
+        
+        // 新增参数控制事件监听器
+        document.getElementById('contrast-setting')?.addEventListener('input', (e) => {
+            this.updateContrastDisplay(parseFloat(e.target.value));
+        });
+        
+        document.getElementById('brightness-setting')?.addEventListener('input', (e) => {
+            this.updateBrightnessDisplay(parseFloat(e.target.value));
+        });
+        
+        document.getElementById('saturation-setting')?.addEventListener('input', (e) => {
+            this.updateSaturationDisplay(parseFloat(e.target.value));
+        });
+        
+        document.getElementById('sharpness-setting')?.addEventListener('input', (e) => {
+            this.updateSharpnessDisplay(parseFloat(e.target.value));
+        });
+        
+        document.getElementById('noise-reduction-setting')?.addEventListener('input', (e) => {
+            this.updateNoiseReductionDisplay(parseInt(e.target.value));
+        });
+        
+        document.getElementById('white-balance-mode')?.addEventListener('change', (e) => {
+            this.updateWhiteBalanceMode(e.target.value);
+        });
+        
+        document.getElementById('wb-gain-r')?.addEventListener('input', (e) => {
+            this.updateWhiteBalanceGainR(parseFloat(e.target.value));
+        });
+        
+        document.getElementById('wb-gain-b')?.addEventListener('input', (e) => {
+            this.updateWhiteBalanceGainB(parseFloat(e.target.value));
+        });
+        
+        // 夜间模式控制
+        document.getElementById('night-mode-preset')?.addEventListener('click', () => {
+            this.applyNightModePreset();
+        });
+        
+        document.getElementById('toggle-night-mode')?.addEventListener('click', () => {
+            this.toggleNightMode();
+        });
+        
+        // 安全机制
+        document.getElementById('backup-settings')?.addEventListener('click', () => {
+            this.backupSettings();
+        });
+        
+        document.getElementById('restore-settings')?.addEventListener('click', () => {
+            this.restoreSettings();
         });
         
         // 分辨率预设选择
@@ -844,36 +497,6 @@ class DebugConsole {
             }
         });
         
-        // 直方图控制
-        document.getElementById('histogram-toggle')?.addEventListener('click', () => {
-            this.toggleHistogram();
-        });
-        
-        document.getElementById('histogram-settings')?.addEventListener('click', () => {
-            this.toggleHistogramPanel();
-        });
-        
-        // 直方图设置选项
-        document.getElementById('show-histogram')?.addEventListener('change', (e) => {
-            this.histogramSettings.visible = e.target.checked;
-            this.updateHistogramVisibility();
-        });
-        
-        document.getElementById('show-rgb')?.addEventListener('change', (e) => {
-            this.histogramSettings.showRGB = e.target.checked;
-            this.updateHistogramDisplay();
-        });
-        
-        document.getElementById('show-luminance')?.addEventListener('change', (e) => {
-            this.histogramSettings.showLuminance = e.target.checked;
-            this.updateHistogramDisplay();
-        });
-        
-        document.getElementById('show-overexposure')?.addEventListener('change', (e) => {
-            this.histogramSettings.showOverexposure = e.target.checked;
-            this.updateHistogramDisplay();
-        });
-        
         // 键盘快捷键
         document.addEventListener('keydown', (e) => {
             this.handleKeyboardShortcuts(e);
@@ -888,7 +511,7 @@ class DebugConsole {
      */
     initUI() {
         // 设置默认标签页
-        this.switchTab('preview');
+        this.switchTab('capture');
         
         // 初始化参数显示
         this.updateExposureDisplay(this.currentSettings.exposure);
@@ -1017,6 +640,9 @@ class DebugConsole {
      */
     async startPreview() {
         try {
+            // 显示启动状态
+            this.showNotification('正在启动相机预览...', 'info');
+            
             const response = await fetch('/api/debug/camera/start', {
                 method: 'POST'
             });
@@ -1070,38 +696,53 @@ class DebugConsole {
         // 启动前立即隐藏覆盖层，并重置统计，避免提示一直停留
         overlay.classList.add('hidden');
         this.resetStreamStats();
-        this.startNetworkMonitoring();
 
         // 使用单次请求循环（避免并发取消）：每次等上一帧 onload/onerror/超时 后再发起下一帧
         this.previewActive = true;
-        const fps = 5;
-        const intervalMs = Math.max(1000 / fps, 150);
+        // 提高预览帧率到15fps以获得更流畅的体验
+        const fps = 15;
+        const intervalMs = Math.max(1000 / fps, 50);
         let consecutiveFailures = 0;
         let frameToken = 0;
+        let firstFrameAttempts = 0;
+        const maxFirstFrameAttempts = 10;  // 前10次请求使用更短间隔
 
         const loop = () => {
             if (!this.previewActive) return;
             const loader = new Image();
             const startedAt = performance.now();
             const myToken = ++frameToken;
+            
+            // 增加第一帧尝试计数
+            if (firstFrameAttempts < maxFirstFrameAttempts) {
+                firstFrameAttempts++;
+            }
 
-            // 帧超时保护：1.5s 未返回则视为失败，退避重试
+            // 帧超时保护：1s 未返回则视为失败，退避重试（减少等待时间）
             let timeoutId = setTimeout(() => {
                 if (!this.previewActive || myToken !== frameToken) return;
                 consecutiveFailures++;
                 const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
                 this.previewTimer = setTimeout(loop, retryDelay);
-            }, 1500);
+            }, 1000);
 
             loader.onload = () => {
                 // 交换显示源，避免中途取消请求
                 previewImg.src = loader.src;
-                // 使用previewImg而不是loader进行分析，因为previewImg有naturalWidth/naturalHeight属性
-                this.analyzeStreamData(previewImg);
+                this.analyzeStreamData(loader);
                 if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
                 consecutiveFailures = 0;
+                
+                // 第一帧获取成功后，恢复正常间隔
+                if (firstFrameAttempts < maxFirstFrameAttempts) {
+                    firstFrameAttempts = maxFirstFrameAttempts;
+                    console.log(`[Preview] 第一帧获取成功，耗时 ${(performance.now() - startedAt).toFixed(1)}ms`);
+                }
+                
                 const elapsed = performance.now() - startedAt;
-                const delay = Math.max(0, intervalMs - elapsed);
+                // 第一帧阶段使用更短间隔
+                const currentInterval = firstFrameAttempts < maxFirstFrameAttempts ? 100 : intervalMs;
+                const delay = Math.max(0, currentInterval - elapsed);
                 this.previewTimer = setTimeout(loop, delay);
             };
             loader.onerror = () => {
@@ -1115,11 +756,11 @@ class DebugConsole {
         };
         loop();
 
-        // 看门狗：若3秒未收到帧，强制刷新状态
+        // 看门狗：若2秒未收到帧，强制刷新状态（更敏感的检测）
         this.previewWatchdog = setInterval(() => {
             if (this.streamStats.lastFrameTime === null) return;
             const since = performance.now() - this.streamStats.lastFrameTime;
-            if (since > 3000) {
+            if (since > 2000) {
                 this.updateCameraStatus();
             }
         }, 1000);
@@ -1150,9 +791,6 @@ class DebugConsole {
         }
         // 显示覆盖层
         document.getElementById('preview-overlay').classList.remove('hidden');
-        
-        // 停止网络监控
-        this.stopNetworkMonitoring();
     }
     
     /**
@@ -1237,19 +875,12 @@ class DebugConsole {
                 method: 'POST'
             });
             
-            this.showNotification('录制已停止', 'info');
-            
-            // 停止计时
             this.stopRecordingTimer();
-            
-            // 更新按钮状态
             this.updateRecordingButtons(false);
             this.setRecOverlay(false);
             
-            // 更新状态
             await this.updateCameraStatus();
-            
-            // 刷新文件列表
+            this.showNotification('录制已停止', 'info');
             await this.loadFiles();
             
         } catch (error) {
@@ -1262,20 +893,10 @@ class DebugConsole {
      * 开始录制计时器
      */
     startRecordingTimer() {
-        this.stopRecordingTimer(); // 清除现有定时器
-        
         this.recordingInterval = setInterval(() => {
             if (this.recordingStartTime) {
                 const duration = Date.now() - this.recordingStartTime;
-                const minutes = Math.floor(duration / 60000);
-                const seconds = Math.floor((duration % 60000) / 1000);
-                
-                document.getElementById('recording-duration').textContent = 
-                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                const badgeTime = document.getElementById('rec-badge-time');
-                if (badgeTime) {
-                    badgeTime.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                }
+                this.updateRecordingDuration(duration);
             }
         }, 1000);
     }
@@ -1288,83 +909,85 @@ class DebugConsole {
             clearInterval(this.recordingInterval);
             this.recordingInterval = null;
         }
-        
-        document.getElementById('recording-duration').textContent = '00:00';
-        this.recordingStartTime = null;
-        const badgeTime = document.getElementById('rec-badge-time');
-        if (badgeTime) badgeTime.textContent = '00:00';
-
     }
-
+    
+    /**
+     * 更新录制时长
+     */
+    updateRecordingDuration(duration) {
+        const durationElement = document.getElementById('recording-duration');
+        if (durationElement) {
+            const seconds = Math.floor(duration / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            durationElement.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+        
+        // 更新录制徽章
+        const recBadgeTime = document.getElementById('rec-badge-time');
+        if (recBadgeTime) {
+            const seconds = Math.floor(duration / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            recBadgeTime.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+    }
+    
+    /**
+     * 设置录制覆盖层
+     */
+    setRecOverlay(recording) {
+        const recBadge = document.getElementById('rec-badge');
+        if (recBadge) {
+            recBadge.style.display = recording ? 'flex' : 'none';
+        }
+    }
+    
+    /**
+     * 更新录制按钮状态
+     */
+    updateRecordingButtons(isRecording) {
+        const startBtn = document.getElementById('start-recording');
+        const stopBtn = document.getElementById('stop-recording');
+        
+        if (startBtn) startBtn.disabled = isRecording;
+        if (stopBtn) stopBtn.disabled = !isRecording;
+    }
+    
+    /**
+     * 更新按钮状态
+     */
+    updateButtonStates() {
+        const startBtn = document.getElementById('start-preview');
+        const stopBtn = document.getElementById('stop-preview');
+        
+        if (startBtn) {
+            startBtn.disabled = this.cameraStatus.streaming;
+        }
+        
+        if (stopBtn) {
+            stopBtn.disabled = !this.cameraStatus.streaming;
+        }
+    }
+    
+    /**
+     * 开始状态轮询
+     */
     beginStatusPolling() {
         this.endStatusPolling();
-        this.statusInterval = setInterval(() => this.updateCameraStatus(), 1000);
+        this.statusInterval = setInterval(() => {
+            this.updateCameraStatus();
+        }, 2000);
     }
+    
+    /**
+     * 结束状态轮询
+     */
     endStatusPolling() {
         if (this.statusInterval) {
             clearInterval(this.statusInterval);
             this.statusInterval = null;
         }
-    }
-
-    async applySizeOnly(width, height) {
-        const btn = document.getElementById('apply-resolution');
-        try {
-            if (btn) btn.disabled = true;
-            this.showNotification('正在设置分辨率...', 'info');
-            
-            const params = new URLSearchParams({ width: String(width), height: String(height) });
-            const url = `/api/debug/camera/size?${params.toString()}`;
-            console.debug('[applySizeOnly] POST', url);
-            
-            // 先停止预览，避免浏览器持有旧图像源导致卡死
-            try { await this.stopPreview(); } catch(_){}
-            
-            const resp = await fetch(url, { method: 'POST' });
-            if (!resp.ok) {
-                let detail = '设置分辨率失败';
-                try {
-                    const err = await resp.json();
-                    detail = err.detail || detail;
-                } catch (_) {
-                    try { detail = await resp.text(); } catch(_){}
-                }
-                throw new Error(detail);
-            }
-            const data = await resp.json();
-            const info = data?.info || {};
-            const applied = info?.width && info?.height ? `${info.width}x${info.height}` : `${width}x${height}`;
-            this.showNotification(`分辨率已应用: ${applied}`, 'success');
-            
-            // 重新启动预览，确保新分辨率生效
-            await this.updateCameraStatus();
-            await this.startPreview();
-            
-            // 重置网络监控，确保新的分辨率设置后的数据传输被正确统计
-            this.resetNetworkStatsForResolutionChange();
-        } catch (e) {
-            console.error('[applySizeOnly] error:', e);
-            this.showNotification(`设置分辨率失败: ${e.message}`, 'error');
-            // 尝试恢复预览
-            try {
-                await this.updateCameraStatus();
-                if (this.cameraStatus.streaming) {
-                    await this.startPreview();
-                }
-            } catch (recoveryError) {
-                console.error('[applySizeOnly] recovery failed:', recoveryError);
-            }
-        } finally {
-            if (btn) btn.disabled = false;
-        }
-    }
-
-    setRecOverlay(isRecording) {
-        const container = document.getElementById('video-container');
-        const badge = document.getElementById('rec-badge');
-        if (!container || !badge) return;
-        container.classList.toggle('recording-border', !!isRecording);
-        badge.classList.toggle('show', !!isRecording);
     }
     
     /**
@@ -1372,7 +995,6 @@ class DebugConsole {
      */
     updateExposureDisplay(value) {
         document.getElementById('exposure-value').textContent = value;
-        this.currentSettings.exposure = value;
     }
     
     /**
@@ -1380,7 +1002,6 @@ class DebugConsole {
      */
     updateGainDisplay(value) {
         document.getElementById('gain-value').textContent = value.toFixed(1);
-        this.currentSettings.gain = value;
     }
     
     /**
@@ -1388,34 +1009,104 @@ class DebugConsole {
      */
     updateDigitalGainDisplay(value) {
         document.getElementById('digital-gain-value').textContent = value.toFixed(1);
-        this.currentSettings.digitalGain = value;
+    }
+    
+    /**
+     * 更新对比度显示
+     */
+    updateContrastDisplay(value) {
+        document.getElementById('contrast-value').textContent = value.toFixed(1);
+    }
+    
+    /**
+     * 更新亮度显示
+     */
+    updateBrightnessDisplay(value) {
+        document.getElementById('brightness-value').textContent = value.toFixed(1);
+    }
+    
+    /**
+     * 更新饱和度显示
+     */
+    updateSaturationDisplay(value) {
+        document.getElementById('saturation-value').textContent = value.toFixed(1);
+    }
+    
+    /**
+     * 更新锐度显示
+     */
+    updateSharpnessDisplay(value) {
+        document.getElementById('sharpness-value').textContent = value.toFixed(1);
+    }
+    
+    /**
+     * 更新降噪显示
+     */
+    updateNoiseReductionDisplay(value) {
+        document.getElementById('noise-reduction-value').textContent = value;
+    }
+    
+    /**
+     * 更新白平衡模式
+     */
+    updateWhiteBalanceMode(mode) {
+        const gainsContainer = document.getElementById('white-balance-gains');
+        if (gainsContainer) {
+            gainsContainer.style.display = mode === 'manual' ? 'block' : 'none';
+        }
+    }
+    
+    /**
+     * 更新白平衡红色增益显示
+     */
+    updateWhiteBalanceGainR(value) {
+        document.getElementById('wb-gain-r-value').textContent = value.toFixed(1);
+    }
+    
+    /**
+     * 更新白平衡蓝色增益显示
+     */
+    updateWhiteBalanceGainB(value) {
+        document.getElementById('wb-gain-b-value').textContent = value.toFixed(1);
     }
     
     /**
      * 应用设置
      */
     async applySettings() {
+        const settings = {
+            exposure: parseInt(document.getElementById('exposure-setting').value),
+            gain: parseFloat(document.getElementById('gain-setting').value),
+            digitalGain: parseFloat(document.getElementById('digital-gain-setting').value),
+            contrast: parseFloat(document.getElementById('contrast-setting').value),
+            brightness: parseFloat(document.getElementById('brightness-setting').value),
+            saturation: parseFloat(document.getElementById('saturation-setting').value),
+            sharpness: parseFloat(document.getElementById('sharpness-setting').value),
+            noiseReduction: parseInt(document.getElementById('noise-reduction-setting').value),
+            whiteBalanceMode: document.getElementById('white-balance-mode').value,
+            whiteBalanceGainR: parseFloat(document.getElementById('wb-gain-r').value),
+            whiteBalanceGainB: parseFloat(document.getElementById('wb-gain-b').value)
+        };
+
         try {
             const response = await fetch('/api/debug/camera/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    exposure: this.currentSettings.exposure,
-                    gain: this.currentSettings.gain
-                })
+                body: JSON.stringify(settings)
             });
-            
+
             if (response.ok) {
-                this.showNotification('相机设置已应用', 'success');
+                this.showNotification('设置应用成功', 'success');
+                await this.updateCameraStatus();
             } else {
                 const error = await response.json();
-                throw new Error(error.detail || '应用设置失败');
+                throw new Error(error.detail || '设置应用失败');
             }
         } catch (error) {
             console.error('[DebugConsole] 应用设置失败:', error);
-            this.showNotification(`应用设置失败: ${error.message}`, 'error');
+            this.showNotification(`设置应用失败: ${error.message}`, 'error');
         }
     }
     
@@ -1448,6 +1139,216 @@ class DebugConsole {
             console.error('[DebugConsole] 重置设置失败:', error);
             this.showNotification(`重置设置失败: ${error.message}`, 'error');
         }
+    }
+    
+    /**
+     * 应用夜间模式预设
+     */
+    async applyNightModePreset() {
+        try {
+            const response = await fetch('/api/debug/camera/night-mode-preset', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.showNotification('夜间模式预设已应用', 'success');
+                await this.updateCameraStatus();
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || '应用夜间模式预设失败');
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 应用夜间模式预设失败:', error);
+            this.showNotification(`应用夜间模式预设失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 切换夜间模式
+     */
+    async toggleNightMode() {
+        try {
+            const enabled = !this.currentSettings.nightMode;
+            const response = await fetch(`/api/debug/camera/night-mode?enabled=${enabled}`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                this.currentSettings.nightMode = enabled;
+                const statusElement = document.getElementById('night-mode-status');
+                if (statusElement) {
+                    statusElement.textContent = enabled ? '开启' : '关闭';
+                }
+                this.showNotification(`夜间模式已${enabled ? '开启' : '关闭'}`, 'success');
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || '切换夜间模式失败');
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 切换夜间模式失败:', error);
+            this.showNotification(`切换夜间模式失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 备份设置
+     */
+    async backupSettings() {
+        try {
+            const response = await fetch('/api/debug/camera/backup-settings', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                this.showNotification('当前设置已备份', 'success');
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || '备份设置失败');
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 备份设置失败:', error);
+            this.showNotification(`备份设置失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 恢复设置
+     */
+    async restoreSettings() {
+        try {
+            const response = await fetch('/api/debug/camera/restore-settings', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                this.showNotification('设置已从备份恢复', 'success');
+                await this.updateCameraStatus();
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || '恢复设置失败');
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 恢复设置失败:', error);
+            this.showNotification(`恢复设置失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 仅应用尺寸（宽高），不影响帧率
+     */
+    async applySizeOnly(width, height) {
+        try {
+            const resp = await fetch(`/api/debug/camera/size?width=${width}&height=${height}`, { method: 'POST' });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || '设置分辨率失败');
+            }
+            this.showNotification(`分辨率已设置为 ${width}x${height}`, 'success');
+            await this.updateCameraStatus();
+        } catch (e) {
+            console.error(e);
+            this.showNotification(`设置分辨率失败: ${e.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 启动图像质量监控
+     */
+    startQualityMonitoring() {
+        this.stopQualityMonitoring();
+        
+        this.qualityMonitoringInterval = setInterval(async () => {
+            try {
+                const response = await fetch('/api/debug/camera/image-quality');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.updateQualityMetrics(data.quality);
+                }
+            } catch (error) {
+                console.error('[QualityMonitoring] 获取图像质量失败:', error);
+            }
+        }, 3000); // 每3秒更新一次
+        
+        console.log('[QualityMonitoring] 图像质量监控已启动');
+    }
+    
+    /**
+     * 停止图像质量监控
+     */
+    stopQualityMonitoring() {
+        if (this.qualityMonitoringInterval) {
+            clearInterval(this.qualityMonitoringInterval);
+            this.qualityMonitoringInterval = null;
+            console.log('[QualityMonitoring] 图像质量监控已停止');
+        }
+    }
+    
+    /**
+     * 更新图像质量指标
+     */
+    updateQualityMetrics(quality) {
+        // 更新噪点水平
+        const noiseLevel = quality.noise_level || 0;
+        const noiseBar = document.getElementById('noise-level-bar');
+        const noiseValue = document.getElementById('noise-level');
+        if (noiseBar && noiseValue) {
+            noiseBar.style.width = `${Math.min(100, noiseLevel * 10)}%`;
+            noiseValue.textContent = `${noiseLevel.toFixed(1)}`;
+        }
+        
+        // 更新曝光充足度
+        const exposureLevel = quality.exposure_level || 0;
+        const exposureBar = document.getElementById('exposure-bar');
+        const exposureValue = document.getElementById('exposure-level');
+        if (exposureBar && exposureValue) {
+            exposureBar.style.width = `${Math.min(100, exposureLevel * 10)}%`;
+            exposureValue.textContent = `${exposureLevel.toFixed(1)}`;
+        }
+        
+        // 更新增益水平
+        const gainLevel = quality.gain_level || 0;
+        const gainBar = document.getElementById('gain-bar');
+        const gainValue = document.getElementById('gain-level');
+        if (gainBar && gainValue) {
+            gainBar.style.width = `${Math.min(100, gainLevel * 10)}%`;
+            gainValue.textContent = `${gainLevel.toFixed(1)}`;
+        }
+        
+        // 更新建议
+        this.updateQualityRecommendations(quality);
+    }
+    
+    /**
+     * 更新质量建议
+     */
+    updateQualityRecommendations(quality) {
+        const recommendationsContainer = document.getElementById('quality-recommendations');
+        if (!recommendationsContainer) return;
+        
+        const recommendations = [];
+        
+        if (quality.noise_level > 7) {
+            recommendations.push('建议降低增益以减少噪点');
+        }
+        
+        if (quality.exposure_level < 3) {
+            recommendations.push('建议增加曝光时间');
+        } else if (quality.exposure_level > 8) {
+            recommendations.push('建议减少曝光时间');
+        }
+        
+        if (quality.gain_level > 8) {
+            recommendations.push('建议降低增益设置');
+        }
+        
+        if (recommendations.length === 0) {
+            recommendations.push('图像质量良好');
+        }
+        
+        recommendationsContainer.innerHTML = recommendations.map(rec => 
+            `<div class="quality-recommendation">${rec}</div>`
+        ).join('');
     }
     
     /**
@@ -1747,43 +1648,6 @@ class DebugConsole {
     }
     
     /**
-     * 更新按钮状态
-     */
-    updateButtonStates() {
-        const startBtn = document.getElementById('start-preview');
-        const stopBtn = document.getElementById('stop-preview');
-        
-        if (startBtn) {
-            startBtn.disabled = this.cameraStatus.streaming;
-            if (this.cameraStatus.streaming) {
-                startBtn.classList.add('disabled');
-            } else {
-                startBtn.classList.remove('disabled');
-            }
-        }
-        
-        if (stopBtn) {
-            stopBtn.disabled = !this.cameraStatus.streaming;
-            if (!this.cameraStatus.streaming) {
-                stopBtn.classList.add('disabled');
-            } else {
-                stopBtn.classList.remove('disabled');
-            }
-        }
-    }
-    
-    /**
-     * 更新录制按钮状态
-     */
-    updateRecordingButtons(isRecording) {
-        const startBtn = document.getElementById('start-recording');
-        const stopBtn = document.getElementById('stop-recording');
-        
-        if (startBtn) startBtn.disabled = isRecording;
-        if (stopBtn) stopBtn.disabled = !isRecording;
-    }
-    
-    /**
      * 处理键盘快捷键
      */
     handleKeyboardShortcuts(e) {
@@ -1794,18 +1658,15 @@ class DebugConsole {
         
         switch(e.key) {
             case '1':
-                this.switchTab('preview');
-                break;
-            case '2':
                 this.switchTab('capture');
                 break;
-            case '3':
+            case '2':
                 this.switchTab('settings');
                 break;
-            case '4':
+            case '3':
                 this.switchTab('presets');
                 break;
-            case '5':
+            case '4':
                 this.switchTab('files');
                 break;
             case ' ':
@@ -2010,273 +1871,3 @@ const modalStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = modalStyles;
 document.head.appendChild(styleSheet);
-
-// 在DebugConsole类中添加直方图相关方法
-DebugConsole.prototype.initHistogram = function() {
-    console.log('[DebugConsole] 初始化直方图...');
-    
-    this.histogramCanvas = document.getElementById('histogram-canvas');
-    this.histogramOverlay = document.getElementById('histogram-overlay');
-    this.histogramPanel = document.getElementById('histogram-panel');
-    
-    if (this.histogramCanvas) {
-        this.histogramContext = this.histogramCanvas.getContext('2d');
-        this.setupHistogramCanvas();
-    }
-    
-    // 初始化直方图状态
-    this.updateHistogramVisibility();
-};
-
-DebugConsole.prototype.setupHistogramCanvas = function() {
-    if (!this.histogramCanvas || !this.histogramContext) return;
-    
-    // 设置canvas尺寸
-    const rect = this.histogramCanvas.getBoundingClientRect();
-    this.histogramCanvas.width = rect.width * window.devicePixelRatio;
-    this.histogramCanvas.height = rect.height * window.devicePixelRatio;
-    this.histogramContext.scale(window.devicePixelRatio, window.devicePixelRatio);
-    
-    // 设置canvas样式
-    this.histogramCanvas.style.width = rect.width + 'px';
-    this.histogramCanvas.style.height = rect.height + 'px';
-};
-
-DebugConsole.prototype.toggleHistogram = function() {
-    this.histogramSettings.visible = !this.histogramSettings.visible;
-    this.updateHistogramVisibility();
-    
-    const toggleBtn = document.getElementById('histogram-toggle');
-    if (toggleBtn) {
-        toggleBtn.classList.toggle('active', this.histogramSettings.visible);
-    }
-    
-    this.showNotification(
-        this.histogramSettings.visible ? '直方图已显示' : '直方图已隐藏', 
-        'info'
-    );
-};
-
-DebugConsole.prototype.toggleHistogramPanel = function() {
-    this.histogramSettings.panelVisible = !this.histogramSettings.panelVisible;
-    
-    if (this.histogramPanel) {
-        this.histogramPanel.classList.toggle('visible', this.histogramSettings.panelVisible);
-    }
-};
-
-DebugConsole.prototype.updateHistogramVisibility = function() {
-    if (this.histogramOverlay) {
-        this.histogramOverlay.classList.toggle('visible', this.histogramSettings.visible);
-    }
-    
-    // 如果直方图可见且有预览图像，则更新直方图
-    if (this.histogramSettings.visible && this.previewActive) {
-        this.updateHistogramFromImage();
-    }
-};
-
-DebugConsole.prototype.updateHistogramDisplay = function() {
-    if (this.histogramSettings.visible && this.previewActive) {
-        this.updateHistogramFromImage();
-    }
-};
-
-DebugConsole.prototype.updateHistogramFromImage = function() {
-    const previewImg = document.getElementById('preview-image');
-    if (!previewImg || !this.histogramCanvas || !this.histogramContext) return;
-    
-    try {
-        // 创建临时canvas来分析图像
-        const tempCanvas = document.createElement('canvas');
-        const tempContext = tempCanvas.getContext('2d');
-        
-        // 设置临时canvas尺寸
-        tempCanvas.width = previewImg.naturalWidth || previewImg.width;
-        tempCanvas.height = previewImg.naturalHeight || previewImg.height;
-        
-        // 绘制图像到临时canvas
-        tempContext.drawImage(previewImg, 0, 0);
-        
-        // 获取图像数据
-        const imageData = tempContext.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-        const data = imageData.data;
-        
-        // 计算直方图
-        const histogram = this.calculateHistogram(data);
-        
-        // 绘制直方图
-        this.drawHistogram(histogram);
-        
-        // 更新统计信息
-        this.updateHistogramStats(histogram);
-        
-    } catch (error) {
-        console.error('[DebugConsole] 更新直方图失败:', error);
-    }
-};
-
-DebugConsole.prototype.calculateHistogram = function(imageData) {
-    const histogram = {
-        red: new Array(256).fill(0),
-        green: new Array(256).fill(0),
-        blue: new Array(256).fill(0),
-        luminance: new Array(256).fill(0)
-    };
-    
-    for (let i = 0; i < imageData.length; i += 4) {
-        const r = imageData[i];
-        const g = imageData[i + 1];
-        const b = imageData[i + 2];
-        
-        // 计算亮度 (使用标准的亮度公式)
-        const luminance = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        
-        histogram.red[r]++;
-        histogram.green[g]++;
-        histogram.blue[b]++;
-        histogram.luminance[luminance]++;
-    }
-    
-    return histogram;
-};
-
-DebugConsole.prototype.drawHistogram = function(histogram) {
-    if (!this.histogramCanvas || !this.histogramContext) return;
-    
-    const canvas = this.histogramCanvas;
-    const ctx = this.histogramContext;
-    const width = canvas.width / window.devicePixelRatio;
-    const height = canvas.height / window.devicePixelRatio;
-    
-    // 清除canvas
-    ctx.clearRect(0, 0, width, height);
-    
-    // 设置背景
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(0, 0, width, height);
-    
-    // 找到最大计数值用于归一化
-    const maxCount = Math.max(
-        ...histogram.red,
-        ...histogram.green,
-        ...histogram.blue,
-        ...histogram.luminance
-    );
-    
-    if (maxCount === 0) return;
-    
-    // 绘制直方图
-    const barWidth = width / 256;
-    
-    for (let i = 0; i < 256; i++) {
-        const x = i * barWidth;
-        
-        // 绘制RGB通道
-        if (this.histogramSettings.showRGB) {
-            const redHeight = (histogram.red[i] / maxCount) * height;
-            const greenHeight = (histogram.green[i] / maxCount) * height;
-            const blueHeight = (histogram.blue[i] / maxCount) * height;
-            
-            // 红色通道
-            ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
-            ctx.fillRect(x, height - redHeight, barWidth, redHeight);
-            
-            // 绿色通道
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.6)';
-            ctx.fillRect(x, height - greenHeight, barWidth, greenHeight);
-            
-            // 蓝色通道
-            ctx.fillStyle = 'rgba(0, 0, 255, 0.6)';
-            ctx.fillRect(x, height - blueHeight, barWidth, blueHeight);
-        }
-        
-        // 绘制亮度通道
-        if (this.histogramSettings.showLuminance) {
-            const luminanceHeight = (histogram.luminance[i] / maxCount) * height;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.fillRect(x, height - luminanceHeight, barWidth, luminanceHeight);
-        }
-        
-        // 过曝警告
-        if (this.histogramSettings.showOverexposure && i >= 250) {
-            const overexposedHeight = (histogram.luminance[i] / maxCount) * height;
-            if (overexposedHeight > 0) {
-                ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
-                ctx.fillRect(x, height - overexposedHeight, barWidth, overexposedHeight);
-            }
-        }
-    }
-    
-    // 绘制网格线
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.lineWidth = 1;
-    
-    // 垂直线
-    for (let i = 0; i <= 4; i++) {
-        const x = (i * width) / 4;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-    }
-    
-    // 水平线
-    for (let i = 0; i <= 4; i++) {
-        const y = (i * height) / 4;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-    }
-};
-
-DebugConsole.prototype.updateHistogramStats = function(histogram) {
-    // 计算统计信息
-    const totalPixels = histogram.luminance.reduce((sum, count) => sum + count, 0);
-    
-    if (totalPixels === 0) return;
-    
-    // 计算平均值
-    let mean = 0;
-    for (let i = 0; i < 256; i++) {
-        mean += i * histogram.luminance[i];
-    }
-    mean /= totalPixels;
-    
-    // 计算标准差
-    let variance = 0;
-    for (let i = 0; i < 256; i++) {
-        variance += Math.pow(i - mean, 2) * histogram.luminance[i];
-    }
-    variance /= totalPixels;
-    const stdDev = Math.sqrt(variance);
-    
-    // 计算过曝像素数量
-    let overexposedPixels = 0;
-    for (let i = 250; i < 256; i++) {
-        overexposedPixels += histogram.luminance[i];
-    }
-    const overexposedPercent = (overexposedPixels / totalPixels) * 100;
-    
-    // 更新UI
-    const meanElement = document.getElementById('histogram-mean');
-    const stdElement = document.getElementById('histogram-std');
-    const overexposedElement = document.getElementById('histogram-overexposed');
-    
-    if (meanElement) meanElement.textContent = mean.toFixed(1);
-    if (stdElement) stdElement.textContent = stdDev.toFixed(1);
-    if (overexposedElement) overexposedElement.textContent = `${overexposedPercent.toFixed(1)}%`;
-};
-
-// 重写analyzeStreamData方法以包含直方图更新
-const originalAnalyzeStreamData = DebugConsole.prototype.analyzeStreamData;
-DebugConsole.prototype.analyzeStreamData = function(imageElement) {
-    // 调用原始方法
-    originalAnalyzeStreamData.call(this, imageElement);
-    
-    // 更新直方图
-    if (this.histogramSettings.visible) {
-        this.updateHistogramFromImage();
-    }
-};
