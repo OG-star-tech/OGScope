@@ -4,11 +4,11 @@
 
 ## 项目概述
 
-OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
+OGScope 是一个基于 Orange Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
 ## 技术栈
 
-- **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
+- **硬件**: Orange Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
 - **语言**: Python 3.9+
 - **包管理**: Poetry
 - **Web 框架**: FastAPI + Uvicorn
@@ -88,21 +88,22 @@ ogscope/
 ## 项目配置信息
 
 ### 服务器连接信息
-- **服务器地址**: [http://192.168.31.18]
+- **服务器地址**: [配置为环境变量]
 - **服务器项目目录**: [配置为环境变量]
 - **连接方式**: SSH
-- **用户名**: [ogstartech]
-- **端口**: [22]
+- **用户名**: [配置为环境变量]
+- **端口**: [配置为环境变量]
 
 ### 开发环境配置
+- **本地项目路径**: [用户自定义]
 - **Python 版本**: 3.9+
 - **包管理器**: Poetry
 - **虚拟环境**: Poetry 管理
 
 ### 部署配置
-- **生产环境**: Raspberry Pi Zero 2W 开发板
+- **生产环境**: Orange Pi Zero 2W 开发板
 - **测试环境**: [与生产环境相同]
-- **虚拟环境目录**: [/home/ogstartech/.virtualenvs/OGScope]
+- **虚拟环境目录**: [用户自定义]
 
 ### 系统服务配置
 项目已配置为系统服务，服务配置文件位于 `/etc/systemd/system/ogscope.service`：
@@ -136,7 +137,7 @@ WantedBy=multi-user.target
 ### 常用命令
 ```bash
 # 连接服务器
-ssh [ogstartech]@[192.168.31.18] -p [22]
+ssh [ogstartech]@[192.168.31.16] -p [22]
 
 # 部署到服务器
 # 使用 git clone 或手动上传
@@ -158,20 +159,71 @@ python -m ogscope.main
 
 ## Git 工作流
 
-项目已上传到GitHub: https://github.com/OG-star-tech/OGScope
 - 主分支: `main` (稳定版本)
 - 开发分支: `dev` (开发版本)
 - 功能分支: `feature/xxx`
 - 修复分支: `fix/xxx`
 
-提交信息格式:
+### 提交信息格式
+**必须使用中英文双语提交信息**，格式如下：
 ```
-feat: 添加新功能
-fix: 修复bug
-docs: 更新文档
-style: 代码格式调整
-refactor: 重构代码
-test: 添加测试
-chore: 构建/工具变更
+中文描述 / English description
+
+- 中文详细说明 / English detailed explanation
+- 中文变更内容 / English change content
+```
+
+示例：
+```
+修复相机接口500错误 / Fix camera API 500 error
+
+- 添加缺失的方法实现 / Add missing method implementations
+- 重新组织服务类结构 / Reorganize service class structure
+```
+
+### 提交类型前缀
+```
+feat: 添加新功能 / Add new feature
+fix: 修复bug / Fix bug
+docs: 更新文档 / Update documentation
+style: 代码格式调整 / Code style changes
+refactor: 重构代码 / Refactor code
+test: 添加测试 / Add tests
+chore: 构建/工具变更 / Build/tool changes
+```
+
+## 开发板调试配置
+
+### 开发板连接信息
+- **IP地址**: 192.168.31.16
+- **用户名**: ogstartech
+- **端口**: 22
+- **连接方式**: SSH
+
+### 调试工作流程
+1. **代码修改后必须上传**: 修改或新建的代码必须先上传到开发板
+2. **不要遗漏文件**: 确保所有相关文件都已上传
+3. **服务重启**: 项目以系统服务方式运行，修改后需要重启服务
+4. **调试前确认**: 如果有不明白的地方，先询问用户再开始工作
+
+### 常用调试命令
+```bash
+# 上传文件到开发板
+scp -P 22 /path/to/local/file ogstartech@192.168.31.16:/path/to/remote/file
+
+# 连接开发板
+ssh -p 22 ogstartech@192.168.31.16
+
+# 重启服务
+sudo systemctl restart ogscope
+
+# 查看服务状态
+sudo systemctl status ogscope
+
+# 查看服务日志
+sudo journalctl -u ogscope -f
+
+# 测试接口
+curl http://localhost:8000/api/debug/camera/image-quality
 ```
 
