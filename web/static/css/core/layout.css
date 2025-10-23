@@ -1,0 +1,513 @@
+/* OGScope - 布局样式 */
+/* 横屏全屏布局和响应式设计 */
+
+/* 主应用容器 */
+.polar-scope-app {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--background-color);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    z-index: var(--z-content);
+}
+
+/* 横屏布局 */
+.polar-scope-app.landscape {
+    flex-direction: row;
+}
+
+/* 竖屏布局 */
+.polar-scope-app.portrait {
+    flex-direction: column;
+}
+
+/* 视频容器 */
+.video-container {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--background-color);
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* 视频流 */
+.video-stream {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    transition: transform var(--transition-normal);
+}
+
+/* 缩放状态 */
+.video-container.zoomed .video-stream {
+    transform: scale(1.2);
+    cursor: grab;
+}
+
+.video-container.zoomed .video-stream:active {
+    cursor: grabbing;
+}
+
+/* 视频覆盖层 */
+.video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: var(--z-overlay);
+}
+
+/* 十字准星 */
+.crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    pointer-events: none;
+}
+
+.crosshair-horizontal,
+.crosshair-vertical {
+    position: absolute;
+    background: var(--primary-color);
+    box-shadow: 0 0 10px var(--glow-color);
+}
+
+.crosshair-horizontal {
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    transform: translateY(-50%);
+}
+
+.crosshair-vertical {
+    left: 50%;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    transform: translateX(-50%);
+}
+
+.crosshair-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 15px var(--glow-color);
+}
+
+/* 星点标记 */
+.star-markers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.star-marker {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: var(--neon-color);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--neon-color);
+    animation: starPulse 2s ease-in-out infinite;
+}
+
+@keyframes starPulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* 极轴目标指示 */
+.polar-target {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.target-circle {
+    width: 60px;
+    height: 60px;
+    border: 2px solid var(--success-color);
+    border-radius: 50%;
+    box-shadow: 0 0 20px var(--success-color);
+    animation: targetPulse 3s ease-in-out infinite;
+}
+
+.target-arrow {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 12px solid var(--success-color);
+    filter: drop-shadow(0 0 10px var(--success-color));
+}
+
+@keyframes targetPulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* 校准进度环 */
+.alignment-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    border-top: 3px solid var(--primary-color);
+    animation: alignmentSpin 2s linear infinite;
+    opacity: 0;
+    transition: opacity var(--transition-normal);
+}
+
+.alignment-ring.active {
+    opacity: 1;
+}
+
+@keyframes alignmentSpin {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* 控制按钮容器 */
+.video-controls,
+.alignment-controls {
+    position: absolute;
+    z-index: var(--z-overlay);
+}
+
+.video-controls {
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.alignment-controls {
+    bottom: var(--spacing-md);
+    right: var(--spacing-md);
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* 状态信息 */
+.status-info {
+    position: absolute;
+    top: var(--spacing-md);
+    left: var(--spacing-md);
+    z-index: var(--z-overlay);
+    background: rgba(26, 26, 26, 0.9);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(10px);
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-sm);
+}
+
+.status-item:last-child {
+    margin-bottom: 0;
+}
+
+.status-label {
+    color: var(--text-secondary);
+    margin-right: var(--spacing-sm);
+}
+
+.status-value {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* 校准指标 */
+.alignment-metrics {
+    position: absolute;
+    bottom: var(--spacing-md);
+    left: var(--spacing-md);
+    z-index: var(--z-overlay);
+    background: rgba(26, 26, 26, 0.9);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(10px);
+}
+
+.metric {
+    display: flex;
+    align-items: center;
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-sm);
+}
+
+.metric:last-child {
+    margin-bottom: 0;
+}
+
+.metric-label {
+    color: var(--text-secondary);
+    margin-right: var(--spacing-sm);
+    min-width: 60px;
+}
+
+.metric-value {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-right: var(--spacing-xs);
+}
+
+.metric-unit {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+}
+
+/* 网络状态指示器 */
+.network-status {
+    position: fixed;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    z-index: var(--z-notification);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: rgba(26, 26, 26, 0.9);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(10px);
+    font-size: var(--font-sm);
+    transition: all var(--transition-normal);
+}
+
+.network-status.online {
+    border-color: var(--success-color);
+    color: var(--success-color);
+}
+
+.network-status.offline {
+    border-color: var(--error-color);
+    color: var(--error-color);
+}
+
+.status-icon {
+    font-size: var(--font-md);
+}
+
+.status-text {
+    font-weight: 500;
+}
+
+/* PWA安装提示 */
+.install-prompt {
+    position: fixed;
+    bottom: var(--spacing-md);
+    left: var(--spacing-md);
+    right: var(--spacing-md);
+    z-index: var(--z-modal);
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid var(--primary-color);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    backdrop-filter: blur(20px);
+    box-shadow: var(--shadow-glow);
+    transform: translateY(100%);
+    transition: transform var(--transition-normal);
+}
+
+.install-prompt.show {
+    transform: translateY(0);
+}
+
+.install-prompt-content {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.install-prompt-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.install-prompt-text {
+    flex: 1;
+}
+
+.install-prompt-text h3 {
+    font-size: var(--font-lg);
+    font-weight: 600;
+    margin-bottom: var(--spacing-xs);
+    color: var(--text-primary);
+}
+
+.install-prompt-text p {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.install-prompt-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-shrink: 0;
+}
+
+/* 加载屏幕 */
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--background-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
+    transition: opacity var(--transition-slow);
+}
+
+.loading-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loading-content {
+    text-align: center;
+    max-width: 400px;
+    padding: var(--spacing-xl);
+}
+
+.loading-logo {
+    margin-bottom: var(--spacing-xl);
+}
+
+.logo-icon-large {
+    font-size: 4rem;
+    margin-bottom: var(--spacing-md);
+    animation: logoGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes logoGlow {
+    0% { filter: drop-shadow(0 0 10px var(--glow-color)); }
+    100% { filter: drop-shadow(0 0 20px var(--glow-color)); }
+}
+
+.loading-logo h1 {
+    font-size: var(--font-title);
+    font-weight: 900;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+    font-family: 'Orbitron', monospace;
+}
+
+.loading-logo p {
+    font-size: var(--font-lg);
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.loading-progress {
+    margin-top: var(--spacing-xl);
+}
+
+.progress-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--surface-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin-bottom: var(--spacing-md);
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    border-radius: var(--radius-sm);
+    transition: width var(--transition-normal);
+    box-shadow: 0 0 10px var(--glow-color);
+}
+
+.loading-text {
+    font-size: var(--font-md);
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .status-info,
+    .alignment-metrics {
+        font-size: var(--font-xs);
+        padding: var(--spacing-xs);
+    }
+    
+    .video-controls,
+    .alignment-controls {
+        gap: var(--spacing-xs);
+    }
+    
+    .install-prompt-content {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .install-prompt-actions {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+@media (max-height: 600px) {
+    .loading-content {
+        padding: var(--spacing-md);
+    }
+    
+    .loading-logo {
+        margin-bottom: var(--spacing-md);
+    }
+    
+    .logo-icon-large {
+        font-size: 3rem;
+    }
+    
+    .loading-logo h1 {
+        font-size: 1.5rem;
+    }
+}

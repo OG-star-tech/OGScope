@@ -4,11 +4,11 @@
 
 ## 项目概述
 
-OGScope 是一个基于 Orange Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
+OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
 ## 技术栈
 
-- **硬件**: Orange Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
+- **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
 - **语言**: Python 3.9+
 - **包管理**: Poetry
 - **Web 框架**: FastAPI + Uvicorn
@@ -88,22 +88,21 @@ ogscope/
 ## 项目配置信息
 
 ### 服务器连接信息
-- **服务器地址**: [配置为环境变量]
+- **服务器地址**: [http://192.168.31.18]
 - **服务器项目目录**: [配置为环境变量]
 - **连接方式**: SSH
-- **用户名**: [配置为环境变量]
-- **端口**: [配置为环境变量]
+- **用户名**: [ogstartech]
+- **端口**: [22]
 
 ### 开发环境配置
-- **本地项目路径**: [用户自定义]
 - **Python 版本**: 3.9+
 - **包管理器**: Poetry
 - **虚拟环境**: Poetry 管理
 
 ### 部署配置
-- **生产环境**: Orange Pi Zero 2W 开发板
+- **生产环境**: Raspberry Pi Zero 2W 开发板
 - **测试环境**: [与生产环境相同]
-- **虚拟环境目录**: [用户自定义]
+- **虚拟环境目录**: [/home/ogstartech/.virtualenvs/OGScope]
 
 ### 系统服务配置
 项目已配置为系统服务，服务配置文件位于 `/etc/systemd/system/ogscope.service`：
@@ -137,7 +136,7 @@ WantedBy=multi-user.target
 ### 常用命令
 ```bash
 # 连接服务器
-ssh [用户名]@[服务器地址] -p [端口]
+ssh [ogstartech]@[192.168.31.18] -p [22]
 
 # 部署到服务器
 # 使用 git clone 或手动上传
@@ -159,7 +158,7 @@ python -m ogscope.main
 
 ## Git 工作流
 
-目前还没上传到Git
+项目已上传到GitHub: https://github.com/OG-star-tech/OGScope
 - 主分支: `main` (稳定版本)
 - 开发分支: `dev` (开发版本)
 - 功能分支: `feature/xxx`

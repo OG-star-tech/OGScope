@@ -259,12 +259,34 @@ class IMX327MIPICamera(CameraInterface):
             logger.error("相机未初始化")
             return False
         
+        new_w, new_h = int(width), int(height)
+        if fps is not None:
+            self.fps = int(fps)
+
+        # 检查是否真的需要改变
+        if self.sampling_mode == 'supersample':
+            current_output_w = self.output_width
+            current_output_h = self.output_height
+            if current_output_w == new_w and current_output_h == new_h:
+                # 输出分辨率相同，只需要更新帧率
+                try:
+                    self.camera.set_controls({"FrameRate": self.fps})
+                except Exception:
+                    pass
+                return True
+        else:
+            current_w = self.width
+            current_h = self.height
+            if current_w == new_w and current_h == new_h:
+                # 分辨率相同，只需要更新帧率
+                try:
+                    self.camera.set_controls({"FrameRate": self.fps})
+                except Exception:
+                    pass
+                return True
+
         was_capturing = self.is_capturing
         try:
-            new_w, new_h = int(width), int(height)
-            if fps is not None:
-                self.fps = int(fps)
-
             if self.sampling_mode == 'supersample':
                 # 超采样模式：只更新输出分辨率
                 self.output_width = new_w
@@ -276,14 +298,8 @@ class IMX327MIPICamera(CameraInterface):
                 target_capture_width = max(new_w * 2, 1280)
                 target_capture_height = max(new_h * 2, 720)
                 need_reconfig = (target_capture_width > self.capture_width) or (target_capture_height > self.capture_height)
-                if not need_reconfig:
-                    # 不需要重新配置硬件，只需要更新帧率
-                    try:
-                        self.camera.set_controls({"FrameRate": self.fps})
-                    except Exception:
-                        pass
-                    return True
-                else:
+                
+                if need_reconfig:
                     # 需要提升捕获分辨率
                     if was_capturing:
                         if not self.stop_capture():
@@ -292,6 +308,13 @@ class IMX327MIPICamera(CameraInterface):
                     self.capture_width = target_capture_width
                     self.capture_height = target_capture_height
                     self._adjust_capture_resolution_to_aspect_ratio()
+                else:
+                    # 不需要重新配置硬件，只需要更新帧率
+                    try:
+                        self.camera.set_controls({"FrameRate": self.fps})
+                    except Exception:
+                        pass
+                    return True
             else:
                 # native/crop模式：捕获和输出分辨率相同
                 if was_capturing:
@@ -304,6 +327,7 @@ class IMX327MIPICamera(CameraInterface):
                 self.width = new_w
                 self.height = new_h
 
+            # 只有在需要重新配置时才调用configure
             try:
                 video_config = self.camera.create_video_configuration(
                     main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}

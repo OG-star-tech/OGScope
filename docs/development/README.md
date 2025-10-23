@@ -1,197 +1,124 @@
-# OGScope 开发文档
+# OGScope 开发指引
 
-## 目录
+## 项目启动
 
-- [PyCharm 远程开发配置](./pycharm-remote.md)
-- [FastAPI 开发指南](./fastapi-guide.md)
-- [硬件接口开发](./hardware-interface.md)
-- [测试指南](./testing-guide.md)
-
-## 技术栈
-
-- **硬件平台**: Orange Pi Zero 2W
-- **操作系统**: Debian
-- **编程语言**: Python 3.9+
-- **包管理**: Poetry
-- **Web 框架**: FastAPI
-- **日志系统**: Loguru
-- **测试框架**: Pytest
-
-## 开发环境设置
-
-### 1. 本地开发（Mac）
+### 本地开发环境
 
 ```bash
-# 克隆项目
-git clone https://github.com/your-username/OGScope.git
+# 1. 克隆项目
+git clone https://github.com/OG-star-tech/OGScope.git
 cd OGScope
 
-# 安装 Poetry（如果未安装）
-curl -sSL https://install.python-poetry.org | python3 -
-
-# 安装依赖
+# 2. 安装依赖
 poetry install
 
-# 激活虚拟环境
+# 3. 激活虚拟环境
 poetry shell
 
-# 运行（模拟模式，不需要硬件）
+# 4. 运行项目
 python -m ogscope.main
 ```
 
-### 2. 远程开发（Orange Pi）
+### 开发板环境
 
-详见 [PyCharm 远程开发配置](./pycharm-remote.md)
+```bash
+# 1. SSH连接到开发板
+ssh [用户名]@[开发板IP]
 
-## 项目结构
+# 2. 进入项目目录
+cd [项目目录]
+
+# 3. 激活虚拟环境
+source [虚拟环境路径]/bin/activate
+
+# 4. 设置环境变量（重要）
+export PYTHONPATH=[系统Python路径]
+export LD_LIBRARY_PATH=[系统库路径]
+
+# 5. 运行项目
+python -m ogscope.main
+```
+
+## 开发模式
+
+### 推荐开发流程
+
+1. **本地开发** - 在Mac上进行代码编写和测试
+2. **文件同步** - 使用PyCharm自动同步到开发板
+3. **远程测试** - 在开发板上测试硬件功能
+4. **混合调试** - 结合本地和远程环境
+
+### PyCharm配置
+
+详见 [PyCharm文件同步开发指南](pycharm-remote.md)
+
+### 测试策略
+
+```bash
+# 本地单元测试
+poetry run pytest tests/unit/
+
+# 本地集成测试
+poetry run pytest tests/integration/
+
+# 硬件相关测试（需要在开发板上运行）
+poetry run pytest tests/ -m hardware
+```
+
+## 项目结构说明
 
 ```
 ogscope/
-├── core/           # 核心功能模块
-│   ├── camera.py           # 相机抽象层
-│   ├── image_processor.py  # 图像处理
-│   ├── plate_solver.py     # 板块求解
-│   └── polar_align.py      # 极轴校准算法
-├── hardware/       # 硬件接口层
-│   ├── camera_imx327.py    # IMX327 驱动
-│   ├── display_spi.py      # SPI 屏幕驱动
-│   └── gpio_control.py     # GPIO 控制
-├── web/            # Web 服务
-│   ├── app.py              # FastAPI 应用
-│   ├── api.py              # REST API
-│   └── websocket.py        # WebSocket
-├── ui/             # SPI 屏幕界面
-├── algorithms/     # 算法模块
-├── data/           # 数据管理
-├── indi/           # INDI 集成
-└── utils/          # 工具函数
+├── core/          # 核心功能：相机、图像处理、板块求解
+├── hardware/      # 硬件接口：相机驱动、显示驱动
+├── web/           # FastAPI Web 服务
+├── ui/            # SPI 屏幕界面
+├── algorithms/    # 天文算法
+├── data/          # 数据管理
+├── indi/          # INDI 集成（Phase 3）
+└── utils/         # 工具函数
 ```
 
-## 开发流程
+## 开发阶段
 
-### 1. 创建新功能
+### Phase 1 - MVP (当前)
+- ✅ 项目结构搭建
+- ✅ 基础相机功能
+- ✅ Web 界面和 API
+- 🔄 简单极轴校准算法
 
-```bash
-# 创建新分支
-git checkout -b feature/your-feature
+### Phase 2 - 完整功能
+- ⏳ SPI 屏幕支持
+- ⏳ 高级板块求解
+- ⏳ 移动 App
 
-# 开发功能
-# ...
+### Phase 3 - 生态集成
+- ⏳ INDI 驱动
+- ⏳ 赤道仪控制
 
-# 运行测试
-poetry run pytest
+## 代码规范
 
-# 代码格式化
-poetry run black ogscope tests
-poetry run ruff check ogscope tests
+- 行长度: 88 字符 (Black 默认)
+- 类型提示: 使用 Python 类型注解
+- 文档字符串: Google 风格
+- 导入顺序: 标准库 → 第三方库 → 本地模块
 
-# 提交代码
-git add .
-git commit -m "feat: add your feature"
-git push origin feature/your-feature
-```
+## 测试标记
 
-### 2. 代码规范
+- `@pytest.mark.unit`: 单元测试
+- `@pytest.mark.integration`: 集成测试
+- `@pytest.mark.hardware`: 需要实际硬件的测试
+- `@pytest.mark.slow`: 运行较慢的测试
 
-- 使用 **Black** 进行代码格式化（行长度 88）
-- 使用 **Ruff** 进行代码检查
-- 使用 **MyPy** 进行类型检查
-- 遵循 **PEP 8** 规范
-- 编写清晰的文档字符串（Google 风格）
+## 配置管理
 
-### 3. 测试
+- 默认配置: `default_config.json`
+- 环境变量: `.env` (从 `.env.example` 复制)
+- 运行时配置: `ogscope/config.py` (Pydantic Settings)
 
-```bash
-# 运行所有测试
-poetry run pytest
+## 注意事项
 
-# 运行单元测试
-poetry run pytest -m unit
-
-# 运行集成测试
-poetry run pytest -m integration
-
-# 生成覆盖率报告
-poetry run pytest --cov=ogscope --cov-report=html
-```
-
-## 常用命令
-
-```bash
-# 安装依赖
-poetry install
-
-# 添加新依赖
-poetry add <package>
-
-# 添加开发依赖
-poetry add --group dev <package>
-
-# 更新依赖
-poetry update
-
-# 运行程序
-poetry run python -m ogscope.main
-
-# 运行测试
-poetry run pytest
-
-# 代码格式化
-poetry run black ogscope tests
-
-# 代码检查
-poetry run ruff check ogscope tests
-
-# 类型检查
-poetry run mypy ogscope
-```
-
-## 调试技巧
-
-### 1. 使用 IPython
-
-```python
-# 在代码中插入断点
-import IPython; IPython.embed()
-```
-
-### 2. 使用 Loguru
-
-```python
-from loguru import logger
-
-logger.debug("调试信息")
-logger.info("普通信息")
-logger.warning("警告信息")
-logger.error("错误信息")
-```
-
-### 3. PyCharm 远程调试
-
-在 PyCharm 中设置断点，然后使用调试模式运行
-
-## 常见问题
-
-### Q: 如何模拟相机进行开发？
-
-A: 在 `ogscope/hardware/camera_debug.py` 中实现模拟相机，返回测试图像
-
-### Q: 如何在 Mac 上测试 SPI 屏幕代码？
-
-A: 使用模拟 SPI 驱动，将显示内容保存为图像文件
-
-### Q: 如何贡献代码？
-
-A: 
-1. Fork 项目
-2. 创建功能分支
-3. 提交代码
-4. 创建 Pull Request
-
-## 参考资源
-
-- [FastAPI 文档](https://fastapi.tiangolo.com/)
-- [Poetry 文档](https://python-poetry.org/docs/)
-- [Orange Pi 官方文档](http://www.orangepi.org/)
-- [PiFinder 项目](https://github.com/brickbots/PiFinder)
-
+- 避免在代码中硬编码路径，使用配置系统
+- 硬件相关代码应提供模拟实现，便于在开发机上测试
+- 所有 API 端点应编写单元测试
+- 日志使用 Loguru，不要使用 print()

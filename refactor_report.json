@@ -1,0 +1,140 @@
+{
+  "timestamp": "2024-01-01T00:00:00Z",
+  "structure_check": {
+    "js/core": {
+      "exists": true,
+      "files": {
+        "app.js": {
+          "exists": true,
+          "size": 8485
+        },
+        "camera.js": {
+          "exists": true,
+          "size": 8435
+        },
+        "alignment.js": {
+          "exists": true,
+          "size": 8313
+        },
+        "ui.js": {
+          "exists": true,
+          "size": 13003
+        },
+        "particles.js": {
+          "exists": true,
+          "size": 8692
+        },
+        "pwa.js": {
+          "exists": true,
+          "size": 9069
+        }
+      }
+    },
+    "js/debug": {
+      "exists": true,
+      "files": {
+        "debug-console.js": {
+          "exists": true,
+          "size": 26703
+        },
+        "camera-debug.js": {
+          "exists": true,
+          "size": 6671
+        },
+        "histogram.js": {
+          "exists": true,
+          "size": 9864
+        },
+        "stream-analysis.js": {
+          "exists": true,
+          "size": 6352
+        },
+        "file-manager.js": {
+          "exists": true,
+          "size": 8071
+        }
+      }
+    },
+    "js/shared": {
+      "exists": true,
+      "files": {
+        "constants.js": {
+          "exists": true,
+          "size": 2859
+        },
+        "api.js": {
+          "exists": true,
+          "size": 5053
+        },
+        "utils.js": {
+          "exists": true,
+          "size": 8192
+        }
+      }
+    },
+    "css/core": {
+      "exists": true,
+      "files": {
+        "base.css": {
+          "exists": true,
+          "size": 7734
+        },
+        "layout.css": {
+          "exists": true,
+          "size": 10395
+        },
+        "components.css": {
+          "exists": true,
+          "size": 10954
+        },
+        "themes.css": {
+          "exists": true,
+          "size": 9857
+        }
+      }
+    },
+    "css/debug": {
+      "exists": true,
+      "files": {
+        "debug-base.css": {
+          "exists": true,
+          "size": 8067
+        },
+        "debug-components.css": {
+          "exists": true,
+          "size": 11935
+        },
+        "debug-layout.css": {
+          "exists": true,
+          "size": 8241
+        }
+      }
+    },
+    "css/shared": {
+      "exists": true,
+      "files": {
+        "animations.css": {
+          "exists": true,
+          "size": 12039
+        }
+      }
+    }
+  },
+  "file_sizes": {},
+  "total_size": 208984,
+  "old_total_size": 153640,
+  "template_check": {
+    "web/templates/index.html": {
+      "exists": true,
+      "has_new_css": true,
+      "has_new_js": true,
+      "size": 7510
+    },
+    "web/templates/debug.html": {
+      "exists": true,
+      "has_new_css": true,
+      "has_new_js": true,
+      "size": 25492
+    }
+  }
+}

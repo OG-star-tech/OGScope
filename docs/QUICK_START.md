@@ -2,6 +2,8 @@
 
 本指南将帮助你快速搭建 OGScope 开发环境。
 
+English | [中文](QUICK_START.md)
+
 ## 🎯 目标
 
 - ✅ 在 Raspberry Pi Zero 2W 上运行 OGScope
@@ -138,7 +140,7 @@ poetry run python -m ogscope.main
 # 生成 SSH 密钥（如果还没有）
 ssh-keygen -t ed25519 -C "ogscope-dev"
 
-# 复制公钥到 Orange Pi
+# 复制公钥到 Raspberry Pi
 ssh-copy-id orangepi@orangepi.local
 
 # 配置 SSH config
@@ -210,7 +212,7 @@ http://orangepi.local:8000/redoc    # ReDoc
 
 ### 检查清单
 
-- [ ] Orange Pi 可以正常启动
+- [ ] Raspberry Pi 可以正常启动
 - [ ] SSH 可以连接
 - [ ] Poetry 已安装
 - [ ] OGScope 依赖已安装
@@ -221,14 +223,14 @@ http://orangepi.local:8000/redoc    # ReDoc
 ### 运行测试
 
 ```bash
-# 在 Orange Pi 上
+# 在 Raspberry Pi 上
 cd ~/OGScope
 poetry run pytest tests/unit/
 ```
 
 ## 🐛 故障排除
 
-### 问题 1: 找不到 Orange Pi
+### 问题 1: 找不到 Raspberry Pi
 
 ```bash
 # 方法 1: 使用 IP 地址

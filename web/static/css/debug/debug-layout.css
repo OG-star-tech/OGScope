@@ -1,0 +1,453 @@
+/* OGScope 调试控制台 - 布局样式 */
+/* 调试控制台的布局和响应式设计 */
+
+/* 调试控制台布局 */
+.debug-layout {
+    display: grid;
+    grid-template-areas: 
+        "header"
+        "main";
+    grid-template-rows: auto 1fr;
+    min-height: 100vh;
+}
+
+/* 头部区域 */
+.debug-header {
+    grid-area: header;
+    position: sticky;
+    top: 0;
+    z-index: var(--z-content);
+}
+
+/* 主内容区域 */
+.debug-main {
+    grid-area: main;
+    display: grid;
+    grid-template-areas: 
+        "preview"
+        "tabs";
+    grid-template-rows: auto 1fr;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* 预览区域 */
+.preview-section {
+    grid-area: preview;
+}
+
+/* 标签页区域 */
+.tabs-section {
+    grid-area: tabs;
+}
+
+/* 卡片布局 */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--spacing-lg);
+}
+
+.card-full {
+    grid-column: 1 / -1;
+}
+
+/* 预览容器布局 */
+.preview-layout {
+    display: grid;
+    grid-template-areas: 
+        "video controls"
+        "info info"
+        "settings settings";
+    grid-template-columns: 1fr auto;
+    gap: var(--spacing-md);
+    align-items: start;
+}
+
+.preview-video {
+    grid-area: video;
+}
+
+.preview-controls-side {
+    grid-area: controls;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.preview-info-grid {
+    grid-area: info;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.preview-settings {
+    grid-area: settings;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: var(--spacing-md);
+}
+
+/* 控制面板布局 */
+.control-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+}
+
+.control-section {
+    background: rgba(26, 26, 26, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+
+.control-section h4 {
+    font-size: var(--font-md);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* 表单布局 */
+.form-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.form-layout-single {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+/* 按钮组布局 */
+.button-group {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.button-group-center {
+    justify-content: center;
+}
+
+.button-group-end {
+    justify-content: flex-end;
+}
+
+.button-group-start {
+    justify-content: flex-start;
+}
+
+.button-group-stretch {
+    justify-content: stretch;
+}
+
+.button-group-stretch .btn {
+    flex: 1;
+}
+
+/* 信息网格布局 */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.info-grid-compact {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.info-grid-wide {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* 列表布局 */
+.list-layout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+}
+
+.list-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba(255, 69, 0, 0.2);
+}
+
+.list-item-icon {
+    flex-shrink: 0;
+    font-size: var(--font-lg);
+}
+
+.list-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.list-item-title {
+    font-size: var(--font-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.list-item-subtitle {
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+}
+
+.list-item-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+/* 网格布局 */
+.grid-layout {
+    display: grid;
+    gap: var(--spacing-md);
+}
+
+.grid-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.grid-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.grid-auto {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.grid-auto-sm {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.grid-auto-lg {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+/* 侧边栏布局 */
+.sidebar-layout {
+    display: grid;
+    grid-template-areas: "sidebar main";
+    grid-template-columns: 250px 1fr;
+    gap: var(--spacing-lg);
+    min-height: 100vh;
+}
+
+.sidebar {
+    grid-area: sidebar;
+    background: var(--surface-color);
+    border-right: 1px solid var(--border-color);
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+}
+
+.sidebar-main {
+    grid-area: main;
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+}
+
+/* 分栏布局 */
+.columns-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--spacing-lg);
+}
+
+.columns-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.columns-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* 堆叠布局 */
+.stack-layout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.stack-item {
+    flex: 0 0 auto;
+}
+
+.stack-item-flex {
+    flex: 1;
+}
+
+/* 响应式断点 */
+@media (max-width: 1200px) {
+    .debug-main {
+        padding: var(--spacing-md);
+    }
+    
+    .preview-layout {
+        grid-template-areas: 
+            "video"
+            "controls"
+            "info"
+            "settings";
+        grid-template-columns: 1fr;
+    }
+    
+    .preview-controls-side {
+        flex-direction: row;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 768px) {
+    .debug-main {
+        padding: var(--spacing-sm);
+        gap: var(--spacing-md);
+    }
+    
+    .card-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .control-panel {
+        grid-template-columns: 1fr;
+        padding: var(--spacing-md);
+    }
+    
+    .form-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .button-group {
+        flex-direction: column;
+    }
+    
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .grid-2,
+    .grid-3,
+    .grid-4 {
+        grid-template-columns: 1fr;
+    }
+    
+    .sidebar-layout {
+        grid-template-areas: "main";
+        grid-template-columns: 1fr;
+    }
+    
+    .sidebar {
+        display: none;
+    }
+    
+    .columns-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .debug-main {
+        padding: var(--spacing-xs);
+    }
+    
+    .preview-info-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .preview-settings {
+        grid-template-columns: 1fr;
+    }
+    
+    .list-item {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+    }
+    
+    .list-item-actions {
+        justify-content: center;
+    }
+}
+
+/* 打印样式 */
+@media print {
+    .debug-header,
+    .preview-controls-side,
+    .button-group,
+    .list-item-actions {
+        display: none;
+    }
+    
+    .debug-main {
+        grid-template-areas: "preview" "tabs";
+        grid-template-rows: auto 1fr;
+    }
+    
+    .card {
+        break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ccc;
+    }
+    
+    .tab-content {
+        display: block !important;
+    }
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+    .card,
+    .control-section,
+    .list-item {
+        border-width: 2px;
+    }
+    
+    .tab-button.active {
+        border-bottom-width: 4px;
+    }
+}
+
+/* 减少动画模式 */
+@media (prefers-reduced-motion: reduce) {
+    .preview-layout,
+    .control-panel,
+    .form-layout,
+    .info-grid,
+    .grid-layout,
+    .columns-layout {
+        transition: none;
+    }
+    
+    .list-item:hover {
+        transform: none;
+    }
+}

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from ogscope.web.api.models.schemas import CameraSettings
 from ogscope.utils.environment import should_use_simulation_mode, get_simulation_config
+from ogscope.hardware.camera import create_camera
 from ogscope.utils.virtual_stream import get_virtual_stream
 import logging
 import io
@@ -23,6 +24,11 @@ if _simulation_mode:
     _virtual_stream = get_virtual_stream()
 else:
     logger.info("检测到树莓派环境，使用真实相机")
+    try:
+        # 延迟到首次启动时再初始化，避免阻塞模块导入
+        _camera_instance = None
+    except Exception as e:
+        logger.error(f"初始化相机占位失败: {e}")
 
 
 @router.get("/camera/status")
@@ -38,12 +44,25 @@ async def get_camera_status():
             "simulation_config": get_simulation_config()
         }
     else:
-        # TODO: 实现真实相机状态获取
+        connected = False
+        streaming = False
+        width, height, fps = 1920, 1080, 30
+        try:
+            global _camera_instance
+            if _camera_instance is not None:
+                connected = getattr(_camera_instance, "is_initialized", False)
+                streaming = getattr(_camera_instance, "is_capturing", False)
+                width = getattr(_camera_instance, "width", width)
+                height = getattr(_camera_instance, "height", height)
+                fps = getattr(_camera_instance, "fps", fps)
+        except Exception as e:
+            logger.error(f"读取相机状态失败: {e}")
+
         return {
-            "connected": False,
-            "streaming": False,
-            "resolution": [1920, 1080],
-            "fps": 30,
+            "connected": bool(connected),
+            "streaming": bool(streaming),
+            "resolution": [int(width), int(height)],
+            "fps": int(fps),
             "mode": "real"
         }
 
@@ -118,30 +137,66 @@ async def update_camera_config(config: dict):
 async def start_camera():
     """开始相机预览"""
     global _is_streaming
+    global _camera_instance
     
     if _simulation_mode:
         _is_streaming = True
         logger.info("模拟模式：开始视频流")
         return {"status": "success", "message": "模拟视频流已开始", "mode": "simulation"}
     else:
-        # TODO: 实现真实相机启动逻辑
-        _is_streaming = True
-        return {"status": "success", "message": "相机预览已开始", "mode": "real"}
+        try:
+            from ogscope.config import get_settings
+            settings = get_settings()
+            if _camera_instance is None:
+                cam_cfg = {
+                    "width": getattr(settings, "camera_width", 640),
+                    "height": getattr(settings, "camera_height", 360),
+                    "fps": getattr(settings, "camera_fps", 5),
+                    "exposure_us": getattr(settings, "camera_exposure", 10000),
+                    "analogue_gain": getattr(settings, "camera_gain", 1.0),
+                    "digital_gain": getattr(settings, "camera_digital_gain", 1.0),
+                    "auto_exposure": getattr(settings, "camera_auto_exposure", False),
+                    "auto_gain": getattr(settings, "camera_auto_gain", False),
+                    "rotation": getattr(settings, "camera_rotation", 0),
+                    "sampling_mode": getattr(settings, "camera_sampling_mode", "supersample"),
+                    "type": getattr(settings, "camera_type", "imx327_mipi"),
+                }
+                _camera_instance = create_camera(cam_cfg)
+                if _camera_instance is None:
+                    raise RuntimeError("不支持的相机类型或创建失败")
+                if not _camera_instance.initialize():
+                    raise RuntimeError("相机初始化失败")
+
+            if not _camera_instance.is_capturing:
+                if not _camera_instance.start_capture():
+                    raise RuntimeError("相机启动捕获失败")
+
+            _is_streaming = True
+            return {"status": "success", "message": "相机预览已开始", "mode": "real"}
+        except Exception as e:
+            logger.error(f"启动真实相机失败: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/camera/stop")
 async def stop_camera():
     """停止相机预览"""
     global _is_streaming
+    global _camera_instance
     
     if _simulation_mode:
         _is_streaming = False
         logger.info("模拟模式：停止视频流")
         return {"status": "success", "message": "模拟视频流已停止", "mode": "simulation"}
     else:
-        # TODO: 实现真实相机停止逻辑
-        _is_streaming = False
-        return {"status": "success", "message": "相机预览已停止", "mode": "real"}
+        try:
+            if _camera_instance is not None and getattr(_camera_instance, "is_capturing", False):
+                _camera_instance.stop_capture()
+            _is_streaming = False
+            return {"status": "success", "message": "相机预览已停止", "mode": "real"}
+        except Exception as e:
+            logger.error(f"停止真实相机失败: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/camera/preview")
@@ -172,16 +227,69 @@ async def get_camera_preview():
             logger.error(f"生成虚拟视频帧失败: {e}")
             raise HTTPException(status_code=500, detail="生成视频帧失败")
     else:
-        # TODO: 实现真实相机预览图获取
-        placeholder_image = io.BytesIO()
-        placeholder_image.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x90\x00\x00\x00\xf0\x08\x02\x00\x00\x00')
-        placeholder_image.seek(0)
-        
-        return StreamingResponse(
-            placeholder_image,
-            media_type="image/png",
-            headers={"Cache-Control": "no-cache"}
-        )
+        try:
+            global _camera_instance
+            # 懒加载初始化与启动，避免前端必须显式调用 start
+            if _camera_instance is None or not getattr(_camera_instance, "is_initialized", False):
+                from ogscope.config import get_settings
+                settings = get_settings()
+                cam_cfg = {
+                    "width": getattr(settings, "camera_width", 640),
+                    "height": getattr(settings, "camera_height", 360),
+                    "fps": getattr(settings, "camera_fps", 5),
+                    "exposure_us": getattr(settings, "camera_exposure", 10000),
+                    "analogue_gain": getattr(settings, "camera_gain", 1.0),
+                    "digital_gain": getattr(settings, "camera_digital_gain", 1.0),
+                    "auto_exposure": getattr(settings, "camera_auto_exposure", False),
+                    "auto_gain": getattr(settings, "camera_auto_gain", False),
+                    "rotation": getattr(settings, "camera_rotation", 0),
+                    "sampling_mode": getattr(settings, "camera_sampling_mode", "supersample"),
+                    "type": getattr(settings, "camera_type", "imx327_mipi"),
+                }
+                _camera_instance = create_camera(cam_cfg)
+                if _camera_instance is None:
+                    raise HTTPException(status_code=500, detail="创建相机失败")
+                if not _camera_instance.initialize():
+                    raise HTTPException(status_code=500, detail="相机初始化失败")
+            if not getattr(_camera_instance, "is_capturing", False):
+                if not _camera_instance.start_capture():
+                    raise HTTPException(status_code=500, detail="相机未能启动")
+
+            # 获取一帧并编码为JPEG
+            frame = _camera_instance.get_video_frame()
+            if frame is None:
+                raise HTTPException(status_code=500, detail="无法获取视频帧")
+            try:
+                import cv2
+                ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if not ok:
+                    raise RuntimeError("图像编码失败")
+                data = buf.tobytes()
+            except Exception as e:
+                logger.error(f"编码JPEG失败: {e}")
+                raise HTTPException(status_code=500, detail="编码失败")
+
+            return StreamingResponse(
+                io.BytesIO(data),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-cache"}
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"获取真实相机预览失败: {e}")
+            raise HTTPException(status_code=500, detail="获取预览失败")
+
+
+# 兼容旧前端路径：/camera/stream/start 与 /camera/stream/stop
+@router.post("/camera/stream/start")
+async def compat_start_stream():
+    return await start_camera()
+
+
+@router.post("/camera/stream/stop")
+async def compat_stop_stream():
+    return await stop_camera()
 
 
 @router.get("/camera/stars")

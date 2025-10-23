@@ -27,11 +27,15 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/icon-16x16.png">
     
     <!-- Stylesheets -->
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/core/base.css">
+    <link rel="stylesheet" href="/static/css/core/layout.css">
+    <link rel="stylesheet" href="/static/css/core/components.css">
+    <link rel="stylesheet" href="/static/css/core/themes.css">
+    <link rel="stylesheet" href="/static/css/shared/animations.css">
     
     <!-- Preload Critical Resources -->
-    <link rel="preload" href="/static/js/app.js" as="script">
-    <link rel="preload" href="/static/css/style.css" as="style">
+    <link rel="preload" href="/static/js/core/app.js" as="script">
+    <link rel="preload" href="/static/css/core/base.css" as="style">
     
     <!-- Google Fonts for Sci-Fi UI -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -170,7 +174,8 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
+    <!-- JavaScript Modules -->
+    <script type="module" src="/static/js/core/app.js"></script>
 </body>
 </html>
 

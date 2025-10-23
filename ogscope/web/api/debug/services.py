@@ -40,6 +40,16 @@ def get_camera_instance():
             "analogue_gain": settings.camera_gain,
             "rotation": 180,  # 默认180度旋转
             "sampling_mode": "supersample",
+            # 新增参数
+            "noise_reduction": 0,
+            "white_balance_mode": "auto",
+            "white_balance_gain_r": 1.0,
+            "white_balance_gain_b": 1.0,
+            "contrast": 1.0,
+            "brightness": 0.0,
+            "saturation": 1.0,
+            "sharpness": 1.0,
+            "night_mode": False,
         }
         
         camera_instance = create_camera(config)
@@ -301,12 +311,32 @@ class DebugCameraService:
         if width <= 0 or height <= 0:
             raise Exception("分辨率参数无效")
         
+        # 检查当前分辨率是否相同
+        info = camera.get_camera_info()
+        current_width = info.get('output_width', info.get('width', 0))
+        current_height = info.get('output_height', info.get('height', 0))
+        
+        if current_width == width and current_height == height:
+            return {"success": True, "message": "分辨率未变化", "info": info}
+        
         # 为避免在预览抓取进行中重配导致底层冲突：先停抓取，再设置，最后重启抓取
         try:
             await DebugCameraService._stop_preview_grabber()
-            success = camera.set_resolution(int(width), int(height))
+            
+            # 设置超时，避免卡死
+            import asyncio
+            success = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, camera.set_resolution, int(width), int(height)
+                ),
+                timeout=10.0  # 10秒超时
+            )
+            
             if not success:
                 raise Exception("相机设置分辨率失败")
+                
+        except asyncio.TimeoutError:
+            raise Exception("设置分辨率超时，请重试")
         except Exception as e:
             # 出错也尽量恢复抓取器
             try:
@@ -324,23 +354,11 @@ class DebugCameraService:
             applied = (int(info.get('width', 0)) == int(width) and int(info.get('height', 0)) == int(height))
         
         if not applied:
-            # 如果设置未生效，尝试重新设置一次
-            try:
-                success = camera.set_resolution(int(width), int(height))
-                if success:
-                    info = camera.get_camera_info()
-                    if info.get('sampling_mode') == 'supersample':
-                        applied = (int(info.get('output_width', 0)) == int(width) and int(info.get('output_height', 0)) == int(height))
-                    else:
-                        applied = (int(info.get('width', 0)) == int(width) and int(info.get('height', 0)) == int(height))
-            except Exception:
-                pass
-            
-            if not applied:
-                current_res = f"{info.get('width', 0)}x{info.get('height', 0)}"
-                if info.get('sampling_mode') == 'supersample':
-                    current_res = f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
-                raise Exception(f"切换分辨率未生效，当前分辨率: {current_res}")
+            # 如果设置未生效，记录警告但不抛出异常
+            current_res = f"{info.get('width', 0)}x{info.get('height', 0)}"
+            if info.get('sampling_mode') == 'supersample':
+                current_res = f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
+            print(f"警告: 分辨率设置可能未完全生效，当前分辨率: {current_res}")
 
         # 分辨率调整后尝试重启抓取器（失败不影响返回）
         try:
@@ -706,3 +724,163 @@ class DebugFileService:
             
         except Exception as e:
             raise Exception(f"获取文件信息失败: {str(e)}")
+    
+    @staticmethod
+    async def set_noise_reduction(level: int):
+        """设置降噪级别"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        if camera.set_noise_reduction(level):
+            return {"success": True, "message": f"降噪级别设置为: {level}"}
+        else:
+            raise Exception("设置降噪级别失败")
+    
+    @staticmethod
+    async def set_white_balance(mode: str, gain_r: float = 1.0, gain_b: float = 1.0):
+        """设置白平衡"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        if camera.set_white_balance(mode, gain_r, gain_b):
+            return {"success": True, "message": f"白平衡模式设置为: {mode}"}
+        else:
+            raise Exception("设置白平衡失败")
+    
+    @staticmethod
+    async def set_image_enhancement(contrast: float = 1.0, brightness: float = 0.0, 
+                                  saturation: float = 1.0, sharpness: float = 1.0):
+        """设置图像增强参数"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        if camera.set_image_enhancement(contrast, brightness, saturation, sharpness):
+            return {"success": True, "message": "图像增强参数已设置"}
+        else:
+            raise Exception("设置图像增强参数失败")
+    
+    @staticmethod
+    async def set_night_mode(enabled: bool):
+        """设置夜间模式"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        if camera.set_night_mode(enabled):
+            mode_text = "启用" if enabled else "关闭"
+            return {"success": True, "message": f"夜间模式已{mode_text}"}
+        else:
+            raise Exception("设置夜间模式失败")
+    
+    @staticmethod
+    async def get_image_quality():
+        """获取图像质量指标"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        quality_metrics = camera.get_image_quality_metrics()
+        return {"success": True, "quality": quality_metrics}
+    
+    @staticmethod
+    async def apply_night_mode_preset():
+        """应用夜间模式预设"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        try:
+            # 夜间模式预设参数
+            night_preset = {
+                "exposure_us": 50000,
+                "analogue_gain": 8.0,
+                "digital_gain": 2.0,
+                "noise_reduction": 2,
+                "white_balance_mode": "night",
+                "contrast": 1.2,
+                "brightness": 0.1,
+                "saturation": 0.8,
+                "sharpness": 1.1,
+                "night_mode": True
+            }
+            
+            # 应用预设
+            camera.set_exposure(night_preset["exposure_us"])
+            camera.set_gain(night_preset["analogue_gain"], night_preset["digital_gain"])
+            camera.set_noise_reduction(night_preset["noise_reduction"])
+            camera.set_white_balance(night_preset["white_balance_mode"])
+            camera.set_image_enhancement(
+                night_preset["contrast"],
+                night_preset["brightness"],
+                night_preset["saturation"],
+                night_preset["sharpness"]
+            )
+            camera.set_night_mode(night_preset["night_mode"])
+            
+            return {"success": True, "message": "夜间模式预设已应用", "preset": night_preset}
+        except Exception as e:
+            raise Exception(f"应用夜间模式预设失败: {str(e)}")
+    
+    @staticmethod
+    async def save_current_settings_backup():
+        """保存当前设置作为备份"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        try:
+            backup_data = {
+                "timestamp": datetime.now().isoformat(),
+                "settings": camera.get_camera_info()
+            }
+            
+            backup_file = DEBUG_CAPTURES_DIR / "settings_backup.json"
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, indent=2, ensure_ascii=False)
+            
+            return {"success": True, "message": "当前设置已备份", "backup_file": str(backup_file)}
+        except Exception as e:
+            raise Exception(f"保存设置备份失败: {str(e)}")
+    
+    @staticmethod
+    async def restore_settings_backup():
+        """从备份恢复设置"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        try:
+            backup_file = DEBUG_CAPTURES_DIR / "settings_backup.json"
+            if not backup_file.exists():
+                raise Exception("未找到设置备份文件")
+            
+            with open(backup_file, 'r', encoding='utf-8') as f:
+                backup_data = json.load(f)
+            
+            settings = backup_data.get("settings", {})
+            
+            # 恢复设置
+            if "exposure_us" in settings:
+                camera.set_exposure(settings["exposure_us"])
+            if "analogue_gain" in settings and "digital_gain" in settings:
+                camera.set_gain(settings["analogue_gain"], settings["digital_gain"])
+            if "noise_reduction" in settings:
+                camera.set_noise_reduction(settings["noise_reduction"])
+            if "white_balance_mode" in settings:
+                camera.set_white_balance(settings["white_balance_mode"])
+            if "contrast" in settings and "brightness" in settings:
+                camera.set_image_enhancement(
+                    settings.get("contrast", 1.0),
+                    settings.get("brightness", 0.0),
+                    settings.get("saturation", 1.0),
+                    settings.get("sharpness", 1.0)
+                )
+            if "night_mode" in settings:
+                camera.set_night_mode(settings["night_mode"])
+            
+            return {"success": True, "message": "设置已从备份恢复"}
+        except Exception as e:
+            raise Exception(f"恢复设置备份失败: {str(e)}")

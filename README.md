@@ -1,6 +1,8 @@
 # OGScope - 电子极轴镜
 
-基于 Raspberry Pi Zero 2W 的智能电子极轴镜系统
+基于 Raspberry Pi Zero 2W 的智能电子极轴镜系统，用于天文摄影中的精确极轴校准。
+
+[English](README_EN.md) | 中文
 
 ## 硬件平台
 
@@ -41,7 +43,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/OGScope.git
+git clone https://github.com/OG-star-tech/OGScope.git
 cd OGScope
 
 # 安装依赖（使用 Poetry）
@@ -64,10 +66,12 @@ python -m ogscope.main
 
 ### 远程开发配置 (PyCharm Pro)
 
-1. 配置 SSH 连接到 Raspberry Pi
-2. 设置远程 Python 解释器
-3. 配置自动部署和同步
-4. 详细步骤见 [PyCharm 远程开发指南](docs/development/pycharm-remote.md)
+推荐使用 PyCharm 的文件同步功能进行开发：
+
+1. 配置 SSH 连接到 Raspberry Pi Zero 2W
+2. 设置文件自动同步到开发板
+3. 在本地开发，远程测试硬件功能
+4. 详细步骤见 [PyCharm 文件同步开发指南](docs/development/pycharm-remote.md)
 
 ## 项目结构
 
@@ -86,19 +90,18 @@ OGScope/
 └── web/              # Web 前端资源
 ```
 
-## 参考项目
-
-- [PiFinder](https://github.com/brickbots/PiFinder) - 板块求解寻星器
-- [OpenMV Polar Scope](https://frank26080115.github.io/OpenMV-Astrophotography-Gear/doc/Polar-Scope.html) - 极轴镜参考
 
 ## 许可证
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+本项目采用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 许可证
+
+- **署名 (BY)**: 必须标明原作者
+- **非商业性使用 (NC)**: 禁止商业用途
+- **相同方式共享 (SA)**: 衍生作品必须使用相同许可证
+
+详见 [LICENSE](LICENSE) 文件
 
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！
 
-## 致谢
-
-感谢 PiFinder 项目的开源贡献，为本项目提供了宝贵的参考。
