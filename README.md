@@ -31,6 +31,20 @@
 - ⏳ 赤道仪控制
 - ⏳ 多设备联动
 
+### 主要特性
+
+- 🔭 **精确校准**: 高精度极轴校准算法
+- 📱 **远程控制**: Web 界面和移动 App
+- 🖥️ **本地显示**: 2.4寸 SPI LCD 实时显示
+- 🌐 **生态集成**: 支持 INDI 协议
+
+### 技术规格
+
+- **处理器**: Raspberry Pi Zero 2W (ARM Cortex-A53)
+- **相机**: IMX327 传感器 (1920x1080)
+- **显示**: 2.4寸 SPI LCD (240x320)
+- **软件**: Python 3.9 + FastAPI
+
 ## 快速开始
 
 ### 环境要求
@@ -59,6 +73,24 @@ python -m ogscope.main
 ### Web 界面访问
 
 启动后访问: http://raspberrypi.local:8000 或 http://<IP>:8000
+
+## 文档
+
+### 用户文档
+- [快速开始](docs/QUICK_START.md)
+- [用户手册](docs/user_guide/user-manual.md)
+- [常见问题](docs/user_guide/faq.md)
+
+### 硬件文档
+- [硬件清单 (BOM)](docs/hardware/bom.md)
+- [组装指南](docs/hardware/assembly-guide.md)
+- [硬件调试](docs/hardware/hardware-debug.md)
+
+### 开发文档
+- [开发指南](docs/development/README.md)
+- [PyCharm 远程开发](docs/development/pycharm-remote.md)
+- [FastAPI 开发](docs/development/fastapi-guide.md)
+- [测试指南](docs/development/testing-guide.md)
 
 ## 开发
 
@@ -101,7 +133,13 @@ OGScope/
 
 详见 [LICENSE](LICENSE) 文件
 
+## 快速链接
+
+- [GitHub 仓库](https://github.com/OG-star-tech/OGScope)
+- [问题反馈](https://github.com/OG-star-tech/OGScope/issues)
+- [讨论区](https://github.com/OG-star-tech/OGScope/discussions)
+
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request！
+欢迎提交 Issue 和 Pull Request！详见 [贡献指南](CONTRIBUTING.md)
 
