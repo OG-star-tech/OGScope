@@ -2,16 +2,17 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>OGScope - 革命性电子极轴镜</title>
+    <!-- 强制横屏显示，移动端优先 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover, orientation=landscape">
+    <title>OGScope - 电子极轴镜</title>
     
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#8B0000">
+    <meta name="theme-color" content="#FF4500">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="OGScope">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="msapplication-TileColor" content="#8B0000">
+    <meta name="msapplication-TileColor" content="#FF4500">
     <meta name="msapplication-tap-highlight" content="no">
     
     <!-- PWA Manifest -->
@@ -26,156 +27,1004 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/icon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/icon-16x16.png">
     
-    <!-- Stylesheets -->
-    <link rel="stylesheet" href="/static/css/core/base.css">
-    <link rel="stylesheet" href="/static/css/core/layout.css">
-    <link rel="stylesheet" href="/static/css/core/components.css">
-    <link rel="stylesheet" href="/static/css/core/themes.css">
-    <link rel="stylesheet" href="/static/css/shared/animations.css">
-    
-    <!-- Preload Critical Resources -->
-    <link rel="preload" href="/static/js/core/app.js" as="script">
-    <link rel="preload" href="/static/css/core/base.css" as="style">
-    
-    <!-- Google Fonts for Sci-Fi UI -->
+    <!-- 现代化字体 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        /* 现代化DJI风格CSS变量 */
+        :root {
+            /* 深红色科技主题 */
+            --primary-red: #FF4500;
+            --dark-red: #8B0000;
+            --accent-red: #FF6B35;
+            --bg-black: #0A0A0A;
+            --bg-dark: #1A1A1A;
+            --bg-darker: #0F0F0F;
+
+            /* 状态颜色 */
+            --success: #00FF88;
+            --warning: #FFB800;
+            --error: #FF4444;
+            --info: #00BFFF;
+
+            /* 文字颜色 */
+            --text-white: #FFFFFF;
+            --text-gray: #CCCCCC;
+            --text-dark: #999999;
+
+            /* 间距 */
+            --space-xs: 0.25rem;
+            --space-sm: 0.5rem;
+            --space-md: 1rem;
+            --space-lg: 1.5rem;
+            --space-xl: 2rem;
+
+            /* 圆角 */
+            --radius-sm: 0.375rem;
+            --radius-md: 0.5rem;
+            --radius-lg: 0.75rem;
+
+            /* 动画 */
+            --transition: all 0.2s ease;
+            --transition-slow: all 0.3s ease;
+        }
+
+        /* 基础重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-black);
+            color: var(--text-white);
+        }
+
+        /* 强制横屏 */
+        body {
+            transform: rotate(0deg);
+        }
+
+        /* 主要容器 */
+        .app-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-black);
+        }
+
+        /* 视频区域 - 16:9比例，居中显示 */
+        .video-section {
+            position: relative;
+            width: 80vw;
+            height: 45vw; /* 16:9 比例 */
+            max-width: 90vw;
+            max-height: 50.625vw;
+            background: #000;
+            border: 2px solid var(--primary-red);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow:
+                0 0 0 1px rgba(255, 69, 0, 0.3),
+                0 0 20px rgba(255, 69, 0, 0.2);
+        }
+
+        /* 视频流 */
+        .video-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: none; /* 初始隐藏，等待加载 */
+        }
+
+        .video-stream.loaded {
+            display: block;
+        }
+
+        /* 视频覆盖层 */
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* 准星组件 - 十字+圆+三角引导 */
+        .crosshair-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+        }
+
+        .crosshair-circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            border: 2px solid var(--primary-red);
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(255, 69, 0, 0.5);
+        }
+
+        .crosshair-cross {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair-line {
+            position: absolute;
+            background: var(--primary-red);
+            box-shadow: 0 0 10px rgba(255, 69, 0, 0.8);
+        }
+
+        .crosshair-line.horizontal {
+            width: 30px;
+            height: 2px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair-line.vertical {
+            width: 2px;
+            height: 30px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair-triangle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 12px solid var(--primary-red);
+            filter: drop-shadow(0 0 8px rgba(255, 69, 0, 0.8));
+            animation: trianglePulse 2s ease-in-out infinite;
+        }
+
+        @keyframes trianglePulse {
+            0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+        }
+
+        /* 视频内组件 - 左上角：GPS坐标、海拔、环境亮度 */
+        .top-left-info {
+            position: absolute;
+            top: var(--space-md);
+            left: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .info-card {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius-md);
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-white);
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .info-label {
+            color: var(--text-gray);
+            font-size: 0.7rem;
+        }
+
+        .info-value {
+            color: var(--text-white);
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+
+        .gps-icon, .altitude-icon, .brightness-icon {
+            width: 12px;
+            height: 12px;
+            opacity: 0.8;
+        }
+
+        /* 视频内组件 - 右上角：GPS信号、电量、WIFI信号 */
+        .top-right-info {
+            position: absolute;
+            top: var(--space-md);
+            right: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+            align-items: flex-end;
+        }
+
+        .signal-bar {
+            display: flex;
+            align-items: flex-end;
+            gap: 1px;
+            height: 12px;
+        }
+
+        .signal-segment {
+            width: 2px;
+            background: var(--text-gray);
+            border-radius: 1px;
+            transition: var(--transition);
+        }
+
+        .signal-segment.active {
+            background: var(--success);
+        }
+
+        .battery-info {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        .battery-level {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        /* 视频内组件 - 左下角：极轴校准偏移 */
+        .bottom-left-info {
+            position: absolute;
+            bottom: var(--space-md);
+            left: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .offset-card {
+            background: rgba(255, 69, 0, 0.1);
+            border: 1px solid rgba(255, 69, 0, 0.3);
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+
+        .offset-title {
+            font-size: 0.65rem;
+            color: var(--primary-red);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .offset-values {
+            display: flex;
+            gap: var(--space-md);
+        }
+
+        .offset-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .offset-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-white);
+        }
+
+        .offset-unit {
+            font-size: 0.6rem;
+            color: var(--text-gray);
+        }
+
+        /* 视频内组件 - 右下角：图像质量 */
+        .bottom-right-info {
+            position: absolute;
+            bottom: var(--space-md);
+            right: var(--space-md);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .quality-meter {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        .quality-bars {
+            display: flex;
+            gap: 1px;
+            align-items: flex-end;
+            height: 10px;
+        }
+
+        .quality-bar {
+            width: 2px;
+            background: var(--text-gray);
+            border-radius: 1px;
+            transition: var(--transition);
+        }
+
+        .quality-bar.active {
+            background: var(--success);
+        }
+
+        .quality-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-white);
+            min-width: 24px;
+        }
+
+        /* 视频外部组件 - 右上角菜单 */
+        .top-menu {
+            position: absolute;
+            top: var(--space-md);
+            right: calc(80vw + var(--space-lg));
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .menu-button {
+            width: 44px;
+            height: 44px;
+            background: rgba(26, 26, 26, 0.9);
+            backdrop-filter: blur(10px);
+            border: none;
+            border-radius: var(--radius-md);
+            color: var(--text-white);
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .menu-button:hover {
+            background: rgba(255, 69, 0, 0.2);
+            transform: scale(1.05);
+        }
+
+        .menu-button.active {
+            background: var(--primary-red);
+            box-shadow: 0 0 15px rgba(255, 69, 0, 0.4);
+        }
+
+        /* 视频外部组件 - 右侧中间：手动缩放 */
+        .zoom-control {
+            position: absolute;
+            top: 50%;
+            right: calc(80vw + var(--space-lg));
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .zoom-slider {
+            width: 4px;
+            height: 120px;
+            background: rgba(26, 26, 26, 0.6);
+            border-radius: 2px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .zoom-track {
+            width: 100%;
+            height: 50%;
+            background: var(--primary-red);
+            border-radius: 2px;
+            position: absolute;
+            bottom: 0;
+            transition: var(--transition);
+        }
+
+        .zoom-labels {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+            font-size: 0.65rem;
+            color: var(--text-gray);
+        }
+
+        /* 视频外部组件 - 右侧下方：模式切换 */
+        .mode-controls {
+            position: absolute;
+            bottom: var(--space-md);
+            right: calc(80vw + var(--space-lg));
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .mode-button {
+            padding: var(--space-sm) var(--space-md);
+            background: rgba(26, 26, 26, 0.9);
+            backdrop-filter: blur(10px);
+            border: none;
+            border-radius: var(--radius-md);
+            color: var(--text-white);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .mode-button:hover {
+            background: rgba(255, 69, 0, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .mode-button.active {
+            background: var(--primary-red);
+            color: var(--text-white);
+            box-shadow: 0 0 15px rgba(255, 69, 0, 0.4);
+        }
+
+        /* 视频外部组件 - 左上角：高级模式 */
+        .advanced-toggle {
+            position: absolute;
+            top: var(--space-md);
+            left: calc(80vw + var(--space-lg));
+            width: 44px;
+            height: 44px;
+            background: rgba(26, 26, 26, 0.9);
+            backdrop-filter: blur(10px);
+            border: none;
+            border-radius: var(--radius-md);
+            color: var(--text-white);
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .advanced-toggle:hover {
+            background: rgba(255, 69, 0, 0.2);
+            transform: scale(1.05);
+        }
+
+        .advanced-toggle.active {
+            background: var(--primary-red);
+            box-shadow: 0 0 15px rgba(255, 69, 0, 0.4);
+        }
+
+        /* 加载屏幕 */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-black);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+
+        .loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-content {
+            text-align: center;
+            padding: var(--space-xl);
+        }
+
+        .loading-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-white);
+            margin-bottom: var(--space-md);
+        }
+
+        .loading-subtitle {
+            font-size: 0.9rem;
+            color: var(--text-gray);
+            margin-bottom: var(--space-xl);
+        }
+
+        .loading-progress {
+            width: 200px;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: var(--space-md);
+        }
+
+        .loading-fill {
+            height: 100%;
+            background: var(--primary-red);
+            width: 0%;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(255, 69, 0, 0.5);
+        }
+
+        .loading-text {
+            font-size: 0.8rem;
+            color: var(--text-gray);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* 响应式设计 - 移动端优化 */
+        @media (max-width: 768px) {
+            .video-section {
+                width: 90vw;
+                height: 50.625vw;
+            }
+
+            .top-menu,
+            .zoom-control,
+            .mode-controls {
+                right: calc(90vw + var(--space-md));
+            }
+
+            .advanced-toggle {
+                left: calc(90vw + var(--space-md));
+            }
+
+            .info-card {
+                font-size: 0.7rem;
+                padding: var(--space-xs) var(--space-sm);
+            }
+
+            .offset-card {
+                padding: var(--space-xs) var(--space-sm);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .video-section {
+                width: 95vw;
+                height: 53.4375vw;
+            }
+
+            .top-menu,
+            .zoom-control,
+            .mode-controls {
+                right: calc(95vw + var(--space-sm));
+            }
+
+            .advanced-toggle {
+                left: calc(95vw + var(--space-sm));
+            }
+
+            .menu-button,
+            .advanced-toggle {
+                width: 36px;
+                height: 36px;
+                font-size: 0.9rem;
+            }
+
+            .mode-button {
+                padding: var(--space-xs) var(--space-sm);
+                font-size: 0.7rem;
+                min-width: 70px;
+            }
+        }
+
+        /* 隐藏滚动条 */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* 强制横屏提示 */
+        .orientation-warning {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-black);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            color: var(--text-white);
+            text-align: center;
+            padding: var(--space-xl);
+        }
+
+        .orientation-warning.show {
+            display: flex;
+        }
+    </style>
 </head>
 <body>
-    <!-- 背景粒子效果 -->
-    <div class="particles-background" id="particles-bg"></div>
-    
-    <!-- 主应用容器 - 横屏布局 -->
-    <div id="app" class="polar-scope-app">
-        <!-- 视频流区域 - 占据整个屏幕 -->
-        <div class="video-container" id="video-container">
-            <!-- MJPEG视频流 -->
-            <img id="mjpeg-stream" class="video-stream" src="/api/camera/preview" alt="极轴镜视频流">
-            
-            <!-- 视频覆盖层 -->
-            <div class="video-overlay" id="video-overlay">
-                <!-- 十字准星 -->
-                <div class="crosshair" id="crosshair">
-                    <div class="crosshair-horizontal"></div>
-                    <div class="crosshair-vertical"></div>
-                    <div class="crosshair-center"></div>
-                </div>
-                
-                <!-- 星点标记 -->
-                <div class="star-markers" id="star-markers"></div>
-                
-                <!-- 极轴目标指示 -->
-                <div class="polar-target" id="polar-target">
-                    <div class="target-circle"></div>
-                    <div class="target-arrow" id="target-arrow"></div>
-                </div>
-                
-                <!-- 校准进度环 -->
-                <div class="alignment-ring" id="alignment-ring"></div>
-            </div>
-            
-            <!-- 视频控制按钮 - 浮动在右上角 -->
-            <div class="video-controls">
-                <button class="control-btn" id="start-stream" title="开始视频流">
-                    <span class="btn-icon">▶️</span>
-                </button>
-                <button class="control-btn" id="stop-stream" title="停止视频流" disabled>
-                    <span class="btn-icon">⏹️</span>
-                </button>
-                <button class="control-btn" id="zoom-toggle" title="切换缩放">
-                    <span class="btn-icon">🔍</span>
-                </button>
-            </div>
-            
-            <!-- 校准控制 - 浮动在右下角 -->
-            <div class="alignment-controls">
-                <button class="btn btn-primary" id="start-alignment">
-                    <span class="btn-icon">🚀</span>
-                    <span class="btn-text">开始校准</span>
-                </button>
-                <button class="btn btn-secondary" id="stop-alignment" disabled>
-                    <span class="btn-icon">⏹️</span>
-                    <span class="btn-text">停止校准</span>
-                </button>
-            </div>
-            
-            <!-- 状态信息 - 浮动在左上角 -->
-            <div class="status-info">
-                <div class="status-item">
-                    <span class="status-label">模式</span>
-                    <span class="status-value" id="mode-display">检测中...</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">状态</span>
-                    <span class="status-value" id="status-display">系统启动中...</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">进度</span>
-                    <span class="status-value" id="progress-display">0%</span>
-                </div>
-            </div>
-            
-            <!-- 校准指标 - 浮动在左下角 -->
-            <div class="alignment-metrics">
-                <div class="metric">
-                    <span class="metric-label">方位误差</span>
-                    <span class="metric-value" id="azimuth-error">--</span>
-                    <span class="metric-unit">′</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">高度误差</span>
-                    <span class="metric-value" id="altitude-error">--</span>
-                    <span class="metric-unit">′</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">精度</span>
-                    <span class="metric-value" id="precision-level">--</span>
-                </div>
-            </div>
+    <!-- 横屏提示 -->
+    <div class="orientation-warning" id="orientation-warning">
+        <div>
+            <div style="font-size: 3rem; margin-bottom: var(--space-md);">📱</div>
+            <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: var(--space-sm);">请旋转设备</div>
+            <div style="font-size: 0.9rem; color: var(--text-gray);">此应用需要横屏使用</div>
         </div>
     </div>
 
-    <!-- 网络状态指示器 -->
-    <div class="network-status offline" id="network-status">
-        <div class="status-icon">📡</div>
-        <span class="status-text">离线</span>
-    </div>
-    
-    <!-- PWA安装提示 -->
-    <div class="install-prompt" id="install-prompt">
-        <div class="install-prompt-content">
-            <div class="install-prompt-icon">📱</div>
-            <div class="install-prompt-text">
-                <h3>安装 OGScope</h3>
-                <p>添加到主屏幕，获得专业级极轴校准体验</p>
+    <!-- 主要应用容器 -->
+    <div class="app-container">
+        <!-- 视频区域 -->
+        <div class="video-section">
+            <!-- 视频流 -->
+            <img id="video-stream" class="video-stream" src="/api/camera/preview" alt="极轴镜视频流">
+            
+            <!-- 视频覆盖层 -->
+            <div class="video-overlay">
+                <!-- 准星组件 -->
+                <div class="crosshair-center">
+                    <div class="crosshair-circle"></div>
+                    <div class="crosshair-cross">
+                        <div class="crosshair-line horizontal"></div>
+                        <div class="crosshair-line vertical"></div>
+                    </div>
+                    <div class="crosshair-triangle"></div>
+                </div>
+                
+                <!-- 左上角信息：GPS坐标、海拔、环境亮度 -->
+                <div class="top-left-info">
+                    <div class="info-card">
+                        <span class="gps-icon">📍</span>
+                        <span class="info-label">GPS:</span>
+                        <span class="info-value" id="gps-coords">N 39.9042° E 116.4074°</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="altitude-icon">⛰️</span>
+                        <span class="info-label">海拔:</span>
+                        <span class="info-value" id="altitude">1,245m</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="brightness-icon">☀️</span>
+                        <span class="info-label">亮度:</span>
+                        <span class="info-value" id="brightness">85%</span>
+                    </div>
+                </div>
+                
+                <!-- 右上角信息：GPS信号、电量、WIFI信号 -->
+                <div class="top-right-info">
+                    <div class="info-card">
+                        <span class="info-label">信号:</span>
+                        <div class="signal-bar">
+                            <div class="signal-segment active"></div>
+                            <div class="signal-segment active"></div>
+                            <div class="signal-segment active"></div>
+                            <div class="signal-segment"></div>
+                </div>
             </div>
-            <div class="install-prompt-actions">
-                <button class="btn btn-primary" id="install-app">立即安装</button>
-                <button class="btn btn-secondary" id="dismiss-install">稍后</button>
+                    <div class="info-card">
+                        <span class="info-label">🔋</span>
+                        <span class="battery-level" id="battery-level">78%</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">📶</span>
+                        <span class="info-value" id="wifi-strength">强</span>
+            </div>
+            </div>
+            
+                <!-- 左下角：极轴校准偏移 -->
+                <div class="bottom-left-info">
+                    <div class="offset-card">
+                        <div class="offset-title">校准偏移</div>
+                        <div class="offset-values">
+                            <div class="offset-item">
+                                <span class="offset-value" id="azimuth-offset">-2.3</span>
+                                <span class="offset-unit">′</span>
+                            </div>
+                            <div class="offset-item">
+                                <span class="offset-value" id="altitude-offset">+1.8</span>
+                                <span class="offset-unit">′</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右下角：图像质量 -->
+                <div class="bottom-right-info">
+                    <span class="info-label">质量:</span>
+                    <div class="quality-meter">
+                        <div class="quality-bars">
+                            <div class="quality-bar active"></div>
+                            <div class="quality-bar active"></div>
+                            <div class="quality-bar active"></div>
+                            <div class="quality-bar active"></div>
+                            <div class="quality-bar"></div>
+                        </div>
+                        <span class="quality-value" id="image-quality">85%</span>
+                    </div>
+                </div>
+                </div>
+            </div>
+            
+        <!-- 右上角菜单 -->
+        <div class="top-menu">
+            <button class="menu-button" onclick="toggleMenu()" title="设置">⚙️</button>
+            <button class="menu-button" onclick="showInfo()" title="信息">ℹ️</button>
+            <button class="menu-button" onclick="toggleRecord()" title="录制">⏺️</button>
+                </div>
+
+        <!-- 右侧中间：手动缩放 -->
+        <div class="zoom-control">
+            <div class="zoom-labels">
+                <span>2x</span>
+                <span>1.5x</span>
+                <span>1x</span>
+                </div>
+            <div class="zoom-slider" onclick="handleZoomClick(event)">
+                <div class="zoom-track" id="zoom-track"></div>
             </div>
         </div>
+
+        <!-- 右侧下方：模式切换 -->
+        <div class="mode-controls">
+            <button class="mode-button active" onclick="setMode('tracking')">追踪模式</button>
+            <button class="mode-button" onclick="setMode('manual')">手动模式</button>
+            <button class="mode-button" onclick="setMode('auto')">自动模式</button>
+    </div>
+
+        <!-- 左上角：高级模式 -->
+        <button class="advanced-toggle" onclick="toggleAdvanced()" title="高级模式">⚡</button>
     </div>
 
     <!-- 加载屏幕 -->
     <div class="loading-screen" id="loading-screen">
         <div class="loading-content">
-            <div class="loading-logo">
-                <div class="logo-icon-large">🌌</div>
-                <h1>OGScope</h1>
-                <p>革命性电子极轴镜</p>
-            </div>
+            <div class="loading-title">OGScope</div>
+            <div class="loading-subtitle">电子极轴镜系统</div>
             <div class="loading-progress">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="loading-progress"></div>
-                </div>
-                <div class="loading-text" id="loading-text">正在初始化系统...</div>
+                <div class="loading-fill" id="loading-progress"></div>
             </div>
+            <div class="loading-text" id="loading-text">正在初始化...</div>
         </div>
     </div>
 
-    <!-- JavaScript Modules -->
-    <script type="module" src="/static/js/core/app.js"></script>
+    <script>
+        // 应用状态
+        let appState = {
+            isLoaded: false,
+            currentMode: 'tracking',
+            isAdvanced: false,
+            zoomLevel: 1,
+            isRecording: false
+        };
+
+        // DOM元素
+        let elements = {};
+
+        // 初始化应用
+        function init() {
+            elements = {
+                videoStream: document.getElementById('video-stream'),
+                loadingScreen: document.getElementById('loading-screen'),
+                loadingProgress: document.getElementById('loading-progress'),
+                loadingText: document.getElementById('loading-text'),
+                orientationWarning: document.getElementById('orientation-warning'),
+                zoomTrack: document.getElementById('zoom-track')
+            };
+
+            // 检查横屏
+            checkOrientation();
+
+            // 模拟加载过程
+            simulateLoading();
+
+            // 设置事件监听
+            setupEventListeners();
+        }
+
+        // 检查设备方向
+        function checkOrientation() {
+            if (window.innerHeight > window.innerWidth) {
+                elements.orientationWarning.classList.add('show');
+            } else {
+                elements.orientationWarning.classList.remove('show');
+            }
+        }
+
+        // 模拟加载过程
+        async function simulateLoading() {
+            const steps = [
+                { progress: 20, text: '连接摄像头...' },
+                { progress: 40, text: '加载星图数据库...' },
+                { progress: 60, text: '初始化传感器...' },
+                { progress: 80, text: '校准系统...' },
+                { progress: 100, text: '系统就绪' }
+            ];
+
+            for (let step of steps) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+                elements.loadingProgress.style.width = step.progress + '%';
+                elements.loadingText.textContent = step.text;
+            }
+
+            // 隐藏加载屏幕
+            setTimeout(() => {
+                elements.loadingScreen.classList.add('hidden');
+                elements.videoStream.classList.add('loaded');
+                appState.isLoaded = true;
+
+                // 模拟数据更新
+                startDataUpdates();
+            }, 500);
+        }
+
+        // 设置事件监听
+        function setupEventListeners() {
+            window.addEventListener('resize', checkOrientation);
+            window.addEventListener('orientationchange', checkOrientation);
+
+            // 防止页面滚动和缩放
+            document.addEventListener('touchmove', (e) => {
+                if (e.touches.length > 1) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+            document.addEventListener('gesturestart', (e) => {
+                e.preventDefault();
+            });
+        }
+
+        // 切换菜单
+        function toggleMenu() {
+            console.log('菜单已切换');
+        }
+
+        // 显示信息
+        function showInfo() {
+            console.log('显示信息');
+        }
+
+        // 切换录制
+        function toggleRecord() {
+            appState.isRecording = !appState.isRecording;
+            const button = event.target;
+            button.textContent = appState.isRecording ? '⏸️' : '⏺️';
+            button.title = appState.isRecording ? '停止录制' : '开始录制';
+        }
+
+        // 处理缩放点击
+        function handleZoomClick(event) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const clickY = event.clientY - rect.top;
+            const percentage = clickY / rect.height;
+
+            appState.zoomLevel = 2 - percentage * 1; // 1x 到 2x
+            elements.zoomTrack.style.height = (percentage * 100) + '%';
+
+            // 应用缩放到视频
+            elements.videoStream.style.transform = `scale(${appState.zoomLevel})`;
+        }
+
+        // 设置模式
+        function setMode(mode) {
+            appState.currentMode = mode;
+
+            // 更新按钮状态
+            document.querySelectorAll('.mode-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            console.log('模式切换到:', mode);
+        }
+
+        // 切换高级模式
+        function toggleAdvanced() {
+            appState.isAdvanced = !appState.isAdvanced;
+            const button = event.target;
+            button.classList.toggle('active');
+            button.textContent = appState.isAdvanced ? '🔥' : '⚡';
+        }
+
+        // 模拟数据更新
+        function startDataUpdates() {
+            // 模拟GPS坐标更新
+            setInterval(() => {
+                const lat = 39.9042 + (Math.random() - 0.5) * 0.01;
+                const lon = 116.4074 + (Math.random() - 0.5) * 0.01;
+                document.getElementById('gps-coords').textContent =
+                    `N ${lat.toFixed(4)}° E ${lon.toFixed(4)}°`;
+            }, 2000);
+
+            // 模拟高度更新
+            setInterval(() => {
+                const alt = 1245 + Math.floor((Math.random() - 0.5) * 20);
+                document.getElementById('altitude').textContent = alt + 'm';
+            }, 3000);
+
+            // 模拟亮度更新
+            setInterval(() => {
+                const brightness = 80 + Math.floor(Math.random() * 20);
+                document.getElementById('brightness').textContent = brightness + '%';
+            }, 1000);
+
+            // 模拟信号强度更新
+            setInterval(() => {
+                const strength = Math.floor(Math.random() * 4);
+                document.querySelectorAll('.signal-segment').forEach((seg, index) => {
+                    seg.classList.toggle('active', index <= strength);
+                });
+            }, 1500);
+
+            // 模拟电量更新
+            setInterval(() => {
+                const battery = 70 + Math.floor(Math.random() * 30);
+                document.getElementById('battery-level').textContent = battery + '%';
+            }, 5000);
+
+            // 模拟WIFI强度
+            setInterval(() => {
+                const strengths = ['弱', '中', '强', '极强'];
+                const strength = strengths[Math.floor(Math.random() * strengths.length)];
+                document.getElementById('wifi-strength').textContent = strength;
+            }, 3000);
+
+            // 模拟偏移更新
+            setInterval(() => {
+                const azimuth = (Math.random() - 0.5) * 10;
+                const altitude = (Math.random() - 0.5) * 10;
+                document.getElementById('azimuth-offset').textContent = azimuth.toFixed(1);
+                document.getElementById('altitude-offset').textContent = altitude.toFixed(1);
+            }, 1000);
+
+            // 模拟图像质量更新
+            setInterval(() => {
+                const quality = 75 + Math.floor(Math.random() * 25);
+                document.getElementById('image-quality').textContent = quality + '%';
+
+                document.querySelectorAll('.quality-bar').forEach((bar, index) => {
+                    const threshold = (index + 1) * 20;
+                    bar.classList.toggle('active', quality >= threshold);
+                });
+            }, 800);
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
 </body>
 </html>
 

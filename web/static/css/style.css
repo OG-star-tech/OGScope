@@ -320,8 +320,68 @@ body {
     100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
+/* 16:9画面框选指示器 */
+.video-frame-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+    height: 45%; /* 16:9 比例: 45% = 80% * 9/16 */
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+.frame-corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--primary-color);
+    opacity: 0.9;
+}
+
+.frame-corner-tl {
+    top: 0;
+    left: 0;
+    border-right: none;
+    border-bottom: none;
+}
+
+.frame-corner-tr {
+    top: 0;
+    right: 0;
+    border-left: none;
+    border-bottom: none;
+}
+
+.frame-corner-bl {
+    bottom: 0;
+    left: 0;
+    border-right: none;
+    border-top: none;
+}
+
+.frame-corner-br {
+    bottom: 0;
+    right: 0;
+    border-left: none;
+    border-top: none;
+}
+
+.frame-label {
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--primary-color);
+    font-family: 'Orbitron', monospace;
+    font-size: var(--font-xs);
+    font-weight: 600;
+    text-shadow: 0 0 10px var(--primary-color);
+    opacity: 0.8;
+}
+
 /* 浮动控制元素 */
-.video-controls,
 .alignment-controls,
 .status-info,
 .alignment-metrics {
@@ -332,50 +392,6 @@ body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: var(--spacing-sm);
-}
-
-/* 视频控制按钮 - 右上角 */
-.video-controls {
-    top: var(--spacing-md);
-    right: var(--spacing-md);
-    display: flex;
-    gap: var(--spacing-sm);
-}
-
-.control-btn {
-    width: 40px;
-    height: 40px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: rgba(26, 26, 26, 0.8);
-    color: var(--text-primary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--transition-fast) ease;
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--border-color);
-}
-
-.control-btn:hover {
-    background: rgba(255, 69, 0, 0.2);
-    border-color: var(--primary-color);
-    box-shadow: 0 0 15px var(--primary-color);
-    transform: scale(1.05);
-}
-
-.control-btn:active {
-    transform: scale(0.95);
-}
-
-.control-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.btn-icon {
-    font-size: var(--font-md);
 }
 
 /* 校准控制 - 右下角 */
@@ -529,7 +545,7 @@ body {
 .network-status {
     position: fixed;
     top: var(--spacing-md);
-    right: var(--spacing-md);
+    right: calc(var(--spacing-md) + 200px); /* 避免与视频控制按钮重叠 */
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -541,6 +557,7 @@ body {
     z-index: 1000;
     transition: all var(--transition-normal) ease;
     transform: translateX(100%);
+    min-width: 120px;
 }
 
 .network-status.online {
@@ -565,60 +582,6 @@ body {
     color: var(--text-primary);
 }
 
-/* PWA安装提示 */
-.install-prompt {
-    position: fixed;
-    bottom: var(--spacing-lg);
-    left: var(--spacing-lg);
-    right: var(--spacing-lg);
-    background: linear-gradient(135deg, var(--surface-color) 0%, rgba(26, 26, 26, 0.95) 100%);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--primary-color);
-    box-shadow: var(--shadow-glow);
-    backdrop-filter: blur(15px);
-    z-index: 1000;
-    transform: translateY(100%);
-    transition: transform var(--transition-slow) ease;
-}
-
-.install-prompt.show {
-    transform: translateY(0);
-}
-
-.install-prompt-content {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-lg);
-}
-
-.install-prompt-icon {
-    font-size: var(--font-xxl);
-    animation: glow 2s ease-in-out infinite alternate;
-}
-
-.install-prompt-text {
-    flex: 1;
-}
-
-.install-prompt-text h3 {
-    font-family: 'Orbitron', monospace;
-    font-size: var(--font-lg);
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0 0 var(--spacing-xs) 0;
-}
-
-.install-prompt-text p {
-    font-size: var(--font-sm);
-    color: var(--text-secondary);
-    margin: 0;
-}
-
-.install-prompt-actions {
-    display: flex;
-    gap: var(--spacing-sm);
-}
 
 /* 加载屏幕 */
 .loading-screen {
@@ -886,24 +849,14 @@ body {
     100% { opacity: 1; }
 }
 
-/* 响应式设计 - 移动设备优化 */
-@media (max-width: 768px) {
-    .video-controls {
-        top: var(--spacing-sm);
-        right: var(--spacing-sm);
-        gap: var(--spacing-xs);
-    }
-    
+/* 移动设备优化 - 手机和pad */
+/* 默认样式已经针对移动设备优化，这里只做微调 */
+
+/* 小屏幕手机优化 */
+@media (max-width: 480px) {
     .control-btn {
         width: 36px;
         height: 36px;
-    }
-    
-    .alignment-controls {
-        bottom: var(--spacing-sm);
-        right: var(--spacing-sm);
-        flex-direction: column;
-        gap: var(--spacing-xs);
     }
     
     .btn {
@@ -911,6 +864,19 @@ body {
         font-size: var(--font-xs);
     }
     
+    .btn-icon {
+        font-size: var(--font-sm);
+    }
+    
+    /* 网络状态指示器 */
+    .network-status {
+        right: calc(var(--spacing-sm) + 140px);
+        min-width: 90px;
+        font-size: var(--font-xs);
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+    
+    /* 状态信息 */
     .status-info {
         top: var(--spacing-sm);
         left: var(--spacing-sm);
@@ -924,13 +890,14 @@ body {
     
     .status-label {
         min-width: auto;
-        font-size: 0.6rem;
+        font-size: 0.7rem;
     }
     
     .status-value {
         font-size: var(--font-xs);
     }
     
+    /* 校准指标 */
     .alignment-metrics {
         bottom: var(--spacing-sm);
         left: var(--spacing-sm);
@@ -941,36 +908,40 @@ body {
     }
     
     .metric-label {
-        min-width: 40px;
-        font-size: 0.6rem;
+        min-width: 45px;
+        font-size: 0.7rem;
     }
     
     .metric-value {
         font-size: var(--font-xs);
     }
     
-    .install-prompt-content {
+    /* 校准控制 */
+    .alignment-controls {
+        bottom: var(--spacing-sm);
+        right: var(--spacing-sm);
         flex-direction: column;
-        text-align: center;
-        gap: var(--spacing-md);
+        gap: var(--spacing-xs);
     }
     
-    .install-prompt-actions {
-        width: 100%;
-        justify-content: center;
-    }
-}
-
-@media (max-width: 480px) {
-    .control-btn {
-        width: 32px;
-        height: 32px;
+    
+    /* 16:9画面框选指示器优化 */
+    .video-frame-indicator {
+        width: 85%;
+        height: 48%; /* 16:9 比例调整 */
     }
     
-    .btn-icon {
-        font-size: var(--font-sm);
+    .frame-corner {
+        width: 16px;
+        height: 16px;
     }
     
+    .frame-label {
+        top: -25px;
+        font-size: 0.6rem;
+    }
+    
+    /* 弹窗和通知 */
     .modal-content {
         padding: var(--spacing-lg);
         width: 95%;
@@ -983,14 +954,38 @@ body {
     }
 }
 
-/* 横屏优化 */
+/* 横屏模式优化 - 适用于手机和pad横屏使用 */
 @media (orientation: landscape) and (max-height: 600px) {
+    /* 加载屏幕在横屏下的优化 */
     .loading-logo h1 {
         font-size: var(--font-xl);
     }
     
     .loading-logo p {
         font-size: var(--font-md);
+    }
+    
+    /* 横屏模式下减少元素间距，节省空间 */
+    
+    .network-status {
+        top: var(--spacing-xs);
+        right: calc(var(--spacing-xs) + 140px);
+        font-size: var(--font-xs);
+    }
+    
+    .status-info {
+        top: var(--spacing-xs);
+        left: var(--spacing-xs);
+    }
+    
+    .alignment-metrics {
+        bottom: var(--spacing-xs);
+        left: var(--spacing-xs);
+    }
+    
+    .alignment-controls {
+        bottom: var(--spacing-xs);
+        right: var(--spacing-xs);
     }
 }
 
@@ -1019,16 +1014,13 @@ body {
         transition-duration: 0.01ms !important;
     }
 }
-
 /* 打印样式 */
 @media print {
     .particles-background,
-    .video-controls,
     .alignment-controls,
     .status-info,
     .alignment-metrics,
     .network-status,
-    .install-prompt,
     .loading-screen {
         display: none !important;
     }
