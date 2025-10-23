@@ -679,15 +679,22 @@ class DebugFileService:
     async def get_files():
         """获取拍摄文件列表"""
         try:
+            # 支持的图片格式
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+            # 支持的视频格式
+            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
+            
             files = []
             for file_path in DEBUG_CAPTURES_DIR.iterdir():
-                if file_path.is_file() and file_path.suffix.lower() in ['.jpg', '.mp4']:
-                    files.append({
-                        "name": file_path.name,
-                        "size": file_path.stat().st_size,
-                        "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                        "type": "image" if file_path.suffix.lower() == '.jpg' else "video"
-                    })
+                if file_path.is_file():
+                    suffix = file_path.suffix.lower()
+                    if suffix in image_extensions or suffix in video_extensions:
+                        files.append({
+                            "name": file_path.name,
+                            "size": file_path.stat().st_size,
+                            "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
+                            "type": "image" if suffix in image_extensions else "video"
+                        })
             
             # 按修改时间排序（最新的在前）
             files.sort(key=lambda x: x["modified"], reverse=True)
@@ -707,11 +714,19 @@ class DebugFileService:
             raise Exception("文件不存在")
         
         try:
+            # 支持的图片格式
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+            # 支持的视频格式
+            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
+            
+            suffix = file_path.suffix.lower()
+            file_type = "image" if suffix in image_extensions else "video"
+            
             info = {
                 "filename": filename,
                 "size": file_path.stat().st_size,
                 "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                "type": "image" if file_path.suffix.lower() == '.jpg' else "video"
+                "type": file_type
             }
             
             # 读取拍摄信息
@@ -726,8 +741,29 @@ class DebugFileService:
             raise Exception(f"获取文件信息失败: {str(e)}")
     
     @staticmethod
+    async def delete_file(filename: str):
+        """删除文件"""
+        try:
+            file_path = DEBUG_CAPTURES_DIR / filename
+            info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
+            
+            if not file_path.exists():
+                raise Exception("文件不存在")
+            
+            # 删除主文件
+            file_path.unlink()
+            
+            # 删除对应的参数文件（如果存在）
+            if info_path.exists():
+                info_path.unlink()
+            
+            return {"message": f"文件 {filename} 删除成功"}
+            
+        except Exception as e:
+            raise Exception(f"删除文件失败: {str(e)}")
+    
+    @staticmethod
     async def set_noise_reduction(level: int):
-        """设置降噪级别"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")

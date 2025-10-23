@@ -1560,6 +1560,9 @@ class DebugConsole {
                         <button class="btn btn-secondary" onclick="window.debugConsole.showFileInfo('${file.name}')">
                             详情
                         </button>
+                        <button class="btn btn-danger" onclick="window.debugConsole.deleteFile('${file.name}')">
+                            删除
+                        </button>
                     </div>
                 </div>
             `;
@@ -1631,6 +1634,37 @@ class DebugConsole {
         } catch (error) {
             console.error('[DebugConsole] 获取文件信息失败:', error);
             this.showNotification('获取文件信息失败', 'error');
+        }
+    }
+    
+    /**
+     * 删除文件
+     */
+    async deleteFile(filename) {
+        // 确认删除
+        if (!confirm(`确定要删除文件 "${filename}" 吗？\n\n此操作不可撤销！`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/debug/files/${encodeURIComponent(filename)}`, {
+                method: 'DELETE'
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '删除失败');
+            }
+            
+            const result = await response.json();
+            this.showNotification(result.message || '文件删除成功', 'success');
+            
+            // 重新加载文件列表
+            await this.loadFiles();
+            
+        } catch (error) {
+            console.error('[DebugConsole] 删除文件失败:', error);
+            this.showNotification(`删除文件失败: ${error.message}`, 'error');
         }
     }
     

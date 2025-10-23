@@ -497,3 +497,12 @@ async def get_file_info(filename: str):
         return await DebugFileService.get_file_info(filename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/debug/files/{filename}")
+async def delete_capture_file(filename: str):
+    """删除拍摄文件"""
+    try:
+        return await DebugFileService.delete_file(filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
