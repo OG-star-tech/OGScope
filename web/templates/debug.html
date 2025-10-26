@@ -16,14 +16,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/icon-32x32.png">
     
     <!-- Stylesheets -->
-    <link rel="stylesheet" href="/static/css/core/base.css">
-    <link rel="stylesheet" href="/static/css/core/layout.css">
-    <link rel="stylesheet" href="/static/css/core/components.css">
-    <link rel="stylesheet" href="/static/css/core/themes.css">
-    <link rel="stylesheet" href="/static/css/debug/debug-base.css">
-    <link rel="stylesheet" href="/static/css/debug/debug-components.css">
-    <link rel="stylesheet" href="/static/css/debug/debug-layout.css">
-    <link rel="stylesheet" href="/static/css/shared/animations.css">
+    <link rel="stylesheet" href="/static/css/debug.css">
     
     <!-- Preload Critical Resources -->
     <link rel="preload" href="/static/js/debug.js" as="script">
@@ -77,6 +70,9 @@
                             <button class="histogram-toggle" id="histogram-settings">
                                 ⚙️
                             </button>
+                            <button class="histogram-toggle" id="fullscreen-toggle" title="全屏预览">
+                                ⛶ 全屏
+                            </button>
                         </div>
                         
                         <!-- 直方图叠加显示 -->
@@ -124,6 +120,15 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- 全屏预览容器 -->
+                    <div class="fullscreen-preview" id="fullscreen-preview">
+                        <div class="fullscreen-container">
+                            <img id="fullscreen-image" src="/static/images/placeholder-camera.png" alt="全屏预览">
+                            <button class="fullscreen-close" id="fullscreen-close">✕ 关闭</button>
+                        </div>
+                    </div>
+                    
                     <div class="preview-controls">
                         <button class="btn btn-primary" id="start-preview">
                             <span class="btn-icon">▶️</span>

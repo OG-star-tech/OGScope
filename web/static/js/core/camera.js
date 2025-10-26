@@ -1,23 +1,21 @@
+/* OGScope - 相机控制模块 */
+
 /**
- * OGScope 相机控制模块
- * 处理相机相关的所有功能
+ * 相机控制器类
  */
-
-import { cameraAPI } from '../shared/api.js';
-import { Utils, EventEmitter } from '../shared/utils.js';
-import { APP_CONFIG, EVENTS } from '../shared/constants.js';
-
-export class CameraController extends EventEmitter {
+class CameraController {
     constructor() {
-        super();
+        this.videoElement = null;
+        this.stream = null;
+        this.isInitialized = false;
         this.isStreaming = false;
-        this.isRecording = false;
-        this.settings = {
-            exposure: APP_CONFIG.CAMERA.DEFAULT_EXPOSURE,
-            gain: APP_CONFIG.CAMERA.DEFAULT_GAIN,
-            brightness: APP_CONFIG.CAMERA.DEFAULT_BRIGHTNESS
+        this.currentSettings = {
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            quality: 85
         };
-        this.streamElement = null;
+        this.eventListeners = new Map();
         this.init();
     }
 
@@ -25,277 +23,480 @@ export class CameraController extends EventEmitter {
      * 初始化相机控制器
      */
     init() {
-        this.streamElement = document.getElementById('mjpeg-stream');
-        this.setupEventListeners();
-        this.loadSettings();
-    }
-
-    /**
-     * 设置事件监听器
-     */
-    setupEventListeners() {
-        // 视频流元素事件
-        if (this.streamElement) {
-            this.streamElement.addEventListener('load', () => {
-                this.emit(EVENTS.CAMERA_STREAM_START);
-            });
-            
-            this.streamElement.addEventListener('error', () => {
-                this.emit(EVENTS.CAMERA_STREAM_ERROR);
-            });
+        this.videoElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.VIDEO_STREAM);
+        if (this.videoElement) {
+            this.setupVideoElement();
         }
+    }
 
-        // 网络状态监听
-        window.addEventListener('online', () => {
-            this.emit(EVENTS.NETWORK_ONLINE);
+    /**
+     * 设置视频元素
+     */
+    setupVideoElement() {
+        this.videoElement.addEventListener('loadedmetadata', () => {
+            console.log('视频元数据已加载');
+            this.emit('metadataLoaded');
         });
-        
-        window.addEventListener('offline', () => {
-            this.emit(EVENTS.NETWORK_OFFLINE);
+
+        this.videoElement.addEventListener('canplay', () => {
+            console.log('视频可以播放');
+            this.emit('canPlay');
+        });
+
+        this.videoElement.addEventListener('play', () => {
+            console.log('视频开始播放');
+            this.isStreaming = true;
+            this.emit('play');
+        });
+
+        this.videoElement.addEventListener('pause', () => {
+            console.log('视频暂停');
+            this.isStreaming = false;
+            this.emit('pause');
+        });
+
+        this.videoElement.addEventListener('error', (event) => {
+            console.error('视频错误:', event);
+            this.emit('error', event);
+        });
+
+        this.videoElement.addEventListener('ended', () => {
+            console.log('视频播放结束');
+            this.isStreaming = false;
+            this.emit('ended');
         });
     }
 
     /**
-     * 开始视频流
-     * @returns {Promise<boolean>} 是否成功启动
+     * 初始化视频流
+     */
+    async initVideoStream() {
+        try {
+            console.log('正在初始化视频流...');
+            
+            // 尝试获取用户媒体
+            const constraints = {
+                video: {
+                    width: { ideal: this.currentSettings.width },
+                    height: { ideal: this.currentSettings.height },
+                    frameRate: { ideal: this.currentSettings.fps }
+                }
+            };
+
+            this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+            
+            if (this.videoElement) {
+                this.videoElement.srcObject = this.stream;
+                this.videoElement.play();
+            }
+            
+            this.isInitialized = true;
+            this.emit('streamInitialized');
+            
+            console.log('视频流初始化成功');
+            return true;
+        } catch (error) {
+            console.error('视频流初始化失败:', error);
+            this.emit('streamError', error);
+            
+            // 使用占位符
+            this.usePlaceholder();
+            return false;
+        }
+    }
+
+    /**
+     * 使用占位符
+     */
+    usePlaceholder() {
+        if (this.videoElement) {
+            this.videoElement.style.background = 'radial-gradient(circle at 50% 50%, #1a1a1a 0%, #000000 100%)';
+            this.videoElement.style.display = 'block';
+        }
+        this.isInitialized = true;
+        this.emit('placeholderUsed');
+    }
+
+    /**
+     * 开始流媒体
      */
     async startStream() {
-        try {
-            if (this.isStreaming) {
-                console.log('[Camera] 视频流已在运行');
+        if (!this.isInitialized) {
+            await this.initVideoStream();
+        }
+        
+        if (this.videoElement && this.stream) {
+            try {
+                await this.videoElement.play();
+                this.isStreaming = true;
+                this.emit('streamStarted');
                 return true;
+            } catch (error) {
+                console.error('开始流媒体失败:', error);
+                this.emit('streamError', error);
+                return false;
             }
-
-            console.log('[Camera] 启动视频流...');
-            
-            // 更新视频流URL，添加时间戳防止缓存
-            const timestamp = Date.now();
-            this.streamElement.src = `${APP_CONFIG.CAMERA_PREVIEW_URL}?t=${timestamp}`;
-            
-            this.isStreaming = true;
-            this.emit(EVENTS.CAMERA_STREAM_START);
-            
-            console.log('[Camera] 视频流启动成功');
-            return true;
-        } catch (error) {
-            console.error('[Camera] 视频流启动失败:', error);
-            this.emit(EVENTS.CAMERA_STREAM_ERROR, error);
-            return false;
         }
+        return false;
     }
 
     /**
-     * 停止视频流
-     * @returns {Promise<boolean>} 是否成功停止
+     * 停止流媒体
      */
-    async stopStream() {
-        try {
-            if (!this.isStreaming) {
-                console.log('[Camera] 视频流未在运行');
-                return true;
+    stopStream() {
+        if (this.videoElement) {
+            this.videoElement.pause();
+        }
+        
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => {
+                track.stop();
+            });
+            this.stream = null;
+        }
+        
+        this.isStreaming = false;
+        this.emit('streamStopped');
+    }
+
+    /**
+     * 设置相机参数
+     * @param {Object} settings - 相机设置
+     */
+    async setCameraSettings(settings) {
+        this.currentSettings = { ...this.currentSettings, ...settings };
+        
+        if (this.stream) {
+            const videoTrack = this.stream.getVideoTracks()[0];
+            if (videoTrack) {
+                try {
+                    await videoTrack.applyConstraints({
+                        width: { ideal: this.currentSettings.width },
+                        height: { ideal: this.currentSettings.height },
+                        frameRate: { ideal: this.currentSettings.fps }
+                    });
+                    this.emit('settingsUpdated', this.currentSettings);
+                } catch (error) {
+                    console.error('设置相机参数失败:', error);
+                    this.emit('settingsError', error);
+                }
             }
-
-            console.log('[Camera] 停止视频流...');
-            
-            // 停止视频流
-            this.streamElement.src = '';
-            this.isStreaming = false;
-            this.emit(EVENTS.CAMERA_STREAM_STOP);
-            
-            console.log('[Camera] 视频流停止成功');
-            return true;
-        } catch (error) {
-            console.error('[Camera] 视频流停止失败:', error);
-            return false;
         }
     }
 
     /**
-     * 切换视频流状态
-     * @returns {Promise<boolean>} 新的流状态
+     * 获取相机信息
+     * @returns {Object} 相机信息
      */
-    async toggleStream() {
-        if (this.isStreaming) {
-            await this.stopStream();
-            return false;
-        } else {
-            await this.startStream();
-            return true;
-        }
+    getCameraInfo() {
+        if (!this.stream) return null;
+        
+        const videoTrack = this.stream.getVideoTracks()[0];
+        if (!videoTrack) return null;
+        
+        const settings = videoTrack.getSettings();
+        const capabilities = videoTrack.getCapabilities();
+        
+        return {
+            deviceId: settings.deviceId,
+            label: videoTrack.label,
+            settings: settings,
+            capabilities: capabilities,
+            currentSettings: this.currentSettings
+        };
     }
 
     /**
-     * 更新相机设置
-     * @param {Object} newSettings - 新的设置
-     * @returns {Promise<boolean>} 是否更新成功
+     * 拍照
+     * @returns {Promise<Blob>} 图片数据
      */
-    async updateSettings(newSettings) {
-        try {
-            console.log('[Camera] 更新相机设置:', newSettings);
-            
-            // 验证设置范围
-            const validatedSettings = this.validateSettings(newSettings);
-            
-            // 发送到API
-            await cameraAPI.updateSettings(validatedSettings);
-            
-            // 更新本地设置
-            this.settings = { ...this.settings, ...validatedSettings };
-            
-            // 保存到本地存储
-            this.saveSettings();
-            
-            console.log('[Camera] 相机设置更新成功');
-            return true;
-        } catch (error) {
-            console.error('[Camera] 相机设置更新失败:', error);
-            return false;
-        }
-    }
-
-    /**
-     * 验证设置范围
-     * @param {Object} settings - 要验证的设置
-     * @returns {Object} 验证后的设置
-     */
-    validateSettings(settings) {
-        const validated = {};
-        
-        if (settings.exposure !== undefined) {
-            validated.exposure = Utils.clamp(
-                settings.exposure,
-                APP_CONFIG.CAMERA.MIN_EXPOSURE,
-                APP_CONFIG.CAMERA.MAX_EXPOSURE
-            );
+    async capturePhoto() {
+        if (!this.videoElement || !this.isStreaming) {
+            throw new Error('相机未初始化或未在流媒体状态');
         }
         
-        if (settings.gain !== undefined) {
-            validated.gain = Utils.clamp(
-                settings.gain,
-                APP_CONFIG.CAMERA.MIN_GAIN,
-                APP_CONFIG.CAMERA.MAX_GAIN
-            );
-        }
-        
-        if (settings.brightness !== undefined) {
-            validated.brightness = Utils.clamp(settings.brightness, 0.1, 3.0);
-        }
-        
-        return validated;
-    }
-
-    /**
-     * 拍摄照片
-     * @returns {Promise<Object>} 拍摄结果
-     */
-    async captureImage() {
-        try {
-            console.log('[Camera] 拍摄照片...');
-            const result = await cameraAPI.captureImage();
-            console.log('[Camera] 照片拍摄成功');
-            return result;
-        } catch (error) {
-            console.error('[Camera] 照片拍摄失败:', error);
-            throw error;
-        }
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            canvas.width = this.videoElement.videoWidth;
+            canvas.height = this.videoElement.videoHeight;
+            
+            context.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
+            
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    resolve(blob);
+                } else {
+                    reject(new Error('拍照失败'));
+                }
+            }, 'image/jpeg', this.currentSettings.quality / 100);
+        });
     }
 
     /**
      * 开始录制
-     * @returns {Promise<boolean>} 是否成功开始
+     * @returns {Promise<MediaRecorder>} 录制器
      */
     async startRecording() {
-        try {
-            if (this.isRecording) {
-                console.log('[Camera] 录制已在进行中');
-                return true;
-            }
-
-            console.log('[Camera] 开始录制...');
-            await cameraAPI.startRecording();
-            this.isRecording = true;
-            console.log('[Camera] 录制开始成功');
-            return true;
-        } catch (error) {
-            console.error('[Camera] 录制开始失败:', error);
-            return false;
+        if (!this.stream) {
+            throw new Error('没有可用的视频流');
         }
+        
+        const options = {
+            mimeType: 'video/webm;codecs=vp9',
+            videoBitsPerSecond: 2500000
+        };
+        
+        const recorder = new MediaRecorder(this.stream, options);
+        const chunks = [];
+        
+        recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                chunks.push(event.data);
+            }
+        };
+        
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            this.emit('recordingStopped', blob);
+        };
+        
+        recorder.start();
+        this.emit('recordingStarted', recorder);
+        
+        return recorder;
     }
 
     /**
      * 停止录制
-     * @returns {Promise<boolean>} 是否成功停止
+     * @param {MediaRecorder} recorder - 录制器
      */
-    async stopRecording() {
-        try {
-            if (!this.isRecording) {
-                console.log('[Camera] 录制未在进行中');
-                return true;
+    stopRecording(recorder) {
+        if (recorder && recorder.state === 'recording') {
+            recorder.stop();
+        }
+    }
+
+    /**
+     * 获取视频帧
+     * @returns {ImageData|null} 视频帧数据
+     */
+    getVideoFrame() {
+        if (!this.videoElement || !this.isStreaming) {
+            return null;
+        }
+        
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        
+        canvas.width = this.videoElement.videoWidth;
+        canvas.height = this.videoElement.videoHeight;
+        
+        context.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
+        
+        return context.getImageData(0, 0, canvas.width, canvas.height);
+    }
+
+    /**
+     * 分析图像质量
+     * @returns {Object} 质量分析结果
+     */
+    analyzeImageQuality() {
+        const frameData = this.getVideoFrame();
+        if (!frameData) {
+            return { quality: 0, sharpness: 0, brightness: 0, contrast: 0 };
+        }
+        
+        const data = frameData.data;
+        const width = frameData.width;
+        const height = frameData.height;
+        
+        let totalBrightness = 0;
+        let totalContrast = 0;
+        let edgeCount = 0;
+        
+        // 计算亮度和对比度
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const brightness = (r + g + b) / 3;
+            totalBrightness += brightness;
+        }
+        
+        const avgBrightness = totalBrightness / (data.length / 4);
+        
+        // 计算对比度
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const brightness = (r + g + b) / 3;
+            totalContrast += Math.pow(brightness - avgBrightness, 2);
+        }
+        
+        const contrast = Math.sqrt(totalContrast / (data.length / 4));
+        
+        // 计算锐度（边缘检测）
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                const r = data[idx];
+                const g = data[idx + 1];
+                const b = data[idx + 2];
+                const brightness = (r + g + b) / 3;
+                
+                // Sobel算子
+                const gx = Math.abs(
+                    -data[idx - 4] + data[idx + 4] +
+                    -2 * data[idx - width * 4] + 2 * data[idx + width * 4] +
+                    -data[idx - (width + 1) * 4] + data[idx + (width + 1) * 4]
+                );
+                
+                const gy = Math.abs(
+                    -data[idx - width * 4] + data[idx + width * 4] +
+                    -2 * data[idx - 4] + 2 * data[idx + 4] +
+                    -data[idx - (width - 1) * 4] + data[idx + (width - 1) * 4]
+                );
+                
+                const gradient = Math.sqrt(gx * gx + gy * gy);
+                if (gradient > 50) {
+                    edgeCount++;
+                }
             }
-
-            console.log('[Camera] 停止录制...');
-            await cameraAPI.stopRecording();
-            this.isRecording = false;
-            console.log('[Camera] 录制停止成功');
-            return true;
-        } catch (error) {
-            console.error('[Camera] 录制停止失败:', error);
-            return false;
         }
-    }
-
-    /**
-     * 获取相机状态
-     * @returns {Promise<Object>} 相机状态
-     */
-    async getStatus() {
-        try {
-            return await cameraAPI.getStatus();
-        } catch (error) {
-            console.error('[Camera] 获取状态失败:', error);
-            return {
-                connected: false,
-                streaming: this.isStreaming,
-                recording: this.isRecording,
-                error: error.message
-            };
-        }
-    }
-
-    /**
-     * 保存设置到本地存储
-     */
-    saveSettings() {
-        Utils.saveToStorage('camera-settings', this.settings);
-    }
-
-    /**
-     * 从本地存储加载设置
-     */
-    loadSettings() {
-        const savedSettings = Utils.loadFromStorage('camera-settings', null);
-        if (savedSettings) {
-            this.settings = { ...this.settings, ...savedSettings };
-        }
-    }
-
-    /**
-     * 获取当前设置
-     * @returns {Object} 当前设置
-     */
-    getSettings() {
-        return { ...this.settings };
-    }
-
-    /**
-     * 重置设置为默认值
-     */
-    resetSettings() {
-        this.settings = {
-            exposure: APP_CONFIG.CAMERA.DEFAULT_EXPOSURE,
-            gain: APP_CONFIG.CAMERA.DEFAULT_GAIN,
-            brightness: APP_CONFIG.CAMERA.DEFAULT_BRIGHTNESS
+        
+        const sharpness = edgeCount / ((width - 2) * (height - 2));
+        const quality = Math.min(100, (sharpness * 1000 + contrast * 10 + avgBrightness / 2.55) / 3);
+        
+        return {
+            quality: Math.round(quality),
+            sharpness: Math.round(sharpness * 100),
+            brightness: Math.round(avgBrightness / 2.55),
+            contrast: Math.round(contrast)
         };
-        this.saveSettings();
+    }
+
+    /**
+     * 检测星点
+     * @returns {Array} 星点列表
+     */
+    detectStars() {
+        const frameData = this.getVideoFrame();
+        if (!frameData) {
+            return [];
+        }
+        
+        const data = frameData.data;
+        const width = frameData.width;
+        const height = frameData.height;
+        const stars = [];
+        
+        // 简单的星点检测算法
+        for (let y = 2; y < height - 2; y++) {
+            for (let x = 2; x < width - 2; x++) {
+                const idx = (y * width + x) * 4;
+                const r = data[idx];
+                const g = data[idx + 1];
+                const b = data[idx + 2];
+                const brightness = (r + g + b) / 3;
+                
+                // 检查是否为亮点
+                if (brightness > 200) {
+                    let isStar = true;
+                    
+                    // 检查周围像素
+                    for (let dy = -2; dy <= 2 && isStar; dy++) {
+                        for (let dx = -2; dx <= 2 && isStar; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            
+                            const checkIdx = ((y + dy) * width + (x + dx)) * 4;
+                            const checkR = data[checkIdx];
+                            const checkG = data[checkIdx + 1];
+                            const checkB = data[checkIdx + 2];
+                            const checkBrightness = (checkR + checkG + checkB) / 3;
+                            
+                            if (checkBrightness >= brightness) {
+                                isStar = false;
+                            }
+                        }
+                    }
+                    
+                    if (isStar) {
+                        stars.push({
+                            x: x,
+                            y: y,
+                            brightness: brightness,
+                            size: 1
+                        });
+                    }
+                }
+            }
+        }
+        
+        return stars;
+    }
+
+    /**
+     * 添加事件监听器
+     * @param {string} event - 事件名
+     * @param {Function} callback - 回调函数
+     */
+    on(event, callback) {
+        if (!this.eventListeners.has(event)) {
+            this.eventListeners.set(event, []);
+        }
+        this.eventListeners.get(event).push(callback);
+    }
+
+    /**
+     * 移除事件监听器
+     * @param {string} event - 事件名
+     * @param {Function} callback - 回调函数
+     */
+    off(event, callback) {
+        if (this.eventListeners.has(event)) {
+            const callbacks = this.eventListeners.get(event);
+            const index = callbacks.indexOf(callback);
+            if (index > -1) {
+                callbacks.splice(index, 1);
+            }
+        }
+    }
+
+    /**
+     * 触发事件
+     * @param {string} event - 事件名
+     * @param {...any} args - 参数
+     */
+    emit(event, ...args) {
+        if (this.eventListeners.has(event)) {
+            this.eventListeners.get(event).forEach(callback => {
+                try {
+                    callback(...args);
+                } catch (error) {
+                    console.error('相机事件回调执行失败:', error);
+                }
+            });
+        }
+    }
+
+    /**
+     * 销毁相机控制器
+     */
+    destroy() {
+        this.stopStream();
+        this.eventListeners.clear();
+        this.isInitialized = false;
     }
 }
+
+// 创建相机控制器实例
+const cameraController = new CameraController();
+
+// 导出相机控制器
+window.OGScopeCamera = {
+    CameraController,
+    cameraController
+};

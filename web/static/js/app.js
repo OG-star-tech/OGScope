@@ -1,26 +1,23 @@
-/**
- * OGScope 革命性电子极轴镜 - 横屏全屏应用
- * 支持MJPEG视频流、星点识别、极轴校准、PWA功能
- */
+/* OGScope - 主应用 */
 
+/**
+ * OGScope主应用类
+ */
 class OGScopeApp {
     constructor() {
-        this.isStreaming = false;
-        this.isAligning = false;
-        this.isZoomed = false;
-        this.alignmentProgress = 0;
-        this.alignmentStatus = 'idle';
-        this.cameraSettings = {
-            exposure: 10,
-            gain: 1.0,
-            brightness: 1.0
-        };
-        this.deferredPrompt = null;
-        this.isInstalled = false;
-        this.networkStatus = 'online';
-        this.particles = [];
-        this.maxParticles = 30;
-        
+        this.isInitialized = false;
+        this.isLoaded = false;
+        this.loadingProgress = 0;
+        this.loadingSteps = [
+            { progress: 20, text: '正在连接设备...' },
+            { progress: 40, text: '正在初始化相机...' },
+            { progress: 60, text: '正在加载视频流...' },
+            { progress: 80, text: '正在加载组件...' },
+            { progress: 100, text: '加载完成' }
+        ];
+        this.currentStep = 0;
+        this.loadingInterval = null;
+        this.dataUpdateInterval = null;
         this.init();
     }
 
@@ -28,45 +25,45 @@ class OGScopeApp {
      * 初始化应用
      */
     async init() {
-        console.log('[OGScope] 初始化革命性电子极轴镜...');
-        
-        // 显示加载屏幕
-        this.showLoadingScreen();
-        
-        // 注册Service Worker
-        await this.registerServiceWorker();
-        
-        // 设置事件监听器
-        this.setupEventListeners();
-        
-        // 初始化UI
-        this.initUI();
-        
-        // 检查网络状态
-        this.updateNetworkStatus();
-        
-        // 初始化粒子背景
-        this.initParticles();
-        
-        // 设置PWA安装提示
-        this.setupInstallPrompt();
-        
-        // 模拟加载过程
-        await this.simulateLoading();
-        
-        // 隐藏加载屏幕
-        this.hideLoadingScreen();
-        
-        console.log('[OGScope] 初始化完成');
+        try {
+            console.log('OGScope应用初始化开始...');
+            
+            // 显示加载屏幕
+            this.showLoadingScreen();
+            
+            // 开始加载过程
+            await this.startLoadingProcess();
+            
+            // 初始化各个模块
+            await this.initializeModules();
+            
+            // 设置事件监听
+            this.setupEventListeners();
+            
+            // 开始数据更新
+            this.startDataUpdates();
+            
+            // 隐藏加载屏幕
+            this.hideLoadingScreen();
+            
+            this.isInitialized = true;
+            this.isLoaded = true;
+            
+            console.log('OGScope应用初始化完成');
+            
+        } catch (error) {
+            console.error('应用初始化失败:', error);
+            this.handleInitializationError(error);
+        }
     }
 
     /**
      * 显示加载屏幕
      */
     showLoadingScreen() {
-        const loadingScreen = document.getElementById('loading-screen');
+        const loadingScreen = document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_SCREEN);
         if (loadingScreen) {
-            loadingScreen.classList.remove('hidden');
+            loadingScreen.classList.remove(OGScopeConstants.CSS_CLASSES.HIDDEN);
         }
     }
 
@@ -74,747 +71,363 @@ class OGScopeApp {
      * 隐藏加载屏幕
      */
     hideLoadingScreen() {
-        const loadingScreen = document.getElementById('loading-screen');
+        const loadingScreen = document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_SCREEN);
+        const app = document.getElementById(OGScopeConstants.ELEMENT_IDS.APP);
+        
         if (loadingScreen) {
-            setTimeout(() => {
-                loadingScreen.classList.add('hidden');
-            }, 500);
+            loadingScreen.classList.add(OGScopeConstants.CSS_CLASSES.HIDDEN);
         }
-    }
-
-    /**
-     * 模拟加载过程
-     */
-    async simulateLoading() {
-        const loadingProgress = document.getElementById('loading-progress');
-        const loadingText = document.getElementById('loading-text');
         
-        const steps = [
-            { progress: 20, text: '正在初始化系统...' },
-            { progress: 40, text: '正在连接摄像头...' },
-            { progress: 60, text: '正在加载星图数据库...' },
-            { progress: 80, text: '正在校准系统...' },
-            { progress: 100, text: '系统就绪' }
-        ];
-        
-        for (const step of steps) {
-            await new Promise(resolve => setTimeout(resolve, 800));
-            if (loadingProgress) {
-                loadingProgress.style.width = step.progress + '%';
-            }
-            if (loadingText) {
-                loadingText.textContent = step.text;
-            }
+        if (app) {
+            app.classList.add(OGScopeConstants.CSS_CLASSES.LOADED);
         }
     }
 
     /**
-     * 注册Service Worker
+     * 开始加载过程
      */
-    async registerServiceWorker() {
-        if ('serviceWorker' in navigator) {
-            try {
-                const registration = await navigator.serviceWorker.register('/static/sw.js');
-                console.log('[OGScope] Service Worker 注册成功:', registration);
-            } catch (error) {
-                console.error('[OGScope] Service Worker 注册失败:', error);
-            }
+    async startLoadingProcess() {
+        return new Promise((resolve) => {
+            this.loadingInterval = setInterval(() => {
+                if (this.currentStep < this.loadingSteps.length) {
+                    const step = this.loadingSteps[this.currentStep];
+                    this.updateLoadingProgress(step.progress, step.text);
+                    this.currentStep++;
+                } else {
+                    clearInterval(this.loadingInterval);
+                    setTimeout(resolve, 500);
+                }
+            }, 600);
+        });
+    }
+
+    /**
+     * 更新加载进度
+     * @param {number} progress - 进度百分比
+     * @param {string} text - 状态文本
+     */
+    updateLoadingProgress(progress, text) {
+        this.loadingProgress = progress;
+        
+        const progressBar = document.getElementById(OGScopeConstants.ELEMENT_IDS.PROGRESS_BAR);
+        const loadingStatus = document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_STATUS);
+        
+        if (progressBar) {
+            progressBar.style.width = progress + '%';
+        }
+        
+        if (loadingStatus) {
+            loadingStatus.textContent = text;
         }
     }
 
     /**
-     * 设置事件监听器
+     * 初始化各个模块
+     */
+    async initializeModules() {
+        try {
+            // 初始化相机
+            if (window.OGScopeCamera && window.OGScopeCamera.cameraController) {
+                await window.OGScopeCamera.cameraController.initVideoStream();
+            }
+            
+            // 初始化校准
+            if (window.OGScopeAlignment && window.OGScopeAlignment.alignmentController) {
+                // 校准模块已在构造函数中初始化
+            }
+            
+            // 初始化UI
+            if (window.OGScopeUI && window.OGScopeUI.uiController) {
+                // UI模块已在构造函数中初始化
+            }
+            
+            console.log('所有模块初始化完成');
+        } catch (error) {
+            console.error('模块初始化失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 设置事件监听
      */
     setupEventListeners() {
-        // 视频控制按钮
-        const startStreamBtn = document.getElementById('start-stream');
-        const stopStreamBtn = document.getElementById('stop-stream');
-        const zoomToggleBtn = document.getElementById('zoom-toggle');
-        
-        if (startStreamBtn) {
-            startStreamBtn.addEventListener('click', () => this.startVideoStream());
-        }
-        if (stopStreamBtn) {
-            stopStreamBtn.addEventListener('click', () => this.stopVideoStream());
-        }
-        if (zoomToggleBtn) {
-            zoomToggleBtn.addEventListener('click', () => this.toggleVideoZoom());
-        }
-        
-        // 校准控制按钮
-        const startAlignmentBtn = document.getElementById('start-alignment');
-        const stopAlignmentBtn = document.getElementById('stop-alignment');
-        
-        if (startAlignmentBtn) {
-            startAlignmentBtn.addEventListener('click', () => this.startPolarAlignment());
-        }
-        if (stopAlignmentBtn) {
-            stopAlignmentBtn.addEventListener('click', () => this.stopPolarAlignment());
-        }
-        
-        // PWA安装按钮
-        const installAppBtn = document.getElementById('install-app');
-        const dismissInstallBtn = document.getElementById('dismiss-install');
-        
-        if (installAppBtn) {
-            installAppBtn.addEventListener('click', () => this.installPWA());
-        }
-        if (dismissInstallBtn) {
-            dismissInstallBtn.addEventListener('click', () => this.dismissInstallPrompt());
-        }
-        
-        // 网络状态监听
-        window.addEventListener('online', () => this.updateNetworkStatus());
-        window.addEventListener('offline', () => this.updateNetworkStatus());
-        
-        // 键盘快捷键
-        this.setupKeyboardShortcuts();
-        
-        // 触摸手势
-        this.setupTouchGestures();
-    }
-
-    /**
-     * 初始化UI
-     */
-    initUI() {
-        this.updateSystemStatus('ready', '系统就绪');
-        this.updateConnectionStatus('online');
-        this.updateVideoInfo();
-        this.updateAlignmentProgress(0);
-        this.updateAlignmentMetrics();
-        this.updateCelestialInfo();
-    }
-
-    /**
-     * 更新系统状态
-     */
-    updateSystemStatus(status, text) {
-        const statusDisplay = document.getElementById('status-display');
-        if (statusDisplay) {
-            statusDisplay.textContent = text;
-        }
-        
-        const modeDisplay = document.getElementById('mode-display');
-        if (modeDisplay) {
-            modeDisplay.textContent = status === 'ready' ? '就绪' : '检测中...';
-        }
-    }
-
-    /**
-     * 更新连接状态
-     */
-    updateConnectionStatus(status) {
-        this.networkStatus = status;
-        const networkStatus = document.getElementById('network-status');
-        if (networkStatus) {
-            networkStatus.className = `network-status ${status}`;
-            const statusText = networkStatus.querySelector('.status-text');
-            if (statusText) {
-                statusText.textContent = status === 'online' ? '在线' : '离线';
-            }
-        }
-    }
-
-    /**
-     * 更新网络状态
-     */
-    updateNetworkStatus() {
-        const isOnline = navigator.onLine;
-        this.updateConnectionStatus(isOnline ? 'online' : 'offline');
-    }
-
-    /**
-     * 更新视频信息
-     */
-    updateVideoInfo() {
-        // 模拟视频信息更新
-        const resolution = document.getElementById('resolution');
-        const fps = document.getElementById('fps');
-        const exposureDisplay = document.getElementById('exposure-display');
-        
-        if (resolution) resolution.textContent = '1920×1080';
-        if (fps) fps.textContent = '30fps';
-        if (exposureDisplay) exposureDisplay.textContent = this.cameraSettings.exposure + 'ms';
-    }
-
-    /**
-     * 开始视频流
-     */
-    async startVideoStream() {
-        try {
-            console.log('[OGScope] 开始视频流...');
-            this.isStreaming = true;
+        // 监听相机事件
+        if (window.OGScopeCamera && window.OGScopeCamera.cameraController) {
+            window.OGScopeCamera.cameraController.on('streamInitialized', () => {
+                console.log('视频流初始化成功');
+            });
             
-            const startBtn = document.getElementById('start-stream');
-            const stopBtn = document.getElementById('stop-stream');
-            
-            if (startBtn) startBtn.disabled = true;
-            if (stopBtn) stopBtn.disabled = false;
-            
-            // 更新视频流URL（添加时间戳防止缓存）
-            const videoStream = document.getElementById('mjpeg-stream');
-            if (videoStream) {
-                videoStream.src = `/api/camera/preview?t=${Date.now()}`;
-            }
-            
-            this.showNotification('success', '视频流已启动', '摄像头连接成功');
-            
-        } catch (error) {
-            console.error('[OGScope] 启动视频流失败:', error);
-            this.showNotification('error', '视频流启动失败', error.message);
-        }
-    }
-
-    /**
-     * 停止视频流
-     */
-    stopVideoStream() {
-        console.log('[OGScope] 停止视频流...');
-        this.isStreaming = false;
-        
-        const startBtn = document.getElementById('start-stream');
-        const stopBtn = document.getElementById('stop-stream');
-        
-        if (startBtn) startBtn.disabled = false;
-        if (stopBtn) stopBtn.disabled = true;
-        
-        const videoStream = document.getElementById('mjpeg-stream');
-        if (videoStream) {
-            videoStream.src = '';
+            window.OGScopeCamera.cameraController.on('streamError', (error) => {
+                console.error('视频流错误:', error);
+            });
         }
         
-        this.showNotification('info', '视频流已停止', '摄像头连接已断开');
-    }
-
-    /**
-     * 切换视频缩放
-     */
-    toggleVideoZoom() {
-        this.isZoomed = !this.isZoomed;
-        const videoStream = document.getElementById('mjpeg-stream');
-        
-        if (videoStream) {
-            if (this.isZoomed) {
-                videoStream.classList.add('zoomed');
-                this.showNotification('info', '视频已放大', '双击屏幕可恢复原始大小');
-            } else {
-                videoStream.classList.remove('zoomed');
-                this.showNotification('info', '视频已恢复', '双击屏幕可放大视频');
-            }
-        }
-    }
-
-    /**
-     * 开始极轴校准
-     */
-    async startPolarAlignment() {
-        try {
-            console.log('[OGScope] 开始极轴校准...');
-            this.isAligning = true;
-            this.alignmentStatus = 'starting';
+        // 监听校准事件
+        if (window.OGScopeAlignment && window.OGScopeAlignment.alignmentController) {
+            window.OGScopeAlignment.alignmentController.on('alignmentComplete', (data) => {
+                console.log('校准完成:', data);
+            });
             
-            const startBtn = document.getElementById('start-alignment');
-            const stopBtn = document.getElementById('stop-alignment');
-            
-            if (startBtn) startBtn.disabled = true;
-            if (stopBtn) stopBtn.disabled = false;
-            
-            // 显示校准进度环
-            const alignmentRing = document.getElementById('alignment-ring');
-            if (alignmentRing) {
-                alignmentRing.classList.add('active');
-            }
-            
-            // 开始校准流程
-            await this.startAlignmentProcess();
-            
-        } catch (error) {
-            console.error('[OGScope] 启动极轴校准失败:', error);
-            this.showNotification('error', '校准启动失败', error.message);
-        }
-    }
-
-    /**
-     * 停止极轴校准
-     */
-    stopPolarAlignment() {
-        console.log('[OGScope] 停止极轴校准...');
-        this.isAligning = false;
-        this.alignmentStatus = 'idle';
-        this.alignmentProgress = 0;
-        
-        const startBtn = document.getElementById('start-alignment');
-        const stopBtn = document.getElementById('stop-alignment');
-        
-        if (startBtn) startBtn.disabled = false;
-        if (stopBtn) stopBtn.disabled = true;
-        
-        // 隐藏校准进度环
-        const alignmentRing = document.getElementById('alignment-ring');
-        if (alignmentRing) {
-            alignmentRing.classList.remove('active');
+            window.OGScopeAlignment.alignmentController.on('alignmentError', (error) => {
+                console.error('校准错误:', error);
+            });
         }
         
-        this.updateAlignmentProgress(0);
-        this.updateAlignmentStatus('校准已停止');
+        // 监听窗口事件
+        window.addEventListener('beforeunload', () => {
+            this.cleanup();
+        });
         
-        this.showNotification('info', '校准已停止', '极轴校准流程已中断');
-    }
-
-    /**
-     * 开始校准流程
-     */
-    async startAlignmentProcess() {
-        const steps = [
-            { status: 'starting', progress: 10, text: '系统启动中...' },
-            { status: 'identifying', progress: 30, text: '天区识别中...' },
-            { status: 'calibrating', progress: 60, text: '校准完成' },
-            { status: 'targeting', progress: 80, text: '瞄准中...' },
-            { status: 'rendering', progress: 100, text: '渲染天空数据...' }
-        ];
+        window.addEventListener('error', (event) => {
+            console.error('全局错误:', event.error);
+        });
         
-        for (const step of steps) {
-            if (!this.isAligning) break;
-            
-            this.alignmentStatus = step.status;
-            this.alignmentProgress = step.progress;
-            
-            this.updateAlignmentProgress(step.progress);
-            this.updateAlignmentStatus(step.text);
-            
-            // 模拟星点识别
-            if (step.status === 'identifying') {
-                this.simulateStarDetection();
-            }
-            
-            // 模拟目标指示
-            if (step.status === 'calibrating') {
-                this.simulateTargetIndication();
-            }
-            
-            // 模拟震动反馈
-            if (step.status === 'targeting') {
-                this.triggerVibrationFeedback();
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-        
-        if (this.isAligning) {
-            this.showNotification('success', '校准完成', '极轴校准成功完成！');
-            this.isAligning = false;
-        }
-    }
-
-    /**
-     * 模拟星点检测
-     */
-    simulateStarDetection() {
-        const starMarkers = document.getElementById('star-markers');
-        if (!starMarkers) return;
-        
-        // 清除现有星点
-        starMarkers.innerHTML = '';
-        
-        // 生成随机星点
-        const starCount = Math.floor(Math.random() * 5) + 3;
-        for (let i = 0; i < starCount; i++) {
-            const star = document.createElement('div');
-            star.className = 'star-marker';
-            star.style.left = Math.random() * 80 + 10 + '%';
-            star.style.top = Math.random() * 80 + 10 + '%';
-            
-            const label = document.createElement('div');
-            label.className = 'star-label';
-            label.textContent = `星${i + 1}`;
-            star.appendChild(label);
-            
-            starMarkers.appendChild(star);
-        }
-    }
-
-    /**
-     * 模拟目标指示
-     */
-    simulateTargetIndication() {
-        const polarTarget = document.getElementById('polar-target');
-        if (polarTarget) {
-            polarTarget.style.display = 'block';
-            polarTarget.style.left = Math.random() * 60 + 20 + '%';
-            polarTarget.style.top = Math.random() * 60 + 20 + '%';
-        }
-    }
-
-    /**
-     * 触发震动反馈
-     */
-    triggerVibrationFeedback() {
-        if ('vibrate' in navigator) {
-            navigator.vibrate([100, 50, 100]);
-        } else {
-            // 视觉反馈替代
-            const videoContainer = document.getElementById('video-container');
-            if (videoContainer) {
-                videoContainer.style.animation = 'pulse 0.5s ease-in-out';
-                setTimeout(() => {
-                    videoContainer.style.animation = '';
-                }, 500);
-            }
-        }
-    }
-
-    /**
-     * 更新校准进度
-     */
-    updateAlignmentProgress(progress) {
-        this.alignmentProgress = progress;
-        
-        const progressDisplay = document.getElementById('progress-display');
-        if (progressDisplay) {
-            progressDisplay.textContent = progress + '%';
-        }
-    }
-
-    /**
-     * 更新校准状态
-     */
-    updateAlignmentStatus(text) {
-        const statusDisplay = document.getElementById('status-display');
-        if (statusDisplay) {
-            statusDisplay.textContent = text;
-        }
-    }
-
-    /**
-     * 更新校准指标
-     */
-    updateAlignmentMetrics() {
-        const azimuthError = document.getElementById('azimuth-error');
-        const altitudeError = document.getElementById('altitude-error');
-        const precisionLevel = document.getElementById('precision-level');
-        
-        if (azimuthError) {
-            azimuthError.textContent = this.isAligning ? 
-                (Math.random() * 10).toFixed(1) : '--';
-        }
-        if (altitudeError) {
-            altitudeError.textContent = this.isAligning ? 
-                (Math.random() * 10).toFixed(1) : '--';
-        }
-        if (precisionLevel) {
-            precisionLevel.textContent = this.isAligning ? 
-                (Math.random() * 5 + 1).toFixed(1) : '--';
-        }
-    }
-
-    /**
-     * 更新天体信息
-     */
-    updateCelestialInfo() {
-        const celestialList = document.getElementById('celestial-list');
-        if (!celestialList) return;
-        
-        const celestialObjects = [
-            { name: '北极星', magnitude: '2.0' },
-            { name: '小熊座α', magnitude: '1.9' },
-            { name: '小熊座β', magnitude: '2.1' }
-        ];
-        
-        celestialList.innerHTML = '';
-        celestialObjects.forEach(obj => {
-            const item = document.createElement('div');
-            item.className = 'celestial-item';
-            item.innerHTML = `
-                <span class="star-name">${obj.name}</span>
-                <span class="star-magnitude">${obj.magnitude}</span>
-            `;
-            celestialList.appendChild(item);
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('未处理的Promise拒绝:', event.reason);
         });
     }
 
     /**
-     * 设置键盘快捷键
+     * 开始数据更新
      */
-    setupKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
-            switch (e.key) {
-                case ' ':
-                    e.preventDefault();
-                    if (this.isStreaming) {
-                        this.stopVideoStream();
-                    } else {
-                        this.startVideoStream();
-                    }
-                    break;
-                case 'a':
-                case 'A':
-                    e.preventDefault();
-                    if (this.isAligning) {
-                        this.stopPolarAlignment();
-                    } else {
-                        this.startPolarAlignment();
-                    }
-                    break;
-                case 'z':
-                case 'Z':
-                    e.preventDefault();
-                    this.toggleVideoZoom();
-                    break;
-                case 'Escape':
-                    e.preventDefault();
-                    if (this.isAligning) {
-                        this.stopPolarAlignment();
-                    }
-                    break;
+    startDataUpdates() {
+        this.dataUpdateInterval = setInterval(() => {
+            this.updateSystemData();
+        }, 2000);
+    }
+
+    /**
+     * 更新系统数据
+     */
+    updateSystemData() {
+        // 更新GPS坐标
+        this.updateGPSData();
+        
+        // 更新海拔
+        this.updateAltitudeData();
+        
+        // 更新信号强度
+        this.updateSignalData();
+        
+        // 更新电池信息
+        this.updateBatteryData();
+        
+        // 更新图像质量
+        this.updateImageQuality();
+        
+        // 更新引导线
+        this.updateGuideLine();
+    }
+
+    /**
+     * 更新GPS数据
+     */
+    updateGPSData() {
+        const gpsElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.GPS_COORD);
+        if (gpsElement) {
+            // 模拟GPS坐标更新
+            const lat = 39.9042 + OGScopeUtils.random(-0.01, 0.01);
+            const lon = 116.4074 + OGScopeUtils.random(-0.01, 0.01);
+            
+            const latDeg = Math.floor(lat);
+            const latMin = Math.floor((lat - latDeg) * 60);
+            const latSec = Math.floor(((lat - latDeg) * 60 - latMin) * 60);
+            
+            const lonDeg = Math.floor(lon);
+            const lonMin = Math.floor((lon - lonDeg) * 60);
+            const lonSec = Math.floor(((lon - lonDeg) * 60 - lonMin) * 60);
+            
+            gpsElement.textContent = `${latDeg}°${latMin}'${latSec}"N &nbsp;&nbsp; ${lonDeg}°${lonMin}'${lonSec}"E`;
+        }
+    }
+
+    /**
+     * 更新海拔数据
+     */
+    updateAltitudeData() {
+        const altitudeElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.ALTITUDE);
+        if (altitudeElement) {
+            // 模拟海拔更新
+            const altitude = 43.8 + OGScopeUtils.random(-2, 2);
+            altitudeElement.textContent = `${altitude.toFixed(1)} m`;
+        }
+    }
+
+    /**
+     * 更新信号数据
+     */
+    updateSignalData() {
+        // WiFi信号
+        const wifiElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.WIFI_STRENGTH);
+        if (wifiElement) {
+            const wifiStrength = OGScopeUtils.randomInt(80, 100);
+            wifiElement.textContent = `${wifiStrength}%`;
+        }
+        
+        // GPS信号
+        const gpsElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.GPS_STRENGTH);
+        if (gpsElement) {
+            const gpsStrength = OGScopeUtils.randomInt(90, 100);
+            gpsElement.textContent = `${gpsStrength}%`;
+        }
+    }
+
+    /**
+     * 更新电池数据
+     */
+    updateBatteryData() {
+        const batteryElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.BATTERY_LEVEL);
+        if (batteryElement) {
+            // 模拟电池电量更新
+            const batteryLevel = OGScopeUtils.randomInt(75, 95);
+            batteryElement.textContent = `${batteryLevel}%`;
+        }
+    }
+
+    /**
+     * 更新图像质量
+     */
+    updateImageQuality() {
+        const qualityFillElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.QUALITY_FILL);
+        const qualityValueElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.QUALITY_VALUE);
+        
+        if (qualityFillElement && qualityValueElement) {
+            // 模拟图像质量更新
+            const quality = OGScopeUtils.randomInt(70, 95);
+            qualityFillElement.style.width = quality + '%';
+            
+            let qualityText = '一般';
+            if (quality > 85) {
+                qualityText = '优秀';
+            } else if (quality > 75) {
+                qualityText = '良好';
             }
-        });
-    }
-
-    /**
-     * 设置触摸手势
-     */
-    setupTouchGestures() {
-        const videoContainer = document.getElementById('video-container');
-        if (!videoContainer) return;
-        
-        let lastTouchTime = 0;
-        let touchStartY = 0;
-        
-        videoContainer.addEventListener('touchstart', (e) => {
-            touchStartY = e.touches[0].clientY;
-        });
-        
-        videoContainer.addEventListener('touchend', (e) => {
-            const touchEndY = e.changedTouches[0].clientY;
-            const touchDuration = Date.now() - lastTouchTime;
             
-            // 双击缩放
-            if (touchDuration < 300) {
-                this.toggleVideoZoom();
-            }
-            
-            // 上下滑动调节亮度
-            const deltaY = touchStartY - touchEndY;
-            if (Math.abs(deltaY) > 50) {
-                if (deltaY > 0) {
-                    this.adjustBrightness(0.1);
-                } else {
-                    this.adjustBrightness(-0.1);
-                }
-            }
-            
-            lastTouchTime = Date.now();
-        });
-    }
-
-    /**
-     * 调节亮度
-     */
-    adjustBrightness(delta) {
-        this.cameraSettings.brightness = Math.max(0.5, Math.min(2.0, 
-            this.cameraSettings.brightness + delta));
-        
-        const brightnessValue = document.getElementById('brightness-value');
-        if (brightnessValue) {
-            brightnessValue.textContent = this.cameraSettings.brightness.toFixed(1) + '×';
-        }
-        
-        this.showNotification('info', '亮度已调节', 
-            `当前亮度: ${this.cameraSettings.brightness.toFixed(1)}×`);
-    }
-
-    /**
-     * 设置PWA安装提示
-     */
-    setupInstallPrompt() {
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            this.deferredPrompt = e;
-            
-            // 延迟显示安装提示
-            setTimeout(() => {
-                this.showInstallPrompt();
-            }, 5000);
-        });
-        
-        // 检查是否已安装
-        window.addEventListener('appinstalled', () => {
-            this.isInstalled = true;
-            this.hideInstallPrompt();
-            this.showNotification('success', '应用已安装', 'OGScope已成功安装到主屏幕');
-        });
-    }
-
-    /**
-     * 显示安装提示
-     */
-    showInstallPrompt() {
-        if (this.isInstalled || !this.deferredPrompt) return;
-        
-        const installPrompt = document.getElementById('install-prompt');
-        if (installPrompt) {
-            installPrompt.classList.add('show');
+            qualityValueElement.textContent = qualityText;
         }
     }
 
     /**
-     * 隐藏安装提示
+     * 更新引导线
      */
-    hideInstallPrompt() {
-        const installPrompt = document.getElementById('install-prompt');
-        if (installPrompt) {
-            installPrompt.classList.remove('show');
+    updateGuideLine() {
+        const guideLine = document.querySelector('.guide-line');
+        if (guideLine) {
+            // 模拟引导线角度更新
+            const angle = (Date.now() / 50) % 360;
+            guideLine.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
         }
     }
 
     /**
-     * 安装PWA
+     * 处理初始化错误
+     * @param {Error} error - 错误对象
      */
-    async installPWA() {
-        if (!this.deferredPrompt) return;
+    handleInitializationError(error) {
+        console.error('应用初始化失败:', error);
         
-        this.deferredPrompt.prompt();
-        const { outcome } = await this.deferredPrompt.userChoice;
-        
-        if (outcome === 'accepted') {
-            console.log('[OGScope] 用户接受了安装提示');
-        } else {
-            console.log('[OGScope] 用户拒绝了安装提示');
+        // 显示错误信息
+        const loadingStatus = document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_STATUS);
+        if (loadingStatus) {
+            loadingStatus.textContent = '初始化失败，请刷新页面重试';
+            loadingStatus.style.color = '#ff4444';
         }
         
-        this.deferredPrompt = null;
-        this.hideInstallPrompt();
-    }
-
-    /**
-     * 取消安装提示
-     */
-    dismissInstallPrompt() {
-        this.hideInstallPrompt();
-        // 24小时内不再显示
-        localStorage.setItem('ogscope-install-dismissed', Date.now().toString());
-    }
-
-    /**
-     * 显示通知
-     */
-    showNotification(type, title, message) {
-        const notification = document.createElement('div');
-        notification.className = `notification ${type}`;
-        notification.innerHTML = `
-            <div class="notification-header">
-                <h4 class="notification-title">${title}</h4>
-                <button class="notification-close">×</button>
-            </div>
-            <div class="notification-body">${message}</div>
-        `;
-        
-        document.body.appendChild(notification);
-        
-        // 显示动画
+        // 可以在这里添加错误恢复逻辑
         setTimeout(() => {
-            notification.classList.add('show');
-        }, 100);
-        
-        // 关闭按钮事件
-        const closeBtn = notification.querySelector('.notification-close');
-        closeBtn.addEventListener('click', () => {
-            notification.classList.remove('show');
-            setTimeout(() => {
-                document.body.removeChild(notification);
-            }, 300);
-        });
-        
-        // 自动关闭
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.classList.remove('show');
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        document.body.removeChild(notification);
-                    }
-                }, 300);
-            }
+            console.log('尝试重新初始化...');
+            this.init();
         }, 5000);
     }
 
     /**
-     * 显示模态框
+     * 获取应用状态
+     * @returns {Object} 应用状态
      */
-    showModal(title, content) {
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 class="modal-title">${title}</h3>
-                    <button class="modal-close">×</button>
-                </div>
-                <div class="modal-body">${content}</div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        
-        // 显示动画
-        setTimeout(() => {
-            modal.classList.add('show');
-        }, 100);
-        
-        // 关闭按钮事件
-        const closeBtn = modal.querySelector('.modal-close');
-        closeBtn.addEventListener('click', () => {
-            modal.classList.remove('show');
-            setTimeout(() => {
-                document.body.removeChild(modal);
-            }, 300);
-        });
-        
-        // 点击背景关闭
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
-                setTimeout(() => {
-                    document.body.removeChild(modal);
-                }, 300);
+    getAppStatus() {
+        return {
+            isInitialized: this.isInitialized,
+            isLoaded: this.isLoaded,
+            loadingProgress: this.loadingProgress,
+            currentStep: this.currentStep,
+            modules: {
+                camera: window.OGScopeCamera ? window.OGScopeCamera.cameraController.isInitialized : false,
+                alignment: window.OGScopeAlignment ? window.OGScopeAlignment.alignmentController.isCalibrating : false,
+                ui: window.OGScopeUI ? true : false
             }
-        });
+        };
     }
 
     /**
-     * 初始化粒子背景
+     * 重启应用
      */
-    initParticles() {
-        const particlesBg = document.getElementById('particles-bg');
-        if (!particlesBg) return;
+    async restart() {
+        console.log('重启应用...');
         
-        // 创建粒子
-        for (let i = 0; i < this.maxParticles; i++) {
-            const particle = document.createElement('div');
-            particle.className = 'particle';
-            particle.style.cssText = `
-                position: absolute;
-                width: 2px;
-                height: 2px;
-                background: var(--particle-color);
-                border-radius: 50%;
-                opacity: ${Math.random() * 0.5 + 0.2};
-                left: ${Math.random() * 100}%;
-                top: ${Math.random() * 100}%;
-                animation: particleFloat ${Math.random() * 10 + 10}s linear infinite;
-            `;
-            particlesBg.appendChild(particle);
+        // 清理资源
+        this.cleanup();
+        
+        // 重置状态
+        this.isInitialized = false;
+        this.isLoaded = false;
+        this.loadingProgress = 0;
+        this.currentStep = 0;
+        
+        // 重新初始化
+        await this.init();
+    }
+
+    /**
+     * 清理资源
+     */
+    cleanup() {
+        console.log('清理应用资源...');
+        
+        // 清理定时器
+        if (this.loadingInterval) {
+            clearInterval(this.loadingInterval);
+            this.loadingInterval = null;
+        }
+        
+        if (this.dataUpdateInterval) {
+            clearInterval(this.dataUpdateInterval);
+            this.dataUpdateInterval = null;
+        }
+        
+        // 清理各个模块
+        if (window.OGScopeCamera && window.OGScopeCamera.cameraController) {
+            window.OGScopeCamera.cameraController.destroy();
+        }
+        
+        if (window.OGScopeAlignment && window.OGScopeAlignment.alignmentController) {
+            window.OGScopeAlignment.alignmentController.destroy();
+        }
+        
+        if (window.OGScopeUI && window.OGScopeUI.uiController) {
+            window.OGScopeUI.uiController.destroy();
         }
     }
 }
 
-// 初始化应用
+// 等待DOM加载完成后初始化应用
 document.addEventListener('DOMContentLoaded', () => {
-    window.ogscopeApp = new OGScopeApp();
+    console.log('DOM加载完成，开始初始化OGScope应用...');
+    
+    // 创建应用实例
+    const app = new OGScopeApp();
+    
+    // 将应用实例挂载到全局对象
+    window.OGScopeApp = app;
+    
+    // 添加全局错误处理
+    window.addEventListener('error', (event) => {
+        console.error('全局错误:', event.error);
+    });
+    
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error('未处理的Promise拒绝:', event.reason);
+    });
+    
+    console.log('OGScope应用已启动');
 });
-
-// 导出类供其他模块使用
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = OGScopeApp;
-}

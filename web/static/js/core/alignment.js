@@ -1,24 +1,26 @@
+/* OGScope - 校准控制模块 */
+
 /**
- * OGScope 极轴校准模块
- * 处理极轴校准相关的所有功能
+ * 校准控制器类
  */
-
-import { alignmentAPI } from '../shared/api.js';
-import { Utils, EventEmitter } from '../shared/utils.js';
-import { APP_CONFIG, EVENTS } from '../shared/constants.js';
-
-export class AlignmentController extends EventEmitter {
+class AlignmentController {
     constructor() {
-        super();
-        this.isAligning = false;
-        this.progress = 0;
-        this.status = 'idle';
-        this.result = {
-            azimuthError: null,
-            altitudeError: null,
-            precision: null,
-            isComplete: false
+        this.isCalibrating = false;
+        this.calibrationData = {
+            azimuthOffset: 0,
+            altitudeOffset: 0,
+            accuracy: 0,
+            lastUpdate: null
         };
+        this.targetPosition = {
+            azimuth: 0,
+            altitude: 0
+        };
+        this.currentPosition = {
+            azimuth: 0,
+            altitude: 0
+        };
+        this.eventListeners = new Map();
         this.updateInterval = null;
         this.init();
     }
@@ -27,102 +29,209 @@ export class AlignmentController extends EventEmitter {
      * 初始化校准控制器
      */
     init() {
-        this.setupEventListeners();
-        this.loadProgress();
-    }
-
-    /**
-     * 设置事件监听器
-     */
-    setupEventListeners() {
-        // 页面卸载时停止校准
-        window.addEventListener('beforeunload', () => {
-            if (this.isAligning) {
-                this.stopAlignment();
-            }
-        });
+        this.loadCalibrationData();
+        this.startDataUpdates();
     }
 
     /**
      * 开始校准
-     * @returns {Promise<boolean>} 是否成功开始
+     * @param {Object} options - 校准选项
+     * @returns {Promise<boolean>} 校准结果
      */
-    async startAlignment() {
-        try {
-            if (this.isAligning) {
-                console.log('[Alignment] 校准已在进行中');
-                return true;
-            }
-
-            console.log('[Alignment] 开始极轴校准...');
-            
-            // 调用API开始校准
-            await alignmentAPI.startAlignment();
-            
-            this.isAligning = true;
-            this.status = 'running';
-            this.progress = 0;
-            this.result.isComplete = false;
-            
-            // 开始进度更新
-            this.startProgressUpdate();
-            
-            this.emit(EVENTS.ALIGNMENT_START);
-            console.log('[Alignment] 校准开始成功');
-            return true;
-        } catch (error) {
-            console.error('[Alignment] 校准开始失败:', error);
-            this.emit(EVENTS.ALIGNMENT_ERROR, error);
+    async startAlignment(options = {}) {
+        if (this.isCalibrating) {
+            console.warn('校准已在进行中');
             return false;
         }
+
+        try {
+            this.isCalibrating = true;
+            this.emit('alignmentStart', options);
+
+            console.log('开始校准...');
+
+            // 模拟校准过程
+            const result = await this.performAlignment(options);
+            
+            if (result.success) {
+                this.calibrationData = {
+                    azimuthOffset: result.azimuthOffset,
+                    altitudeOffset: result.altitudeOffset,
+                    accuracy: result.accuracy,
+                    lastUpdate: new Date()
+                };
+                
+                this.saveCalibrationData();
+                this.emit('alignmentComplete', this.calibrationData);
+                
+                console.log('校准完成:', this.calibrationData);
+                return true;
+            } else {
+                this.emit('alignmentError', result.error);
+                console.error('校准失败:', result.error);
+                return false;
+            }
+        } catch (error) {
+            this.emit('alignmentError', error);
+            console.error('校准过程出错:', error);
+            return false;
+        } finally {
+            this.isCalibrating = false;
+        }
+    }
+
+    /**
+     * 执行校准
+     * @param {Object} options - 校准选项
+     * @returns {Promise<Object>} 校准结果
+     */
+    async performAlignment(options) {
+        return new Promise((resolve) => {
+            // 模拟校准过程
+            let progress = 0;
+            const steps = [
+                { progress: 20, message: '正在检测星点...' },
+                { progress: 40, message: '正在计算位置...' },
+                { progress: 60, message: '正在分析偏移...' },
+                { progress: 80, message: '正在优化参数...' },
+                { progress: 100, message: '校准完成' }
+            ];
+
+            const interval = setInterval(() => {
+                if (progress < steps.length) {
+                    const step = steps[progress];
+                    this.emit('alignmentProgress', step);
+                    progress++;
+                } else {
+                    clearInterval(interval);
+                    
+                    // 模拟校准结果
+                    const result = {
+                        success: true,
+                        azimuthOffset: OGScopeUtils.random(-5, 5),
+                        altitudeOffset: OGScopeUtils.random(-3, 3),
+                        accuracy: OGScopeUtils.random(0.1, 0.5)
+                    };
+                    
+                    resolve(result);
+                }
+            }, 1000);
+        });
     }
 
     /**
      * 停止校准
-     * @returns {Promise<boolean>} 是否成功停止
      */
-    async stopAlignment() {
-        try {
-            if (!this.isAligning) {
-                console.log('[Alignment] 校准未在进行中');
-                return true;
-            }
-
-            console.log('[Alignment] 停止极轴校准...');
-            
-            // 调用API停止校准
-            await alignmentAPI.stopAlignment();
-            
-            this.isAligning = false;
-            this.status = 'stopped';
-            this.stopProgressUpdate();
-            
-            this.emit(EVENTS.ALIGNMENT_STOP);
-            console.log('[Alignment] 校准停止成功');
-            return true;
-        } catch (error) {
-            console.error('[Alignment] 校准停止失败:', error);
-            return false;
+    stopAlignment() {
+        if (this.isCalibrating) {
+            this.isCalibrating = false;
+            this.emit('alignmentStopped');
+            console.log('校准已停止');
         }
     }
 
     /**
-     * 开始进度更新
+     * 重置校准
      */
-    startProgressUpdate() {
-        this.updateInterval = setInterval(async () => {
-            try {
-                await this.updateProgress();
-            } catch (error) {
-                console.error('[Alignment] 进度更新失败:', error);
-            }
-        }, APP_CONFIG.ALIGNMENT.UPDATE_INTERVAL);
+    resetAlignment() {
+        this.calibrationData = {
+            azimuthOffset: 0,
+            altitudeOffset: 0,
+            accuracy: 0,
+            lastUpdate: null
+        };
+        
+        this.saveCalibrationData();
+        this.emit('alignmentReset');
+        console.log('校准数据已重置');
     }
 
     /**
-     * 停止进度更新
+     * 获取校准状态
+     * @returns {Object} 校准状态
      */
-    stopProgressUpdate() {
+    getAlignmentStatus() {
+        return {
+            isCalibrating: this.isCalibrating,
+            calibrationData: this.calibrationData,
+            targetPosition: this.targetPosition,
+            currentPosition: this.currentPosition
+        };
+    }
+
+    /**
+     * 设置目标位置
+     * @param {Object} position - 目标位置 {azimuth, altitude}
+     */
+    setTargetPosition(position) {
+        this.targetPosition = { ...position };
+        this.emit('targetPositionChanged', this.targetPosition);
+        console.log('目标位置已设置:', this.targetPosition);
+    }
+
+    /**
+     * 更新当前位置
+     * @param {Object} position - 当前位置 {azimuth, altitude}
+     */
+    updateCurrentPosition(position) {
+        this.currentPosition = { ...position };
+        this.emit('currentPositionChanged', this.currentPosition);
+    }
+
+    /**
+     * 计算偏移量
+     * @returns {Object} 偏移量 {azimuth, altitude}
+     */
+    calculateOffset() {
+        const azimuthOffset = this.targetPosition.azimuth - this.currentPosition.azimuth;
+        const altitudeOffset = this.targetPosition.altitude - this.currentPosition.altitude;
+        
+        return {
+            azimuth: azimuthOffset,
+            altitude: altitudeOffset
+        };
+    }
+
+    /**
+     * 检查校准精度
+     * @returns {Object} 精度信息
+     */
+    checkAccuracy() {
+        const offset = this.calculateOffset();
+        const totalOffset = Math.sqrt(
+            Math.pow(offset.azimuth, 2) + Math.pow(offset.altitude, 2)
+        );
+        
+        let accuracy = 'excellent';
+        if (totalOffset > 2) {
+            accuracy = 'poor';
+        } else if (totalOffset > 1) {
+            accuracy = 'fair';
+        } else if (totalOffset > 0.5) {
+            accuracy = 'good';
+        }
+        
+        return {
+            totalOffset,
+            accuracy,
+            azimuthOffset: offset.azimuth,
+            altitudeOffset: offset.altitude
+        };
+    }
+
+    /**
+     * 开始数据更新
+     */
+    startDataUpdates() {
+        this.updateInterval = setInterval(() => {
+            this.updateAlignmentData();
+        }, OGScopeConstants.APP_CONSTANTS.UPDATE_INTERVALS.OFFSET);
+    }
+
+    /**
+     * 停止数据更新
+     */
+    stopDataUpdates() {
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
@@ -130,171 +239,221 @@ export class AlignmentController extends EventEmitter {
     }
 
     /**
-     * 更新校准进度
+     * 更新校准数据
      */
-    async updateProgress() {
+    updateAlignmentData() {
+        // 模拟数据更新
+        const offset = this.calculateOffset();
+        
+        // 更新UI显示
+        this.updateOffsetDisplay(offset);
+        
+        // 更新校准数据
+        this.calibrationData.azimuthOffset = offset.azimuth;
+        this.calibrationData.altitudeOffset = offset.altitude;
+        this.calibrationData.lastUpdate = new Date();
+        
+        this.emit('alignmentDataUpdated', this.calibrationData);
+    }
+
+    /**
+     * 更新偏移显示
+     * @param {Object} offset - 偏移量
+     */
+    updateOffsetDisplay(offset) {
+        const azimuthElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.AZIMUTH_OFFSET);
+        const altitudeElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.ALTITUDE_OFFSET);
+        
+        if (azimuthElement) {
+            azimuthElement.textContent = `${offset.azimuth >= 0 ? '+' : ''}${offset.azimuth.toFixed(1)}°`;
+        }
+        
+        if (altitudeElement) {
+            altitudeElement.textContent = `${offset.altitude >= 0 ? '+' : ''}${offset.altitude.toFixed(1)}°`;
+        }
+    }
+
+    /**
+     * 保存校准数据
+     */
+    saveCalibrationData() {
         try {
-            const progressData = await alignmentAPI.getProgress();
+            localStorage.setItem(
+                OGScopeConstants.STORAGE_KEYS.CALIBRATION_DATA,
+                JSON.stringify(this.calibrationData)
+            );
+        } catch (error) {
+            console.error('保存校准数据失败:', error);
+        }
+    }
+
+    /**
+     * 加载校准数据
+     */
+    loadCalibrationData() {
+        try {
+            const savedData = localStorage.getItem(
+                OGScopeConstants.STORAGE_KEYS.CALIBRATION_DATA
+            );
             
-            this.progress = progressData.progress || 0;
-            this.status = progressData.status || this.status;
-            
-            // 更新校准结果
-            if (progressData.result) {
-                this.result = {
-                    azimuthError: progressData.result.azimuthError,
-                    altitudeError: progressData.result.altitudeError,
-                    precision: progressData.result.precision,
-                    isComplete: progressData.result.isComplete
-                };
+            if (savedData) {
+                this.calibrationData = JSON.parse(savedData);
+                console.log('校准数据已加载:', this.calibrationData);
             }
-            
-            this.emit(EVENTS.ALIGNMENT_PROGRESS, {
-                progress: this.progress,
-                status: this.status,
-                result: this.result
+        } catch (error) {
+            console.error('加载校准数据失败:', error);
+        }
+    }
+
+    /**
+     * 导出校准数据
+     * @returns {Object} 校准数据
+     */
+    exportCalibrationData() {
+        return {
+            ...this.calibrationData,
+            targetPosition: this.targetPosition,
+            currentPosition: this.currentPosition,
+            exportTime: new Date().toISOString()
+        };
+    }
+
+    /**
+     * 导入校准数据
+     * @param {Object} data - 校准数据
+     */
+    importCalibrationData(data) {
+        if (data.azimuthOffset !== undefined) {
+            this.calibrationData.azimuthOffset = data.azimuthOffset;
+        }
+        if (data.altitudeOffset !== undefined) {
+            this.calibrationData.altitudeOffset = data.altitudeOffset;
+        }
+        if (data.accuracy !== undefined) {
+            this.calibrationData.accuracy = data.accuracy;
+        }
+        if (data.targetPosition) {
+            this.targetPosition = data.targetPosition;
+        }
+        if (data.currentPosition) {
+            this.currentPosition = data.currentPosition;
+        }
+        
+        this.calibrationData.lastUpdate = new Date();
+        this.saveCalibrationData();
+        
+        this.emit('calibrationDataImported', this.calibrationData);
+        console.log('校准数据已导入:', this.calibrationData);
+    }
+
+    /**
+     * 获取校准历史
+     * @returns {Array} 校准历史
+     */
+    getCalibrationHistory() {
+        try {
+            const history = localStorage.getItem('ogscope_calibration_history');
+            return history ? JSON.parse(history) : [];
+        } catch (error) {
+            console.error('获取校准历史失败:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 添加校准记录
+     * @param {Object} record - 校准记录
+     */
+    addCalibrationRecord(record) {
+        try {
+            const history = this.getCalibrationHistory();
+            history.push({
+                ...record,
+                timestamp: new Date().toISOString()
             });
             
-            // 检查是否完成
-            if (this.result.isComplete) {
-                this.completeAlignment();
+            // 只保留最近50条记录
+            if (history.length > 50) {
+                history.splice(0, history.length - 50);
             }
+            
+            localStorage.setItem('ogscope_calibration_history', JSON.stringify(history));
         } catch (error) {
-            console.error('[Alignment] 获取进度失败:', error);
+            console.error('添加校准记录失败:', error);
         }
     }
 
     /**
-     * 完成校准
+     * 清除校准历史
      */
-    async completeAlignment() {
+    clearCalibrationHistory() {
         try {
-            console.log('[Alignment] 校准完成');
-            
-            this.isAligning = false;
-            this.status = 'completed';
-            this.stopProgressUpdate();
-            
-            // 获取最终结果
-            const finalResult = await alignmentAPI.getResult();
-            this.result = { ...this.result, ...finalResult };
-            
-            this.emit(EVENTS.ALIGNMENT_COMPLETE, this.result);
-            
-            // 保存进度
-            this.saveProgress();
+            localStorage.removeItem('ogscope_calibration_history');
+            console.log('校准历史已清除');
         } catch (error) {
-            console.error('[Alignment] 获取最终结果失败:', error);
+            console.error('清除校准历史失败:', error);
         }
     }
 
     /**
-     * 获取校准结果
-     * @returns {Object} 校准结果
+     * 添加事件监听器
+     * @param {string} event - 事件名
+     * @param {Function} callback - 回调函数
      */
-    getResult() {
-        return { ...this.result };
-    }
-
-    /**
-     * 获取校准进度
-     * @returns {Object} 校准进度
-     */
-    getProgress() {
-        return {
-            progress: this.progress,
-            status: this.status,
-            isAligning: this.isAligning,
-            result: this.result
-        };
-    }
-
-    /**
-     * 格式化误差显示
-     * @param {number} error - 误差值（度）
-     * @returns {string} 格式化的误差字符串
-     */
-    formatError(error) {
-        if (error === null || error === undefined) {
-            return '--';
+    on(event, callback) {
+        if (!this.eventListeners.has(event)) {
+            this.eventListeners.set(event, []);
         }
-        
-        // 转换为角分
-        const arcMinutes = Math.abs(error * 60);
-        
-        if (arcMinutes >= APP_CONFIG.ALIGNMENT.MAX_ERROR_DISPLAY) {
-            return `${APP_CONFIG.ALIGNMENT.MAX_ERROR_DISPLAY}+`;
-        }
-        
-        return arcMinutes.toFixed(1);
+        this.eventListeners.get(event).push(callback);
     }
 
     /**
-     * 获取精度等级
-     * @param {number} precision - 精度值
-     * @returns {string} 精度等级
+     * 移除事件监听器
+     * @param {string} event - 事件名
+     * @param {Function} callback - 回调函数
      */
-    getPrecisionLevel(precision) {
-        if (precision === null || precision === undefined) {
-            return '--';
-        }
-        
-        if (precision <= APP_CONFIG.ALIGNMENT.PRECISION_THRESHOLD) {
-            return '优秀';
-        } else if (precision <= APP_CONFIG.ALIGNMENT.PRECISION_THRESHOLD * 2) {
-            return '良好';
-        } else if (precision <= APP_CONFIG.ALIGNMENT.PRECISION_THRESHOLD * 5) {
-            return '一般';
-        } else {
-            return '需改进';
-        }
-    }
-
-    /**
-     * 保存进度到本地存储
-     */
-    saveProgress() {
-        const progressData = {
-            progress: this.progress,
-            status: this.status,
-            result: this.result,
-            timestamp: Date.now()
-        };
-        Utils.saveToStorage('alignment-progress', progressData);
-    }
-
-    /**
-     * 从本地存储加载进度
-     */
-    loadProgress() {
-        const savedProgress = Utils.loadFromStorage('alignment-progress', null);
-        if (savedProgress) {
-            // 检查时间戳，如果超过1小时则重置
-            const oneHour = 60 * 60 * 1000;
-            if (Date.now() - savedProgress.timestamp < oneHour) {
-                this.progress = savedProgress.progress || 0;
-                this.status = savedProgress.status || 'idle';
-                this.result = savedProgress.result || this.result;
+    off(event, callback) {
+        if (this.eventListeners.has(event)) {
+            const callbacks = this.eventListeners.get(event);
+            const index = callbacks.indexOf(callback);
+            if (index > -1) {
+                callbacks.splice(index, 1);
             }
         }
     }
 
     /**
-     * 重置校准状态
+     * 触发事件
+     * @param {string} event - 事件名
+     * @param {...any} args - 参数
      */
-    reset() {
-        this.isAligning = false;
-        this.progress = 0;
-        this.status = 'idle';
-        this.result = {
-            azimuthError: null,
-            altitudeError: null,
-            precision: null,
-            isComplete: false
-        };
-        this.stopProgressUpdate();
-        
-        // 清除本地存储
-        localStorage.removeItem('alignment-progress');
+    emit(event, ...args) {
+        if (this.eventListeners.has(event)) {
+            this.eventListeners.get(event).forEach(callback => {
+                try {
+                    callback(...args);
+                } catch (error) {
+                    console.error('校准事件回调执行失败:', error);
+                }
+            });
+        }
+    }
+
+    /**
+     * 销毁校准控制器
+     */
+    destroy() {
+        this.stopDataUpdates();
+        this.eventListeners.clear();
+        this.isCalibrating = false;
     }
 }
+
+// 创建校准控制器实例
+const alignmentController = new AlignmentController();
+
+// 导出校准控制器
+window.OGScopeAlignment = {
+    AlignmentController,
+    alignmentController
+};

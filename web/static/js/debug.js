@@ -111,31 +111,71 @@ class DebugConsole {
         const videoContainer = document.querySelector('.video-container');
         if (!videoContainer) return;
         
-        // IMX327传感器原生宽高比约为16:9 (1945x1097)
-        const sensorAspectRatio = 1945 / 1097; // ≈ 1.773
-        const outputAspectRatio = width / height;
-        
-        // 如果输出分辨率与传感器比例差异较大，使用传感器比例
-        // 这样可以避免画面被压缩
-        let targetAspectRatio;
-        if (Math.abs(outputAspectRatio - sensorAspectRatio) > 0.1) {
-            // 使用传感器原生比例
-            targetAspectRatio = sensorAspectRatio;
-            console.log(`[UI] 输出分辨率${width}x${height}与传感器比例差异较大，使用传感器比例: ${targetAspectRatio.toFixed(3)}`);
-        } else {
-            // 使用输出分辨率比例
-            targetAspectRatio = outputAspectRatio;
-            console.log(`[UI] 使用输出分辨率比例: ${width}:${height} (${outputAspectRatio.toFixed(3)})`);
-        }
+        // 固定使用16:9比例，避免画面变形
+        const targetAspectRatio = 16 / 9; // 1.778
         
         // 设置CSS自定义属性
         videoContainer.style.aspectRatio = `${targetAspectRatio}`;
+        
+        console.log(`[UI] 固定使用16:9比例显示视频 (${width}x${height})`);
         
         // 添加视觉反馈
         videoContainer.classList.add('aspect-ratio-changing');
         setTimeout(() => {
             videoContainer.classList.remove('aspect-ratio-changing');
         }, 300);
+    }
+    
+    /**
+     * 初始化全屏预览功能
+     */
+    initFullscreenPreview() {
+        const fullscreenToggle = document.getElementById('fullscreen-toggle');
+        const fullscreenPreview = document.getElementById('fullscreen-preview');
+        const fullscreenImage = document.getElementById('fullscreen-image');
+        const fullscreenClose = document.getElementById('fullscreen-close');
+        const previewImage = document.getElementById('preview-image');
+        
+        if (!fullscreenToggle || !fullscreenPreview || !fullscreenImage) return;
+        
+        // 打开全屏预览
+        fullscreenToggle.addEventListener('click', () => {
+            if (previewImage && previewImage.src) {
+                fullscreenImage.src = previewImage.src;
+                fullscreenPreview.classList.add('active');
+                document.body.style.overflow = 'hidden';
+                console.log('[Debug] 全屏预览已打开');
+            } else {
+                console.warn('[Debug] 没有可预览的图像');
+            }
+        });
+        
+        // 关闭全屏预览
+        if (fullscreenClose) {
+            fullscreenClose.addEventListener('click', () => {
+                fullscreenPreview.classList.remove('active');
+                document.body.style.overflow = '';
+                console.log('[Debug] 全屏预览已关闭');
+            });
+        }
+        
+        // 点击背景关闭全屏
+        fullscreenPreview.addEventListener('click', (e) => {
+            if (e.target === fullscreenPreview) {
+                fullscreenPreview.classList.remove('active');
+                document.body.style.overflow = '';
+                console.log('[Debug] 全屏预览已关闭');
+            }
+        });
+        
+        // ESC键关闭全屏
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && fullscreenPreview.classList.contains('active')) {
+                fullscreenPreview.classList.remove('active');
+                document.body.style.overflow = '';
+                console.log('[Debug] 全屏预览已关闭 (ESC键)');
+            }
+        });
     }
     
     /**
@@ -517,6 +557,9 @@ class DebugConsole {
         this.updateExposureDisplay(this.currentSettings.exposure);
         this.updateGainDisplay(this.currentSettings.gain);
         this.updateDigitalGainDisplay(this.currentSettings.digitalGain);
+        
+        // 初始化全屏预览功能
+        this.initFullscreenPreview();
         
         // 添加触摸反馈
         document.querySelectorAll('.btn, .tab-button, .control-row input').forEach(element => {

@@ -1,17 +1,19 @@
+/* OGScope - UI控制模块 */
+
 /**
- * OGScope UI组件模块
- * 处理用户界面相关的所有功能
+ * UI控制器类
  */
-
-import { Utils, EventEmitter } from '../shared/utils.js';
-import { APP_CONFIG, CSS_CLASSES, EVENTS } from '../shared/constants.js';
-
-export class UIController extends EventEmitter {
+class UIController {
     constructor() {
-        super();
         this.elements = {};
-        this.isZoomed = false;
-        this.isLoading = false;
+        this.state = {
+            isMenuOpen: false,
+            isAdvancedMode: false,
+            currentMode: OGScopeConstants.APP_CONSTANTS.MODES.POLAR,
+            zoomLevel: 1.0,
+            isShutterPressed: false
+        };
+        this.eventListeners = new Map();
         this.init();
     }
 
@@ -21,7 +23,8 @@ export class UIController extends EventEmitter {
     init() {
         this.cacheElements();
         this.setupEventListeners();
-        this.initUI();
+        this.setupKeyboardShortcuts();
+        this.loadSettings();
     }
 
     /**
@@ -30,46 +33,40 @@ export class UIController extends EventEmitter {
     cacheElements() {
         this.elements = {
             // 主要容器
-            app: document.getElementById('app'),
-            videoContainer: document.getElementById('video-container'),
-            videoStream: document.getElementById('mjpeg-stream'),
-            videoOverlay: document.getElementById('video-overlay'),
+            app: document.getElementById(OGScopeConstants.ELEMENT_IDS.APP),
+            loadingScreen: document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_SCREEN),
+            videoStream: document.getElementById(OGScopeConstants.ELEMENT_IDS.VIDEO_STREAM),
             
-            // 控制按钮
-            startStreamBtn: document.getElementById('start-stream'),
-            stopStreamBtn: document.getElementById('stop-stream'),
-            zoomToggleBtn: document.getElementById('zoom-toggle'),
-            startAlignmentBtn: document.getElementById('start-alignment'),
-            stopAlignmentBtn: document.getElementById('stop-alignment'),
+            // 加载相关
+            progressBar: document.getElementById(OGScopeConstants.ELEMENT_IDS.PROGRESS_BAR),
+            loadingStatus: document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_STATUS),
             
-            // 状态显示
-            modeDisplay: document.getElementById('mode-display'),
-            statusDisplay: document.getElementById('status-display'),
-            progressDisplay: document.getElementById('progress-display'),
+            // 菜单相关
+            menuButton: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_BUTTON),
+            menuPanel: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_PANEL),
+            menuClose: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_CLOSE),
             
-            // 校准指标
-            azimuthError: document.getElementById('azimuth-error'),
-            altitudeError: document.getElementById('altitude-error'),
-            precisionLevel: document.getElementById('precision-level'),
+            // 缩放相关
+            zoomIn: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_IN),
+            zoomOut: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_OUT),
+            zoomThumb: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_THUMB),
             
-            // 加载屏幕
-            loadingScreen: document.getElementById('loading-screen'),
-            loadingProgress: document.getElementById('loading-progress'),
-            loadingText: document.getElementById('loading-text'),
+            // 快门相关
+            shutterToggle: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TOGGLE),
+            shutterTools: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TOOLS),
+            shutterButton: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_BUTTON),
+            shutterTimer: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TIMER),
             
-            // 网络状态
-            networkStatus: document.getElementById('network-status'),
-            
-            // PWA安装提示
-            installPrompt: document.getElementById('install-prompt'),
-            installBtn: document.getElementById('install-app'),
-            dismissInstallBtn: document.getElementById('dismiss-install'),
-            
-            // 十字准星和覆盖层
-            crosshair: document.getElementById('crosshair'),
-            starMarkers: document.getElementById('star-markers'),
-            polarTarget: document.getElementById('polar-target'),
-            alignmentRing: document.getElementById('alignment-ring')
+            // 数据显示
+            gpsCoord: document.getElementById(OGScopeConstants.ELEMENT_IDS.GPS_COORD),
+            altitude: document.getElementById(OGScopeConstants.ELEMENT_IDS.ALTITUDE),
+            wifiStrength: document.getElementById(OGScopeConstants.ELEMENT_IDS.WIFI_STRENGTH),
+            gpsStrength: document.getElementById(OGScopeConstants.ELEMENT_IDS.GPS_STRENGTH),
+            batteryLevel: document.getElementById(OGScopeConstants.ELEMENT_IDS.BATTERY_LEVEL),
+            azimuthOffset: document.getElementById(OGScopeConstants.ELEMENT_IDS.AZIMUTH_OFFSET),
+            altitudeOffset: document.getElementById(OGScopeConstants.ELEMENT_IDS.ALTITUDE_OFFSET),
+            qualityFill: document.getElementById(OGScopeConstants.ELEMENT_IDS.QUALITY_FILL),
+            qualityValue: document.getElementById(OGScopeConstants.ELEMENT_IDS.QUALITY_VALUE)
         };
     }
 
@@ -77,290 +74,475 @@ export class UIController extends EventEmitter {
      * 设置事件监听器
      */
     setupEventListeners() {
-        // 视频控制按钮
-        if (this.elements.startStreamBtn) {
-            this.elements.startStreamBtn.addEventListener('click', () => {
-                this.emit('ui:stream:start');
-            });
-        }
+        // 菜单控制
+        this.addEventListener(this.elements.menuButton, 'click', () => this.toggleMenu());
+        this.addEventListener(this.elements.menuClose, 'click', () => this.closeMenu());
         
-        if (this.elements.stopStreamBtn) {
-            this.elements.stopStreamBtn.addEventListener('click', () => {
-                this.emit('ui:stream:stop');
-            });
-        }
+        // 缩放控制
+        this.addEventListener(this.elements.zoomIn, 'click', () => this.zoomIn());
+        this.addEventListener(this.elements.zoomOut, 'click', () => this.zoomOut());
+        this.setupZoomSlider();
         
-        if (this.elements.zoomToggleBtn) {
-            this.elements.zoomToggleBtn.addEventListener('click', () => {
-                this.toggleZoom();
-            });
-        }
+        // 模式切换
+        this.setupModeSwitcher();
         
-        // 校准控制按钮
-        if (this.elements.startAlignmentBtn) {
-            this.elements.startAlignmentBtn.addEventListener('click', () => {
-                this.emit('ui:alignment:start');
-            });
-        }
+        // 快门控制
+        this.setupShutterControl();
         
-        if (this.elements.stopAlignmentBtn) {
-            this.elements.stopAlignmentBtn.addEventListener('click', () => {
-                this.emit('ui:alignment:stop');
-            });
-        }
+        // 高级模式
+        this.setupAdvancedMode();
         
-        // PWA安装按钮
-        if (this.elements.installBtn) {
-            this.elements.installBtn.addEventListener('click', () => {
-                this.emit('ui:pwa:install');
-            });
-        }
+        // 窗口事件
+        this.addEventListener(window, 'resize', () => this.handleResize());
+        this.addEventListener(window, 'orientationchange', () => this.handleOrientationChange());
         
-        if (this.elements.dismissInstallBtn) {
-            this.elements.dismissInstallBtn.addEventListener('click', () => {
-                this.hideInstallPrompt();
-            });
-        }
-        
-        // 网络状态监听
-        window.addEventListener('online', () => {
-            this.updateNetworkStatus(true);
-        });
-        
-        window.addEventListener('offline', () => {
-            this.updateNetworkStatus(false);
-        });
-        
-        // 窗口大小变化
-        window.addEventListener('resize', Utils.debounce(() => {
-            this.handleResize();
-        }, 250));
+        // 触摸事件
+        this.setupTouchEvents();
     }
 
     /**
-     * 初始化UI
+     * 设置键盘快捷键
      */
-    initUI() {
-        // 设置初始状态
-        this.updateModeDisplay('检测中...');
-        this.updateStatusDisplay('系统启动中...');
-        this.updateProgressDisplay(0);
-        this.updateNetworkStatus(Utils.isOnline());
-        
-        // 初始化校准指标
-        this.updateAlignmentMetrics(null, null, null);
-        
-        // 设置按钮状态
-        this.updateButtonStates();
-        
-        this.emit(EVENTS.UI_READY);
-    }
-
-    /**
-     * 显示加载屏幕
-     */
-    showLoadingScreen() {
-        if (this.elements.loadingScreen) {
-            this.elements.loadingScreen.classList.remove(CSS_CLASSES.HIDDEN);
-            this.isLoading = true;
-        }
-    }
-
-    /**
-     * 隐藏加载屏幕
-     */
-    hideLoadingScreen() {
-        if (this.elements.loadingScreen) {
-            setTimeout(() => {
-                this.elements.loadingScreen.classList.add(CSS_CLASSES.HIDDEN);
-                this.isLoading = false;
-            }, 500);
-        }
-    }
-
-    /**
-     * 模拟加载过程
-     * @returns {Promise} 加载完成Promise
-     */
-    async simulateLoading() {
-        const steps = APP_CONFIG.UI.LOADING_STEPS;
-        
-        for (const step of steps) {
-            await Utils.delay(800); // 每步延迟800ms
+    setupKeyboardShortcuts() {
+        this.addEventListener(document, 'keydown', (event) => {
+            const key = event.key;
             
-            if (this.elements.loadingProgress) {
-                this.elements.loadingProgress.style.width = `${step.progress}%`;
+            switch (key) {
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.TOGGLE_MENU:
+                    this.toggleMenu();
+                    break;
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.TOGGLE_ZOOM:
+                    this.toggleZoom();
+                    break;
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.SHUTTER_RELEASE:
+                    if (!event.repeat) {
+                        this.startShutter();
+                    }
+                    break;
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.POLAR_MODE:
+                    this.setMode(OGScopeConstants.APP_CONSTANTS.MODES.POLAR);
+                    break;
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.STAR_MODE:
+                    this.setMode(OGScopeConstants.APP_CONSTANTS.MODES.STAR);
+                    break;
+                case OGScopeConstants.KEYBOARD_SHORTCUTS.GUIDE_MODE:
+                    this.setMode(OGScopeConstants.APP_CONSTANTS.MODES.GUIDE);
+                    break;
             }
+        });
+
+        this.addEventListener(document, 'keyup', (event) => {
+            if (event.key === OGScopeConstants.KEYBOARD_SHORTCUTS.SHUTTER_RELEASE) {
+                this.stopShutter();
+            }
+        });
+    }
+
+    /**
+     * 设置缩放滑块
+     */
+    setupZoomSlider() {
+        if (!this.elements.zoomThumb) return;
+
+        let isDragging = false;
+        
+        this.addEventListener(this.elements.zoomThumb, 'touchstart', (e) => {
+            e.preventDefault();
+            isDragging = true;
+        });
+
+        this.addEventListener(document, 'touchend', () => {
+            isDragging = false;
+        });
+
+        this.addEventListener(document, 'touchmove', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+                const slider = this.elements.zoomThumb.parentElement;
+                const rect = slider.getBoundingClientRect();
+                const y = e.touches[0].clientY - rect.top;
+                const percentage = Math.max(0, Math.min(100, (1 - y / rect.height) * 100));
+                this.setZoomLevel(1.0 + (percentage / 100) * 2.0);
+            }
+        });
+    }
+
+    /**
+     * 设置模式切换
+     */
+    setupModeSwitcher() {
+        const modeButtons = document.querySelectorAll('.mode-button');
+        
+        modeButtons.forEach(button => {
+            this.addEventListener(button, 'click', () => {
+                if (button.classList.contains(OGScopeConstants.CSS_CLASSES.ACTIVE)) {
+                    // 点击当前模式，展开/折叠
+                    const switcher = button.parentElement;
+                    switcher.classList.toggle(OGScopeConstants.CSS_CLASSES.EXPANDED);
+                } else {
+                    // 点击其他模式，切换模式并折叠
+                    const mode = button.dataset.mode;
+                    this.setMode(mode);
+                }
+            });
+        });
+    }
+
+    /**
+     * 设置快门控制
+     */
+    setupShutterControl() {
+        // 快门切换按钮
+        this.addEventListener(this.elements.shutterToggle, 'click', () => {
+            this.toggleShutterTools();
+        });
+
+        // 快门模式切换
+        const shutterModes = document.querySelectorAll('.shutter-mode');
+        shutterModes.forEach(mode => {
+            this.addEventListener(mode, 'click', () => {
+                shutterModes.forEach(m => m.classList.remove(OGScopeConstants.CSS_CLASSES.ACTIVE));
+                mode.classList.add(OGScopeConstants.CSS_CLASSES.ACTIVE);
+            });
+        });
+
+        // 快门按钮
+        this.setupShutterButton();
+    }
+
+    /**
+     * 设置快门按钮
+     */
+    setupShutterButton() {
+        if (!this.elements.shutterButton) return;
+
+        // 桌面端：鼠标事件
+        this.addEventListener(this.elements.shutterButton, 'mousedown', () => this.startShutter());
+        this.addEventListener(this.elements.shutterButton, 'mouseup', () => this.stopShutter());
+        this.addEventListener(this.elements.shutterButton, 'mouseleave', () => this.stopShutter());
+
+        // 移动端：触摸事件
+        this.addEventListener(this.elements.shutterButton, 'touchstart', (e) => {
+            e.preventDefault();
+            this.startShutter();
+        });
+        this.addEventListener(this.elements.shutterButton, 'touchend', (e) => {
+            e.preventDefault();
+            this.stopShutter();
+        });
+        this.addEventListener(this.elements.shutterButton, 'touchcancel', (e) => {
+            e.preventDefault();
+            this.stopShutter();
+        });
+    }
+
+    /**
+     * 设置高级模式
+     */
+    setupAdvancedMode() {
+        const advancedButton = document.querySelector('.advanced-button');
+        if (advancedButton) {
+            this.addEventListener(advancedButton, 'click', () => {
+                this.toggleAdvancedMode();
+            });
+        }
+    }
+
+    /**
+     * 设置触摸事件
+     */
+    setupTouchEvents() {
+        // 阻止默认手势
+        this.addEventListener(document, 'touchmove', (e) => {
+            if (e.scale !== 1) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        this.addEventListener(document, 'gesturestart', (e) => {
+            e.preventDefault();
+        });
+    }
+
+    /**
+     * 添加事件监听器
+     * @param {Element} element - DOM元素
+     * @param {string} event - 事件名
+     * @param {Function} handler - 处理函数
+     * @param {Object} options - 选项
+     */
+    addEventListener(element, event, handler, options = {}) {
+        if (element) {
+            element.addEventListener(event, handler, options);
             
-            if (this.elements.loadingText) {
-                this.elements.loadingText.textContent = step.text;
+            // 保存监听器引用以便后续移除
+            const key = `${element.id || element.tagName}_${event}`;
+            if (!this.eventListeners.has(key)) {
+                this.eventListeners.set(key, []);
             }
+            this.eventListeners.get(key).push({ element, event, handler, options });
         }
-        
-        await Utils.delay(500); // 最后延迟500ms
     }
 
     /**
-     * 更新模式显示
-     * @param {string} mode - 模式文本
+     * 切换菜单
      */
-    updateModeDisplay(mode) {
-        if (this.elements.modeDisplay) {
-            this.elements.modeDisplay.textContent = mode;
+    toggleMenu() {
+        this.state.isMenuOpen = !this.state.isMenuOpen;
+        
+        if (this.state.isMenuOpen) {
+            this.openMenu();
+        } else {
+            this.closeMenu();
         }
     }
 
     /**
-     * 更新状态显示
-     * @param {string} status - 状态文本
+     * 打开菜单
      */
-    updateStatusDisplay(status) {
-        if (this.elements.statusDisplay) {
-            this.elements.statusDisplay.textContent = status;
+    openMenu() {
+        if (this.elements.menuPanel) {
+            this.elements.menuPanel.classList.add(OGScopeConstants.CSS_CLASSES.MENU_OPEN);
         }
+        if (this.elements.menuButton) {
+            this.elements.menuButton.classList.add(OGScopeConstants.CSS_CLASSES.HIDDEN);
+        }
+        this.state.isMenuOpen = true;
     }
 
     /**
-     * 更新进度显示
-     * @param {number} progress - 进度百分比
+     * 关闭菜单
      */
-    updateProgressDisplay(progress) {
-        if (this.elements.progressDisplay) {
-            this.elements.progressDisplay.textContent = `${Math.round(progress)}%`;
+    closeMenu() {
+        if (this.elements.menuPanel) {
+            this.elements.menuPanel.classList.remove(OGScopeConstants.CSS_CLASSES.MENU_OPEN);
         }
+        if (this.elements.menuButton) {
+            this.elements.menuButton.classList.remove(OGScopeConstants.CSS_CLASSES.HIDDEN);
+        }
+        this.state.isMenuOpen = false;
     }
 
     /**
-     * 更新校准指标
-     * @param {number} azimuthError - 方位误差
-     * @param {number} altitudeError - 高度误差
-     * @param {number} precision - 精度
+     * 放大
      */
-    updateAlignmentMetrics(azimuthError, altitudeError, precision) {
-        if (this.elements.azimuthError) {
-            this.elements.azimuthError.textContent = this.formatError(azimuthError);
-        }
-        
-        if (this.elements.altitudeError) {
-            this.elements.altitudeError.textContent = this.formatError(altitudeError);
-        }
-        
-        if (this.elements.precisionLevel) {
-            this.elements.precisionLevel.textContent = this.getPrecisionLevel(precision);
-        }
+    zoomIn() {
+        this.setZoomLevel(Math.min(this.state.zoomLevel + 0.1, 3.0));
     }
 
     /**
-     * 格式化误差显示
-     * @param {number} error - 误差值
-     * @returns {string} 格式化的误差
+     * 缩小
      */
-    formatError(error) {
-        if (error === null || error === undefined) {
-            return '--';
-        }
-        return Math.abs(error * 60).toFixed(1);
+    zoomOut() {
+        this.setZoomLevel(Math.max(this.state.zoomLevel - 0.1, 1.0));
     }
 
     /**
-     * 获取精度等级
-     * @param {number} precision - 精度值
-     * @returns {string} 精度等级
-     */
-    getPrecisionLevel(precision) {
-        if (precision === null || precision === undefined) {
-            return '--';
-        }
-        
-        if (precision <= 0.1) return '优秀';
-        if (precision <= 0.2) return '良好';
-        if (precision <= 0.5) return '一般';
-        return '需改进';
-    }
-
-    /**
-     * 更新按钮状态
-     * @param {Object} states - 按钮状态对象
-     */
-    updateButtonStates(states = {}) {
-        const defaultStates = {
-            streamRunning: false,
-            alignmentRunning: false,
-            zoomed: false
-        };
-        
-        const buttonStates = { ...defaultStates, ...states };
-        
-        // 视频流按钮
-        if (this.elements.startStreamBtn) {
-            this.elements.startStreamBtn.disabled = buttonStates.streamRunning;
-        }
-        
-        if (this.elements.stopStreamBtn) {
-            this.elements.stopStreamBtn.disabled = !buttonStates.streamRunning;
-        }
-        
-        // 校准按钮
-        if (this.elements.startAlignmentBtn) {
-            this.elements.startAlignmentBtn.disabled = buttonStates.alignmentRunning;
-        }
-        
-        if (this.elements.stopAlignmentBtn) {
-            this.elements.stopAlignmentBtn.disabled = !buttonStates.alignmentRunning;
-        }
-        
-        // 缩放按钮
-        if (this.elements.zoomToggleBtn) {
-            this.elements.zoomToggleBtn.classList.toggle('active', buttonStates.zoomed);
-        }
-    }
-
-    /**
-     * 切换缩放状态
+     * 切换缩放
      */
     toggleZoom() {
-        this.isZoomed = !this.isZoomed;
-        
-        if (this.elements.videoContainer) {
-            this.elements.videoContainer.classList.toggle('zoomed', this.isZoomed);
+        if (this.state.zoomLevel > 1.0) {
+            this.setZoomLevel(1.0);
+        } else {
+            this.setZoomLevel(2.0);
         }
-        
-        this.updateButtonStates({ zoomed: this.isZoomed });
-        this.emit('ui:zoom:toggle', this.isZoomed);
     }
 
     /**
-     * 更新网络状态显示
-     * @param {boolean} isOnline - 是否在线
+     * 设置缩放级别
+     * @param {number} level - 缩放级别
      */
-    updateNetworkStatus(isOnline) {
-        if (this.elements.networkStatus) {
-            this.elements.networkStatus.classList.toggle(CSS_CLASSES.STATUS_ONLINE, isOnline);
-            this.elements.networkStatus.classList.toggle(CSS_CLASSES.STATUS_OFFLINE, !isOnline);
-            
-            const statusText = this.elements.networkStatus.querySelector('.status-text');
-            if (statusText) {
-                statusText.textContent = isOnline ? '在线' : '离线';
+    setZoomLevel(level) {
+        this.state.zoomLevel = OGScopeUtils.clamp(level, 1.0, 3.0);
+        this.updateZoomUI();
+        
+        // 应用缩放到视频
+        if (this.elements.videoStream) {
+            this.elements.videoStream.style.transform = `scale(${this.state.zoomLevel})`;
+        }
+    }
+
+    /**
+     * 更新缩放UI
+     */
+    updateZoomUI() {
+        if (this.elements.zoomThumb) {
+            const percentage = ((this.state.zoomLevel - 1.0) / 2.0) * 100;
+            this.elements.zoomThumb.style.top = (100 - percentage) + '%';
+        }
+    }
+
+    /**
+     * 设置模式
+     * @param {string} mode - 模式
+     */
+    setMode(mode) {
+        this.state.currentMode = mode;
+        
+        // 更新按钮状态
+        document.querySelectorAll('.mode-button').forEach(btn => {
+            btn.classList.remove(OGScopeConstants.CSS_CLASSES.ACTIVE);
+        });
+        
+        const activeButton = document.querySelector(`[data-mode="${mode}"]`);
+        if (activeButton) {
+            activeButton.classList.add(OGScopeConstants.CSS_CLASSES.ACTIVE);
+        }
+        
+        // 折叠模式切换器
+        const switcher = document.querySelector('.mode-switcher');
+        if (switcher) {
+            switcher.classList.remove(OGScopeConstants.CSS_CLASSES.EXPANDED);
+        }
+        
+        console.log('模式切换到:', mode);
+    }
+
+    /**
+     * 切换快门工具
+     */
+    toggleShutterTools() {
+        if (this.elements.shutterTools) {
+            const isExpanded = this.elements.shutterTools.classList.toggle(OGScopeConstants.CSS_CLASSES.EXPANDED);
+            this.elements.shutterToggle.classList.toggle(OGScopeConstants.CSS_CLASSES.ACTIVE, isExpanded);
+        }
+    }
+
+    /**
+     * 开始快门
+     */
+    startShutter() {
+        if (this.state.isShutterPressed) return;
+        
+        this.state.isShutterPressed = true;
+        if (this.elements.shutterButton) {
+            this.elements.shutterButton.classList.add(OGScopeConstants.CSS_CLASSES.PRESSING);
+        }
+        
+        this.shutterStartTime = Date.now();
+        this.handleShutterMode();
+    }
+
+    /**
+     * 停止快门
+     */
+    stopShutter() {
+        if (!this.state.isShutterPressed) return;
+        
+        this.state.isShutterPressed = false;
+        if (this.elements.shutterButton) {
+            this.elements.shutterButton.classList.remove(OGScopeConstants.CSS_CLASSES.PRESSING);
+        }
+        
+        this.clearShutterIntervals();
+    }
+
+    /**
+     * 处理快门模式
+     */
+    handleShutterMode() {
+        const activeMode = document.querySelector('.shutter-mode.active');
+        const mode = activeMode ? activeMode.dataset.mode : 'single';
+        
+        switch (mode) {
+            case OGScopeConstants.APP_CONSTANTS.SHUTTER_MODES.SINGLE:
+                this.handleSingleShutter();
+                break;
+            case OGScopeConstants.APP_CONSTANTS.SHUTTER_MODES.BULB:
+                this.handleBulbShutter();
+                break;
+            case OGScopeConstants.APP_CONSTANTS.SHUTTER_MODES.CONTINUOUS:
+                this.handleContinuousShutter();
+                break;
+        }
+    }
+
+    /**
+     * 处理单次快门
+     */
+    handleSingleShutter() {
+        if (this.elements.shutterTimer) {
+            this.elements.shutterTimer.textContent = '拍摄中...';
+        }
+        
+        setTimeout(() => {
+            if (this.elements.shutterTimer) {
+                this.elements.shutterTimer.textContent = '完成';
+                setTimeout(() => {
+                    if (this.elements.shutterTimer) {
+                        this.elements.shutterTimer.textContent = '';
+                    }
+                }, 1000);
             }
+        }, 300);
+    }
+
+    /**
+     * 处理B门快门
+     */
+    handleBulbShutter() {
+        if (this.elements.shutterTimer) {
+            this.elements.shutterTimer.textContent = '0.0s';
+        }
+        
+        this.shutterInterval = setInterval(() => {
+            const elapsed = (Date.now() - this.shutterStartTime) / 1000;
+            if (this.elements.shutterTimer) {
+                this.elements.shutterTimer.textContent = OGScopeUtils.formatTime(elapsed);
+            }
+        }, 100);
+    }
+
+    /**
+     * 处理连拍快门
+     */
+    handleContinuousShutter() {
+        let shotCount = 0;
+        if (this.elements.shutterTimer) {
+            this.elements.shutterTimer.textContent = `连拍 ${shotCount}`;
+        }
+        
+        this.continuousInterval = setInterval(() => {
+            shotCount++;
+            if (this.elements.shutterTimer) {
+                this.elements.shutterTimer.textContent = `连拍 ${shotCount}`;
+            }
+        }, 500);
+    }
+
+    /**
+     * 清除快门间隔
+     */
+    clearShutterIntervals() {
+        if (this.shutterInterval) {
+            clearInterval(this.shutterInterval);
+            this.shutterInterval = null;
+        }
+        
+        if (this.continuousInterval) {
+            clearInterval(this.continuousInterval);
+            this.continuousInterval = null;
+        }
+        
+        if (this.elements.shutterTimer) {
+            setTimeout(() => {
+                this.elements.shutterTimer.textContent = '';
+            }, 2000);
         }
     }
 
     /**
-     * 显示PWA安装提示
+     * 切换高级模式
      */
-    showInstallPrompt() {
-        if (this.elements.installPrompt) {
-            this.elements.installPrompt.classList.remove(CSS_CLASSES.HIDDEN);
+    toggleAdvancedMode() {
+        this.state.isAdvancedMode = !this.state.isAdvancedMode;
+        
+        const button = document.querySelector('.advanced-button');
+        if (button) {
+            button.classList.toggle(OGScopeConstants.CSS_CLASSES.ACTIVE, this.state.isAdvancedMode);
         }
-    }
-
-    /**
-     * 隐藏PWA安装提示
-     */
-    hideInstallPrompt() {
-        if (this.elements.installPrompt) {
-            this.elements.installPrompt.classList.add(CSS_CLASSES.HIDDEN);
-        }
+        
+        console.log('高级模式:', this.state.isAdvancedMode ? '开启' : '关闭');
     }
 
     /**
@@ -369,75 +551,116 @@ export class UIController extends EventEmitter {
     handleResize() {
         // 重新计算布局
         this.updateLayout();
-        
-        // 触发resize事件
-        this.emit('ui:resize', {
-            width: window.innerWidth,
-            height: window.innerHeight
-        });
+    }
+
+    /**
+     * 处理方向变化
+     */
+    handleOrientationChange() {
+        // 延迟处理以确保尺寸已更新
+        setTimeout(() => {
+            this.updateLayout();
+        }, 100);
     }
 
     /**
      * 更新布局
      */
     updateLayout() {
-        // 根据屏幕方向调整布局
-        const isLandscape = window.innerWidth > window.innerHeight;
-        
-        if (this.elements.app) {
-            this.elements.app.classList.toggle('landscape', isLandscape);
-            this.elements.app.classList.toggle('portrait', !isLandscape);
+        // 检查是否为横屏
+        if (OGScopeUtils.isPortrait()) {
+            // 显示横屏提示
+            this.showOrientationWarning();
+        } else {
+            // 隐藏横屏提示
+            this.hideOrientationWarning();
         }
     }
 
     /**
-     * 显示通知
-     * @param {string} message - 通知消息
-     * @param {string} type - 通知类型
-     * @param {number} duration - 显示时长
+     * 显示横屏提示
      */
-    showNotification(message, type = 'info', duration = 3000) {
-        Utils.showNotification(message, type, duration);
+    showOrientationWarning() {
+        // 这里可以添加横屏提示逻辑
+        console.log('需要横屏使用');
     }
 
     /**
-     * 显示错误消息
-     * @param {string} message - 错误消息
+     * 隐藏横屏提示
      */
-    showError(message) {
-        this.showNotification(message, 'error', 5000);
+    hideOrientationWarning() {
+        // 这里可以添加隐藏横屏提示的逻辑
     }
 
     /**
-     * 显示成功消息
-     * @param {string} message - 成功消息
+     * 加载设置
      */
-    showSuccess(message) {
-        this.showNotification(message, 'success', 3000);
+    loadSettings() {
+        try {
+            const savedSettings = localStorage.getItem(OGScopeConstants.STORAGE_KEYS.SETTINGS);
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                this.applySettings(settings);
+            }
+        } catch (error) {
+            console.error('加载设置失败:', error);
+        }
     }
 
     /**
-     * 显示警告消息
-     * @param {string} message - 警告消息
+     * 保存设置
      */
-    showWarning(message) {
-        this.showNotification(message, 'warning', 4000);
+    saveSettings() {
+        try {
+            const settings = {
+                mode: this.state.currentMode,
+                zoomLevel: this.state.zoomLevel,
+                isAdvancedMode: this.state.isAdvancedMode
+            };
+            localStorage.setItem(OGScopeConstants.STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+        } catch (error) {
+            console.error('保存设置失败:', error);
+        }
     }
 
     /**
-     * 获取元素引用
-     * @param {string} name - 元素名称
-     * @returns {HTMLElement} DOM元素
+     * 应用设置
+     * @param {Object} settings - 设置对象
      */
-    getElement(name) {
-        return this.elements[name];
+    applySettings(settings) {
+        if (settings.mode) {
+            this.setMode(settings.mode);
+        }
+        if (settings.zoomLevel) {
+            this.setZoomLevel(settings.zoomLevel);
+        }
+        if (settings.isAdvancedMode) {
+            this.state.isAdvancedMode = settings.isAdvancedMode;
+        }
     }
 
     /**
      * 销毁UI控制器
      */
     destroy() {
-        this.removeAllListeners();
-        this.elements = {};
+        // 移除所有事件监听器
+        this.eventListeners.forEach((listeners, key) => {
+            listeners.forEach(({ element, event, handler, options }) => {
+                element.removeEventListener(event, handler, options);
+            });
+        });
+        this.eventListeners.clear();
+        
+        // 保存设置
+        this.saveSettings();
     }
 }
+
+// 创建UI控制器实例
+const uiController = new UIController();
+
+// 导出UI控制器
+window.OGScopeUI = {
+    UIController,
+    uiController
+};
