@@ -20,7 +20,18 @@ recording_task = None
 # 预览帧缓存与抓取任务
 latest_preview_jpeg: Optional[bytes] = None
 last_preview_time: Optional[float] = None
+latest_preview_id: int = 0
 preview_grabber_task = None
+
+
+def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "message_key": message_key,
+        "message": message,
+    }
+    if message_params:
+        payload["message_params"] = message_params
+    return payload
 
 
 def get_camera_instance():
@@ -124,7 +135,7 @@ class DebugCameraService:
         if camera.start_capture():
             # 启动后台抓取任务
             await DebugCameraService._ensure_preview_grabber()
-            return {"success": True, "message": "相机启动成功"}
+            return {"success": True, **i18n_payload("server.cameraStarted", "相机启动成功")}
         else:
             raise Exception("相机启动失败")
     
@@ -133,11 +144,11 @@ class DebugCameraService:
         """停止调试相机"""
         camera = get_camera_instance()
         if not camera:
-            return {"success": True, "message": "相机未运行"}
+            return {"success": True, **i18n_payload("server.cameraNotRunning", "相机未运行")}
         
         if camera.stop_capture():
             await DebugCameraService._stop_preview_grabber()
-            return {"success": True, "message": "相机停止成功"}
+            return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
         else:
             raise Exception("相机停止失败")
     
@@ -155,16 +166,21 @@ class DebugCameraService:
             # 等待最多500ms 以获取缓存帧
             import time
             deadline = time.time() + 0.5
-            global latest_preview_jpeg
+            global latest_preview_jpeg, latest_preview_id, last_preview_time
             while latest_preview_jpeg is None and time.time() < deadline:
                 await asyncio.sleep(0.01)
             if latest_preview_jpeg is None:
                 raise Exception("暂无预览帧")
-            from fastapi.responses import StreamingResponse
-            return StreamingResponse(
-                iter([latest_preview_jpeg]),
+            from fastapi.responses import Response
+            return Response(
+                content=latest_preview_jpeg,
                 media_type="image/jpeg",
-                headers={"Cache-Control": "no-cache"}
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "X-Frame-Id": str(latest_preview_id),
+                    "X-Frame-Ts": str(last_preview_time or 0.0),
+                },
             )
         except Exception as e:
             raise Exception(f"预览失败: {str(e)}")
@@ -218,7 +234,14 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         if camera.set_rotation(rotation):
-            return {"success": True, "message": f"旋转角度设置为: {rotation}度"}
+            return {
+                "success": True,
+                **i18n_payload(
+                    "server.rotationSet",
+                    f"旋转角度设置为: {rotation}度",
+                    {"rotation": rotation}
+                )
+            }
         else:
             raise Exception("设置旋转角度失败")
     
@@ -300,7 +323,7 @@ class DebugCameraService:
             await recording_task
             recording_task = None
         
-        return {"success": True, "message": "录制已停止"}
+        return {"success": True, **i18n_payload("server.recordingStopped", "录制已停止")}
 
     @staticmethod
     async def set_size(width: int, height: int):
@@ -319,7 +342,7 @@ class DebugCameraService:
         current_height = info.get('output_height', info.get('height', 0))
         
         if current_width == width and current_height == height:
-            return {"success": True, "message": "分辨率未变化", "info": info}
+            return {"success": True, "info": info, **i18n_payload("server.resolutionUnchanged", "分辨率未变化")}
         
         # 为避免在预览抓取进行中重配导致底层冲突：先停抓取，再设置，最后重启抓取
         try:
@@ -367,7 +390,7 @@ class DebugCameraService:
             await DebugCameraService._restart_preview_grabber()
         except Exception:
             pass
-        return {"success": True, "message": "分辨率已更新", "info": info}
+        return {"success": True, "info": info, **i18n_payload("server.resolutionUpdated", "分辨率已更新")}
 
     @staticmethod
     async def set_sampling_mode(mode: str):
@@ -400,7 +423,11 @@ class DebugCameraService:
             raise Exception(f"采样模式设置未生效，当前模式: {current_mode}")
         
         await DebugCameraService._restart_preview_grabber()
-        return {"success": True, "message": f"采样模式已设置为 {mode}", "info": info}
+        return {
+            "success": True,
+            "info": info,
+            **i18n_payload("server.samplingModeSet", f"采样模式已设置为 {mode}", {"mode": mode})
+        }
 
     @staticmethod
     async def set_fps(fps: int):
@@ -449,7 +476,11 @@ class DebugCameraService:
             
             # 帧率变化后，预览抓取节流需要同步
             await DebugCameraService._restart_preview_grabber()
-            return {"success": True, "message": f"帧率设置为 {int(fps)}", "info": info}
+            return {
+                "success": True,
+                "info": info,
+                **i18n_payload("server.fpsSet", f"帧率设置为 {int(fps)}", {"fps": int(fps)})
+            }
         except Exception as e:
             raise Exception(f"设置帧率失败: {str(e)}")
 
@@ -487,7 +518,7 @@ class DebugCameraService:
     @staticmethod
     async def _preview_grabber_loop():
         """后台抓取最新帧，编码为 JPEG 缓存，降低单次请求阻塞与抖动"""
-        global latest_preview_jpeg, last_preview_time
+        global latest_preview_jpeg, last_preview_time, latest_preview_id
         camera = get_camera_instance()
         if not camera or not camera.is_capturing:
             return
@@ -505,6 +536,7 @@ class DebugCameraService:
                         if ok:
                             latest_preview_jpeg = buf.tobytes()
                             last_preview_time = time.time()
+                            latest_preview_id += 1
                 except Exception:
                     # 忽略单帧失败
                     pass
@@ -572,7 +604,7 @@ class DebugCameraService:
             
             return {
                 "success": True,
-                "message": "相机设置已更新",
+                **i18n_payload("server.cameraSettingsUpdated", "相机设置已更新"),
                 "settings": settings
             }
         except Exception as e:
@@ -592,7 +624,7 @@ class DebugCameraService:
         
         return {
             "success": True,
-            "message": "相机已重置到默认设置"
+            **i18n_payload("server.cameraReset", "相机已重置到默认设置")
         }
     
     @staticmethod
@@ -613,7 +645,10 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         if camera.set_noise_reduction(level):
-            return {"success": True, "message": f"降噪级别设置为: {level}"}
+            return {
+                "success": True,
+                **i18n_payload("server.noiseReductionSet", f"降噪级别设置为: {level}", {"level": level})
+            }
         else:
             raise Exception("设置降噪级别失败")
     
@@ -625,7 +660,10 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         if camera.set_white_balance(mode, gain_r, gain_b):
-            return {"success": True, "message": f"白平衡模式设置为: {mode}"}
+            return {
+                "success": True,
+                **i18n_payload("server.whiteBalanceSet", f"白平衡模式设置为: {mode}", {"mode": mode})
+            }
         else:
             raise Exception("设置白平衡失败")
     
@@ -638,7 +676,7 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         if camera.set_image_enhancement(contrast, brightness, saturation, sharpness):
-            return {"success": True, "message": "图像增强参数已设置"}
+            return {"success": True, **i18n_payload("server.imageEnhancementSet", "图像增强参数已设置")}
         else:
             raise Exception("设置图像增强参数失败")
     
@@ -651,7 +689,10 @@ class DebugCameraService:
         
         if camera.set_night_mode(enabled):
             mode_text = "启用" if enabled else "关闭"
-            return {"success": True, "message": f"夜间模式已{mode_text}"}
+            return {
+                "success": True,
+                **i18n_payload("server.nightModeSet", f"夜间模式已{mode_text}", {"state": mode_text})
+            }
         else:
             raise Exception("设置夜间模式失败")
     
@@ -690,7 +731,11 @@ class DebugCameraService:
             )
             camera.set_night_mode(night_preset["night_mode"])
             
-            return {"success": True, "message": "夜间模式预设已应用", "preset": night_preset}
+            return {
+                "success": True,
+                "preset": night_preset,
+                **i18n_payload("server.nightPresetApplied", "夜间模式预设已应用")
+            }
         except Exception as e:
             raise Exception(f"应用夜间模式预设失败: {str(e)}")
     
@@ -711,7 +756,11 @@ class DebugCameraService:
             with open(backup_file, 'w', encoding='utf-8') as f:
                 json.dump(backup_data, f, indent=2, ensure_ascii=False)
             
-            return {"success": True, "message": "当前设置已备份", "backup_file": str(backup_file)}
+            return {
+                "success": True,
+                "backup_file": str(backup_file),
+                **i18n_payload("server.settingsBackedUp", "当前设置已备份")
+            }
         except Exception as e:
             raise Exception(f"保存设置备份失败: {str(e)}")
     
@@ -751,7 +800,7 @@ class DebugCameraService:
             if "night_mode" in settings:
                 camera.set_night_mode(settings["night_mode"])
             
-            return {"success": True, "message": "设置已从备份恢复"}
+            return {"success": True, **i18n_payload("server.settingsRestored", "设置已从备份恢复")}
         except Exception as e:
             raise Exception(f"恢复设置备份失败: {str(e)}")
     
@@ -772,7 +821,11 @@ class DebugCameraService:
                     mode_name = "彩色" if color_mode == "color" else "黑白"
                     return {
                         "success": True, 
-                        "message": f"颜色模式已切换为{mode_name}模式",
+                        **i18n_payload(
+                            "server.colorModeSwitched",
+                            f"颜色模式已切换为{mode_name}模式",
+                            {"mode": mode_name}
+                        ),
                         "color_mode": color_mode
                     }
                 else:
@@ -832,7 +885,7 @@ class DebugPresetService:
             with open(presets_file, 'w', encoding='utf-8') as f:
                 json.dump({"presets": presets}, f, indent=2, ensure_ascii=False)
             
-            return {"success": True, "message": "预设保存成功"}
+            return {"success": True, **i18n_payload("server.presetSaved", "预设保存成功")}
         except Exception as e:
             raise Exception(f"保存预设失败: {str(e)}")
     
@@ -906,7 +959,11 @@ class DebugPresetService:
                     if hasattr(camera, 'set_color_mode'):
                         camera.set_color_mode(preset["color_mode"])
             
-            return {"success": True, "message": f"预设 '{preset_name}' 已应用", "preset": preset}
+            return {
+                "success": True,
+                "preset": preset,
+                **i18n_payload("server.presetApplied", f"预设 '{preset_name}' 已应用", {"name": preset_name})
+            }
             
         except Exception as e:
             raise Exception(f"应用预设失败: {str(e)}")
@@ -935,7 +992,7 @@ class DebugPresetService:
             with open(presets_file, 'w', encoding='utf-8') as f:
                 json.dump({"presets": presets}, f, indent=2, ensure_ascii=False)
             
-            return {"success": True, "message": f"预设 '{preset_name}' 已删除"}
+            return {"success": True, **i18n_payload("server.presetDeleted", f"预设 '{preset_name}' 已删除", {"name": preset_name})}
             
         except Exception as e:
             raise Exception(f"删除预设失败: {str(e)}")
@@ -1027,7 +1084,7 @@ class DebugFileService:
             if info_path.exists():
                 info_path.unlink()
             
-            return {"message": f"文件 {filename} 删除成功"}
+            return i18n_payload("server.fileDeleted", f"文件 {filename} 删除成功", {"filename": filename})
             
         except Exception as e:
             raise Exception(f"删除文件失败: {str(e)}")

@@ -99,6 +99,28 @@
   gap: var(--debug-spacing);
 }
 
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--debug-text-secondary);
+  font-size: 0.85rem;
+}
+
+.lang-select {
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--debug-text);
+  border: 1px solid var(--debug-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.lang-select:focus {
+  outline: none;
+  border-color: var(--debug-primary);
+}
+
 /* 状态指示器 */
 .status-indicator {
   display: flex;
@@ -1466,6 +1488,15 @@ button:disabled:hover,
   
   .header-actions {
     gap: 6px;
+  }
+
+  .lang-switch label {
+    display: none;
+  }
+
+  .lang-select {
+    padding: 4px 6px;
+    max-width: 110px;
   }
   
   .status-indicator {

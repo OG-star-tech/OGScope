@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>OGScope 调试控制台</title>
+    <title data-i18n="page.title">OGScope 调试控制台</title>
     
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#ff6b35">
@@ -29,12 +29,20 @@
         <!-- 头部 -->
         <header class="debug-header">
             <div class="header-content">
-                <h1>🔧 OGScope 调试控制台</h1>
+                <h1 data-i18n="header.title">🔧 OGScope 调试控制台</h1>
                 <div class="header-actions">
-                    <button class="btn btn-secondary" onclick="window.location.href='/'">← 返回主界面</button>
+                    <div class="lang-switch">
+                        <label for="language-select" data-i18n="language.label">语言</label>
+                        <select id="language-select" class="lang-select">
+                            <option value="zh" data-i18n="language.zh">中文</option>
+                            <option value="en" data-i18n="language.en">English</option>
+                            <option value="bilingual" data-i18n="language.bilingual">中英双语</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="window.location.href='/'" data-i18n="header.backToHome">← 返回主界面</button>
                     <div class="status-indicator" id="camera-status">
                         <span class="status-dot offline"></span>
-                        <span class="status-text">相机离线</span>
+                        <span class="status-text" data-i18n="status.cameraOffline">相机离线</span>
                     </div>
                 </div>
             </div>
@@ -48,11 +56,11 @@
                     <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
                     </svg>
-                    <h2>实时预览</h2>
+                    <h2 data-i18n="preview.title">实时预览</h2>
                 </div>
                 <div class="preview-container">
                     <div class="video-container" id="video-container">
-                        <img id="preview-image" src="/static/images/placeholder-camera.png" alt="相机预览">
+                        <img id="preview-image" src="/static/images/placeholder-camera.png" alt="相机预览" data-i18n-alt="preview.imageAlt">
                         <div class="rec-badge" id="rec-badge">
                             <span class="rec-dot"></span>
                             <span class="rec-text">REC</span>
@@ -61,19 +69,19 @@
                         <div class="video-overlay" id="preview-overlay">
                             <div class="overlay-content">
                                 <div class="overlay-icon">📷</div>
-                                <div class="overlay-text">点击启动相机预览</div>
+                                <div class="overlay-text" data-i18n="preview.overlayClickToStart">点击启动相机预览</div>
                             </div>
                         </div>
                         
                         <!-- 直方图控制按钮 -->
                         <div class="histogram-controls">
-                            <button class="histogram-toggle" id="histogram-toggle">
+                            <button class="histogram-toggle" id="histogram-toggle" data-i18n="histogram.button">
                                 📊 直方图
                             </button>
                             <button class="histogram-toggle" id="histogram-settings">
                                 ⚙️
                             </button>
-                            <button class="histogram-toggle" id="fullscreen-toggle" title="全屏预览">
+                            <button class="histogram-toggle" id="fullscreen-toggle" title="全屏预览" data-i18n="preview.fullscreen" data-i18n-title="preview.fullscreenTitle">
                                 ⛶ 全屏
                             </button>
                         </div>
@@ -82,42 +90,44 @@
                         <div class="histogram-overlay" id="histogram-overlay">
                             <canvas class="histogram-canvas" id="histogram-canvas"></canvas>
                             <div class="histogram-info" id="histogram-info">
-                                <div>RGB 直方图</div>
+                                <div data-i18n="histogram.rgbTitle">RGB 直方图</div>
+                                <div data-i18n="histogram.frontendOnly">纯前端实现</div>
                             </div>
                         </div>
                         
                         <!-- 直方图控制面板 -->
                         <div class="histogram-panel" id="histogram-panel">
-                            <h4>📊 直方图设置</h4>
+                            <h4 data-i18n="histogram.settingsTitle">📊 直方图设置</h4>
+                            <div class="param-hint" data-i18n="histogram.settingsHint">该直方图工具为纯前端实现（基于预览帧像素计算）</div>
                             <div class="histogram-options">
                                 <div class="histogram-option">
                                     <input type="checkbox" id="show-histogram" checked>
-                                    <label for="show-histogram">显示直方图</label>
+                                    <label for="show-histogram" data-i18n="histogram.showHistogram">显示直方图</label>
                                 </div>
                                 <div class="histogram-option">
                                     <input type="checkbox" id="show-rgb" checked>
-                                    <label for="show-rgb">RGB 通道</label>
+                                    <label for="show-rgb" data-i18n="histogram.showRgb">RGB 通道</label>
                                 </div>
                                 <div class="histogram-option">
                                     <input type="checkbox" id="show-luminance">
-                                    <label for="show-luminance">亮度通道</label>
+                                    <label for="show-luminance" data-i18n="histogram.showLuminance">亮度通道</label>
                                 </div>
                                 <div class="histogram-option">
                                     <input type="checkbox" id="show-overexposure">
-                                    <label for="show-overexposure">过曝警告</label>
+                                    <label for="show-overexposure" data-i18n="histogram.showOverExposure">过曝警告</label>
                                 </div>
                             </div>
                             <div class="histogram-stats" id="histogram-stats">
                                 <div class="stat-item">
-                                    <span class="stat-label">平均值:</span>
+                                    <span class="stat-label" data-i18n="histogram.mean">平均值:</span>
                                     <span class="stat-value" id="histogram-mean">--</span>
                                 </div>
                                 <div class="stat-item">
-                                    <span class="stat-label">标准差:</span>
+                                    <span class="stat-label" data-i18n="histogram.std">标准差:</span>
                                     <span class="stat-value" id="histogram-std">--</span>
                                 </div>
                                 <div class="stat-item">
-                                    <span class="stat-label">过曝像素:</span>
+                                    <span class="stat-label" data-i18n="histogram.overexposedPixels">过曝像素:</span>
                                     <span class="stat-value" id="histogram-overexposed">--</span>
                                 </div>
                             </div>
@@ -127,43 +137,43 @@
                     <!-- 全屏预览容器 -->
                     <div class="fullscreen-preview" id="fullscreen-preview">
                         <div class="fullscreen-container">
-                            <img id="fullscreen-image" src="/static/images/placeholder-camera.png" alt="全屏预览">
-                            <button class="fullscreen-close" id="fullscreen-close">✕ 关闭</button>
+                            <img id="fullscreen-image" src="/static/images/placeholder-camera.png" alt="全屏预览" data-i18n-alt="preview.fullscreenAlt">
+                            <button class="fullscreen-close" id="fullscreen-close" data-i18n="common.close">✕ 关闭</button>
                         </div>
                     </div>
                     
                     <div class="preview-controls">
-                        <button class="btn btn-primary" id="start-preview">
+                        <button class="btn btn-primary" id="start-preview" data-i18n="preview.start">
                             <span class="btn-icon">▶️</span>
                             启动预览
                         </button>
-                        <button class="btn btn-secondary" id="stop-preview" disabled>
+                        <button class="btn btn-secondary" id="stop-preview" disabled data-i18n="preview.stop">
                             <span class="btn-icon">⏹️</span>
                             停止预览
                         </button>
                     </div>
                     <div class="preview-info">
                         <div class="info-item">
-                            <span class="info-label">分辨率:</span>
+                            <span class="info-label" data-i18n="preview.resolution">分辨率:</span>
                             <span class="info-value" id="resolution">--</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">帧率:</span>
+                            <span class="info-label" data-i18n="preview.fps">帧率:</span>
                             <span class="info-value" id="fps">--</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">采样模式:</span>
+                            <span class="info-label" data-i18n="preview.samplingMode">采样模式:</span>
                             <span class="info-value" id="sampling-mode">--</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">状态:</span>
-                            <span class="info-value" id="preview-status">未启动</span>
+                            <span class="info-label" data-i18n="common.status">状态:</span>
+                            <span class="info-value" id="preview-status" data-i18n="status.notStarted">未启动</span>
                         </div>
                     </div>
                     
                     <!-- 分辨率 / 帧率 / 采样模式 控制（互不影响，各有确认） -->
                     <div class="resolution-controls">
-                        <h4>🖼️ 分辨率</h4>
+                        <h4 data-i18n="resolution.sectionTitle">🖼️ 分辨率</h4>
                         <div class="resolution-row">
                             <div class="preset-buttons">
                                 <button class="btn btn-secondary btn-small" data-res="640x360">640×360</button>
@@ -171,97 +181,105 @@
                                 <button class="btn btn-secondary btn-small" data-res="1600x900">1600×900</button>
                                 <button class="btn btn-secondary btn-small" data-res="1920x1080">1920×1080</button>
                             </div>
-                            <button class="btn btn-primary btn-small" id="apply-resolution">
+                            <button class="btn btn-primary btn-small" id="apply-resolution" data-i18n="resolution.apply">
                                 <span class="btn-icon">✅</span>
                                 应用分辨率
                             </button>
                         </div>
-                        <div class="resolution-hint">所有分辨率均为16:9比例，符合IMX327传感器原生比例，避免画面变形</div>
+                        <div class="resolution-hint" data-i18n="resolution.hint">所有分辨率均为16:9比例，符合IMX327传感器原生比例，避免画面变形</div>
                     </div>
 
                     <div class="resolution-controls">
-                        <h4>⏱️ 帧率</h4>
+                        <h4 data-i18n="fps.sectionTitle">⏱️ 帧率</h4>
                         <div class="resolution-row">
                             <div class="fps-input">
                                 <label for="fps-input">FPS</label>
                                 <input type="number" id="fps-input" min="1" max="60" step="1" value="5">
                             </div>
-                            <button class="btn btn-secondary btn-small" id="apply-fps">
+                            <button class="btn btn-secondary btn-small" id="apply-fps" data-i18n="fps.apply">
                                 <span class="btn-icon">⏱️</span>
                                 应用帧率
                             </button>
                         </div>
-                        <div class="resolution-hint">单独设置帧率，尽量不重启预览</div>
+                        <div class="resolution-hint" data-i18n="fps.hint">单独设置帧率，尽量不重启预览</div>
                     </div>
 
                     <div class="resolution-controls">
-                        <h4>🔄 采样模式</h4>
+                        <h4 data-i18n="sampling.sectionTitle">🔄 采样模式</h4>
                         <div class="resolution-row">
                             <div class="fps-input">
-                                <label for="sampling-select">模式</label>
+                                <label for="sampling-select" data-i18n="sampling.modeLabel">模式</label>
                                 <select id="sampling-select">
-                                    <option value="supersample" selected>超采样</option>
-                                    <option value="native">原生</option>
-                                    <option value="crop">裁切（预留）</option>
+                                    <option value="supersample" selected data-i18n="sampling.mode.supersample">超采样</option>
+                                    <option value="native" data-i18n="sampling.mode.native">原生</option>
+                                    <option value="crop" data-i18n="sampling.mode.crop">裁切（预留）</option>
                                 </select>
                             </div>
-                            <button class="btn btn-secondary btn-small" id="apply-sampling">
+                            <button class="btn btn-secondary btn-small" id="apply-sampling" data-i18n="sampling.apply">
                                 <span class="btn-icon">🔄</span>
                                 切换采样
                             </button>
                         </div>
-                        <div class="resolution-hint">切换模式可能调整输出尺寸</div>
+                        <div class="resolution-hint" data-i18n="sampling.hint">切换模式可能调整输出尺寸</div>
                     </div>
                     
                     <!-- 实时数据流分析 -->
                     <div class="stream-analysis">
-                        <h4>📊 实时数据流分析</h4>
+                        <h4 data-i18n="stream.sectionTitle">📊 实时数据流分析</h4>
                         <div class="analysis-grid">
                             <div class="info-item">
-                                <span class="info-label">检测分辨率</span>
+                                <span class="info-label" data-i18n="stream.detectedResolution">检测分辨率</span>
                                 <span class="info-value" id="detected-resolution">--</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">计算帧率</span>
+                                <span class="info-label" data-i18n="stream.effectiveFps">有效新帧FPS</span>
                                 <span class="info-value" id="calculated-fps">--</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">帧计数</span>
+                                <span class="info-label" data-i18n="stream.requestFps">请求FPS</span>
+                                <span class="info-value" id="request-fps">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label" data-i18n="stream.newFrameCount">有效新帧数</span>
                                 <span class="info-value" id="frame-count">0</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">接收数据</span>
+                                <span class="info-label" data-i18n="stream.requestCount">请求次数</span>
+                                <span class="info-value" id="request-count">0</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label" data-i18n="stream.dataSize">接收数据</span>
                                 <span class="info-value" id="data-size">0 B</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">平均帧大小</span>
+                                <span class="info-label" data-i18n="stream.avgFrameSize">平均帧大小</span>
                                 <span class="info-value" id="avg-frame-size">--</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">下行速率</span>
+                                <span class="info-label" data-i18n="stream.transferRate">下行速率</span>
                                 <span class="info-value" id="transfer-rate">--</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">流状态</span>
-                                <span class="info-value" id="stream-status">非活跃</span>
+                                <span class="info-label" data-i18n="stream.status">流状态</span>
+                                <span class="info-value" id="stream-status" data-i18n="status.inactive">非活跃</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">运行时长</span>
+                                <span class="info-label" data-i18n="stream.runtime">运行时长</span>
                                 <span class="info-value" id="runtime">--</span>
                             </div>
                             <div class="info-item">
-                                <span class="info-label">调试信息</span>
+                                <span class="info-label" data-i18n="stream.debugInfo">调试信息</span>
                                 <span class="info-value" id="debug-info">--</span>
                             </div>
                         </div>
                         <div class="analysis-actions">
-                            <button class="btn btn-secondary btn-small" id="reset-stats">重置统计</button>
+                            <button class="btn btn-secondary btn-small" id="reset-stats" data-i18n="stream.resetStats">重置统计</button>
                         </div>
                     </div>
                     
                     <!-- 旋转控制 -->
                     <div class="rotation-controls">
-                        <h4>🔄 画面旋转控制</h4>
+                        <h4 data-i18n="rotation.sectionTitle">🔄 画面旋转控制</h4>
                         <div class="rotation-buttons">
                             <button class="btn btn-secondary btn-small" data-rotation="0">0°</button>
                             <button class="btn btn-secondary btn-small" data-rotation="90">90°</button>
@@ -269,7 +287,7 @@
                             <button class="btn btn-secondary btn-small" data-rotation="270">270°</button>
                         </div>
                         <div class="rotation-info">
-                            <span class="info-label">当前角度:</span>
+                            <span class="info-label" data-i18n="rotation.current">当前角度:</span>
                             <span class="info-value" id="current-rotation">180°</span>
                         </div>
                     </div>
@@ -278,10 +296,10 @@
 
             <!-- 标签页导航（移除预览） -->
             <div class="tab-navigation">
-                <button class="tab-button active" data-tab="capture">📸 拍摄控制</button>
-                <button class="tab-button" data-tab="settings">⚙️ 参数设置</button>
-                <button class="tab-button" data-tab="presets">💾 预设管理</button>
-                <button class="tab-button" data-tab="files">📁 文件管理</button>
+                <button class="tab-button active" data-tab="capture" data-i18n="tabs.capture">📸 拍摄控制</button>
+                <button class="tab-button" data-tab="settings" data-i18n="tabs.settings">⚙️ 参数设置</button>
+                <button class="tab-button" data-tab="presets" data-i18n="tabs.presets">💾 预设管理</button>
+                <button class="tab-button" data-tab="files" data-i18n="tabs.files">📁 文件管理</button>
             </div>
 
             <!-- 拍摄控制标签页 -->
@@ -291,20 +309,20 @@
                         <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M4,4H7L9,2H15L17,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M12,7A5,5 0 0,0 7,12A5,5 0 0,0 12,17A5,5 0 0,0 17,12A5,5 0 0,0 12,7M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9Z"/>
                         </svg>
-                        <h2>拍摄控制</h2>
+                        <h2 data-i18n="capture.title">拍摄控制</h2>
                     </div>
                     
                     <div class="capture-controls">
                         <div class="capture-section">
-                            <h3>📸 单张拍摄</h3>
+                            <h3 data-i18n="capture.singleShot">📸 单张拍摄</h3>
                             <div class="capture-actions">
-                                <button class="btn btn-primary btn-large" id="capture-image">
+                                <button class="btn btn-primary btn-large" id="capture-image" data-i18n="capture.capturePhoto">
                                     <span class="btn-icon">📷</span>
                                     拍摄照片
                                 </button>
                                 <div class="capture-info">
                                     <div class="info-item">
-                                        <span class="info-label">最后拍摄:</span>
+                                        <span class="info-label" data-i18n="capture.lastCapture">最后拍摄:</span>
                                         <span class="info-value" id="last-capture">--</span>
                                     </div>
                                 </div>
@@ -312,13 +330,13 @@
                         </div>
                         
                         <div class="capture-section">
-                            <h3>🎥 视频录制</h3>
+                            <h3 data-i18n="capture.videoRecording">🎥 视频录制</h3>
                             <div class="recording-controls">
-                                <button class="btn btn-success btn-large" id="start-recording">
+                                <button class="btn btn-success btn-large" id="start-recording" data-i18n="recording.start">
                                     <span class="btn-icon">🔴</span>
                                     开始录制
                                 </button>
-                                <button class="btn btn-error btn-large" id="stop-recording" disabled>
+                                <button class="btn btn-error btn-large" id="stop-recording" disabled data-i18n="recording.stop">
                                     <span class="btn-icon">⏹️</span>
                                     停止录制
                                 </button>
@@ -326,11 +344,11 @@
                             
                             <div class="recording-info">
                                 <div class="info-item">
-                                    <span class="info-label">录制状态:</span>
-                                    <span class="info-value" id="recording-status">未录制</span>
+                                    <span class="info-label" data-i18n="recording.statusLabel">录制状态:</span>
+                                    <span class="info-value" id="recording-status" data-i18n="status.notRecording">未录制</span>
                                 </div>
                                 <div class="info-item">
-                                    <span class="info-label">录制时长:</span>
+                                    <span class="info-label" data-i18n="recording.durationLabel">录制时长:</span>
                                     <span class="info-value" id="recording-duration">00:00</span>
                                 </div>
                             </div>
@@ -346,139 +364,139 @@
                         <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
                         </svg>
-                        <h2>参数设置</h2>
+                        <h2 data-i18n="settings.title">参数设置</h2>
                     </div>
                     
                     <div class="settings-controls">
                         <!-- 基础参数 -->
                         <div class="param-section">
-                            <h4>📸 基础参数</h4>
+                            <h4 data-i18n="settings.basicSection">📸 基础参数</h4>
                             <div class="control-group">
-                                <label for="exposure-setting">曝光时间 (μs)</label>
+                                <label for="exposure-setting" data-i18n="settings.exposure">曝光时间 (μs)</label>
                                 <div class="control-row">
                                     <input type="range" id="exposure-setting" min="1000" max="100000" value="10000" step="1000">
                                     <span class="control-value" id="exposure-value">10000</span>
                                 </div>
-                                <div class="param-hint">范围: 1,000-100,000μs | 建议: 暗场>20000, 明场<10000</div>
+                                <div class="param-hint" data-i18n="settings.exposureHint">范围: 1,000-100,000μs | 建议: 暗场>20000, 明场<10000</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="gain-setting">模拟增益</label>
+                                <label for="gain-setting" data-i18n="settings.analogueGain">模拟增益</label>
                                 <div class="control-row">
                                     <input type="range" id="gain-setting" min="1" max="16" step="0.1" value="1.0">
                                     <span class="control-value" id="gain-value">1.0</span>
                                 </div>
-                                <div class="param-hint">范围: 1.0-16.0x | 建议: 过高会增加噪点</div>
+                                <div class="param-hint" data-i18n="settings.analogueGainHint">范围: 1.0-16.0x | 建议: 过高会增加噪点</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="digital-gain-setting">数字增益</label>
+                                <label for="digital-gain-setting" data-i18n="settings.digitalGain">数字增益</label>
                                 <div class="control-row">
                                     <input type="range" id="digital-gain-setting" min="1" max="4" step="0.1" value="1.0">
                                     <span class="control-value" id="digital-gain-value">1.0</span>
                                 </div>
-                                <div class="param-hint">范围: 1.0-4.0x | 建议: 优先调节模拟增益</div>
+                                <div class="param-hint" data-i18n="settings.digitalGainHint">范围: 1.0-4.0x | 建议: 优先调节模拟增益</div>
                             </div>
                         </div>
 
                         <!-- 图像增强 -->
                         <div class="param-section">
-                            <h4>🎨 图像增强</h4>
+                            <h4 data-i18n="settings.imageEnhancementSection">🎨 图像增强</h4>
                             <div class="control-group">
-                                <label for="contrast-setting">对比度</label>
+                                <label for="contrast-setting" data-i18n="settings.contrast">对比度</label>
                                 <div class="control-row">
                                     <input type="range" id="contrast-setting" min="0.5" max="2.0" step="0.1" value="1.0">
                                     <span class="control-value" id="contrast-value">1.0</span>
                                 </div>
-                                <div class="param-hint">范围: 0.5-2.0 | 默认: 1.0</div>
+                                <div class="param-hint" data-i18n="settings.contrastHint">范围: 0.5-2.0 | 默认: 1.0</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="brightness-setting">亮度</label>
+                                <label for="brightness-setting" data-i18n="settings.brightness">亮度</label>
                                 <div class="control-row">
                                     <input type="range" id="brightness-setting" min="-1.0" max="1.0" step="0.1" value="0.0">
                                     <span class="control-value" id="brightness-value">0.0</span>
                                 </div>
-                                <div class="param-hint">范围: -1.0 到 +1.0 | 默认: 0.0</div>
+                                <div class="param-hint" data-i18n="settings.brightnessHint">范围: -1.0 到 +1.0 | 默认: 0.0</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="saturation-setting">饱和度</label>
+                                <label for="saturation-setting" data-i18n="settings.saturation">饱和度</label>
                                 <div class="control-row">
                                     <input type="range" id="saturation-setting" min="0.0" max="2.0" step="0.1" value="1.0">
                                     <span class="control-value" id="saturation-value">1.0</span>
                                 </div>
-                                <div class="param-hint">范围: 0.0-2.0 | 默认: 1.0 (0=黑白)</div>
+                                <div class="param-hint" data-i18n="settings.saturationHint">范围: 0.0-2.0 | 默认: 1.0 (0=黑白)</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="sharpness-setting">锐化</label>
+                                <label for="sharpness-setting" data-i18n="settings.sharpness">锐化</label>
                                 <div class="control-row">
                                     <input type="range" id="sharpness-setting" min="0.0" max="2.0" step="0.1" value="1.0">
                                     <span class="control-value" id="sharpness-value">1.0</span>
                                 </div>
-                                <div class="param-hint">范围: 0.0-2.0 | 默认: 1.0 (过高会增加噪点)</div>
+                                <div class="param-hint" data-i18n="settings.sharpnessHint">范围: 0.0-2.0 | 默认: 1.0 (过高会增加噪点)</div>
                             </div>
                         </div>
 
                         <!-- 高级参数 -->
                         <div class="param-section">
-                            <h4>⚙️ 高级参数</h4>
+                            <h4 data-i18n="settings.advancedSection">⚙️ 高级参数</h4>
                             <div class="control-group">
-                                <label for="auto-exposure-mode">曝光模式</label>
+                                <label for="auto-exposure-mode" data-i18n="settings.exposureMode">曝光模式</label>
                                 <div class="control-row">
                                     <select id="auto-exposure-mode">
-                                        <option value="auto" selected>自动曝光 (推荐)</option>
-                                        <option value="manual">手动曝光</option>
+                                        <option value="auto" selected data-i18n="settings.exposureModeAuto">自动曝光 (推荐)</option>
+                                        <option value="manual" data-i18n="settings.exposureModeManual">手动曝光</option>
                                     </select>
                                 </div>
-                                <div class="param-hint">自动曝光在动态光线下更稳定；智能调整仅用于手动模式</div>
+                                <div class="param-hint" data-i18n="settings.exposureModeHint">自动曝光在动态光线下更稳定；智能调整仅用于手动模式</div>
                             </div>
 
                             <div class="control-group">
-                                <label for="noise-reduction-setting">降噪级别</label>
+                                <label for="noise-reduction-setting" data-i18n="settings.noiseReduction">降噪级别</label>
                                 <div class="control-row">
                                     <input type="range" id="noise-reduction-setting" min="0" max="4" step="1" value="0">
                                     <span class="control-value" id="noise-reduction-value">0</span>
                                 </div>
-                                <div class="param-hint">范围: 0-4级 | 0=关闭, 4=最强</div>
+                                <div class="param-hint" data-i18n="settings.noiseReductionHint">范围: 0-4级 | 0=关闭, 4=最强</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="color-mode">颜色模式</label>
+                                <label for="color-mode" data-i18n="settings.colorMode">颜色模式</label>
                                 <div class="control-row">
                                     <select id="color-mode">
-                                        <option value="color" selected>彩色</option>
-                                        <option value="mono">黑白</option>
+                                        <option value="color" selected data-i18n="settings.colorModeColor">彩色</option>
+                                        <option value="mono" data-i18n="settings.colorModeMono">黑白</option>
                                     </select>
                                 </div>
-                                <div class="param-hint">黑白模式性能更好，适合极轴校准</div>
+                                <div class="param-hint" data-i18n="settings.colorModeHint">黑白模式性能更好，适合极轴校准</div>
                             </div>
                             
                             <div class="control-group">
-                                <label for="white-balance-mode">白平衡模式</label>
+                                <label for="white-balance-mode" data-i18n="settings.whiteBalanceMode">白平衡模式</label>
                                 <div class="control-row">
                                     <select id="white-balance-mode">
-                                        <option value="auto" selected>自动</option>
-                                        <option value="manual">手动</option>
-                                        <option value="night">夜间</option>
+                                        <option value="auto" selected data-i18n="settings.whiteBalanceAuto">自动</option>
+                                        <option value="manual" data-i18n="settings.whiteBalanceManual">手动</option>
+                                        <option value="night" data-i18n="settings.whiteBalanceNight">夜间</option>
                                     </select>
                                 </div>
-                                <div class="param-hint">自动模式适合大多数情况</div>
+                                <div class="param-hint" data-i18n="settings.whiteBalanceHint">自动模式适合大多数情况</div>
                             </div>
                             
                             <div class="control-group" id="white-balance-gains" style="display: none;">
-                                <label>白平衡增益调整</label>
+                                <label data-i18n="settings.whiteBalanceGainAdjust">白平衡增益调整</label>
                                 <div class="wb-controls">
                                     <div class="wb-control">
-                                        <label for="wb-gain-r">红色增益</label>
+                                        <label for="wb-gain-r" data-i18n="settings.whiteBalanceGainR">红色增益</label>
                                         <div class="control-row">
                                             <input type="range" id="wb-gain-r" min="0.1" max="3.0" step="0.1" value="1.0">
                                             <span class="control-value" id="wb-gain-r-value">1.0</span>
                                         </div>
                                     </div>
                                     <div class="wb-control">
-                                        <label for="wb-gain-b">蓝色增益</label>
+                                        <label for="wb-gain-b" data-i18n="settings.whiteBalanceGainB">蓝色增益</label>
                                         <div class="control-row">
                                             <input type="range" id="wb-gain-b" min="0.1" max="3.0" step="0.1" value="1.0">
                                             <span class="control-value" id="wb-gain-b-value">1.0</span>
@@ -490,35 +508,35 @@
 
                         <!-- 快速预设 -->
                         <div class="param-section">
-                            <h4>🚀 快速预设</h4>
+                            <h4 data-i18n="settings.quickPresets">🚀 快速预设</h4>
                             <div class="preset-buttons">
-                                <button class="btn btn-secondary btn-small" id="daylight-preset">☀️ 白天</button>
-                                <button class="btn btn-secondary btn-small" id="night-preset">🌙 夜间</button>
-                                <button class="btn btn-secondary btn-small" id="deep-sky-preset">🌌 深空</button>
-                                <button class="btn btn-secondary btn-small" id="planetary-preset">🪐 行星</button>
+                                <button class="btn btn-secondary btn-small" id="daylight-preset" data-i18n="settings.presetDaylight">☀️ 白天</button>
+                                <button class="btn btn-secondary btn-small" id="night-preset" data-i18n="settings.presetNight">🌙 夜间</button>
+                                <button class="btn btn-secondary btn-small" id="deep-sky-preset" data-i18n="settings.presetDeepSky">🌌 深空</button>
+                                <button class="btn btn-secondary btn-small" id="planetary-preset" data-i18n="settings.presetPlanetary">🪐 行星</button>
                             </div>
                         </div>
 
                         <!-- 图像质量监控 -->
                         <div class="param-section">
-                            <h4>📊 图像质量监控</h4>
+                            <h4 data-i18n="quality.title">📊 图像质量监控</h4>
                             <div class="quality-metrics">
                                 <div class="quality-metric">
-                                    <span class="quality-label">噪点水平:</span>
+                                    <span class="quality-label" data-i18n="quality.noise">噪点水平:</span>
                                     <div class="quality-bar">
                                         <div class="quality-fill" id="noise-level-bar"></div>
                                     </div>
                                     <span class="quality-value" id="noise-level">--</span>
                                 </div>
                                 <div class="quality-metric">
-                                    <span class="quality-label">曝光充足度:</span>
+                                    <span class="quality-label" data-i18n="quality.exposure">曝光充足度:</span>
                                     <div class="quality-bar">
                                         <div class="quality-fill" id="exposure-bar"></div>
                                     </div>
                                     <span class="quality-value" id="exposure-level">--</span>
                                 </div>
                                 <div class="quality-metric">
-                                    <span class="quality-label">增益水平:</span>
+                                    <span class="quality-label" data-i18n="quality.gain">增益水平:</span>
                                     <div class="quality-bar">
                                         <div class="quality-fill" id="gain-bar"></div>
                                     </div>
@@ -526,20 +544,20 @@
                                 </div>
                             </div>
                             <div class="quality-recommendations" id="quality-recommendations">
-                                <div class="quality-recommendation">正在分析图像质量...</div>
+                                <div class="quality-recommendation" data-i18n="notify.analyzingImageQuality">正在分析图像质量...</div>
                             </div>
                         </div>
                         
                         <div class="settings-actions">
-                            <button class="btn btn-primary" id="apply-settings">
+                            <button class="btn btn-primary" id="apply-settings" data-i18n="settings.apply">
                                 <span class="btn-icon">✅</span>
                                 应用设置
                             </button>
-                            <button class="btn btn-secondary" id="reset-settings">
+                            <button class="btn btn-secondary" id="reset-settings" data-i18n="settings.reset">
                                 <span class="btn-icon">🔄</span>
                                 重置默认
                             </button>
-                            <button class="btn btn-info" id="auto-adjust">
+                            <button class="btn btn-info" id="auto-adjust" data-i18n="settings.autoAdjust">
                                 <span class="btn-icon">🤖</span>
                                 智能调整
                             </button>
@@ -555,28 +573,28 @@
                         <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
                         </svg>
-                        <h2>预设管理</h2>
+                        <h2 data-i18n="presets.title">预设管理</h2>
                     </div>
                     
                     <div class="presets-controls">
                         <div class="preset-form">
-                            <h3>💾 保存当前设置为预设</h3>
+                            <h3 data-i18n="presets.saveCurrent">💾 保存当前设置为预设</h3>
                             <div class="form-group">
-                                <label for="preset-name">预设名称</label>
-                                <input type="text" id="preset-name" placeholder="例如：白天拍摄" maxlength="20">
+                                <label for="preset-name" data-i18n="presets.name">预设名称</label>
+                                <input type="text" id="preset-name" placeholder="例如：白天拍摄" data-i18n-placeholder="presets.namePlaceholder" maxlength="20">
                             </div>
                             <div class="form-group">
-                                <label for="preset-description">描述 (可选)</label>
-                                <input type="text" id="preset-description" placeholder="例如：适合白天光线充足的环境" maxlength="50">
+                                <label for="preset-description" data-i18n="presets.descriptionOptional">描述 (可选)</label>
+                                <input type="text" id="preset-description" placeholder="例如：适合白天光线充足的环境" data-i18n-placeholder="presets.descriptionPlaceholder" maxlength="50">
                             </div>
-                            <button class="btn btn-primary" id="save-preset">
+                            <button class="btn btn-primary" id="save-preset" data-i18n="presets.save">
                                 <span class="btn-icon">💾</span>
                                 保存预设
                             </button>
                         </div>
                         
                         <div class="presets-list">
-                            <h3>📋 已保存的预设</h3>
+                            <h3 data-i18n="presets.savedList">📋 已保存的预设</h3>
                             <div class="presets-grid" id="presets-grid">
                                 <!-- 预设列表将通过JavaScript动态生成 -->
                             </div>
@@ -592,13 +610,13 @@
                         <svg class="card-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
                         </svg>
-                        <h2>文件管理</h2>
+                        <h2 data-i18n="files.title">文件管理</h2>
                     </div>
                     
                     <div class="files-controls">
                         <div class="files-header">
-                            <h3>📁 拍摄文件</h3>
-                            <button class="btn btn-secondary" id="refresh-files">
+                            <h3 data-i18n="files.captureFiles">📁 拍摄文件</h3>
+                            <button class="btn btn-secondary" id="refresh-files" data-i18n="files.refresh">
                                 <span class="btn-icon">🔄</span>
                                 刷新列表
                             </button>

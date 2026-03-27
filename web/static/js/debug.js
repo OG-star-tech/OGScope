@@ -36,6 +36,7 @@ class DebugConsole {
         this.recordingStartTime = null;
         this.recordingInterval = null;
         this.statusInterval = null;
+        this.previewObjectUrl = null;
         
         // 智能头部隐藏
         this.lastScrollY = 0;
@@ -45,23 +46,212 @@ class DebugConsole {
         
         // 实时数据流分析
         this.streamStats = {
-            frameCount: 0,
+            requestCount: 0,
+            frameCount: 0, // 有效新帧计数（基于 X-Frame-Id）
+            lastRequestTime: null,
             lastFrameTime: null,
-            fpsCalculated: 0.0,
+            requestFps: 0.0,
+            fpsCalculated: 0.0, // 有效新帧 FPS
             resolutionDetected: null,
             dataSize: 0,
             avgFrameSize: 0,
+            requestTimes: [],
             frameTimes: [],
+            lastFrameId: null,
+            lastFrameServerTs: null,
             startTime: null
         };
+
+        // 直方图（纯前端计算）
+        this.histogramState = {
+            enabled: true,
+            overlayVisible: false,
+            panelVisible: false,
+            showRgb: true,
+            showLuminance: false,
+            showOverexposure: false,
+        };
+        this.histogramCanvasCtx = null;
+        this.histogramOffscreenCanvas = null;
+        this.histogramOffscreenCtx = null;
+
+        this.supportedLocales = ['zh', 'en', 'bilingual'];
+        this.locale = localStorage.getItem('debugConsole.language') || 'zh';
+        if (!this.supportedLocales.includes(this.locale)) {
+            this.locale = 'zh';
+        }
+        this.translations = { zh: {}, en: {} };
+        this.dynamicTextPatterns = this.buildDynamicTextPatterns();
+        this.rawTextToKeyMap = this.buildRawTextToKeyMap();
         
         this.init();
+    }
+
+    buildRawTextToKeyMap() {
+        return {
+            '请先在设置中启用直方图': 'notify.enableHistogramFirst',
+            '请选择分辨率预设': 'notify.selectResolutionPreset',
+            '请输入有效的帧率': 'notify.invalidFps',
+            '正在设置帧率...': 'notify.settingFps',
+            '帧率已应用': 'notify.fpsApplied',
+            '正在切换采样模式...': 'notify.settingSampling',
+            '采样模式已切换': 'notify.samplingApplied',
+            '获取相机状态失败': 'notify.fetchCameraStatusFailed',
+            '正在启动相机预览...': 'notify.startingPreview',
+            '相机预览已启动': 'notify.previewStarted',
+            '相机预览已停止': 'notify.previewStopped',
+            '停止预览失败': 'notify.stopPreviewFailed',
+            '请先启动相机预览': 'notify.startPreviewRequired',
+            '设置应用成功': 'notify.settingsApplied',
+            '相机已重置到默认设置': 'notify.resetSettingsDone',
+            '夜间模式预设已应用': 'notify.nightPresetApplied',
+            '当前设置已备份': 'notify.settingsBackedUp',
+            '设置已从备份恢复': 'notify.settingsRestored',
+            '加载预设失败': 'notify.loadPresetsFailed',
+            '请输入预设名称': 'notify.inputPresetName',
+            '预设保存成功': 'notify.presetSaved',
+            '加载文件列表失败': 'notify.loadFilesFailed',
+            '获取文件信息失败': 'notify.fileInfoFailed',
+            '未知的预设类型': 'notify.unknownPresetType',
+            '自动曝光模式下无需智能调整，请先切换为手动曝光': 'notify.autoExposureNoAdjust',
+            '正在分析图像质量...': 'notify.analyzingImageQuality',
+            '当前参数已经很好，无需调整': 'notify.parametersAlreadyGood',
+            '相机启动成功': 'server.cameraStarted',
+            '相机未运行': 'server.cameraNotRunning',
+            '相机停止成功': 'server.cameraStopped',
+            '录制已停止': 'server.recordingStopped',
+            '分辨率未变化': 'server.resolutionUnchanged',
+            '分辨率已更新': 'server.resolutionUpdated',
+            '相机设置已更新': 'server.cameraSettingsUpdated',
+            '图像增强参数已设置': 'server.imageEnhancementSet'
+        };
+    }
+
+    buildDynamicTextPatterns() {
+        return [
+            { regex: /^设置旋转失败:\s*(.+)$/u, key: 'notify.rotateFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^启动预览失败:\s*(.+)$/u, key: 'notify.startPreviewFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^设置帧率失败:\s*(.+)$/u, key: 'notify.setFpsFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^设置采样模式失败:\s*(.+)$/u, key: 'notify.setSamplingFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^拍摄失败:\s*(.+)$/u, key: 'notify.captureFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^开始录制:\s*(.+)$/u, key: 'notify.recordingStarted', map: (m) => ({ filename: m[1] }) },
+            { regex: /^开始录制失败:\s*(.+)$/u, key: 'notify.recordingStartFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^设置应用失败:\s*(.+)$/u, key: 'notify.applySettingsFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^正在切换到(黑白|彩色)模式\.\.\.$/u, key: 'notify.switchingColorMode', map: (m) => ({ mode: m[1] }) },
+            { regex: /^颜色模式切换失败:\s*(.+)$/u, key: 'notify.colorModeSwitchFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^重置设置失败:\s*(.+)$/u, key: 'notify.resetSettingsFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^应用夜间模式预设失败:\s*(.+)$/u, key: 'notify.applyNightPresetFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^夜间模式已(开启|关闭)$/u, key: 'notify.nightModeToggled', map: (m) => ({ state: m[1] }) },
+            { regex: /^切换夜间模式失败:\s*(.+)$/u, key: 'notify.toggleNightModeFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^备份设置失败:\s*(.+)$/u, key: 'notify.backupSettingsFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^恢复设置失败:\s*(.+)$/u, key: 'notify.restoreSettingsFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^分辨率已设置为\s*(\d+)x(\d+)$/u, key: 'notify.resolutionSet', map: (m) => ({ width: m[1], height: m[2] }) },
+            { regex: /^设置分辨率失败:\s*(.+)$/u, key: 'notify.setResolutionFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^保存预设失败:\s*(.+)$/u, key: 'notify.savePresetFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^预设\s*'(.+)'\s*已应用$/u, key: 'notify.presetApplied', map: (m) => ({ name: m[1] }) },
+            { regex: /^应用预设失败:\s*(.+)$/u, key: 'notify.applyPresetFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^预设\s*'(.+)'\s*已删除$/u, key: 'notify.presetDeleted', map: (m) => ({ name: m[1] }) },
+            { regex: /^删除预设失败:\s*(.+)$/u, key: 'notify.deletePresetFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^开始下载:\s*(.+)$/u, key: 'notify.downloadStarted', map: (m) => ({ filename: m[1] }) },
+            { regex: /^文件\s+(.+)\s+删除成功$/u, key: 'notify.fileDeleted', map: (m) => ({ filename: m[1] }) },
+            { regex: /^删除文件失败:\s*(.+)$/u, key: 'notify.deleteFileFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^智能调整完成:\s*(.+)$/u, key: 'notify.smartAdjustDone', map: (m) => ({ suggestions: m[1] }) },
+            { regex: /^智能调整失败:\s*(.+)$/u, key: 'notify.smartAdjustFailed', map: (m) => ({ error: m[1] }) },
+            { regex: /^照片已保存:\s*(.+)$/u, key: 'notify.captureSaved', map: (m) => ({ filename: m[1] }) },
+            { regex: /^采样模式已设置为\s*(.+)$/u, key: 'server.samplingModeSet', map: (m) => ({ mode: m[1] }) },
+            { regex: /^帧率设置为\s*(\d+)$/u, key: 'server.fpsSet', map: (m) => ({ fps: m[1] }) },
+            { regex: /^降噪级别设置为:\s*(\d+)$/u, key: 'server.noiseReductionSet', map: (m) => ({ level: m[1] }) },
+            { regex: /^白平衡模式设置为:\s*(.+)$/u, key: 'server.whiteBalanceSet', map: (m) => ({ mode: m[1] }) },
+            { regex: /^颜色模式已切换为(.+)模式$/u, key: 'server.colorModeSwitched', map: (m) => ({ mode: m[1] }) },
+            { regex: /^旋转角度设置为:\s*(\d+)度$/u, key: 'server.rotationSet', map: (m) => ({ rotation: m[1] }) }
+        ];
+    }
+
+    async initI18n() {
+        try {
+            const [zhRes, enRes] = await Promise.all([
+                fetch('/static/i18n/debug.zh.json', { cache: 'no-store' }),
+                fetch('/static/i18n/debug.en.json', { cache: 'no-store' })
+            ]);
+            this.translations.zh = zhRes.ok ? await zhRes.json() : {};
+            this.translations.en = enRes.ok ? await enRes.json() : {};
+        } catch (error) {
+            console.warn('[I18N] load failed, fallback to raw text:', error);
+            this.translations = { zh: {}, en: {} };
+        }
+    }
+
+    interpolate(template, params = {}) {
+        if (typeof template !== 'string') return template;
+        return template.replace(/\{(\w+)\}/g, (_, key) => (params[key] ?? `{${key}}`));
+    }
+
+    t(key, params = {}, forcedLocale = null) {
+        const locale = forcedLocale || this.locale;
+        const zhText = this.interpolate(this.translations.zh[key] || key, params);
+        const enText = this.interpolate(this.translations.en[key] || zhText, params);
+        if (locale === 'en') return enText;
+        if (locale === 'bilingual') return zhText === enText ? zhText : `${zhText} / ${enText}`;
+        return zhText;
+    }
+
+    localizeText(rawText) {
+        if (!rawText || typeof rawText !== 'string') return rawText;
+        const key = this.rawTextToKeyMap[rawText];
+        if (key) return this.t(key);
+        for (const item of this.dynamicTextPatterns) {
+            const match = rawText.match(item.regex);
+            if (match) {
+                return this.t(item.key, item.map(match));
+            }
+        }
+        return rawText;
+    }
+
+    applyI18nToPage() {
+        document.documentElement.lang = this.locale === 'en' ? 'en' : 'zh-CN';
+        document.querySelectorAll('[data-i18n]').forEach((el) => {
+            const key = el.getAttribute('data-i18n');
+            if (key) el.textContent = this.t(key);
+        });
+        document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+            const key = el.getAttribute('data-i18n-title');
+            if (key) el.title = this.t(key);
+        });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+            const key = el.getAttribute('data-i18n-placeholder');
+            if (key) el.placeholder = this.t(key);
+        });
+        document.querySelectorAll('[data-i18n-alt]').forEach((el) => {
+            const key = el.getAttribute('data-i18n-alt');
+            if (key) el.alt = this.t(key);
+        });
+        const languageSelect = document.getElementById('language-select');
+        if (languageSelect) languageSelect.value = this.locale;
+    }
+
+    setLanguage(locale) {
+        if (!this.supportedLocales.includes(locale)) return;
+        this.locale = locale;
+        localStorage.setItem('debugConsole.language', locale);
+        this.applyI18nToPage();
+        this.updateStatusUI();
+        this.updateColorMode(this.currentSettings.colorMode || 'color');
+        this.renderPresets();
+        this.renderFiles();
+    }
+
+    extractApiMessage(payload, fallbackKey = 'notify.colorModeSwitched') {
+        if (!payload || typeof payload !== 'object') return this.t(fallbackKey);
+        if (payload.message_key) return this.t(payload.message_key, payload.message_params || {});
+        if (payload.message) return this.localizeText(payload.message);
+        return this.t(fallbackKey);
     }
     
     /**
      * 分析实时数据流
      */
-    analyzeStreamData(imageElement) {
+    analyzeStreamData(imageElement, frameMeta = {}) {
         const currentTime = performance.now();
         
         // 记录开始时间
@@ -69,8 +259,24 @@ class DebugConsole {
             this.streamStats.startTime = currentTime;
         }
         
-        // 更新帧计数
-        this.streamStats.frameCount++;
+        // 每次请求都计数（请求吞吐）
+        this.streamStats.requestCount++;
+
+        // 计算请求 FPS
+        if (this.streamStats.lastRequestTime !== null) {
+            const requestDiff = currentTime - this.streamStats.lastRequestTime;
+            if (requestDiff > 10) {
+                const requestFps = 1000 / requestDiff;
+                this.streamStats.requestTimes.push(requestFps);
+                if (this.streamStats.requestTimes.length > 10) {
+                    this.streamStats.requestTimes.shift();
+                }
+                this.streamStats.requestFps =
+                    this.streamStats.requestTimes.reduce((a, b) => a + b, 0) /
+                    this.streamStats.requestTimes.length;
+            }
+        }
+        this.streamStats.lastRequestTime = currentTime;
         
         // 检测分辨率并调整容器宽高比
         if (imageElement && imageElement.naturalWidth && imageElement.naturalHeight) {
@@ -82,30 +288,49 @@ class DebugConsole {
             }
         }
         
-        // 计算帧率
-        if (this.streamStats.lastFrameTime !== null) {
-            const timeDiff = currentTime - this.streamStats.lastFrameTime;
-            // 忽略过小的时间差（可能由浏览器缓存/事件合并导致的"超高FPS"）
-            if (timeDiff > 10) {
-                let fps = 1000 / timeDiff; // 转换为每秒帧数
-                // 上限保护：以相机报告 fps 的 2 倍或默认 10fps 作为硬上限
-                const reported = (this.cameraStatus?.info?.fps) || 5;
-                const fpsCap = Math.max(10, reported * 2);
-                if (fps > fpsCap) fps = fpsCap;
-                this.streamStats.frameTimes.push(fps);
-                
-                // 保持最近10帧的FPS数据
-                if (this.streamStats.frameTimes.length > 10) {
-                    this.streamStats.frameTimes.shift();
+        const hasFrameId = frameMeta.frameId !== null && frameMeta.frameId !== undefined;
+        const isNewFrame = hasFrameId
+            ? frameMeta.frameId !== this.streamStats.lastFrameId
+            : true;
+
+        // 仅在检测到新帧时更新“有效新帧 FPS”
+        if (isNewFrame) {
+            this.streamStats.frameCount++;
+
+            if (this.streamStats.lastFrameTime !== null) {
+                const timeDiff = currentTime - this.streamStats.lastFrameTime;
+                if (timeDiff > 10) {
+                    let fps = 1000 / timeDiff;
+                    const reported = (this.cameraStatus?.info?.fps) || 5;
+                    const fpsCap = Math.max(10, reported * 2);
+                    if (fps > fpsCap) fps = fpsCap;
+                    this.streamStats.frameTimes.push(fps);
+
+                    if (this.streamStats.frameTimes.length > 10) {
+                        this.streamStats.frameTimes.shift();
+                    }
+
+                    const avgFps = this.streamStats.frameTimes.reduce((a, b) => a + b, 0) / this.streamStats.frameTimes.length;
+                    this.streamStats.fpsCalculated = avgFps;
                 }
-                
-                // 计算平均FPS
-                const avgFps = this.streamStats.frameTimes.reduce((a, b) => a + b, 0) / this.streamStats.frameTimes.length;
-                this.streamStats.fpsCalculated = avgFps;
+            }
+
+            this.streamStats.lastFrameTime = currentTime;
+            if (hasFrameId) {
+                this.streamStats.lastFrameId = frameMeta.frameId;
+            }
+            if (typeof frameMeta.frameTs === 'number' && Number.isFinite(frameMeta.frameTs)) {
+                this.streamStats.lastFrameServerTs = frameMeta.frameTs;
             }
         }
-        
-        this.streamStats.lastFrameTime = currentTime;
+
+        // 统计接收数据量（按请求流量）
+        if (typeof frameMeta.sizeBytes === 'number' && Number.isFinite(frameMeta.sizeBytes)) {
+            this.streamStats.dataSize += frameMeta.sizeBytes;
+            if (this.streamStats.requestCount > 0) {
+                this.streamStats.avgFrameSize = this.streamStats.dataSize / this.streamStats.requestCount;
+            }
+        }
         
         // 更新UI显示
         this.updateStreamStatsDisplay();
@@ -317,6 +542,185 @@ class DebugConsole {
             }
         });
     }
+
+    /**
+     * 应用直方图可见性与按钮状态
+     */
+    applyHistogramVisibility() {
+        const overlay = document.getElementById('histogram-overlay');
+        const panel = document.getElementById('histogram-panel');
+        const toggleBtn = document.getElementById('histogram-toggle');
+        const settingsBtn = document.getElementById('histogram-settings');
+        const infoEl = document.getElementById('histogram-info');
+
+        if (overlay) {
+            overlay.classList.toggle(
+                'visible',
+                this.histogramState.enabled && this.histogramState.overlayVisible,
+            );
+        }
+        if (panel) {
+            panel.classList.toggle('visible', this.histogramState.panelVisible);
+        }
+        if (toggleBtn) {
+            toggleBtn.classList.toggle(
+                'active',
+                this.histogramState.enabled && this.histogramState.overlayVisible,
+            );
+        }
+        if (settingsBtn) {
+            settingsBtn.classList.toggle('active', this.histogramState.panelVisible);
+        }
+        if (infoEl) {
+            const channels = [];
+            if (this.histogramState.showRgb) channels.push('RGB');
+            if (this.histogramState.showLuminance) channels.push(this.t('histogram.luminanceShort'));
+            if (channels.length === 0) channels.push(this.t('histogram.noChannelSelected'));
+            infoEl.innerHTML = `<div>${channels.join(' + ')} ${this.t('histogram.name')}</div><div>${this.t('histogram.frontendOnly')}</div>`;
+        }
+    }
+
+    /**
+     * 绘制直方图（纯前端像素计算）
+     */
+    updateHistogramFromImage(imageElement) {
+        if (!this.histogramState.enabled || !imageElement?.naturalWidth || !imageElement?.naturalHeight) {
+            return;
+        }
+
+        const histogramCanvas = document.getElementById('histogram-canvas');
+        if (!histogramCanvas) return;
+
+        if (!this.histogramCanvasCtx) {
+            this.histogramCanvasCtx = histogramCanvas.getContext('2d');
+        }
+        if (!this.histogramCanvasCtx) return;
+
+        // 使用离屏 canvas 采样，降低主线程压力
+        if (!this.histogramOffscreenCanvas) {
+            this.histogramOffscreenCanvas = document.createElement('canvas');
+            this.histogramOffscreenCtx = this.histogramOffscreenCanvas.getContext('2d', { willReadFrequently: true });
+        }
+        if (!this.histogramOffscreenCtx) return;
+
+        const maxSampleWidth = 320;
+        const scale = Math.min(1, maxSampleWidth / imageElement.naturalWidth);
+        const sampleWidth = Math.max(1, Math.round(imageElement.naturalWidth * scale));
+        const sampleHeight = Math.max(1, Math.round(imageElement.naturalHeight * scale));
+        this.histogramOffscreenCanvas.width = sampleWidth;
+        this.histogramOffscreenCanvas.height = sampleHeight;
+        this.histogramOffscreenCtx.drawImage(imageElement, 0, 0, sampleWidth, sampleHeight);
+
+        const imageData = this.histogramOffscreenCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+
+        const histR = new Array(256).fill(0);
+        const histG = new Array(256).fill(0);
+        const histB = new Array(256).fill(0);
+        const histLum = new Array(256).fill(0);
+
+        let luminanceSum = 0;
+        let luminanceSquareSum = 0;
+        let overexposedPixels = 0;
+        const pixelsCount = sampleWidth * sampleHeight;
+
+        for (let i = 0; i < imageData.length; i += 4) {
+            const r = imageData[i];
+            const g = imageData[i + 1];
+            const b = imageData[i + 2];
+            const lum = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+
+            histR[r] += 1;
+            histG[g] += 1;
+            histB[b] += 1;
+            histLum[lum] += 1;
+
+            luminanceSum += lum;
+            luminanceSquareSum += lum * lum;
+
+            if (lum >= 250) {
+                overexposedPixels += 1;
+            }
+        }
+
+        const mean = pixelsCount > 0 ? luminanceSum / pixelsCount : 0;
+        const variance = pixelsCount > 0 ? (luminanceSquareSum / pixelsCount) - (mean * mean) : 0;
+        const std = Math.sqrt(Math.max(0, variance));
+        const overexposedRatio = pixelsCount > 0 ? (overexposedPixels / pixelsCount) * 100 : 0;
+
+        this.drawHistogramCanvas(histogramCanvas, this.histogramCanvasCtx, {
+            histR,
+            histG,
+            histB,
+            histLum,
+        });
+        this.updateHistogramStats(mean, std, overexposedRatio);
+    }
+
+    drawHistogramCanvas(canvas, ctx, histData) {
+        const dpr = window.devicePixelRatio || 1;
+        const targetWidth = Math.max(1, canvas.clientWidth || 200);
+        const targetHeight = Math.max(1, canvas.clientHeight || 100);
+        canvas.width = Math.floor(targetWidth * dpr);
+        canvas.height = Math.floor(targetHeight * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+
+        const { histR, histG, histB, histLum } = histData;
+        const peak = Math.max(
+            1,
+            ...(this.histogramState.showRgb ? [Math.max(...histR), Math.max(...histG), Math.max(...histB)] : [0]),
+            ...(this.histogramState.showLuminance ? [Math.max(...histLum)] : [0]),
+        );
+
+        const drawLine = (hist, color) => {
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.2;
+            for (let i = 0; i < 256; i += 1) {
+                const x = (i / 255) * targetWidth;
+                const y = targetHeight - (hist[i] / peak) * targetHeight;
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+        };
+
+        if (this.histogramState.showRgb) {
+            drawLine(histR, 'rgba(255, 80, 80, 0.85)');
+            drawLine(histG, 'rgba(80, 255, 80, 0.85)');
+            drawLine(histB, 'rgba(80, 160, 255, 0.85)');
+        }
+        if (this.histogramState.showLuminance) {
+            drawLine(histLum, 'rgba(255, 255, 255, 0.95)');
+        }
+
+        if (this.histogramState.showOverexposure) {
+            const warningX = (250 / 255) * targetWidth;
+            ctx.fillStyle = 'rgba(255, 100, 100, 0.12)';
+            ctx.fillRect(warningX, 0, targetWidth - warningX, targetHeight);
+        }
+    }
+
+    updateHistogramStats(mean, std, overexposedRatio) {
+        const meanEl = document.getElementById('histogram-mean');
+        const stdEl = document.getElementById('histogram-std');
+        const overEl = document.getElementById('histogram-overexposed');
+
+        if (meanEl) meanEl.textContent = mean.toFixed(1);
+        if (stdEl) stdEl.textContent = std.toFixed(1);
+        if (overEl) overEl.textContent = `${overexposedRatio.toFixed(2)}%`;
+    }
+
+    clearHistogramCanvas() {
+        const canvas = document.getElementById('histogram-canvas');
+        if (canvas && this.histogramCanvasCtx) {
+            this.histogramCanvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        this.updateHistogramStats(0, 0, 0);
+    }
     
     /**
      * 更新数据流统计显示
@@ -331,15 +735,25 @@ class DebugConsole {
         }
         
         // 更新FPS显示
-        const fpsElement = document.getElementById('calculated-fps');
-        if (fpsElement) {
-            fpsElement.textContent = this.streamStats.fpsCalculated.toFixed(2);
+        const effectiveFpsElement = document.getElementById('calculated-fps');
+        if (effectiveFpsElement) {
+            effectiveFpsElement.textContent = this.streamStats.fpsCalculated.toFixed(2);
+        }
+
+        const requestFpsElement = document.getElementById('request-fps');
+        if (requestFpsElement) {
+            requestFpsElement.textContent = this.streamStats.requestFps.toFixed(2);
         }
         
         // 更新帧计数显示
         const frameCountElement = document.getElementById('frame-count');
         if (frameCountElement) {
             frameCountElement.textContent = this.streamStats.frameCount;
+        }
+
+        const requestCountElement = document.getElementById('request-count');
+        if (requestCountElement) {
+            requestCountElement.textContent = this.streamStats.requestCount;
         }
         
         // 更新数据大小显示
@@ -348,13 +762,37 @@ class DebugConsole {
             const dataSizeMB = (this.streamStats.dataSize / (1024 * 1024)).toFixed(2);
             dataSizeElement.textContent = `${dataSizeMB} MB`;
         }
+
+        // 更新平均帧大小显示
+        const avgFrameSizeElement = document.getElementById('avg-frame-size');
+        if (avgFrameSizeElement) {
+            avgFrameSizeElement.textContent = this.streamStats.requestCount > 0
+                ? this.formatFileSize(this.streamStats.avgFrameSize)
+                : '--';
+        }
+
+        // 更新下行速率显示（按累计流量/运行时长）
+        const transferRateElement = document.getElementById('transfer-rate');
+        if (transferRateElement) {
+            if (this.streamStats.startTime !== null) {
+                const runtimeSec = (performance.now() - this.streamStats.startTime) / 1000;
+                if (runtimeSec > 0.2) {
+                    const bytesPerSec = this.streamStats.dataSize / runtimeSec;
+                    transferRateElement.textContent = `${this.formatFileSize(bytesPerSec)}/s`;
+                } else {
+                    transferRateElement.textContent = '--';
+                }
+            } else {
+                transferRateElement.textContent = '--';
+            }
+        }
         
         // 更新流状态显示
         const streamStatusElement = document.getElementById('stream-status');
         if (streamStatusElement) {
-            const isActive = this.streamStats.lastFrameTime !== null && 
-                           (performance.now() - this.streamStats.lastFrameTime) < 5000;
-            streamStatusElement.textContent = isActive ? '活跃' : '非活跃';
+            const isActive = this.streamStats.lastRequestTime !== null &&
+                           (performance.now() - this.streamStats.lastRequestTime) < 5000;
+            streamStatusElement.textContent = isActive ? this.t('status.active') : this.t('status.inactive');
             streamStatusElement.className = isActive ? 'status-active' : 'status-inactive';
         }
         
@@ -364,6 +802,20 @@ class DebugConsole {
             const runtime = (performance.now() - this.streamStats.startTime) / 1000;
             runtimeElement.textContent = `${runtime.toFixed(1)}s`;
         }
+
+        // 更新调试信息显示
+        const debugInfoElement = document.getElementById('debug-info');
+        if (debugInfoElement) {
+            const frameIdText = this.streamStats.lastFrameId !== null
+                ? `frameId=${this.streamStats.lastFrameId}`
+                : 'frameId=--';
+            const frameAgeText = this.streamStats.lastFrameServerTs
+                ? `age=${Math.max(0, Date.now() - this.streamStats.lastFrameServerTs * 1000).toFixed(0)}ms`
+                : 'age=--';
+            const reqText = `req=${this.streamStats.requestCount}`;
+            const effText = `new=${this.streamStats.frameCount}`;
+            debugInfoElement.textContent = `${frameIdText}, ${frameAgeText}, ${reqText}, ${effText}`;
+        }
     }
     
     /**
@@ -371,13 +823,19 @@ class DebugConsole {
      */
     resetStreamStats() {
         this.streamStats = {
+            requestCount: 0,
             frameCount: 0,
+            lastRequestTime: null,
             lastFrameTime: null,
+            requestFps: 0.0,
             fpsCalculated: 0.0,
             resolutionDetected: null,
             dataSize: 0,
             avgFrameSize: 0,
+            requestTimes: [],
             frameTimes: [],
+            lastFrameId: null,
+            lastFrameServerTs: null,
             startTime: null
         };
         this.updateStreamStatsDisplay();
@@ -403,7 +861,7 @@ class DebugConsole {
             if (result.success) {
                 this.currentSettings.rotation = rotation;
                 this.updateRotationDisplay();
-                this.showNotification(result.message, 'success');
+                this.showNotification(this.extractApiMessage(result, 'notify.rotationSetSuccess'), 'success');
             } else {
                 throw new Error(result.message || '设置旋转失败');
             }
@@ -441,6 +899,8 @@ class DebugConsole {
      */
     async init() {
         console.log('[DebugConsole] 初始化调试控制台...');
+        await this.initI18n();
+        this.applyI18nToPage();
         
         // 设置事件监听器
         this.setupEventListeners();
@@ -468,6 +928,10 @@ class DebugConsole {
      * 设置事件监听器
      */
     setupEventListeners() {
+        document.getElementById('language-select')?.addEventListener('change', (e) => {
+            this.setLanguage(e.target.value);
+        });
+
         // 标签页切换
         document.querySelectorAll('.tab-button').forEach(button => {
             button.addEventListener('click', (e) => {
@@ -599,6 +1063,44 @@ class DebugConsole {
         document.getElementById('restore-settings')?.addEventListener('click', () => {
             this.restoreSettings();
         });
+
+        // 直方图控制（纯前端）
+        document.getElementById('histogram-toggle')?.addEventListener('click', () => {
+            if (!this.histogramState.enabled) {
+                this.showNotification('请先在设置中启用直方图', 'info');
+                return;
+            }
+            this.histogramState.overlayVisible = !this.histogramState.overlayVisible;
+            this.applyHistogramVisibility();
+        });
+
+        document.getElementById('histogram-settings')?.addEventListener('click', () => {
+            this.histogramState.panelVisible = !this.histogramState.panelVisible;
+            this.applyHistogramVisibility();
+        });
+
+        document.getElementById('show-histogram')?.addEventListener('change', (e) => {
+            this.histogramState.enabled = !!e.target.checked;
+            if (!this.histogramState.enabled) {
+                this.histogramState.overlayVisible = false;
+            }
+            this.applyHistogramVisibility();
+            if (!this.histogramState.enabled) {
+                this.clearHistogramCanvas();
+            }
+        });
+
+        document.getElementById('show-rgb')?.addEventListener('change', (e) => {
+            this.histogramState.showRgb = !!e.target.checked;
+        });
+
+        document.getElementById('show-luminance')?.addEventListener('change', (e) => {
+            this.histogramState.showLuminance = !!e.target.checked;
+        });
+
+        document.getElementById('show-overexposure')?.addEventListener('change', (e) => {
+            this.histogramState.showOverexposure = !!e.target.checked;
+        });
         
         // 分辨率预设选择
         document.querySelectorAll('[data-res]').forEach(button => {
@@ -695,6 +1197,7 @@ class DebugConsole {
 
         // 启动时同步一次边框状态
         this.setRecOverlay(this.cameraStatus.recording);
+        this.applyHistogramVisibility();
         
         // 快速预设按钮事件监听器
         document.getElementById('daylight-preset')?.addEventListener('click', () => {
@@ -829,25 +1332,25 @@ class DebugConsole {
         
         if (this.cameraStatus.recording) {
             statusDot.className = 'status-dot recording';
-            statusText.textContent = '录制中';
+            statusText.textContent = this.t('status.recording');
         } else if (this.cameraStatus.streaming) {
             statusDot.className = 'status-dot online';
-            statusText.textContent = '预览中';
+            statusText.textContent = this.t('status.previewing');
         } else if (this.cameraStatus.connected) {
             statusDot.className = 'status-dot online';
-            statusText.textContent = '已连接';
+            statusText.textContent = this.t('status.connected');
         } else {
             statusDot.className = 'status-dot offline';
-            statusText.textContent = '相机离线';
+            statusText.textContent = this.t('status.cameraOffline');
         }
         
         // 更新预览状态
         document.getElementById('preview-status').textContent = 
-            this.cameraStatus.streaming ? '运行中' : '未启动';
+            this.cameraStatus.streaming ? this.t('status.running') : this.t('status.notStarted');
         
         // 更新录制状态
         document.getElementById('recording-status').textContent = 
-            this.cameraStatus.recording ? '录制中' : '未录制';
+            this.cameraStatus.recording ? this.t('status.recording') : this.t('status.notRecording');
         
         // 更新按钮状态
         this.updateButtonStates();
@@ -944,9 +1447,8 @@ class DebugConsole {
         let firstFrameAttempts = 0;
         const maxFirstFrameAttempts = 10;  // 前10次请求使用更短间隔
 
-        const loop = () => {
+        const loop = async () => {
             if (!this.previewActive) return;
-            const loader = new Image();
             const startedAt = performance.now();
             const myToken = ++frameToken;
             
@@ -955,41 +1457,71 @@ class DebugConsole {
                 firstFrameAttempts++;
             }
 
-            // 帧超时保护：1s 未返回则视为失败，退避重试（减少等待时间）
-            let timeoutId = setTimeout(() => {
-                if (!this.previewActive || myToken !== frameToken) return;
-                consecutiveFailures++;
-                const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
-                this.previewTimer = setTimeout(loop, retryDelay);
-            }, 1000);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1000);
 
-            loader.onload = () => {
-                // 交换显示源，避免中途取消请求
-                previewImg.src = loader.src;
-                this.analyzeStreamData(loader);
-                if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
-                consecutiveFailures = 0;
-                
-                // 第一帧获取成功后，恢复正常间隔
-                if (firstFrameAttempts < maxFirstFrameAttempts) {
-                    firstFrameAttempts = maxFirstFrameAttempts;
-                    console.log(`[Preview] 第一帧获取成功，耗时 ${(performance.now() - startedAt).toFixed(1)}ms`);
+            try {
+                const response = await fetch(`/api/debug/camera/preview?t=${Date.now()}`, {
+                    cache: 'no-store',
+                    signal: controller.signal,
+                });
+                if (!response.ok) {
+                    throw new Error(`preview status=${response.status}`);
                 }
-                
-                const elapsed = performance.now() - startedAt;
-                // 第一帧阶段使用更短间隔
-                const currentInterval = firstFrameAttempts < maxFirstFrameAttempts ? 100 : intervalMs;
-                const delay = Math.max(0, currentInterval - elapsed);
-                this.previewTimer = setTimeout(loop, delay);
-            };
-            loader.onerror = () => {
-                // 失败则稍后重试
-                if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+
+                const frameIdRaw = response.headers.get('X-Frame-Id');
+                const frameId = frameIdRaw !== null ? parseInt(frameIdRaw, 10) : null;
+                const frameTsRaw = response.headers.get('X-Frame-Ts');
+                const frameTs = frameTsRaw !== null ? parseFloat(frameTsRaw) : null;
+                const blob = await response.blob();
+
+                const objectUrl = URL.createObjectURL(blob);
+                const loader = new Image();
+                loader.onload = () => {
+                    if (!this.previewActive || myToken !== frameToken) {
+                        URL.revokeObjectURL(objectUrl);
+                        return;
+                    }
+
+                    if (this.previewObjectUrl) {
+                        URL.revokeObjectURL(this.previewObjectUrl);
+                    }
+                    this.previewObjectUrl = objectUrl;
+                    previewImg.src = objectUrl;
+
+                    this.analyzeStreamData(loader, {
+                        frameId: Number.isFinite(frameId) ? frameId : null,
+                        frameTs: Number.isFinite(frameTs) ? frameTs : null,
+                        sizeBytes: blob.size,
+                    });
+                    this.updateHistogramFromImage(loader);
+
+                    consecutiveFailures = 0;
+
+                    if (firstFrameAttempts < maxFirstFrameAttempts) {
+                        firstFrameAttempts = maxFirstFrameAttempts;
+                        console.log(`[Preview] 第一帧获取成功，耗时 ${(performance.now() - startedAt).toFixed(1)}ms`);
+                    }
+
+                    const elapsed = performance.now() - startedAt;
+                    const currentInterval = firstFrameAttempts < maxFirstFrameAttempts ? 100 : intervalMs;
+                    const delay = Math.max(0, currentInterval - elapsed);
+                    this.previewTimer = setTimeout(loop, delay);
+                };
+                loader.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    consecutiveFailures++;
+                    const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
+                    this.previewTimer = setTimeout(loop, retryDelay);
+                };
+                loader.src = objectUrl;
+            } catch (error) {
                 consecutiveFailures++;
                 const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
                 this.previewTimer = setTimeout(loop, retryDelay);
-            };
-            loader.src = `/api/debug/camera/preview?t=${Date.now()}`;
+            } finally {
+                clearTimeout(timeoutId);
+            }
         };
         loop();
 
@@ -1019,6 +1551,10 @@ class DebugConsole {
         if (this.previewWatchdog) {
             clearInterval(this.previewWatchdog);
             this.previewWatchdog = null;
+        }
+        if (this.previewObjectUrl) {
+            URL.revokeObjectURL(this.previewObjectUrl);
+            this.previewObjectUrl = null;
         }
         // 复位预览图片
         const previewImg = document.getElementById('preview-image');
@@ -1309,7 +1845,7 @@ class DebugConsole {
         const autoAdjustBtn = document.getElementById('auto-adjust');
         if (autoAdjustBtn) {
             autoAdjustBtn.disabled = isAuto;
-            autoAdjustBtn.title = isAuto ? '请先切换到手动曝光模式' : '';
+            autoAdjustBtn.title = isAuto ? this.t('hint.autoAdjustManualRequired') : '';
         }
     }
     
@@ -1336,10 +1872,10 @@ class DebugConsole {
         const hint = colorModeSelect?.parentElement?.nextElementSibling;
         if (hint && hint.classList.contains('param-hint')) {
             if (mode === 'mono') {
-                hint.textContent = '黑白模式：更高性能、更好低光表现，适合极轴校准';
+                hint.textContent = this.t('hint.colorModeMono');
                 hint.style.color = 'var(--debug-success)';
             } else {
-                hint.textContent = '彩色模式：完整色彩信息，适合天体摄影';
+                hint.textContent = this.t('hint.colorModeColor');
                 hint.style.color = 'var(--debug-text-secondary)';
             }
         }
@@ -1432,7 +1968,7 @@ class DebugConsole {
                 const result = await response.json();
                 this.currentSettings.colorMode = colorMode;
                 this.updateColorMode(colorMode);
-                this.showNotification(result.message || '颜色模式切换成功', 'success');
+                this.showNotification(this.extractApiMessage(result, 'notify.colorModeSwitched'), 'success');
                 
                 // 刷新相机状态
                 await this.updateCameraStatus();
@@ -1702,21 +2238,21 @@ class DebugConsole {
         const recommendations = [];
         
         if (quality.noiseLevel10 > 7) {
-            recommendations.push('建议降低增益以减少噪点');
+            recommendations.push(this.t('quality.rec.reduceGain'));
         }
         
         if (quality.exposureLevel10 < 3) {
-            recommendations.push('建议增加曝光时间');
+            recommendations.push(this.t('quality.rec.increaseExposure'));
         } else if (quality.exposureLevel10 > 8) {
-            recommendations.push('建议减少曝光时间');
+            recommendations.push(this.t('quality.rec.decreaseExposure'));
         }
         
         if (quality.gainLevel > 8) {
-            recommendations.push('建议降低增益设置');
+            recommendations.push(this.t('quality.rec.lowerGain'));
         }
         
         if (recommendations.length === 0) {
-            recommendations.push('图像质量良好');
+            recommendations.push(this.t('quality.rec.good'));
         }
         
         recommendationsContainer.innerHTML = recommendations.map(rec => 
@@ -1751,8 +2287,8 @@ class DebugConsole {
             presetsGrid.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">💾</div>
-                    <div class="empty-state-text">暂无预设</div>
-                    <div class="empty-state-subtext">保存当前设置作为预设</div>
+                    <div class="empty-state-text">${this.t('presets.emptyTitle')}</div>
+                    <div class="empty-state-subtext">${this.t('presets.emptyHint')}</div>
                 </div>
             `;
             return;
@@ -1761,38 +2297,38 @@ class DebugConsole {
         presetsGrid.innerHTML = this.presets.map(preset => `
             <div class="preset-item">
                 <div class="preset-name">${preset.name}</div>
-                <div class="preset-description">${preset.description || '无描述'}</div>
+                <div class="preset-description">${preset.description || this.t('presets.noDescription')}</div>
                 <div class="preset-params">
                     <div class="param-line">
-                        <strong>基础:</strong> 曝光${preset.exposure_us}μs | 增益${preset.analogue_gain}x
-                        ${preset.digital_gain !== undefined ? ` | 数字增益${preset.digital_gain}x` : ''}
+                        <strong>${this.t('presets.basic')}</strong> ${this.t('presets.exposure')}${preset.exposure_us}μs | ${this.t('presets.gain')}${preset.analogue_gain}x
+                        ${preset.digital_gain !== undefined ? ` | ${this.t('presets.digitalGain')}${preset.digital_gain}x` : ''}
                     </div>
                     ${[preset.contrast, preset.brightness, preset.saturation, preset.sharpness].some(v => v !== undefined) ? `
                     <div class="param-line">
-                        <strong>增强:</strong>
-                        ${preset.contrast !== undefined ? ` 对比度${preset.contrast}` : ''}
-                        ${preset.brightness !== undefined ? ` 亮度${preset.brightness}` : ''}
-                        ${preset.saturation !== undefined ? ` 饱和度${preset.saturation}` : ''}
-                        ${preset.sharpness !== undefined ? ` 锐化${preset.sharpness}` : ''}
+                        <strong>${this.t('presets.enhancement')}</strong>
+                        ${preset.contrast !== undefined ? ` ${this.t('presets.contrast')}${preset.contrast}` : ''}
+                        ${preset.brightness !== undefined ? ` ${this.t('presets.brightness')}${preset.brightness}` : ''}
+                        ${preset.saturation !== undefined ? ` ${this.t('presets.saturation')}${preset.saturation}` : ''}
+                        ${preset.sharpness !== undefined ? ` ${this.t('presets.sharpness')}${preset.sharpness}` : ''}
                     </div>
                     ` : ''}
                     ${preset.auto_exposure !== undefined || preset.noise_reduction !== undefined || preset.white_balance_mode !== undefined || preset.color_mode !== undefined ? `
                     <div class="param-line">
-                        <strong>高级:</strong>
-                        ${preset.auto_exposure !== undefined ? ` ${preset.auto_exposure ? '自动曝光' : '手动曝光'}` : ''}
-                        ${preset.color_mode !== undefined ? ` ${preset.color_mode === 'mono' ? '黑白' : '彩色'}模式` : ''}
-                        ${preset.noise_reduction !== undefined ? ` 降噪${preset.noise_reduction}级` : ''}
-                        ${preset.white_balance_mode !== undefined ? ` 白平衡${preset.white_balance_mode}` : ''}
-                        ${preset.rotation !== undefined ? ` 旋转${preset.rotation}°` : ''}
+                        <strong>${this.t('presets.advanced')}</strong>
+                        ${preset.auto_exposure !== undefined ? ` ${preset.auto_exposure ? this.t('presets.autoExposure') : this.t('presets.manualExposure')}` : ''}
+                        ${preset.color_mode !== undefined ? ` ${preset.color_mode === 'mono' ? this.t('presets.monoMode') : this.t('presets.colorMode')}` : ''}
+                        ${preset.noise_reduction !== undefined ? ` ${this.t('presets.noiseReduction')}${preset.noise_reduction}${this.t('presets.levelSuffix')}` : ''}
+                        ${preset.white_balance_mode !== undefined ? ` ${this.t('presets.whiteBalance')}${preset.white_balance_mode}` : ''}
+                        ${preset.rotation !== undefined ? ` ${this.t('presets.rotation')}${preset.rotation}°` : ''}
                     </div>
                     ` : ''}
                 </div>
                 <div class="preset-actions">
                     <button class="btn btn-primary" onclick="window.debugConsole.applyPreset('${preset.name}')">
-                        应用
+                        ${this.t('presets.apply')}
                     </button>
                     <button class="btn btn-error" onclick="window.debugConsole.deletePreset('${preset.name}')">
-                        删除
+                        ${this.t('presets.delete')}
                     </button>
                 </div>
             </div>
@@ -1969,7 +2505,7 @@ class DebugConsole {
      * 删除预设
      */
     async deletePreset(presetName) {
-        if (!confirm(`确定要删除预设 '${presetName}' 吗？`)) {
+        if (!confirm(this.t('confirm.deletePreset', { name: presetName }))) {
             return;
         }
         
@@ -2018,8 +2554,8 @@ class DebugConsole {
             filesList.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">📁</div>
-                    <div class="empty-state-text">暂无文件</div>
-                    <div class="empty-state-subtext">开始拍摄或录制视频</div>
+                    <div class="empty-state-text">${this.t('files.emptyTitle')}</div>
+                    <div class="empty-state-subtext">${this.t('files.emptyHint')}</div>
                 </div>
             `;
             return;
@@ -2039,13 +2575,13 @@ class DebugConsole {
                     </div>
                     <div class="file-actions">
                         <button class="btn btn-info" onclick="window.debugConsole.downloadFile('${file.name}')">
-                            下载
+                            ${this.t('files.download')}
                         </button>
                         <button class="btn btn-secondary" onclick="window.debugConsole.showFileInfo('${file.name}')">
-                            详情
+                            ${this.t('files.details')}
                         </button>
                         <button class="btn btn-danger" onclick="window.debugConsole.deleteFile('${file.name}')">
-                            删除
+                            ${this.t('files.delete')}
                         </button>
                     </div>
                 </div>
@@ -2080,32 +2616,32 @@ class DebugConsole {
                     <h3>📄 ${info.filename}</h3>
                     <div class="info-grid">
                         <div class="info-item">
-                            <span class="info-label">文件大小:</span>
+                            <span class="info-label">${this.t('files.size')}</span>
                             <span class="info-value">${this.formatFileSize(info.size)}</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">修改时间:</span>
+                            <span class="info-label">${this.t('files.modified')}</span>
                             <span class="info-value">${new Date(info.modified).toLocaleString()}</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">文件类型:</span>
-                            <span class="info-value">${info.type === 'image' ? '图片' : '视频'}</span>
+                            <span class="info-label">${this.t('files.type')}</span>
+                            <span class="info-value">${info.type === 'image' ? this.t('files.type.image') : this.t('files.type.video')}</span>
                         </div>
                         ${info.exposure_us ? `
                         <div class="info-item">
-                            <span class="info-label">曝光时间:</span>
+                            <span class="info-label">${this.t('files.exposure')}</span>
                             <span class="info-value">${info.exposure_us}μs</span>
                         </div>
                         ` : ''}
                         ${info.analogue_gain ? `
                         <div class="info-item">
-                            <span class="info-label">模拟增益:</span>
+                            <span class="info-label">${this.t('files.analogueGain')}</span>
                             <span class="info-value">${info.analogue_gain}x</span>
                         </div>
                         ` : ''}
                         ${info.resolution ? `
                         <div class="info-item">
-                            <span class="info-label">分辨率:</span>
+                            <span class="info-label">${this.t('files.resolution')}</span>
                             <span class="info-value">${info.resolution}</span>
                         </div>
                         ` : ''}
@@ -2113,7 +2649,7 @@ class DebugConsole {
                 </div>
             `;
             
-            this.showModal('文件信息', infoHtml);
+            this.showModal(this.t('files.infoTitle'), infoHtml);
             
         } catch (error) {
             console.error('[DebugConsole] 获取文件信息失败:', error);
@@ -2126,7 +2662,7 @@ class DebugConsole {
      */
     async deleteFile(filename) {
         // 确认删除
-        if (!confirm(`确定要删除文件 "${filename}" 吗？\n\n此操作不可撤销！`)) {
+        if (!confirm(this.t('confirm.deleteFile', { name: filename }))) {
             return;
         }
         
@@ -2141,7 +2677,7 @@ class DebugConsole {
             }
             
             const result = await response.json();
-            this.showNotification(result.message || '文件删除成功', 'success');
+            this.showNotification(this.extractApiMessage(result, 'notify.fileDeleteSuccess'), 'success');
             
             // 重新加载文件列表
             await this.loadFiles();
@@ -2228,7 +2764,7 @@ class DebugConsole {
         
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
-        notification.textContent = message;
+        notification.textContent = this.localizeText(message);
         
         notifications.appendChild(notification);
         
