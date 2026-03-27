@@ -57,6 +57,11 @@ class IMX327MIPICamera(CameraInterface):
     SENSOR_MAX_WIDTH = 1920
     SENSOR_MAX_HEIGHT = 1020
     PREVIEW_BUFFER_COUNT = 2
+    MANUAL_CONTROL_RANGE_DEFAULTS = {
+        "ExposureTime": {"min": 1000, "max": 100000, "default": 10000, "step": 1000},
+        "AnalogueGain": {"min": 1.0, "max": 16.0, "default": 1.0, "step": 0.1},
+        "DigitalGain": {"min": 1.0, "max": 4.0, "default": 1.0, "step": 0.1},
+    }
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -90,6 +95,123 @@ class IMX327MIPICamera(CameraInterface):
         ) = self._resolve_sampling_layout(self.sampling_mode, self.width, self.height)
         
         logger.info(f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps")
+
+    @staticmethod
+    def _to_number(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_control_descriptor(self, descriptor: Any) -> Dict[str, float]:
+        parsed: Dict[str, float] = {}
+
+        if isinstance(descriptor, dict):
+            for key in ("min", "max", "default", "step"):
+                numeric_value = self._to_number(descriptor.get(key))
+                if numeric_value is not None:
+                    parsed[key] = numeric_value
+            return parsed
+
+        if isinstance(descriptor, (tuple, list)):
+            if len(descriptor) >= 1:
+                min_value = self._to_number(descriptor[0])
+                if min_value is not None:
+                    parsed["min"] = min_value
+            if len(descriptor) >= 2:
+                max_value = self._to_number(descriptor[1])
+                if max_value is not None:
+                    parsed["max"] = max_value
+            if len(descriptor) >= 3:
+                default_value = self._to_number(descriptor[2])
+                if default_value is not None:
+                    parsed["default"] = default_value
+            if len(descriptor) >= 4:
+                step_value = self._to_number(descriptor[3])
+                if step_value is not None:
+                    parsed["step"] = step_value
+            return parsed
+
+        for target_key, attr_names in {
+            "min": ("min", "minimum", "lower", "lower_bound"),
+            "max": ("max", "maximum", "upper", "upper_bound"),
+            "default": ("default",),
+            "step": ("step", "increment"),
+        }.items():
+            for attr_name in attr_names:
+                raw_value = getattr(descriptor, attr_name, None)
+                numeric_value = self._to_number(raw_value)
+                if numeric_value is not None:
+                    parsed[target_key] = numeric_value
+                    break
+
+        return parsed
+
+    def _extract_control_range(
+        self, control_name: str, default_range: Dict[str, float]
+    ) -> Dict[str, float]:
+        result = dict(default_range)
+        if not self.camera:
+            return result
+
+        controls = getattr(self.camera, "camera_controls", None) or {}
+        descriptor = controls.get(control_name)
+        if descriptor is None:
+            return result
+
+        parsed = self._parse_control_descriptor(descriptor)
+        for key in ("min", "max", "default", "step"):
+            if key in parsed:
+                result[key] = parsed[key]
+
+        min_value = result.get("min")
+        max_value = result.get("max")
+        if (
+            isinstance(min_value, (int, float))
+            and isinstance(max_value, (int, float))
+            and min_value > max_value
+        ):
+            result["min"], result["max"] = max_value, min_value
+
+        return result
+
+    def get_manual_control_ranges(self) -> Dict[str, Dict[str, Any]]:
+        exposure = self._extract_control_range(
+            "ExposureTime", self.MANUAL_CONTROL_RANGE_DEFAULTS["ExposureTime"]
+        )
+        analogue = self._extract_control_range(
+            "AnalogueGain", self.MANUAL_CONTROL_RANGE_DEFAULTS["AnalogueGain"]
+        )
+        digital = self._extract_control_range(
+            "DigitalGain", self.MANUAL_CONTROL_RANGE_DEFAULTS["DigitalGain"]
+        )
+        return {
+            "exposure_us": {
+                "min": int(round(exposure["min"])),
+                "max": int(round(exposure["max"])),
+                "default": int(round(exposure["default"])),
+                "step": max(1, int(round(exposure.get("step", 1)))),
+            },
+            "analogue_gain": {
+                "min": float(analogue["min"]),
+                "max": float(analogue["max"]),
+                "default": float(analogue["default"]),
+                "step": float(analogue.get("step", 0.1)),
+            },
+            "digital_gain": {
+                "min": float(digital["min"]),
+                "max": float(digital["max"]),
+                "default": float(digital["default"]),
+                "step": float(digital.get("step", 0.1)),
+                "supported": "DigitalGain" in (getattr(self.camera, "camera_controls", {}) or {}),
+            },
+        }
     
     @staticmethod
     def _align_even(value: int) -> int:
@@ -618,6 +740,7 @@ class IMX327MIPICamera(CameraInterface):
                 "white_balance_mode": self.white_balance_mode,
                 "white_balance_gain_r": self.white_balance_gain_r,
                 "white_balance_gain_b": self.white_balance_gain_b,
+                "control_ranges": self.get_manual_control_ranges(),
             }
         except Exception as e:
             logger.error(f"获取相机信息失败: {e}")

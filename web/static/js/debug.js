@@ -1335,6 +1335,7 @@ class DebugConsole {
 
             // 同步关键参数状态，避免UI与相机真实状态脱节 / Synchronize the status of key parameters to avoid the disconnection between the UI and the real status of the camera
             const info = status.info || {};
+            this.applyControlRanges(info.control_ranges || {});
             if (typeof info.auto_exposure === 'boolean') {
                 this.currentSettings.autoExposure = info.auto_exposure;
                 this.updateAutoExposureMode(info.auto_exposure, false);
@@ -1942,6 +1943,78 @@ class DebugConsole {
     }
     
     /**
+     * 应用相机控制范围 / Apply camera control ranges
+     */
+    applyControlRanges(controlRanges) {
+        if (!controlRanges || typeof controlRanges !== 'object') {
+            return;
+        }
+
+        this.applySingleControlRange(
+            'exposure-setting',
+            controlRanges.exposure_us,
+            {
+                decimals: 0,
+                onUpdate: (value) => this.updateExposureDisplay(parseInt(value, 10)),
+            }
+        );
+        this.applySingleControlRange(
+            'gain-setting',
+            controlRanges.analogue_gain,
+            {
+                decimals: 1,
+                onUpdate: (value) => this.updateGainDisplay(parseFloat(value)),
+            }
+        );
+        this.applySingleControlRange(
+            'digital-gain-setting',
+            controlRanges.digital_gain,
+            {
+                decimals: 1,
+                onUpdate: (value) => this.updateDigitalGainDisplay(parseFloat(value)),
+            }
+        );
+    }
+
+    applySingleControlRange(elementId, rangeInfo, options = {}) {
+        if (!rangeInfo || typeof rangeInfo !== 'object') {
+            return;
+        }
+        const slider = document.getElementById(elementId);
+        if (!slider) {
+            return;
+        }
+
+        const min = Number(rangeInfo.min);
+        const max = Number(rangeInfo.max);
+        const defaultValue = Number(rangeInfo.default);
+        let step = Number(rangeInfo.step);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+            return;
+        }
+        if (!Number.isFinite(step) || step <= 0) {
+            step = slider.step && Number(slider.step) > 0 ? Number(slider.step) : 1;
+        }
+
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+
+        const current = Number(slider.value);
+        const fallback = Number.isFinite(defaultValue) ? defaultValue : min;
+        const baseValue = Number.isFinite(current) ? current : fallback;
+        const clamped = Math.max(min, Math.min(max, baseValue));
+        const decimals = Number.isInteger(options.decimals) ? options.decimals : 0;
+        const normalized =
+            decimals > 0 ? Number(clamped.toFixed(decimals)) : Math.round(clamped);
+        slider.value = String(normalized);
+
+        if (typeof options.onUpdate === 'function') {
+            options.onUpdate(slider.value);
+        }
+    }
+
+    /**
      * 更新曝光显示 / Update exposure display
      */
     updateExposureDisplay(value) {
@@ -2265,7 +2338,12 @@ class DebugConsole {
      * 应用设置 / Apply settings
      */
     async applySettings() {
+        const modeSelect = document.getElementById('auto-exposure-mode');
+        const requestedAutoExposure = modeSelect
+            ? modeSelect.value === 'auto'
+            : !!this.currentSettings.autoExposure;
         const settings = {
+            autoExposure: requestedAutoExposure,
             exposure: parseInt(document.getElementById('exposure-setting').value),
             gain: parseFloat(document.getElementById('gain-setting').value),
             digitalGain: parseFloat(document.getElementById('digital-gain-setting').value),
@@ -2288,6 +2366,7 @@ class DebugConsole {
             if (response.ok) {
                 this.showNotification('设置应用成功', 'success');
                 this.currentSettings = {...this.currentSettings, ...settings};
+                this.updateAutoExposureMode(!!settings.autoExposure, false);
                 await this.updateCameraStatus();
             } else {
                 const error = await response.json();
@@ -2708,6 +2787,10 @@ class DebugConsole {
         }
         
         try {
+            // 优先保存“当前已生效状态”，避免 UI 暂存值与真实设备状态冲突 / Prefer saving the currently applied state to avoid conflicts between pending UI values and actual device state
+            const effectiveAutoExposure = typeof this.currentSettings.autoExposure === 'boolean'
+                ? this.currentSettings.autoExposure
+                : (document.getElementById('auto-exposure-mode')?.value === 'auto');
             const response = await fetch('/api/debug/camera/presets', {
                 method: 'POST',
                 headers: {
@@ -2719,7 +2802,7 @@ class DebugConsole {
                     exposure_us: parseInt(document.getElementById('exposure-setting').value),
                     analogue_gain: parseFloat(document.getElementById('gain-setting').value),
                     digital_gain: parseFloat(document.getElementById('digital-gain-setting').value),
-                    auto_exposure: document.getElementById('auto-exposure-mode').value === 'auto',
+                    auto_exposure: effectiveAutoExposure,
                     // 图像增强参数 / Image enhancement parameters
                     contrast: parseFloat(document.getElementById('contrast-setting').value),
                     brightness: parseFloat(document.getElementById('brightness-setting').value),
