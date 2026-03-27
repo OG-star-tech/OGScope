@@ -26,7 +26,8 @@ class DebugConsole {
             whiteBalanceMode: 'auto',
             whiteBalanceGainR: 1.0,
             whiteBalanceGainB: 1.0,
-            nightMode: false
+            nightMode: false,
+            colorMode: 'color'  // 颜色模式：color | mono
         };
         
         this.presets = [];
@@ -34,6 +35,12 @@ class DebugConsole {
         this.recordingStartTime = null;
         this.recordingInterval = null;
         this.statusInterval = null;
+        
+        // 智能头部隐藏
+        this.lastScrollY = 0;
+        this.scrollDirection = 'down';
+        this.headerHidden = false;
+        this.scrollThreshold = 10; // 滚动阈值
         
         // 实时数据流分析
         this.streamStats = {
@@ -124,6 +131,138 @@ class DebugConsole {
         setTimeout(() => {
             videoContainer.classList.remove('aspect-ratio-changing');
         }, 300);
+    }
+    
+    /**
+     * 初始化智能头部隐藏功能
+     */
+    initSmartHeader() {
+        const header = document.querySelector('.debug-header');
+        if (!header) return;
+        
+        let ticking = false;
+        
+        const handleScroll = () => {
+            if (!ticking) {
+                requestAnimationFrame(() => {
+                    this.handleHeaderScroll();
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        };
+        
+        // 监听滚动事件
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        
+        // 监听触摸滚动（移动端）
+        let touchStartY = 0;
+        let touchEndY = 0;
+        
+        document.addEventListener('touchstart', (e) => {
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+        
+        document.addEventListener('touchmove', (e) => {
+            touchEndY = e.touches[0].clientY;
+            const deltaY = touchStartY - touchEndY;
+            
+            // 模拟滚动方向检测
+            if (Math.abs(deltaY) > 10) {
+                this.scrollDirection = deltaY > 0 ? 'up' : 'down';
+                this.handleHeaderVisibility();
+                touchStartY = touchEndY;
+            }
+        }, { passive: true });
+        
+        // 唤醒区域事件监听
+        const revealZone = document.getElementById('header-reveal-zone');
+        if (revealZone) {
+            revealZone.addEventListener('click', () => {
+                this.forceShowHeader();
+            });
+            
+            revealZone.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                this.forceShowHeader();
+            });
+        }
+        
+        console.log('[SmartHeader] 智能头部隐藏已初始化');
+    }
+    
+    /**
+     * 处理头部滚动
+     */
+    handleHeaderScroll() {
+        const currentScrollY = window.scrollY;
+        
+        // 检测滚动方向
+        if (currentScrollY > this.lastScrollY && currentScrollY > this.scrollThreshold) {
+            // 向下滚动，隐藏头部
+            this.scrollDirection = 'down';
+        } else if (currentScrollY < this.lastScrollY) {
+            // 向上滚动，显示头部
+            this.scrollDirection = 'up';
+        }
+        
+        this.lastScrollY = currentScrollY;
+        this.handleHeaderVisibility();
+    }
+    
+    /**
+     * 处理头部可见性
+     */
+    handleHeaderVisibility() {
+        const header = document.querySelector('.debug-header');
+        const revealZone = document.getElementById('header-reveal-zone');
+        if (!header) return;
+        
+        const shouldHide = this.scrollDirection === 'down' && this.lastScrollY > this.scrollThreshold;
+        
+        if (shouldHide && !this.headerHidden) {
+            // 隐藏头部
+            header.classList.add('hidden');
+            this.headerHidden = true;
+            
+            // 显示唤醒区域
+            if (revealZone) {
+                revealZone.classList.add('active');
+            }
+            
+            console.log('[SmartHeader] 头部已隐藏');
+        } else if (!shouldHide && this.headerHidden) {
+            // 显示头部
+            header.classList.remove('hidden');
+            this.headerHidden = false;
+            
+            // 隐藏唤醒区域
+            if (revealZone) {
+                revealZone.classList.remove('active');
+            }
+            
+            console.log('[SmartHeader] 头部已显示');
+        }
+    }
+    
+    /**
+     * 强制显示头部（用于某些交互场景）
+     */
+    forceShowHeader() {
+        const header = document.querySelector('.debug-header');
+        const revealZone = document.getElementById('header-reveal-zone');
+        
+        if (header && this.headerHidden) {
+            header.classList.remove('hidden');
+            this.headerHidden = false;
+            
+            // 隐藏唤醒区域
+            if (revealZone) {
+                revealZone.classList.remove('active');
+            }
+            
+            console.log('[SmartHeader] 强制显示头部');
+        }
     }
     
     /**
@@ -318,6 +457,9 @@ class DebugConsole {
         // 启动图像质量监控
         this.startQualityMonitoring();
         
+        // 初始化智能头部隐藏
+        this.initSmartHeader();
+        
         console.log('[DebugConsole] 调试控制台初始化完成');
     }
     
@@ -417,6 +559,10 @@ class DebugConsole {
         
         document.getElementById('noise-reduction-setting')?.addEventListener('input', (e) => {
             this.updateNoiseReductionDisplay(parseInt(e.target.value));
+        });
+        
+        document.getElementById('color-mode')?.addEventListener('change', (e) => {
+            this.updateColorMode(e.target.value);
         });
         
         document.getElementById('white-balance-mode')?.addEventListener('change', (e) => {
@@ -544,6 +690,28 @@ class DebugConsole {
 
         // 启动时同步一次边框状态
         this.setRecOverlay(this.cameraStatus.recording);
+        
+        // 快速预设按钮事件监听器
+        document.getElementById('daylight-preset')?.addEventListener('click', () => {
+            this.applyQuickPreset('daylight');
+        });
+        
+        document.getElementById('night-preset')?.addEventListener('click', () => {
+            this.applyQuickPreset('night');
+        });
+        
+        document.getElementById('deep-sky-preset')?.addEventListener('click', () => {
+            this.applyQuickPreset('deep-sky');
+        });
+        
+        document.getElementById('planetary-preset')?.addEventListener('click', () => {
+            this.applyQuickPreset('planetary');
+        });
+        
+        // 智能调整按钮
+        document.getElementById('auto-adjust')?.addEventListener('click', () => {
+            this.performAutoAdjust();
+        });
     }
     
     /**
@@ -557,6 +725,15 @@ class DebugConsole {
         this.updateExposureDisplay(this.currentSettings.exposure);
         this.updateGainDisplay(this.currentSettings.gain);
         this.updateDigitalGainDisplay(this.currentSettings.digitalGain);
+        this.updateContrastDisplay(this.currentSettings.contrast);
+        this.updateBrightnessDisplay(this.currentSettings.brightness);
+        this.updateSaturationDisplay(this.currentSettings.saturation);
+        this.updateSharpnessDisplay(this.currentSettings.sharpness);
+        this.updateNoiseReductionDisplay(this.currentSettings.noiseReduction);
+        this.updateColorMode(this.currentSettings.colorMode);
+        this.updateWhiteBalanceMode(this.currentSettings.whiteBalanceMode);
+        this.updateWhiteBalanceGainR(this.currentSettings.whiteBalanceGainR);
+        this.updateWhiteBalanceGainB(this.currentSettings.whiteBalanceGainB);
         
         // 初始化全屏预览功能
         this.initFullscreenPreview();
@@ -571,6 +748,9 @@ class DebugConsole {
      * 切换标签页
      */
     switchTab(tabName) {
+        // 强制显示头部（用户正在导航）
+        this.forceShowHeader();
+        
         // 更新按钮状态
         document.querySelectorAll('.tab-button').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabName);
@@ -1090,6 +1270,38 @@ class DebugConsole {
     }
     
     /**
+     * 更新颜色模式显示
+     */
+    updateColorMode(mode) {
+        const colorModeSelect = document.getElementById('color-mode');
+        if (colorModeSelect) {
+            colorModeSelect.value = mode;
+        }
+        
+        // 黑白模式时禁用某些颜色相关设置
+        const colorRelatedControls = ['saturation-setting', 'white-balance-mode'];
+        colorRelatedControls.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.disabled = (mode === 'mono');
+                element.parentElement.style.opacity = (mode === 'mono') ? '0.5' : '1';
+            }
+        });
+        
+        // 更新提示信息
+        const hint = colorModeSelect?.parentElement?.nextElementSibling;
+        if (hint && hint.classList.contains('param-hint')) {
+            if (mode === 'mono') {
+                hint.textContent = '黑白模式：更高性能、更好低光表现，适合极轴校准';
+                hint.style.color = 'var(--debug-success)';
+            } else {
+                hint.textContent = '彩色模式：完整色彩信息，适合天体摄影';
+                hint.style.color = 'var(--debug-text-secondary)';
+            }
+        }
+    }
+    
+    /**
      * 更新白平衡模式
      */
     updateWhiteBalanceMode(mode) {
@@ -1128,10 +1340,16 @@ class DebugConsole {
             noiseReduction: parseInt(document.getElementById('noise-reduction-setting').value),
             whiteBalanceMode: document.getElementById('white-balance-mode').value,
             whiteBalanceGainR: parseFloat(document.getElementById('wb-gain-r').value),
-            whiteBalanceGainB: parseFloat(document.getElementById('wb-gain-b').value)
+            whiteBalanceGainB: parseFloat(document.getElementById('wb-gain-b').value),
+            colorMode: document.getElementById('color-mode').value
         };
 
         try {
+            // 先处理颜色模式切换（如果需要）
+            if (settings.colorMode !== this.currentSettings.colorMode) {
+                await this.switchColorMode(settings.colorMode);
+            }
+            
             const response = await fetch('/api/debug/camera/settings', {
                 method: 'POST',
                 headers: {
@@ -1142,6 +1360,7 @@ class DebugConsole {
 
             if (response.ok) {
                 this.showNotification('设置应用成功', 'success');
+                this.currentSettings = {...this.currentSettings, ...settings};
                 await this.updateCameraStatus();
             } else {
                 const error = await response.json();
@@ -1150,6 +1369,45 @@ class DebugConsole {
         } catch (error) {
             console.error('[DebugConsole] 应用设置失败:', error);
             this.showNotification(`设置应用失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 切换颜色模式
+     */
+    async switchColorMode(colorMode) {
+        try {
+            this.showNotification(`正在切换到${colorMode === 'mono' ? '黑白' : '彩色'}模式...`, 'info');
+            
+            const response = await fetch(`/api/debug/camera/color-mode?color_mode=${colorMode}`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.currentSettings.colorMode = colorMode;
+                this.updateColorMode(colorMode);
+                this.showNotification(result.message || '颜色模式切换成功', 'success');
+                
+                // 刷新相机状态
+                await this.updateCameraStatus();
+                
+                // 给用户一些性能提示
+                if (colorMode === 'mono') {
+                    setTimeout(() => {
+                        this.showNotification('黑白模式已启用，帧率和灵敏度将得到提升', 'info');
+                    }, 1000);
+                }
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || '颜色模式切换失败');
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 颜色模式切换失败:', error);
+            this.showNotification(`颜色模式切换失败: ${error.message}`, 'error');
+            
+            // 恢复UI状态
+            this.updateColorMode(this.currentSettings.colorMode);
         }
     }
     
@@ -1331,37 +1589,64 @@ class DebugConsole {
      * 更新图像质量指标
      */
     updateQualityMetrics(quality) {
+        const normalizedQuality = this.normalizeQualityMetrics(quality);
+
         // 更新噪点水平
-        const noiseLevel = quality.noise_level || 0;
         const noiseBar = document.getElementById('noise-level-bar');
         const noiseValue = document.getElementById('noise-level');
         if (noiseBar && noiseValue) {
-            noiseBar.style.width = `${Math.min(100, noiseLevel * 10)}%`;
-            noiseValue.textContent = `${noiseLevel.toFixed(1)}`;
+            noiseBar.style.width = `${Math.min(100, normalizedQuality.noiseLevel10 * 10)}%`;
+            noiseValue.textContent = `${normalizedQuality.noiseLevel10.toFixed(1)}`;
         }
         
         // 更新曝光充足度
-        const exposureLevel = quality.exposure_level || 0;
         const exposureBar = document.getElementById('exposure-bar');
         const exposureValue = document.getElementById('exposure-level');
         if (exposureBar && exposureValue) {
-            exposureBar.style.width = `${Math.min(100, exposureLevel * 10)}%`;
-            exposureValue.textContent = `${exposureLevel.toFixed(1)}`;
+            exposureBar.style.width = `${Math.min(100, normalizedQuality.exposureLevel10 * 10)}%`;
+            exposureValue.textContent = `${normalizedQuality.exposureLevel10.toFixed(1)}`;
         }
         
         // 更新增益水平
-        const gainLevel = quality.gain_level || 0;
         const gainBar = document.getElementById('gain-bar');
         const gainValue = document.getElementById('gain-level');
         if (gainBar && gainValue) {
-            gainBar.style.width = `${Math.min(100, gainLevel * 10)}%`;
-            gainValue.textContent = `${gainLevel.toFixed(1)}`;
+            gainBar.style.width = `${Math.min(100, normalizedQuality.gainLevel * 10)}%`;
+            gainValue.textContent = `${normalizedQuality.gainLevel.toFixed(1)}`;
         }
         
         // 更新建议
-        this.updateQualityRecommendations(quality);
+        this.updateQualityRecommendations(normalizedQuality);
     }
     
+    /**
+     * 归一化质量指标（兼容 exposure_adequacy 与 exposure_level）
+     */
+    normalizeQualityMetrics(quality = {}) {
+        const hasExposureAdequacy = typeof quality.exposure_adequacy === 'number';
+        const hasExposureLevel = typeof quality.exposure_level === 'number';
+
+        let exposureAdequacy = 0;
+        if (hasExposureAdequacy) {
+            exposureAdequacy = quality.exposure_adequacy;
+        } else if (hasExposureLevel) {
+            exposureAdequacy = quality.exposure_level / 10.0;
+        }
+        exposureAdequacy = Math.min(1.0, Math.max(0.0, exposureAdequacy));
+
+        const rawNoiseLevel = typeof quality.noise_level === 'number' ? quality.noise_level : 0;
+        const noiseLevel10 = rawNoiseLevel <= 1 ? rawNoiseLevel * 10 : rawNoiseLevel;
+
+        const gainLevel = typeof quality.gain_level === 'number' ? quality.gain_level : 0;
+
+        return {
+            exposureAdequacy,
+            exposureLevel10: exposureAdequacy * 10,
+            noiseLevel10: Math.min(10, Math.max(0, noiseLevel10)),
+            gainLevel: Math.max(0, gainLevel),
+        };
+    }
+
     /**
      * 更新质量建议
      */
@@ -1371,17 +1656,17 @@ class DebugConsole {
         
         const recommendations = [];
         
-        if (quality.noise_level > 7) {
+        if (quality.noiseLevel10 > 7) {
             recommendations.push('建议降低增益以减少噪点');
         }
         
-        if (quality.exposure_level < 3) {
+        if (quality.exposureLevel10 < 3) {
             recommendations.push('建议增加曝光时间');
-        } else if (quality.exposure_level > 8) {
+        } else if (quality.exposureLevel10 > 8) {
             recommendations.push('建议减少曝光时间');
         }
         
-        if (quality.gain_level > 8) {
+        if (quality.gainLevel > 8) {
             recommendations.push('建议降低增益设置');
         }
         
@@ -1433,7 +1718,28 @@ class DebugConsole {
                 <div class="preset-name">${preset.name}</div>
                 <div class="preset-description">${preset.description || '无描述'}</div>
                 <div class="preset-params">
-                    曝光: ${preset.exposure_us}μs | 增益: ${preset.analogue_gain}x
+                    <div class="param-line">
+                        <strong>基础:</strong> 曝光${preset.exposure_us}μs | 增益${preset.analogue_gain}x
+                        ${preset.digital_gain !== undefined ? ` | 数字增益${preset.digital_gain}x` : ''}
+                    </div>
+                    ${[preset.contrast, preset.brightness, preset.saturation, preset.sharpness].some(v => v !== undefined) ? `
+                    <div class="param-line">
+                        <strong>增强:</strong>
+                        ${preset.contrast !== undefined ? ` 对比度${preset.contrast}` : ''}
+                        ${preset.brightness !== undefined ? ` 亮度${preset.brightness}` : ''}
+                        ${preset.saturation !== undefined ? ` 饱和度${preset.saturation}` : ''}
+                        ${preset.sharpness !== undefined ? ` 锐化${preset.sharpness}` : ''}
+                    </div>
+                    ` : ''}
+                    ${preset.noise_reduction !== undefined || preset.white_balance_mode !== undefined || preset.color_mode !== undefined ? `
+                    <div class="param-line">
+                        <strong>高级:</strong>
+                        ${preset.color_mode !== undefined ? ` ${preset.color_mode === 'mono' ? '黑白' : '彩色'}模式` : ''}
+                        ${preset.noise_reduction !== undefined ? ` 降噪${preset.noise_reduction}级` : ''}
+                        ${preset.white_balance_mode !== undefined ? ` 白平衡${preset.white_balance_mode}` : ''}
+                        ${preset.rotation !== undefined ? ` 旋转${preset.rotation}°` : ''}
+                    </div>
+                    ` : ''}
                 </div>
                 <div class="preset-actions">
                     <button class="btn btn-primary" onclick="window.debugConsole.applyPreset('${preset.name}')">
@@ -1468,9 +1774,22 @@ class DebugConsole {
                 body: JSON.stringify({
                     name: name,
                     description: description,
-                    exposure_us: this.currentSettings.exposure,
-                    analogue_gain: this.currentSettings.gain,
-                    digital_gain: this.currentSettings.digitalGain
+                    exposure_us: parseInt(document.getElementById('exposure-setting').value),
+                    analogue_gain: parseFloat(document.getElementById('gain-setting').value),
+                    digital_gain: parseFloat(document.getElementById('digital-gain-setting').value),
+                    // 图像增强参数
+                    contrast: parseFloat(document.getElementById('contrast-setting').value),
+                    brightness: parseFloat(document.getElementById('brightness-setting').value),
+                    saturation: parseFloat(document.getElementById('saturation-setting').value),
+                    sharpness: parseFloat(document.getElementById('sharpness-setting').value),
+                    // 高级参数
+                    noise_reduction: parseInt(document.getElementById('noise-reduction-setting').value),
+                    white_balance_mode: document.getElementById('white-balance-mode').value,
+                    white_balance_gain_r: parseFloat(document.getElementById('wb-gain-r').value),
+                    white_balance_gain_b: parseFloat(document.getElementById('wb-gain-b').value),
+                    // 其他参数
+                    rotation: this.currentSettings.rotation,
+                    color_mode: document.getElementById('color-mode').value
                 })
             });
             
@@ -1494,10 +1813,33 @@ class DebugConsole {
     }
     
     /**
+     * 获取预设数据
+     */
+    async getPresetData(presetName) {
+        try {
+            const response = await fetch('/api/debug/camera/presets');
+            if (response.ok) {
+                const data = await response.json();
+                const presets = data.presets || [];
+                return presets.find(preset => preset.name === presetName);
+            }
+        } catch (error) {
+            console.error('[DebugConsole] 获取预设数据失败:', error);
+        }
+        return null;
+    }
+    
+    /**
      * 应用预设
      */
     async applyPreset(presetName) {
         try {
+            // 先获取预设数据
+            const presetData = await this.getPresetData(presetName);
+            if (!presetData) {
+                throw new Error('预设数据不存在');
+            }
+            
             const response = await fetch(`/api/debug/camera/presets/${encodeURIComponent(presetName)}/apply`, {
                 method: 'POST'
             });
@@ -1508,12 +1850,60 @@ class DebugConsole {
                 // 重新加载相机状态
                 await this.updateCameraStatus();
                 
-                // 更新UI显示
-                if (this.cameraStatus.info) {
-                    this.updateExposureDisplay(this.cameraStatus.info.exposure_us);
-                    this.updateGainDisplay(this.cameraStatus.info.analogue_gain);
-                    this.updateDigitalGainDisplay(this.cameraStatus.info.digital_gain || 1.0);
+                // 更新UI控件值
+                document.getElementById('exposure-setting').value = presetData.exposure_us;
+                document.getElementById('gain-setting').value = presetData.analogue_gain;
+                document.getElementById('digital-gain-setting').value = presetData.digital_gain || 1.0;
+                
+                if (presetData.contrast !== undefined) {
+                    document.getElementById('contrast-setting').value = presetData.contrast;
                 }
+                if (presetData.brightness !== undefined) {
+                    document.getElementById('brightness-setting').value = presetData.brightness;
+                }
+                if (presetData.saturation !== undefined) {
+                    document.getElementById('saturation-setting').value = presetData.saturation;
+                }
+                if (presetData.sharpness !== undefined) {
+                    document.getElementById('sharpness-setting').value = presetData.sharpness;
+                }
+                if (presetData.noise_reduction !== undefined) {
+                    document.getElementById('noise-reduction-setting').value = presetData.noise_reduction;
+                }
+                if (presetData.white_balance_mode) {
+                    document.getElementById('white-balance-mode').value = presetData.white_balance_mode;
+                }
+                if (presetData.white_balance_gain_r !== undefined) {
+                    document.getElementById('wb-gain-r').value = presetData.white_balance_gain_r;
+                }
+                if (presetData.white_balance_gain_b !== undefined) {
+                    document.getElementById('wb-gain-b').value = presetData.white_balance_gain_b;
+                }
+                
+                if (presetData.color_mode !== undefined) {
+                    document.getElementById('color-mode').value = presetData.color_mode;
+                }
+                
+                // 更新显示值
+                this.updateExposureDisplay(presetData.exposure_us);
+                this.updateGainDisplay(presetData.analogue_gain);
+                this.updateDigitalGainDisplay(presetData.digital_gain ?? 1.0);
+                this.updateContrastDisplay(presetData.contrast ?? 1.0);
+                this.updateBrightnessDisplay(presetData.brightness ?? 0.0);
+                this.updateSaturationDisplay(presetData.saturation ?? 1.0);
+                this.updateSharpnessDisplay(presetData.sharpness ?? 1.0);
+                this.updateNoiseReductionDisplay(presetData.noise_reduction ?? 0);
+                this.updateWhiteBalanceMode(presetData.white_balance_mode ?? 'auto');
+                this.updateWhiteBalanceGainR(presetData.white_balance_gain_r ?? 1.0);
+                this.updateWhiteBalanceGainB(presetData.white_balance_gain_b ?? 1.0);
+                this.updateColorMode(presetData.color_mode ?? 'color');
+                
+                // 更新旋转角度
+                if (presetData.rotation !== undefined) {
+                    this.currentSettings.rotation = presetData.rotation;
+                    this.updateRotationDisplay();
+                }
+                
             } else {
                 const error = await response.json();
                 throw new Error(error.detail || '应用预设失败');
@@ -1778,6 +2168,11 @@ class DebugConsole {
      * 显示通知
      */
     showNotification(message, type = 'info') {
+        // 显示重要通知时强制显示头部
+        if (type === 'error' || type === 'warning') {
+            this.forceShowHeader();
+        }
+        
         const notifications = document.getElementById('notifications');
         
         const notification = document.createElement('div');
@@ -1849,6 +2244,203 @@ class DebugConsole {
                 modal.parentNode.removeChild(modal);
             }
         }, 300);
+    }
+    
+    /**
+     * 应用快速预设
+     */
+    async applyQuickPreset(presetType) {
+        const presets = {
+            'daylight': {
+                exposure: 5000,
+                gain: 1.0,
+                digitalGain: 1.0,
+                contrast: 1.2,
+                brightness: 0.1,
+                saturation: 1.1,
+                sharpness: 1.2,
+                noiseReduction: 1,
+                whiteBalanceMode: 'auto'
+            },
+            'night': {
+                exposure: 30000,
+                gain: 4.0,
+                digitalGain: 1.5,
+                contrast: 1.1,
+                brightness: 0.0,
+                saturation: 0.9,
+                sharpness: 1.0,
+                noiseReduction: 2,
+                whiteBalanceMode: 'night'
+            },
+            'deep-sky': {
+                exposure: 60000,
+                gain: 8.0,
+                digitalGain: 2.0,
+                contrast: 1.3,
+                brightness: -0.1,
+                saturation: 1.2,
+                sharpness: 0.8,
+                noiseReduction: 3,
+                whiteBalanceMode: 'auto'
+            },
+            'planetary': {
+                exposure: 2000,
+                gain: 2.0,
+                digitalGain: 1.2,
+                contrast: 1.5,
+                brightness: 0.2,
+                saturation: 1.3,
+                sharpness: 1.8,
+                noiseReduction: 1,
+                whiteBalanceMode: 'auto'
+            }
+        };
+        
+        const preset = presets[presetType];
+        if (!preset) {
+            this.showNotification('未知的预设类型', 'error');
+            return;
+        }
+        
+        try {
+            // 更新UI控件
+            document.getElementById('exposure-setting').value = preset.exposure;
+            document.getElementById('gain-setting').value = preset.gain;
+            document.getElementById('digital-gain-setting').value = preset.digitalGain;
+            document.getElementById('contrast-setting').value = preset.contrast;
+            document.getElementById('brightness-setting').value = preset.brightness;
+            document.getElementById('saturation-setting').value = preset.saturation;
+            document.getElementById('sharpness-setting').value = preset.sharpness;
+            document.getElementById('noise-reduction-setting').value = preset.noiseReduction;
+            document.getElementById('white-balance-mode').value = preset.whiteBalanceMode;
+            
+            // 更新显示值
+            this.updateExposureDisplay(preset.exposure);
+            this.updateGainDisplay(preset.gain);
+            this.updateDigitalGainDisplay(preset.digitalGain);
+            this.updateContrastDisplay(preset.contrast);
+            this.updateBrightnessDisplay(preset.brightness);
+            this.updateSaturationDisplay(preset.saturation);
+            this.updateSharpnessDisplay(preset.sharpness);
+            this.updateNoiseReductionDisplay(preset.noiseReduction);
+            this.updateWhiteBalanceMode(preset.whiteBalanceMode);
+            
+            // 应用设置
+            await this.applySettings();
+            
+            const presetNames = {
+                'daylight': '白天模式',
+                'night': '夜间模式',
+                'deep-sky': '深空模式',
+                'planetary': '行星模式'
+            };
+            
+            this.showNotification(`已应用${presetNames[presetType]}预设`, 'success');
+            
+        } catch (error) {
+            console.error('[DebugConsole] 应用快速预设失败:', error);
+            this.showNotification(`应用预设失败: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * 执行智能调整
+     */
+    async performAutoAdjust() {
+        if (!this.cameraStatus.streaming) {
+            this.showNotification('请先启动相机预览', 'warning');
+            return;
+        }
+        
+        try {
+            this.showNotification('正在分析图像质量...', 'info');
+            
+            // 获取图像质量指标
+            const response = await fetch('/api/debug/camera/image-quality');
+            if (!response.ok) {
+                throw new Error('获取图像质量失败');
+            }
+            
+            const data = await response.json();
+            const quality = this.normalizeQualityMetrics(data.quality || {});
+            
+            // 基于质量指标自动调整参数
+            const currentExposure = parseInt(document.getElementById('exposure-setting').value);
+            const currentGain = parseFloat(document.getElementById('gain-setting').value);
+            
+            let adjustments = {};
+            let suggestions = [];
+            
+            // 曝光调整
+            if (quality.exposureLevel10 < 3) {
+                // 曝光不足
+                adjustments.exposure = Math.min(100000, Math.round(currentExposure * 1.5));
+                suggestions.push('增加曝光时间以提高亮度');
+            } else if (quality.exposureLevel10 > 8) {
+                // 过曝
+                adjustments.exposure = Math.max(1000, Math.round(currentExposure * 0.7));
+                suggestions.push('减少曝光时间以避免过曝');
+            }
+            
+            // 增益调整
+            if (quality.noiseLevel10 > 7) {
+                // 噪点过高
+                adjustments.gain = Math.max(1.0, currentGain * 0.8);
+                suggestions.push('降低增益以减少噪点');
+            } else if (quality.gainLevel < 3 && quality.exposureLevel10 < 5) {
+                // 增益过低且曝光不足
+                adjustments.gain = Math.min(16.0, currentGain * 1.3);
+                suggestions.push('适当提高增益');
+            }
+            
+            // 降噪调整
+            if (quality.noiseLevel10 > 6) {
+                adjustments.noiseReduction = Math.min(4, quality.noiseLevel10 > 8 ? 3 : 2);
+                suggestions.push('启用降噪功能');
+            }
+            
+            // 对比度调整
+            if (quality.exposureLevel10 > 5 && quality.exposureLevel10 < 7) {
+                adjustments.contrast = 1.2; // 适中曝光时提高对比度
+                suggestions.push('适当提高对比度');
+            }
+            
+            if (Object.keys(adjustments).length === 0) {
+                this.showNotification('当前参数已经很好，无需调整', 'success');
+                return;
+            }
+            
+            // 应用调整
+            if (adjustments.exposure) {
+                document.getElementById('exposure-setting').value = adjustments.exposure;
+                this.updateExposureDisplay(adjustments.exposure);
+            }
+            
+            if (adjustments.gain) {
+                document.getElementById('gain-setting').value = adjustments.gain;
+                this.updateGainDisplay(adjustments.gain);
+            }
+            
+            if (adjustments.noiseReduction !== undefined) {
+                document.getElementById('noise-reduction-setting').value = adjustments.noiseReduction;
+                this.updateNoiseReductionDisplay(adjustments.noiseReduction);
+            }
+            
+            if (adjustments.contrast) {
+                document.getElementById('contrast-setting').value = adjustments.contrast;
+                this.updateContrastDisplay(adjustments.contrast);
+            }
+            
+            // 应用设置
+            await this.applySettings();
+            
+            this.showNotification(`智能调整完成: ${suggestions.join(', ')}`, 'success');
+            
+        } catch (error) {
+            console.error('[DebugConsole] 智能调整失败:', error);
+            this.showNotification(`智能调整失败: ${error.message}`, 'error');
+        }
     }
 }
 

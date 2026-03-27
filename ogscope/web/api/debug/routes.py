@@ -291,6 +291,15 @@ async def restore_camera_settings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/debug/camera/color-mode")
+async def set_camera_color_mode(color_mode: str = Query(..., pattern="^(color|mono)$")):
+    """设置相机颜色模式"""
+    try:
+        return await DebugCameraService.set_color_mode(color_mode)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/debug/camera/verify-supersample")
 async def verify_supersample_settings():
     """验证超采样设置的有效性"""

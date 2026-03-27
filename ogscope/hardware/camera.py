@@ -71,6 +71,7 @@ class IMX327MIPICamera(CameraInterface):
         self.auto_exposure = config.get('auto_exposure', False)
         self.auto_gain = config.get('auto_gain', False)
         self.rotation = config.get('rotation', 0)
+        self.color_mode = config.get('color_mode', 'color')  # 'color' | 'mono'
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率）
         self.sampling_mode = config.get('sampling_mode', 'supersample')  # supersample | native | crop
         
@@ -112,9 +113,13 @@ class IMX327MIPICamera(CameraInterface):
             
             self.camera = Picamera2()
             
+            # 统一使用RGB888格式，颜色模式转换在图像处理阶段进行
+            # 这样可以保持相机配置的一致性，避免格式兼容性问题
+            main_format = "RGB888"
+            
             # 配置相机
             camera_config = self.camera.create_still_configuration(
-                main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
+                main={"size": (self.capture_width, self.capture_height), "format": main_format},
                 raw={"size": (self.capture_width, self.capture_height), "format": "SRGGB12"}
             )
             
@@ -224,6 +229,15 @@ class IMX327MIPICamera(CameraInterface):
             # 应用旋转
             if self.rotation != 0:
                 image = self.apply_rotation(image, self.rotation)
+            
+            # 应用颜色模式转换
+            if self.color_mode == 'mono' and len(image.shape) == 3:
+                # 将彩色图像转换为灰度
+                import cv2
+                gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                # 转换为3通道灰度图像（保持兼容性）
+                image = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+                logger.debug("应用黑白模式转换")
             
             return image
             
@@ -504,6 +518,7 @@ class IMX327MIPICamera(CameraInterface):
                 "capture_height": self.capture_height,
                 "output_width": self.output_width,
                 "output_height": self.output_height,
+                "color_mode": self.color_mode,
             }
         except Exception as e:
             logger.error(f"获取相机信息失败: {e}")
@@ -694,6 +709,47 @@ class IMX327MIPICamera(CameraInterface):
             return True
         except Exception as e:
             logger.error(f"设置夜间模式失败: {e}")
+            return False
+    
+    def set_color_mode(self, color_mode: str) -> bool:
+        """设置颜色模式 - 需要重新初始化相机"""
+        if color_mode not in ['color', 'mono']:
+            logger.error(f"不支持的颜色模式: {color_mode}")
+            return False
+        
+        if self.color_mode == color_mode:
+            logger.info(f"颜色模式已经是 {color_mode}")
+            return True
+        
+        try:
+            # 停止当前捕获
+            was_capturing = self.is_capturing
+            if was_capturing:
+                self.stop_capture()
+            
+            # 更新颜色模式
+            self.color_mode = color_mode
+            
+            # 对于颜色模式，我们统一使用RGB888格式，在图像处理阶段进行转换
+            # 这样可以保持相机配置的一致性，避免格式兼容性问题
+            main_format = "RGB888"
+            
+            camera_config = self.camera.create_still_configuration(
+                main={"size": (self.capture_width, self.capture_height), "format": main_format},
+                raw={"size": (self.capture_width, self.capture_height), "format": "SRGGB12"}
+            )
+            
+            self.camera.configure(camera_config)
+            
+            # 如果之前在捕获，重新开始
+            if was_capturing:
+                self.start_capture()
+            
+            logger.info(f"颜色模式已切换为: {color_mode}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"设置颜色模式失败: {e}")
             return False
 
 

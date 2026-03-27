@@ -9,6 +9,16 @@ class CameraSettings(BaseModel):
     """相机设置"""
     exposure: int  # 曝光时间 (微秒)
     gain: float    # 增益
+    digitalGain: Optional[float] = 1.0  # 数字增益
+    contrast: Optional[float] = 1.0     # 对比度
+    brightness: Optional[float] = 0.0   # 亮度
+    saturation: Optional[float] = 1.0   # 饱和度
+    sharpness: Optional[float] = 1.0    # 锐度
+    noiseReduction: Optional[int] = 0   # 降噪级别 (0-4)
+    whiteBalanceMode: Optional[str] = 'auto'  # 白平衡模式
+    whiteBalanceGainR: Optional[float] = 1.0  # 白平衡红色增益
+    whiteBalanceGainB: Optional[float] = 1.0  # 白平衡蓝色增益
+    colorMode: Optional[str] = 'color'  # 颜色模式: 'color' | 'mono'
 
 
 class PolarAlignStatus(BaseModel):
@@ -28,6 +38,19 @@ class CameraPreset(BaseModel):
     digital_gain: float = 1.0
     auto_exposure: bool = False
     auto_gain: bool = False
+    # 图像增强参数
+    contrast: Optional[float] = 1.0
+    brightness: Optional[float] = 0.0
+    saturation: Optional[float] = 1.0
+    sharpness: Optional[float] = 1.0
+    # 高级参数
+    noise_reduction: Optional[int] = 0
+    white_balance_mode: Optional[str] = 'auto'
+    white_balance_gain_r: Optional[float] = 1.0
+    white_balance_gain_b: Optional[float] = 1.0
+    # 其他参数
+    rotation: Optional[int] = 180
+    color_mode: Optional[str] = 'color'  # 颜色模式: 'color' | 'mono'
 
 
 class CaptureInfo(BaseModel):

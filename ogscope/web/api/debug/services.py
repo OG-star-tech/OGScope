@@ -50,6 +50,7 @@ def get_camera_instance():
             "saturation": 1.0,
             "sharpness": 1.0,
             "night_mode": False,
+            "color_mode": "color",  # 默认彩色模式
         }
         
         camera_instance = create_camera(config)
@@ -525,9 +526,43 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         try:
-            # 更新相机参数
-            camera.set_exposure(settings["exposure"])
-            camera.set_gain(settings["gain"])
+            # 更新基础相机参数
+            if "exposure" in settings:
+                camera.set_exposure(settings["exposure"])
+            
+            if "gain" in settings and "digitalGain" in settings:
+                camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
+            elif "gain" in settings:
+                camera.set_gain(settings["gain"])
+            
+            # 更新图像增强参数
+            if any(key in settings for key in ["contrast", "brightness", "saturation", "sharpness"]):
+                contrast = settings.get("contrast", 1.0)
+                brightness = settings.get("brightness", 0.0)
+                saturation = settings.get("saturation", 1.0)
+                sharpness = settings.get("sharpness", 1.0)
+                
+                if hasattr(camera, 'set_image_enhancement'):
+                    camera.set_image_enhancement(contrast, brightness, saturation, sharpness)
+            
+            # 更新降噪设置
+            if "noiseReduction" in settings:
+                if hasattr(camera, 'set_noise_reduction'):
+                    camera.set_noise_reduction(settings["noiseReduction"])
+            
+            # 更新白平衡设置
+            if "whiteBalanceMode" in settings:
+                mode = settings["whiteBalanceMode"]
+                gain_r = settings.get("whiteBalanceGainR", 1.0)
+                gain_b = settings.get("whiteBalanceGainB", 1.0)
+                
+                if hasattr(camera, 'set_white_balance'):
+                    camera.set_white_balance(mode, gain_r, gain_b)
+            
+            # 更新颜色模式设置
+            if "colorMode" in settings:
+                if hasattr(camera, 'set_color_mode'):
+                    camera.set_color_mode(settings["colorMode"])
             
             return {
                 "success": True,
@@ -713,6 +748,33 @@ class DebugCameraService:
             return {"success": True, "message": "设置已从备份恢复"}
         except Exception as e:
             raise Exception(f"恢复设置备份失败: {str(e)}")
+    
+    @staticmethod
+    async def set_color_mode(color_mode: str):
+        """设置颜色模式"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+        
+        if color_mode not in ['color', 'mono']:
+            raise Exception("不支持的颜色模式，只支持 'color' 或 'mono'")
+        
+        try:
+            if hasattr(camera, 'set_color_mode'):
+                success = camera.set_color_mode(color_mode)
+                if success:
+                    mode_name = "彩色" if color_mode == "color" else "黑白"
+                    return {
+                        "success": True, 
+                        "message": f"颜色模式已切换为{mode_name}模式",
+                        "color_mode": color_mode
+                    }
+                else:
+                    raise Exception("相机不支持颜色模式切换")
+            else:
+                raise Exception("相机驱动不支持颜色模式切换")
+        except Exception as e:
+            raise Exception(f"设置颜色模式失败: {str(e)}")
 
 
 class DebugPresetService:
@@ -794,10 +856,45 @@ class DebugPresetService:
             # 应用预设到相机
             camera = get_camera_instance()
             if camera and camera.is_initialized:
+                # 基础参数
                 camera.set_exposure(preset["exposure_us"])
-                camera.set_gain(preset["analogue_gain"], preset["digital_gain"])
+                camera.set_gain(preset["analogue_gain"], preset.get("digital_gain", 1.0))
+                
+                # 图像增强参数
+                if any(key in preset for key in ["contrast", "brightness", "saturation", "sharpness"]):
+                    contrast = preset.get("contrast", 1.0)
+                    brightness = preset.get("brightness", 0.0)
+                    saturation = preset.get("saturation", 1.0)
+                    sharpness = preset.get("sharpness", 1.0)
+                    
+                    if hasattr(camera, 'set_image_enhancement'):
+                        camera.set_image_enhancement(contrast, brightness, saturation, sharpness)
+                
+                # 高级参数
+                if "noise_reduction" in preset:
+                    if hasattr(camera, 'set_noise_reduction'):
+                        camera.set_noise_reduction(preset["noise_reduction"])
+                
+                # 白平衡设置
+                if "white_balance_mode" in preset:
+                    mode = preset["white_balance_mode"]
+                    gain_r = preset.get("white_balance_gain_r", 1.0)
+                    gain_b = preset.get("white_balance_gain_b", 1.0)
+                    
+                    if hasattr(camera, 'set_white_balance'):
+                        camera.set_white_balance(mode, gain_r, gain_b)
+                
+                # 旋转角度
+                if "rotation" in preset:
+                    if hasattr(camera, 'set_rotation'):
+                        camera.set_rotation(preset["rotation"])
+                
+                # 颜色模式
+                if "color_mode" in preset:
+                    if hasattr(camera, 'set_color_mode'):
+                        camera.set_color_mode(preset["color_mode"])
             
-            return {"success": True, "message": f"预设 '{preset_name}' 已应用"}
+            return {"success": True, "message": f"预设 '{preset_name}' 已应用", "preset": preset}
             
         except Exception as e:
             raise Exception(f"应用预设失败: {str(e)}")
