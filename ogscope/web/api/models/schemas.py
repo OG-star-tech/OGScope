@@ -105,6 +105,10 @@ class CatalogStarUpsertRequest(BaseModel):
     pmra: float = 0.0
     pmdec: float = 0.0
     phot_g_mean_mag: float
+    name_en: Optional[str] = None
+    name_zh: Optional[str] = None
+    description_en: Optional[str] = None
+    description_zh: Optional[str] = None
 
 
 class AnalysisJobCreateRequest(BaseModel):

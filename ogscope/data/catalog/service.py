@@ -7,7 +7,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import cos, radians
@@ -16,6 +18,8 @@ from typing import Any
 from urllib.request import urlretrieve
 
 from ogscope.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -28,6 +32,10 @@ class CatalogRecord:
     pmra: float
     pmdec: float
     phot_g_mean_mag: float
+    name_en: str
+    name_zh: str
+    description_en: str
+    description_zh: str
 
     @classmethod
     def from_row(cls, row: dict[str, str]) -> "CatalogRecord":
@@ -38,6 +46,10 @@ class CatalogRecord:
             pmra=float(row.get("pmra", 0.0)),
             pmdec=float(row.get("pmdec", 0.0)),
             phot_g_mean_mag=float(row["phot_g_mean_mag"]),
+            name_en=row.get("name_en", row["source_id"]),
+            name_zh=row.get("name_zh", row.get("name_en", row["source_id"])),
+            description_en=row.get("description_en", ""),
+            description_zh=row.get("description_zh", ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +60,10 @@ class CatalogRecord:
             "pmra": self.pmra,
             "pmdec": self.pmdec,
             "phot_g_mean_mag": self.phot_g_mean_mag,
+            "name_en": self.name_en,
+            "name_zh": self.name_zh,
+            "description_en": self.description_en,
+            "description_zh": self.description_zh,
         }
 
 
@@ -59,6 +75,40 @@ class CatalogService:
     RAW_DIR_NAME = "raw"
     META_DIR_NAME = "meta"
     DB_FILE_NAME = "stars.db"
+    HYG_URL = (
+        "https://raw.githubusercontent.com/astronexus/HYG-Database/main/"
+        "hyg/CURRENT/hygdata_v41.csv"
+    )
+
+    _COMMON_CN_NAMES: dict[str, str] = {
+        "sirius": "天狼星",
+        "canopus": "老人星",
+        "arcturus": "大角星",
+        "vega": "织女星",
+        "capella": "五车二",
+        "rigel": "参宿七",
+        "procyon": "南河三",
+        "betelgeuse": "参宿四",
+        "achernar": "水委一",
+        "hadar": "马腹一",
+        "altair": "牛郎星",
+        "aldebaran": "毕宿五",
+        "spica": "角宿一",
+        "antares": "心宿二",
+        "pollux": "北河三",
+        "fomalhaut": "北落师门",
+        "deneb": "天津四",
+        "regulus": "轩辕十四",
+        "castor": "北河二",
+        "bellatrix": "参宿五",
+        "mirfak": "天船三",
+        "alnilam": "参宿二",
+        "alnair": "鹤一",
+        "alioth": "玉衡",
+        "dubhe": "天枢",
+        "merak": "天璇",
+        "polaris": "北极星",
+    }
 
     _SEED_ROWS: tuple[dict[str, str], ...] = (
         {"source_id": "hip11767", "ra": "37.95456067", "dec": "89.26410897", "pmra": "44.22", "pmdec": "-11.74", "phot_g_mean_mag": "1.97"},
@@ -105,14 +155,22 @@ class CatalogService:
         """下载或生成星表，并导入数据库 / Download or generate catalog and import to DB"""
         if source == "seed":
             self._write_seed_catalog(self.raw_file, magnitude_limit=magnitude_limit)
+        elif source == "hyg":
+            target_url = url or self.HYG_URL
+            if target_url.endswith(".gz"):
+                gz_path = self.raw_dir / "hyg_catalog.csv.gz"
+                self._download_file(target_url, gz_path)
+                self._gunzip_file(gz_path, self.raw_file)
+            else:
+                self._download_file(target_url, self.raw_file)
         elif source == "url":
             if not url:
                 raise ValueError("url source 模式必须提供 URL / URL is required for url source")
-            urlretrieve(url, self.raw_file)  # noqa: S310 - controlled by API input
+            self._download_file(url, self.raw_file)
         else:
-            raise ValueError("不支持的 source，允许 seed 或 url / Unsupported source")
+            raise ValueError("不支持的 source，允许 seed / hyg / url / Unsupported source")
 
-        imported_count = self._import_csv_to_db(self.raw_file, magnitude_limit)
+        imported_count = self._import_csv_to_db(self.raw_file, magnitude_limit, source)
         self._set_meta("source", source)
         self._set_meta("magnitude_limit", str(magnitude_limit))
         self._set_meta("source_sha256", self._sha256_of_file(self.raw_file))
@@ -207,7 +265,8 @@ class CatalogService:
         ra_max = ra_center + half_width
 
         query = (
-            "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag FROM stars "
+            "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, "
+            "name_en, name_zh, description_en, description_zh FROM stars "
             "WHERE phot_g_mean_mag <= ? AND "
         )
         mag_limit = float(self._meta("magnitude_limit", "8.5"))
@@ -233,6 +292,10 @@ class CatalogService:
                 pmra=float(row["pmra"]),
                 pmdec=float(row["pmdec"]),
                 phot_g_mean_mag=float(row["phot_g_mean_mag"]),
+                name_en=str(row["name_en"]),
+                name_zh=str(row["name_zh"]),
+                description_en=str(row["description_en"]),
+                description_zh=str(row["description_zh"]),
             )
             for row in rows
         ]
@@ -259,7 +322,9 @@ class CatalogService:
             params.append(max_mag)
         where_clause = f"WHERE {' AND '.join(where)}" if where else ""
         sql = (
-            "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, ra_now, dec_now, updated_at "
+            "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, "
+            "name_en, name_zh, description_en, description_zh, "
+            "ra_now, dec_now, updated_at "
             f"FROM stars {where_clause} ORDER BY phot_g_mean_mag ASC LIMIT ? OFFSET ?"
         )
         count_sql = f"SELECT COUNT(*) AS c FROM stars {where_clause}"
@@ -276,7 +341,9 @@ class CatalogService:
         """按 source_id 查询星点 / Get star by source_id"""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, ra_now, dec_now, updated_at "
+                "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, "
+                "name_en, name_zh, description_en, description_zh, "
+                "ra_now, dec_now, updated_at "
                 "FROM stars WHERE source_id = ?",
                 (source_id,),
             ).fetchone()
@@ -291,13 +358,19 @@ class CatalogService:
             pmra=float(payload.get("pmra", 0.0)),
             pmdec=float(payload.get("pmdec", 0.0)),
             phot_g_mean_mag=float(payload["phot_g_mean_mag"]),
+            name_en=str(payload.get("name_en", payload["source_id"])),
+            name_zh=str(payload.get("name_zh", payload.get("name_en", payload["source_id"]))),
+            description_en=str(payload.get("description_en", "")),
+            description_zh=str(payload.get("description_zh", "")),
         )
         normalized = self._normalize_record_to_observation_epoch(record)
         now_iso = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO stars (source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, ra_now, dec_now, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO stars (source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, "
+                "name_en, name_zh, description_en, description_zh, "
+                "ra_now, dec_now, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     normalized.source_id,
                     normalized.ra,
@@ -305,6 +378,10 @@ class CatalogService:
                     normalized.pmra,
                     normalized.pmdec,
                     normalized.phot_g_mean_mag,
+                    normalized.name_en,
+                    normalized.name_zh,
+                    normalized.description_en,
+                    normalized.description_zh,
                     normalized.ra,
                     normalized.dec,
                     now_iso,
@@ -330,6 +407,10 @@ class CatalogService:
             "phot_g_mean_mag": payload.get(
                 "phot_g_mean_mag", existing["phot_g_mean_mag"]
             ),
+            "name_en": payload.get("name_en", existing["name_en"]),
+            "name_zh": payload.get("name_zh", existing["name_zh"]),
+            "description_en": payload.get("description_en", existing["description_en"]),
+            "description_zh": payload.get("description_zh", existing["description_zh"]),
         }
         normalized = self._normalize_record_to_observation_epoch(
             CatalogRecord(
@@ -339,11 +420,16 @@ class CatalogService:
                 pmra=float(merged["pmra"]),
                 pmdec=float(merged["pmdec"]),
                 phot_g_mean_mag=float(merged["phot_g_mean_mag"]),
+                name_en=str(merged["name_en"]),
+                name_zh=str(merged["name_zh"]),
+                description_en=str(merged["description_en"]),
+                description_zh=str(merged["description_zh"]),
             )
         )
         with self._connect() as conn:
             conn.execute(
                 "UPDATE stars SET ra = ?, dec = ?, pmra = ?, pmdec = ?, phot_g_mean_mag = ?, "
+                "name_en = ?, name_zh = ?, description_en = ?, description_zh = ?, "
                 "ra_now = ?, dec_now = ?, updated_at = ? WHERE source_id = ?",
                 (
                     normalized.ra,
@@ -351,6 +437,10 @@ class CatalogService:
                     normalized.pmra,
                     normalized.pmdec,
                     normalized.phot_g_mean_mag,
+                    normalized.name_en,
+                    normalized.name_zh,
+                    normalized.description_en,
+                    normalized.description_zh,
                     normalized.ra,
                     normalized.dec,
                     datetime.now(timezone.utc).isoformat(),
@@ -379,6 +469,25 @@ class CatalogService:
         return conn
 
     def _init_db(self) -> None:
+        try:
+            self._create_or_migrate_db()
+            return
+        except sqlite3.DatabaseError as exc:
+            if not self._is_malformed_error(exc):
+                raise
+            logger.error(
+                "检测到星表数据库损坏，准备自动恢复 / Corrupted catalog DB detected, starting auto-recovery: %s",
+                exc,
+            )
+
+        self._recover_malformed_db()
+        self._create_or_migrate_db()
+        self._set_meta(
+            "recovered_from_corruption_at",
+            datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _create_or_migrate_db(self) -> None:
         with self._connect() as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS stars ("
@@ -389,6 +498,10 @@ class CatalogService:
                 "pmra REAL NOT NULL DEFAULT 0, "
                 "pmdec REAL NOT NULL DEFAULT 0, "
                 "phot_g_mean_mag REAL NOT NULL, "
+                "name_en TEXT NOT NULL DEFAULT '', "
+                "name_zh TEXT NOT NULL DEFAULT '', "
+                "description_en TEXT NOT NULL DEFAULT '', "
+                "description_zh TEXT NOT NULL DEFAULT '', "
                 "ra_now REAL NOT NULL, "
                 "dec_now REAL NOT NULL, "
                 "created_at TEXT NOT NULL, "
@@ -403,6 +516,60 @@ class CatalogService:
             )
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+        self._migrate_schema()
+
+    @staticmethod
+    def _is_malformed_error(exc: sqlite3.DatabaseError) -> bool:
+        message = str(exc).lower()
+        return (
+            "malformed" in message
+            or "disk image is malformed" in message
+            or "file is not a database" in message
+        )
+
+    def _recover_malformed_db(self) -> None:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = self.catalog_dir / f"stars_corrupt_{timestamp}.db"
+        db_exists = self.db_path.exists()
+        if db_exists:
+            try:
+                self.db_path.replace(backup_path)
+            except Exception:
+                try:
+                    self.db_path.unlink()
+                except FileNotFoundError:
+                    pass
+        for sidecar in (
+            self.db_path.with_suffix(".db-wal"),
+            self.db_path.with_suffix(".db-shm"),
+        ):
+            try:
+                sidecar.unlink()
+            except FileNotFoundError:
+                pass
+        logger.warning(
+            "星表数据库已恢复，原损坏文件备份到: %s / Catalog DB recovered, backup saved at: %s",
+            str(backup_path) if db_exists else "N/A",
+            str(backup_path) if db_exists else "N/A",
+        )
+
+    def _migrate_schema(self) -> None:
+        """为旧库补齐新字段 / Add missing columns for legacy DB"""
+        required_columns = {
+            "name_en": "TEXT NOT NULL DEFAULT ''",
+            "name_zh": "TEXT NOT NULL DEFAULT ''",
+            "description_en": "TEXT NOT NULL DEFAULT ''",
+            "description_zh": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self._connect() as conn:
+            rows = conn.execute("PRAGMA table_info(stars)").fetchall()
+            existing = {str(row["name"]) for row in rows}
+            for column_name, column_spec in required_columns.items():
+                if column_name in existing:
+                    continue
+                conn.execute(
+                    f"ALTER TABLE stars ADD COLUMN {column_name} {column_spec}"
+                )
 
     def _set_meta(self, key: str, value: str) -> None:
         with self._connect() as conn:
@@ -420,11 +587,16 @@ class CatalogService:
         return str(row["value"]) if row else default
 
     def _write_seed_catalog(self, target: Path, magnitude_limit: float) -> None:
-        rows = [
-            row
-            for row in self._SEED_ROWS
-            if float(row["phot_g_mean_mag"]) <= magnitude_limit
-        ]
+        rows = []
+        for row in self._SEED_ROWS:
+            if float(row["phot_g_mean_mag"]) > magnitude_limit:
+                continue
+            enriched = dict(row)
+            enriched["name_en"] = row["source_id"]
+            enriched["name_zh"] = row["source_id"]
+            enriched["description_en"] = "Seed catalog star / 种子星表星点"
+            enriched["description_zh"] = "种子星表星点 / Seed catalog star"
+            rows.append(enriched)
         with target.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(
                 f,
@@ -435,12 +607,18 @@ class CatalogService:
                     "pmra",
                     "pmdec",
                     "phot_g_mean_mag",
+                    "name_en",
+                    "name_zh",
+                    "description_en",
+                    "description_zh",
                 ],
             )
             writer.writeheader()
             writer.writerows(rows)
 
-    def _import_csv_to_db(self, csv_file: Path, magnitude_limit: float) -> int:
+    def _import_csv_to_db(
+        self, csv_file: Path, magnitude_limit: float, source: str
+    ) -> int:
         dedup_source_ids: set[str] = set()
         now_iso = datetime.now(timezone.utc).isoformat()
         imported_count = 0
@@ -448,7 +626,7 @@ class CatalogService:
             reader = csv.DictReader(f)
             for raw in reader:
                 try:
-                    record = CatalogRecord.from_row(raw)
+                    record = self._record_from_raw_row(raw, source)
                 except (KeyError, ValueError):
                     continue
                 if record.source_id in dedup_source_ids:
@@ -459,11 +637,15 @@ class CatalogService:
                     continue
                 normalized = self._normalize_record_to_observation_epoch(record)
                 conn.execute(
-                    "INSERT INTO stars (source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, ra_now, dec_now, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "INSERT INTO stars (source_id, ra, dec, pmra, pmdec, phot_g_mean_mag, "
+                    "name_en, name_zh, description_en, description_zh, "
+                    "ra_now, dec_now, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(source_id) DO UPDATE SET "
                     "ra = excluded.ra, dec = excluded.dec, pmra = excluded.pmra, pmdec = excluded.pmdec, "
                     "phot_g_mean_mag = excluded.phot_g_mean_mag, "
+                    "name_en = excluded.name_en, name_zh = excluded.name_zh, "
+                    "description_en = excluded.description_en, description_zh = excluded.description_zh, "
                     "ra_now = excluded.ra_now, dec_now = excluded.dec_now, updated_at = excluded.updated_at",
                     (
                         normalized.source_id,
@@ -472,6 +654,10 @@ class CatalogService:
                         normalized.pmra,
                         normalized.pmdec,
                         normalized.phot_g_mean_mag,
+                        normalized.name_en,
+                        normalized.name_zh,
+                        normalized.description_en,
+                        normalized.description_zh,
                         normalized.ra,
                         normalized.dec,
                         now_iso,
@@ -497,7 +683,80 @@ class CatalogService:
             pmra=record.pmra,
             pmdec=record.pmdec,
             phot_g_mean_mag=record.phot_g_mean_mag,
+            name_en=record.name_en,
+            name_zh=record.name_zh,
+            description_en=record.description_en,
+            description_zh=record.description_zh,
         )
+
+    def _record_from_raw_row(self, raw: dict[str, str], source: str) -> CatalogRecord:
+        """将来源行转为统一记录 / Convert source row to common record"""
+        if source == "hyg":
+            return self._record_from_hyg_row(raw)
+        return CatalogRecord.from_row(raw)
+
+    def _record_from_hyg_row(self, raw: dict[str, str]) -> CatalogRecord:
+        """解析 HYG 行 / Parse HYG row"""
+        raw_id = raw.get("id") or raw.get("hip") or raw.get("hd") or raw.get("hr")
+        if not raw_id:
+            raise ValueError("missing id")
+        source_id = f"hyg_{str(raw_id).strip()}"
+        ra_hours = float(raw.get("ra", "0") or 0.0)
+        ra_deg = (ra_hours * 15.0) % 360.0
+        dec_deg = float(raw.get("dec", "0") or 0.0)
+        pmra = float(raw.get("pmra", "0") or 0.0)
+        pmdec = float(raw.get("pmdec", "0") or 0.0)
+        mag = float(raw.get("mag", "99") or 99.0)
+        proper_name = (raw.get("proper") or "").strip()
+        bayer_name = (raw.get("bf") or "").strip()
+        name_en = proper_name or bayer_name or source_id
+        name_zh = self._COMMON_CN_NAMES.get(name_en.lower(), name_en)
+        constellation = (raw.get("con") or "").strip()
+        description_en = (
+            f"Star {name_en}; mag={mag:.2f}; constellation={constellation or 'unknown'}."
+        )
+        description_zh = (
+            f"恒星{name_zh}；星等={mag:.2f}；星座={constellation or '未知'}。"
+        )
+        return CatalogRecord(
+            source_id=source_id,
+            ra=ra_deg,
+            dec=dec_deg,
+            pmra=pmra,
+            pmdec=pmdec,
+            phot_g_mean_mag=mag,
+            name_en=name_en,
+            name_zh=name_zh,
+            description_en=description_en,
+            description_zh=description_zh,
+        )
+
+    def _download_file(self, url: str, target: Path) -> None:
+        """下载文件，支持 urllib/curl 回退 / Download file with urllib/curl fallback"""
+        try:
+            urlretrieve(url, target)  # noqa: S310 - controlled by API input
+            return
+        except Exception:
+            pass
+        result = subprocess.run(
+            ["curl", "-L", "--fail", "-o", str(target), url],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"下载失败 / Download failed: {result.stderr.strip() or result.stdout.strip()}"
+            )
+
+    @staticmethod
+    def _gunzip_file(src: Path, dst: Path) -> None:
+        """解压 gzip 文件 / Decompress gzip file"""
+        import gzip
+        import shutil
+
+        with gzip.open(src, "rb") as reader, dst.open("wb") as writer:
+            shutil.copyfileobj(reader, writer)
 
     @staticmethod
     def _sha256_of_file(path: Path) -> str:

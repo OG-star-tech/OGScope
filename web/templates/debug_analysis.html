@@ -23,6 +23,7 @@
                     <label for="catalog-source">数据源</label>
                     <select id="catalog-source">
                         <option value="seed">内置亮星种子（推荐）</option>
+                        <option value="hyg">HYG 全量星表（推荐：星数更多）</option>
                         <option value="url">自定义 URL（CSV）</option>
                     </select>
                 </div>
@@ -75,6 +76,22 @@
                 <div class="row">
                     <label for="star-query">查询条件</label>
                     <input id="star-query" type="text" placeholder="source_id关键字">
+                </div>
+                <div class="row">
+                    <label for="star-name-en">英文名</label>
+                    <input id="star-name-en" type="text" value="Custom Star">
+                </div>
+                <div class="row">
+                    <label for="star-name-zh">中文名</label>
+                    <input id="star-name-zh" type="text" value="自定义恒星">
+                </div>
+                <div class="row">
+                    <label for="star-desc-en">英文描述</label>
+                    <input id="star-desc-en" type="text" value="Custom star for debugging">
+                </div>
+                <div class="row">
+                    <label for="star-desc-zh">中文描述</label>
+                    <input id="star-desc-zh" type="text" value="用于调试的自定义恒星">
                 </div>
                 <div class="actions">
                     <button class="btn primary" id="star-create-btn">新增</button>

@@ -92,6 +92,12 @@ logs/
 *.sqlite3
 *.db-shm
 *.db-wal
+!data/catalog/stars.db
+data/catalog/raw/*
+data/catalog/index/*
+data/catalog/meta/*
+!data/catalog/meta/manifest.json
+!data/catalog/README.md
 
 # ====================
 # 配置文件（敏感信息）

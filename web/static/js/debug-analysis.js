@@ -66,6 +66,10 @@
       pmra: Number($("star-pmra").value),
       pmdec: Number($("star-pmdec").value),
       phot_g_mean_mag: Number($("star-mag").value),
+      name_en: $("star-name-en").value.trim(),
+      name_zh: $("star-name-zh").value.trim(),
+      description_en: $("star-desc-en").value.trim(),
+      description_zh: $("star-desc-zh").value.trim(),
     };
   }
 

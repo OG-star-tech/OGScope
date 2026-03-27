@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-03-27T14:47:15.117645+00:00",
+  "source_file": "data/catalog/raw/catalog_raw.csv",
+  "db_path": "data/catalog/stars.db",
+  "magnitude_limit": 12.0,
+  "ra_bin_size_deg": 5.0,
+  "record_count": 117931,
+  "bucket_count": 72,
+  "source_sha256": "d9f69fd86bbf90a4e4d52b4c5c53eacfa6dfc0bfdef85bfd94f095e0bebe4ebd",
+  "epoch": "JNow(approx)",
+  "status": "ready"
+}

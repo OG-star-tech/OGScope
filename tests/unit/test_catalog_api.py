@@ -2,6 +2,8 @@
 星表 API 测试 / Catalog API tests
 """
 
+from pathlib import Path
+
 import pytest
 
 
@@ -46,11 +48,16 @@ def test_catalog_star_crud(client, temp_catalog_dir):
             "pmra": 0.3,
             "pmdec": -0.2,
             "phot_g_mean_mag": 6.7,
+            "name_en": "Custom Star",
+            "name_zh": "自定义恒星",
+            "description_en": "Custom star for test",
+            "description_zh": "测试用自定义恒星",
         },
     )
     assert create_resp.status_code == 200
     create_data = create_resp.json()
     assert create_data["source_id"] == "custom_star_001"
+    assert create_data["name_zh"] == "自定义恒星"
 
     get_resp = client.get("/api/catalog/stars/custom_star_001")
     assert get_resp.status_code == 200
@@ -70,11 +77,35 @@ def test_catalog_star_crud(client, temp_catalog_dir):
             "pmra": 0.4,
             "pmdec": -0.1,
             "phot_g_mean_mag": 5.8,
+            "name_en": "Custom Star Updated",
+            "name_zh": "自定义恒星更新",
+            "description_en": "Updated custom star",
+            "description_zh": "更新后的自定义恒星",
         },
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["phot_g_mean_mag"] == 5.8
+    assert update_resp.json()["name_en"] == "Custom Star Updated"
 
     delete_resp = client.delete("/api/catalog/stars/custom_star_001")
     assert delete_resp.status_code == 200
     assert delete_resp.json()["success"] is True
+
+
+@pytest.mark.unit
+def test_catalog_db_auto_recovery_on_malformed(tmp_path: Path):
+    """测试损坏数据库自动恢复 / Test auto recovery when SQLite is malformed."""
+    from ogscope.data.catalog.service import CatalogService
+
+    broken_catalog_dir = tmp_path / "broken_catalog"
+    broken_catalog_dir.mkdir(parents=True, exist_ok=True)
+    db_path = broken_catalog_dir / "stars.db"
+    db_path.write_bytes(b"this is not a sqlite database")
+
+    service = CatalogService()
+    service.reconfigure_storage(broken_catalog_dir)
+    status = service.get_status()
+
+    assert Path(status["db_path"]).exists()
+    backups = list(broken_catalog_dir.glob("stars_corrupt_*.db"))
+    assert backups, "应当生成损坏数据库备份 / Corrupted DB backup should be created"
