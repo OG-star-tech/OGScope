@@ -36,7 +36,9 @@ class DebugConsole {
         this.recordingStartTime = null;
         this.recordingInterval = null;
         this.statusInterval = null;
+        this.systemInfoInterval = null;
         this.previewObjectUrl = null;
+        this.systemInfo = null;
         
         // 智能头部隐藏 / Intelligent head hiding
         this.lastScrollY = 0;
@@ -239,6 +241,7 @@ class DebugConsole {
         this.updateColorMode(this.currentSettings.colorMode || 'color');
         this.renderPresets();
         this.renderFiles();
+        this.updateSystemInfoUI();
     }
 
     extractApiMessage(payload, fallbackKey = 'notify.colorModeSwitched') {
@@ -914,6 +917,10 @@ class DebugConsole {
         
         // 更新相机状态 / Update camera status
         await this.updateCameraStatus();
+
+        // 更新系统信息 / Update system information
+        await this.updateSystemInfo();
+        this.startSystemInfoPolling();
         
         // 启动图像质量监控 / Start image quality monitoring
         this.startQualityMonitoring();
@@ -930,6 +937,18 @@ class DebugConsole {
     setupEventListeners() {
         document.getElementById('language-select')?.addEventListener('change', (e) => {
             this.setLanguage(e.target.value);
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                this.updateSystemInfo();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            this.stopSystemInfoPolling();
+            this.stopQualityMonitoring();
+            this.endStatusPolling();
         });
 
         // 标签页切换 / Tab switching
@@ -1761,6 +1780,112 @@ class DebugConsole {
             clearInterval(this.statusInterval);
             this.statusInterval = null;
         }
+    }
+
+    /**
+     * 更新系统信息 / Update system information
+     */
+    async updateSystemInfo() {
+        try {
+            const response = await fetch('/api/system/info');
+            if (!response.ok) {
+                return;
+            }
+            this.systemInfo = await response.json();
+            this.updateSystemInfoUI();
+        } catch (error) {
+            console.warn('[DebugConsole] 获取系统信息失败:', error);
+        }
+    }
+
+    /**
+     * 开始系统信息轮询 / Start system info polling
+     */
+    startSystemInfoPolling() {
+        this.stopSystemInfoPolling();
+        this.systemInfoInterval = setInterval(() => {
+            if (document.hidden) {
+                return;
+            }
+            this.updateSystemInfo();
+        }, 10000);
+    }
+
+    /**
+     * 停止系统信息轮询 / Stop system info polling
+     */
+    stopSystemInfoPolling() {
+        if (this.systemInfoInterval) {
+            clearInterval(this.systemInfoInterval);
+            this.systemInfoInterval = null;
+        }
+    }
+
+    /**
+     * 更新系统信息UI / Update system info UI
+     */
+    updateSystemInfoUI() {
+        const info = this.systemInfo || {};
+
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+            }
+        };
+
+        setText('system-platform', info.platform || '--');
+        setText('system-os', info.os || '--');
+        setText('system-cpu-usage', this.formatPercent(info.cpu_usage));
+        setText('system-memory-usage', this.formatPercent(info.memory_usage));
+        setText('system-temperature', this.formatTemperature(info.temperature));
+        setText('system-wifi-quality', this.formatPercent(info.wifi_quality));
+        setText('system-wifi-signal', this.formatWifiSignal(info.wifi_signal_dbm, info.wifi_interface));
+        setText('system-uptime', this.formatUptime(info.uptime_seconds));
+        setText('system-loadavg', this.formatLoadAverage(info.load_average_1m));
+    }
+
+    formatPercent(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+            return '--';
+        }
+        return `${value.toFixed(1)}%`;
+    }
+
+    formatTemperature(value) {
+        if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
+            return '--';
+        }
+        return `${value.toFixed(1)}°C`;
+    }
+
+    formatWifiSignal(signal, iface) {
+        const hasSignal = typeof signal === 'number' && !Number.isNaN(signal);
+        const suffix = iface ? ` (${iface})` : '';
+        if (!hasSignal) {
+            return `--${suffix}`;
+        }
+        return `${signal.toFixed(1)} dBm${suffix}`;
+    }
+
+    formatUptime(seconds) {
+        if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds <= 0) {
+            return '--';
+        }
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) {
+            return `${days}d ${hours}h`;
+        }
+        return `${hours}h ${minutes}m`;
+    }
+
+    formatLoadAverage(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+            return '--';
+        }
+        return value.toFixed(2);
     }
     
     /**

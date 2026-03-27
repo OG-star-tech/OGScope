@@ -59,11 +59,17 @@ class CaptureInfo(BaseModel):
 
 class SystemInfo(BaseModel):
     """系统信息 / System information"""
+
     platform: str
     os: str
     cpu_usage: float
     memory_usage: float
     temperature: float
+    wifi_quality: Optional[float] = None
+    wifi_signal_dbm: Optional[float] = None
+    wifi_interface: Optional[str] = None
+    uptime_seconds: int = 0
+    load_average_1m: float = 0.0
 
 
 class AlignmentStatus(BaseModel):

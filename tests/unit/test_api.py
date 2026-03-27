@@ -44,3 +44,21 @@ def test_camera_status(client):
     assert "streaming" in data
     assert "mode" in data
 
+
+@pytest.mark.unit
+def test_system_info(client):
+    """测试系统信息接口结构。 / Test system info endpoint schema."""
+    response = client.get("/api/system/info")
+    assert response.status_code == 200
+    data = response.json()
+    assert "platform" in data
+    assert "os" in data
+    assert "cpu_usage" in data
+    assert "memory_usage" in data
+    assert "temperature" in data
+    assert "wifi_quality" in data
+    assert "wifi_signal_dbm" in data
+    assert "wifi_interface" in data
+    assert "uptime_seconds" in data
+    assert "load_average_1m" in data
+

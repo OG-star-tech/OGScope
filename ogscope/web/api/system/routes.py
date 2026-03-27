@@ -3,18 +3,12 @@
 """
 from fastapi import APIRouter
 from ogscope.web.api.models.schemas import SystemInfo
+from ogscope.web.api.system.services import system_info_service
 
 router = APIRouter()
 
 
-@router.get("/system/info")
-async def get_system_info():
+@router.get("/system/info", response_model=SystemInfo)
+async def get_system_info() -> SystemInfo:
     """获取系统信息 / Get system information"""
-    # TODO: 实现系统信息获取 / TODO: Implement system information acquisition
-    return {
-        "platform": "Orange Pi Zero 2W",
-        "os": "Debian",
-        "cpu_usage": 0.0,
-        "memory_usage": 0.0,
-        "temperature": 0.0,
-    }
+    return SystemInfo(**system_info_service.get_system_info())
