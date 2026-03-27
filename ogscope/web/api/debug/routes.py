@@ -14,11 +14,11 @@ from ogscope.web.api.debug.services import (
 router = APIRouter()
 
 
-# ==================== 相机控制 ====================
+# ==================== 相机控制 ==================== / ==================== Camera Control ====================
 
 @router.get("/debug/camera/status")
 async def get_debug_camera_status():
-    """获取调试相机状态"""
+    """获取调试相机状态 / Get debug camera status"""
     try:
         return await DebugCameraService.get_camera_status()
     except Exception as e:
@@ -27,7 +27,7 @@ async def get_debug_camera_status():
 
 @router.post("/debug/camera/start")
 async def start_debug_camera():
-    """启动调试相机"""
+    """启动调试相机 / Start the debug camera"""
     try:
         return await DebugCameraService.start_camera()
     except Exception as e:
@@ -36,7 +36,7 @@ async def start_debug_camera():
 
 @router.get("/debug/camera/stream")
 async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
-    """MJPEG 实时流 - 可配置压缩质量"""
+    """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
         camera = DebugCameraService.get_camera_instance()
@@ -72,7 +72,7 @@ async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
 
 @router.get("/debug/camera/stream-lossless")
 async def stream_debug_camera_lossless():
-    """无损质量实时流 - 使用PNG格式展示超采样效果"""
+    """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
         camera = DebugCameraService.get_camera_instance()
@@ -108,7 +108,7 @@ async def stream_debug_camera_lossless():
 
 @router.post("/debug/camera/stop")
 async def stop_debug_camera():
-    """停止调试相机"""
+    """停止调试相机 / Stop debugging camera"""
     try:
         return await DebugCameraService.stop_camera()
     except Exception as e:
@@ -117,7 +117,7 @@ async def stop_debug_camera():
 
 @router.post("/debug/camera/rotation/{rotation}")
 async def set_camera_rotation(rotation: int):
-    """设置相机旋转角度"""
+    """设置相机旋转角度 / Set camera rotation angle"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
         result = await DebugCameraService.set_rotation(rotation)
@@ -128,7 +128,7 @@ async def set_camera_rotation(rotation: int):
 
 @router.get("/debug/camera/preview")
 async def get_debug_camera_preview():
-    """获取调试相机预览"""
+    """获取调试相机预览 / Get debug camera preview"""
     try:
         return await DebugCameraService.get_preview()
     except Exception as e:
@@ -137,7 +137,7 @@ async def get_debug_camera_preview():
 
 @router.post("/debug/camera/capture")
 async def capture_debug_image():
-    """拍摄单张图片"""
+    """拍摄单张图片 / Take a single picture"""
     try:
         return await DebugCameraService.capture_image()
     except Exception as e:
@@ -146,7 +146,7 @@ async def capture_debug_image():
 
 @router.post("/debug/camera/record/start")
 async def start_debug_recording():
-    """开始录制视频"""
+    """开始录制视频 / Start recording video"""
     try:
         return await DebugCameraService.start_recording()
     except Exception as e:
@@ -155,7 +155,7 @@ async def start_debug_recording():
 
 @router.post("/debug/camera/record/stop")
 async def stop_debug_recording():
-    """停止录制视频"""
+    """停止录制视频 / Stop recording video"""
     try:
         return await DebugCameraService.stop_recording()
     except Exception as e:
@@ -164,7 +164,7 @@ async def stop_debug_recording():
 
 @router.post("/debug/camera/size")
 async def set_camera_size(width: int = Query(..., gt=0), height: int = Query(..., gt=0)):
-    """仅切换分辨率（宽高），不影响当前帧率；必要时重启预览"""
+    """仅切换分辨率（宽高），不影响当前帧率；必要时重启预览 / Only switches the resolution (width and height) and does not affect the current frame rate; restart the preview if necessary"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
         result = await DebugCameraService.set_size(width, height)
@@ -185,7 +185,7 @@ async def set_camera_sampling_mode(mode: str = Query(..., pattern="^(supersample
 
 @router.post("/debug/camera/fps")
 async def set_camera_fps(fps: int = Query(..., gt=0)):
-    """仅设置帧率，尽量不影响当前预览"""
+    """仅设置帧率，尽量不影响当前预览 / Only set the frame rate and try not to affect the current preview"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
         return await DebugCameraService.set_fps(fps)
@@ -194,7 +194,7 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
 
 @router.post("/debug/camera/settings")
 async def update_debug_camera_settings(settings: CameraSettings):
-    """更新调试相机设置"""
+    """更新调试相机设置 / Update debug camera settings"""
     try:
         return await DebugCameraService.update_settings(settings.dict())
     except Exception as e:
@@ -203,7 +203,7 @@ async def update_debug_camera_settings(settings: CameraSettings):
 
 @router.post("/debug/camera/reset")
 async def reset_debug_camera():
-    """重置相机到默认设置"""
+    """重置相机到默认设置 / Reset camera to default settings"""
     try:
         return await DebugCameraService.reset_camera()
     except Exception as e:
@@ -212,7 +212,7 @@ async def reset_debug_camera():
 
 @router.post("/debug/camera/noise-reduction")
 async def set_noise_reduction(level: int = Query(..., ge=0, le=4)):
-    """设置降噪级别 (0-4)"""
+    """设置降噪级别 (0-4) / Set noise reduction level (0-4)"""
     try:
         return await DebugCameraService.set_noise_reduction(level)
     except Exception as e:
@@ -225,7 +225,7 @@ async def set_white_balance(
     gain_r: float = Query(1.0, ge=0.1, le=3.0),
     gain_b: float = Query(1.0, ge=0.1, le=3.0)
 ):
-    """设置白平衡模式"""
+    """设置白平衡模式 / Set white balance mode"""
     try:
         return await DebugCameraService.set_white_balance(mode, gain_r, gain_b)
     except Exception as e:
@@ -239,7 +239,7 @@ async def set_image_enhancement(
     saturation: float = Query(1.0, ge=0.0, le=2.0),
     sharpness: float = Query(1.0, ge=0.0, le=2.0)
 ):
-    """设置图像增强参数"""
+    """设置图像增强参数 / Set image enhancement parameters"""
     try:
         return await DebugCameraService.set_image_enhancement(contrast, brightness, saturation, sharpness)
     except Exception as e:
@@ -248,7 +248,7 @@ async def set_image_enhancement(
 
 @router.post("/debug/camera/night-mode")
 async def set_night_mode(enabled: bool = Query(True)):
-    """设置夜间模式"""
+    """设置夜间模式 / Set night mode"""
     try:
         return await DebugCameraService.set_night_mode(enabled)
     except Exception as e:
@@ -257,7 +257,7 @@ async def set_night_mode(enabled: bool = Query(True)):
 
 @router.get("/debug/camera/image-quality")
 async def get_image_quality():
-    """获取图像质量指标"""
+    """获取图像质量指标 / Get image quality metrics"""
     try:
         return await DebugCameraService.get_image_quality()
     except Exception as e:
@@ -266,7 +266,7 @@ async def get_image_quality():
 
 @router.post("/debug/camera/night-mode-preset")
 async def apply_night_mode_preset():
-    """应用夜间模式预设"""
+    """应用夜间模式预设 / Apply night mode preset"""
     try:
         return await DebugCameraService.apply_night_mode_preset()
     except Exception as e:
@@ -275,7 +275,7 @@ async def apply_night_mode_preset():
 
 @router.post("/debug/camera/backup-settings")
 async def backup_camera_settings():
-    """备份当前相机设置"""
+    """备份当前相机设置 / Back up current camera settings"""
     try:
         return await DebugCameraService.save_current_settings_backup()
     except Exception as e:
@@ -284,7 +284,7 @@ async def backup_camera_settings():
 
 @router.post("/debug/camera/restore-settings")
 async def restore_camera_settings():
-    """从备份恢复相机设置"""
+    """从备份恢复相机设置 / Restore camera settings from backup"""
     try:
         return await DebugCameraService.restore_settings_backup()
     except Exception as e:
@@ -293,7 +293,7 @@ async def restore_camera_settings():
 
 @router.post("/debug/camera/color-mode")
 async def set_camera_color_mode(color_mode: str = Query(..., pattern="^(color|mono)$")):
-    """设置相机颜色模式"""
+    """设置相机颜色模式 / Set camera color mode"""
     try:
         return await DebugCameraService.set_color_mode(color_mode)
     except Exception as e:
@@ -302,7 +302,7 @@ async def set_camera_color_mode(color_mode: str = Query(..., pattern="^(color|mo
 
 @router.get("/debug/camera/verify-supersample")
 async def verify_supersample_settings():
-    """验证超采样设置的有效性"""
+    """验证超采样设置的有效性 / Verify the validity of the supersampling settings"""
     try:
         from ogscope.web.api.debug.services import get_camera_instance
         
@@ -310,10 +310,10 @@ async def verify_supersample_settings():
         if not camera or not camera.is_initialized:
             raise HTTPException(status_code=500, detail="相机未初始化")
         
-        # 获取相机详细信息
+        # 获取相机详细信息 / Get camera details
         info = camera.get_camera_info()
         
-        # 验证超采样设置
+        # 验证超采样设置 / Verify supersampling settings
         verification_result = {
             "sampling_mode": info.get('sampling_mode', 'unknown'),
             "capture_resolution": f"{info.get('capture_width', 0)}x{info.get('capture_height', 0)}",
@@ -324,7 +324,7 @@ async def verify_supersample_settings():
             "recommendations": []
         }
         
-        # 检查超采样是否有效
+        # 检查超采样是否有效 / Check if oversampling is valid
         if info.get('sampling_mode') == 'supersample':
             capture_width = info.get('capture_width', 0)
             capture_height = info.get('capture_height', 0)
@@ -334,12 +334,12 @@ async def verify_supersample_settings():
             if capture_width > 0 and capture_height > 0 and output_width > 0 and output_height > 0:
                 verification_result["is_supersample_active"] = True
                 
-                # 计算超采样比例
+                # 计算超采样比例 / Calculate oversampling ratio
                 width_ratio = capture_width / output_width
                 height_ratio = capture_height / output_height
                 verification_result["supersample_ratio"] = min(width_ratio, height_ratio)
                 
-                # 验证状态
+                # 验证状态 / Verification status
                 if width_ratio >= 1.5 and height_ratio >= 1.5:
                     verification_result["verification_status"] = "excellent"
                 elif width_ratio >= 1.2 and height_ratio >= 1.2:
@@ -356,7 +356,7 @@ async def verify_supersample_settings():
             verification_result["verification_status"] = "not_supersample"
             verification_result["recommendations"].append("当前不是超采样模式，请设置为 supersample 模式")
         
-        # 添加详细建议
+        # 添加详细建议 / Add detailed suggestions
         if verification_result["sampling_mode"] == "supersample" and verification_result["is_supersample_active"]:
             if verification_result["supersample_ratio"] < 1.2:
                 verification_result["recommendations"].append("超采样比例较低，图像质量提升有限")
@@ -377,7 +377,7 @@ async def verify_supersample_settings():
 
 @router.post("/debug/camera/test-image-size")
 async def test_image_size():
-    """测试捕获图像的实际尺寸，验证超采样是否生效"""
+    """测试捕获图像的实际尺寸，验证超采样是否生效 / Test the actual size of the captured image to verify whether supersampling is effective"""
     try:
         from ogscope.web.api.debug.services import get_camera_instance
         
@@ -385,12 +385,12 @@ async def test_image_size():
         if not camera or not camera.is_initialized:
             raise HTTPException(status_code=500, detail="相机未初始化")
         
-        # 捕获一张图像
+        # 捕获一张图像 / capture an image
         image = camera.capture_image()
         if image is None:
             raise HTTPException(status_code=500, detail="无法捕获图像")
         
-        # 获取图像尺寸信息
+        # 获取图像尺寸信息 / Get image size information
         actual_height, actual_width = image.shape[:2]
         info = camera.get_camera_info()
         
@@ -404,7 +404,7 @@ async def test_image_size():
             "analysis": ""
         }
         
-        # 分析结果
+        # 分析结果 / Analyze results
         expected_width = info.get('output_width', 0)
         expected_height = info.get('output_height', 0)
         
@@ -433,11 +433,11 @@ async def test_image_size():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== 预设管理 ====================
+# ==================== 预设管理 ==================== / ==================== Default Management ====================
 
 @router.get("/debug/camera/presets")
 async def get_camera_presets():
-    """获取相机预设列表"""
+    """获取相机预设列表 / Get a list of camera presets"""
     try:
         return await DebugPresetService.get_presets()
     except Exception as e:
@@ -446,7 +446,7 @@ async def get_camera_presets():
 
 @router.post("/debug/camera/presets")
 async def save_camera_preset(preset: CameraPreset):
-    """保存相机预设"""
+    """保存相机预设 / Save camera presets"""
     try:
         return await DebugPresetService.save_preset(preset.dict())
     except Exception as e:
@@ -455,7 +455,7 @@ async def save_camera_preset(preset: CameraPreset):
 
 @router.post("/debug/camera/presets/{preset_name}/apply")
 async def apply_camera_preset(preset_name: str):
-    """应用相机预设"""
+    """应用相机预设 / Apply camera presets"""
     try:
         return await DebugPresetService.apply_preset(preset_name)
     except Exception as e:
@@ -464,18 +464,18 @@ async def apply_camera_preset(preset_name: str):
 
 @router.delete("/debug/camera/presets/{preset_name}")
 async def delete_camera_preset(preset_name: str):
-    """删除相机预设"""
+    """删除相机预设 / Delete camera preset"""
     try:
         return await DebugPresetService.delete_preset(preset_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== 文件管理 ====================
+# ==================== 文件管理 ==================== / ==================== File Management ====================
 
 @router.get("/debug/files")
 async def get_capture_files():
-    """获取拍摄文件列表"""
+    """获取拍摄文件列表 / Get shooting file list"""
     try:
         return await DebugFileService.get_files()
     except Exception as e:
@@ -484,7 +484,7 @@ async def get_capture_files():
 
 @router.get("/debug/files/{filename}")
 async def download_capture_file(filename: str):
-    """下载拍摄文件"""
+    """下载拍摄文件 / Download shooting files"""
     from pathlib import Path
     DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
     file_path = DEBUG_CAPTURES_DIR / filename
@@ -501,7 +501,7 @@ async def download_capture_file(filename: str):
 
 @router.get("/debug/files/{filename}/info")
 async def get_file_info(filename: str):
-    """获取文件信息"""
+    """获取文件信息 / Get file information"""
     try:
         return await DebugFileService.get_file_info(filename)
     except Exception as e:
@@ -510,7 +510,7 @@ async def get_file_info(filename: str):
 
 @router.delete("/debug/files/{filename}")
 async def delete_capture_file(filename: str):
-    """删除拍摄文件"""
+    """删除拍摄文件 / Delete shooting files"""
     try:
         return await DebugFileService.delete_file(filename)
     except Exception as e:

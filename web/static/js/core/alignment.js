@@ -1,7 +1,6 @@
-/* OGScope - 校准控制模块 */
-
+/* OGScope - 校准控制模块 / OGScope - Calibration Control Module */
 /**
- * 校准控制器类
+ * 校准控制器类 / Calibration controller class
  */
 class AlignmentController {
     constructor() {
@@ -26,7 +25,7 @@ class AlignmentController {
     }
 
     /**
-     * 初始化校准控制器
+     * 初始化校准控制器 / Initialize the calibration controller
      */
     init() {
         this.loadCalibrationData();
@@ -34,9 +33,9 @@ class AlignmentController {
     }
 
     /**
-     * 开始校准
-     * @param {Object} options - 校准选项
-     * @returns {Promise<boolean>} 校准结果
+     * 开始校准 / Start calibration
+     * @param {Object} options - 校准选项 / calibration options
+     * @returns {Promise<boolean>} 校准结果 / calibration result
      */
     async startAlignment(options = {}) {
         if (this.isCalibrating) {
@@ -50,7 +49,7 @@ class AlignmentController {
 
             console.log('开始校准...');
 
-            // 模拟校准过程
+            // 模拟校准过程 / Simulate calibration process
             const result = await this.performAlignment(options);
             
             if (result.success) {
@@ -81,13 +80,13 @@ class AlignmentController {
     }
 
     /**
-     * 执行校准
-     * @param {Object} options - 校准选项
-     * @returns {Promise<Object>} 校准结果
+     * 执行校准 / Perform calibration
+     * @param {Object} options - 校准选项 / calibration options
+     * @returns {Promise<Object>} 校准结果 / calibration results
      */
     async performAlignment(options) {
         return new Promise((resolve) => {
-            // 模拟校准过程
+            // 模拟校准过程 / Simulate calibration process
             let progress = 0;
             const steps = [
                 { progress: 20, message: '正在检测星点...' },
@@ -105,7 +104,7 @@ class AlignmentController {
                 } else {
                     clearInterval(interval);
                     
-                    // 模拟校准结果
+                    // 模拟校准结果 / Analog calibration results
                     const result = {
                         success: true,
                         azimuthOffset: OGScopeUtils.random(-5, 5),
@@ -120,7 +119,7 @@ class AlignmentController {
     }
 
     /**
-     * 停止校准
+     * 停止校准 / Stop calibration
      */
     stopAlignment() {
         if (this.isCalibrating) {
@@ -131,7 +130,7 @@ class AlignmentController {
     }
 
     /**
-     * 重置校准
+     * 重置校准 / reset calibration
      */
     resetAlignment() {
         this.calibrationData = {
@@ -147,8 +146,8 @@ class AlignmentController {
     }
 
     /**
-     * 获取校准状态
-     * @returns {Object} 校准状态
+     * 获取校准状态 / Get calibration status
+     * @returns {Object} 校准状态 / calibration status
      */
     getAlignmentStatus() {
         return {
@@ -160,8 +159,8 @@ class AlignmentController {
     }
 
     /**
-     * 设置目标位置
-     * @param {Object} position - 目标位置 {azimuth, altitude}
+     * 设置目标位置 / Set target location
+     * @param {Object} position - 目标位置 {azimuth, altitude} / target position {azimuth, altitude}
      */
     setTargetPosition(position) {
         this.targetPosition = { ...position };
@@ -170,8 +169,8 @@ class AlignmentController {
     }
 
     /**
-     * 更新当前位置
-     * @param {Object} position - 当前位置 {azimuth, altitude}
+     * 更新当前位置 / Update current location
+     * @param {Object} position - 当前位置 {azimuth, altitude} / current position {azimuth, altitude}
      */
     updateCurrentPosition(position) {
         this.currentPosition = { ...position };
@@ -179,8 +178,8 @@ class AlignmentController {
     }
 
     /**
-     * 计算偏移量
-     * @returns {Object} 偏移量 {azimuth, altitude}
+     * 计算偏移量 / Calculate offset
+     * @returns {Object} 偏移量 {azimuth, altitude} / offset {azimuth, altitude}
      */
     calculateOffset() {
         const azimuthOffset = this.targetPosition.azimuth - this.currentPosition.azimuth;
@@ -193,8 +192,8 @@ class AlignmentController {
     }
 
     /**
-     * 检查校准精度
-     * @returns {Object} 精度信息
+     * 检查校准精度 / Check calibration accuracy
+     * @returns {Object} 精度信息 / precision information
      */
     checkAccuracy() {
         const offset = this.calculateOffset();
@@ -220,7 +219,7 @@ class AlignmentController {
     }
 
     /**
-     * 开始数据更新
+     * 开始数据更新 / Start data update
      */
     startDataUpdates() {
         this.updateInterval = setInterval(() => {
@@ -229,7 +228,7 @@ class AlignmentController {
     }
 
     /**
-     * 停止数据更新
+     * 停止数据更新 / Stop data update
      */
     stopDataUpdates() {
         if (this.updateInterval) {
@@ -239,16 +238,16 @@ class AlignmentController {
     }
 
     /**
-     * 更新校准数据
+     * 更新校准数据 / Update calibration data
      */
     updateAlignmentData() {
-        // 模拟数据更新
+        // 模拟数据更新 / Simulation data update
         const offset = this.calculateOffset();
         
-        // 更新UI显示
+        // 更新UI显示 / Update UI display
         this.updateOffsetDisplay(offset);
         
-        // 更新校准数据
+        // 更新校准数据 / Update calibration data
         this.calibrationData.azimuthOffset = offset.azimuth;
         this.calibrationData.altitudeOffset = offset.altitude;
         this.calibrationData.lastUpdate = new Date();
@@ -257,8 +256,8 @@ class AlignmentController {
     }
 
     /**
-     * 更新偏移显示
-     * @param {Object} offset - 偏移量
+     * 更新偏移显示 / Update offset display
+     * @param {Object} offset - 偏移量 / offset
      */
     updateOffsetDisplay(offset) {
         const azimuthElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.AZIMUTH_OFFSET);
@@ -274,7 +273,7 @@ class AlignmentController {
     }
 
     /**
-     * 保存校准数据
+     * 保存校准数据 / Save calibration data
      */
     saveCalibrationData() {
         try {
@@ -288,7 +287,7 @@ class AlignmentController {
     }
 
     /**
-     * 加载校准数据
+     * 加载校准数据 / Load calibration data
      */
     loadCalibrationData() {
         try {
@@ -306,8 +305,8 @@ class AlignmentController {
     }
 
     /**
-     * 导出校准数据
-     * @returns {Object} 校准数据
+     * 导出校准数据 / Export calibration data
+     * @returns {Object} 校准数据 / calibration data
      */
     exportCalibrationData() {
         return {
@@ -319,8 +318,8 @@ class AlignmentController {
     }
 
     /**
-     * 导入校准数据
-     * @param {Object} data - 校准数据
+     * 导入校准数据 / Import calibration data
+     * @param {Object} data - 校准数据 / calibration data
      */
     importCalibrationData(data) {
         if (data.azimuthOffset !== undefined) {
@@ -347,8 +346,8 @@ class AlignmentController {
     }
 
     /**
-     * 获取校准历史
-     * @returns {Array} 校准历史
+     * 获取校准历史 / Get calibration history
+     * @returns {Array} 校准历史 / calibration history
      */
     getCalibrationHistory() {
         try {
@@ -361,8 +360,8 @@ class AlignmentController {
     }
 
     /**
-     * 添加校准记录
-     * @param {Object} record - 校准记录
+     * 添加校准记录 / Add calibration record
+     * @param {Object} record - 校准记录 / calibration record
      */
     addCalibrationRecord(record) {
         try {
@@ -372,7 +371,7 @@ class AlignmentController {
                 timestamp: new Date().toISOString()
             });
             
-            // 只保留最近50条记录
+            // 只保留最近50条记录 / Only keep the latest 50 records
             if (history.length > 50) {
                 history.splice(0, history.length - 50);
             }
@@ -384,7 +383,7 @@ class AlignmentController {
     }
 
     /**
-     * 清除校准历史
+     * 清除校准历史 / Clear calibration history
      */
     clearCalibrationHistory() {
         try {
@@ -396,9 +395,9 @@ class AlignmentController {
     }
 
     /**
-     * 添加事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 添加事件监听器 / Add event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     on(event, callback) {
         if (!this.eventListeners.has(event)) {
@@ -408,9 +407,9 @@ class AlignmentController {
     }
 
     /**
-     * 移除事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 移除事件监听器 / Remove event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     off(event, callback) {
         if (this.eventListeners.has(event)) {
@@ -423,9 +422,9 @@ class AlignmentController {
     }
 
     /**
-     * 触发事件
-     * @param {string} event - 事件名
-     * @param {...any} args - 参数
+     * 触发事件 / trigger event
+     * @param {string} event - 事件名 / event name
+     * @param {...any} args - 参数 / parameters
      */
     emit(event, ...args) {
         if (this.eventListeners.has(event)) {
@@ -440,7 +439,7 @@ class AlignmentController {
     }
 
     /**
-     * 销毁校准控制器
+     * 销毁校准控制器 / Destroy calibration controller
      */
     destroy() {
         this.stopDataUpdates();
@@ -449,10 +448,10 @@ class AlignmentController {
     }
 }
 
-// 创建校准控制器实例
+// 创建校准控制器实例 / Create a calibration controller instance
 const alignmentController = new AlignmentController();
 
-// 导出校准控制器
+// 导出校准控制器 / Export calibration controller
 window.OGScopeAlignment = {
     AlignmentController,
     alignmentController

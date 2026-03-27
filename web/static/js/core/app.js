@@ -1,7 +1,7 @@
 /**
- * OGScope 主应用入口
- * 革命性电子极轴镜 - 横屏全屏应用
- * 支持MJPEG视频流、星点识别、极轴校准、PWA功能
+ * OGScope 主应用入口 / OGScope main application entrance
+ * 革命性电子极轴镜 - 横屏全屏应用 / Revolutionary electronic polar scope - full screen horizontal application
+ * 支持MJPEG视频流、星点识别、极轴校准、PWA功能 / Supports MJPEG video streaming, star point recognition, polar axis calibration, and PWA functions
  */
 
 import { CameraController } from './camera.js';
@@ -20,25 +20,25 @@ export class OGScopeApp {
     }
 
     /**
-     * 初始化应用
+     * 初始化应用 / Initialize application
      */
     async init() {
         try {
             console.log('[OGScope] 初始化革命性电子极轴镜...');
             
-            // 显示加载屏幕
+            // 显示加载屏幕 / show loading screen
             this.showLoadingScreen();
             
-            // 初始化各个模块
+            // 初始化各个模块 / Initialize each module
             await this.initializeModules();
             
-            // 设置模块间通信
+            // 设置模块间通信 / Set up inter-module communication
             this.setupModuleCommunication();
             
-            // 模拟加载过程
+            // 模拟加载过程 / Simulate loading process
             await this.simulateLoading();
             
-            // 隐藏加载屏幕
+            // 隐藏加载屏幕 / Hide loading screen
             this.hideLoadingScreen();
             
             this.isInitialized = true;
@@ -51,36 +51,36 @@ export class OGScopeApp {
     }
 
     /**
-     * 初始化各个模块
+     * 初始化各个模块 / Initialize each module
      */
     async initializeModules() {
         console.log('[OGScope] 初始化模块...');
         
-        // 初始化UI控制器
+        // 初始化UI控制器 / Initialize UI controller
         this.modules.ui = new UIController();
         
-        // 初始化相机控制器
+        // 初始化相机控制器 / Initialize camera controller
         this.modules.camera = new CameraController();
         
-        // 初始化校准控制器
+        // 初始化校准控制器 / Initialize the calibration controller
         this.modules.alignment = new AlignmentController();
         
-        // 初始化粒子系统
+        // 初始化粒子系统 / Initialize particle system
         this.modules.particles = new ParticleSystem();
         
-        // 初始化PWA管理器
+        // 初始化PWA管理器 / Initialize PWA Manager
         this.modules.pwa = new PWAManager();
         
         console.log('[OGScope] 模块初始化完成');
     }
 
     /**
-     * 设置模块间通信
+     * 设置模块间通信 / Set up inter-module communication
      */
     setupModuleCommunication() {
         console.log('[OGScope] 设置模块间通信...');
         
-        // UI事件处理
+        // UI事件处理 / UI event handling
         this.modules.ui.on('ui:stream:start', () => {
             this.modules.camera.startStream();
         });
@@ -101,7 +101,7 @@ export class OGScopeApp {
             this.modules.pwa.installApp();
         });
         
-        // 相机事件处理
+        // 相机事件处理 / Camera event handling
         this.modules.camera.on(EVENTS.CAMERA_STREAM_START, () => {
             this.modules.ui.updateButtonStates({ streamRunning: true });
             this.modules.ui.updateStatusDisplay('视频流运行中');
@@ -119,7 +119,7 @@ export class OGScopeApp {
             this.modules.ui.showError('视频流启动失败');
         });
         
-        // 校准事件处理
+        // 校准事件处理 / Calibration event handling
         this.modules.alignment.on(EVENTS.ALIGNMENT_START, () => {
             this.modules.ui.updateButtonStates({ alignmentRunning: true });
             this.modules.ui.updateStatusDisplay('校准进行中...');
@@ -147,7 +147,7 @@ export class OGScopeApp {
             this.modules.ui.showSuccess('极轴校准完成！');
         });
         
-        // PWA事件处理
+        // PWA事件处理 / PWA event handling
         this.modules.pwa.on(EVENTS.PWA_INSTALL_PROMPT, () => {
             this.modules.ui.showInstallPrompt();
         });
@@ -157,7 +157,7 @@ export class OGScopeApp {
             this.modules.ui.showSuccess('应用已安装到主屏幕');
         });
         
-        // 网络状态处理
+        // 网络状态处理 / Network status handling
         this.modules.pwa.on('pwa:network:online', () => {
             this.modules.ui.updateNetworkStatus(true);
             this.modules.ui.showSuccess('网络连接已恢复');
@@ -172,27 +172,27 @@ export class OGScopeApp {
     }
 
     /**
-     * 显示加载屏幕
+     * 显示加载屏幕 / show loading screen
      */
     showLoadingScreen() {
         this.modules.ui?.showLoadingScreen();
     }
 
     /**
-     * 隐藏加载屏幕
+     * 隐藏加载屏幕 / Hide loading screen
      */
     hideLoadingScreen() {
         this.modules.ui?.hideLoadingScreen();
     }
 
     /**
-     * 模拟加载过程
+     * 模拟加载过程 / Simulate loading process
      */
     async simulateLoading() {
         if (this.modules.ui) {
             await this.modules.ui.simulateLoading();
         } else {
-            // 备用加载过程
+            // 备用加载过程 / Alternate loading process
             const steps = APP_CONFIG.UI.LOADING_STEPS;
             for (const step of steps) {
                 await Utils.delay(800);
@@ -203,13 +203,13 @@ export class OGScopeApp {
     }
 
     /**
-     * 处理初始化错误
-     * @param {Error} error - 错误对象
+     * 处理初始化错误 / Handling initialization errors
+     * @param {Error} error - 错误对象 / error object
      */
     handleInitializationError(error) {
         console.error('[OGScope] 初始化错误:', error);
         
-        // 显示错误信息
+        // 显示错误信息 / Show error message
         if (this.modules.ui) {
             this.modules.ui.showError('系统初始化失败，请刷新页面重试');
         } else {
@@ -218,8 +218,8 @@ export class OGScopeApp {
     }
 
     /**
-     * 获取应用状态
-     * @returns {Object} 应用状态
+     * 获取应用状态 / Get application status
+     * @returns {Object} 应用状态 / application status
      */
     getStatus() {
         return {
@@ -232,12 +232,12 @@ export class OGScopeApp {
     }
 
     /**
-     * 销毁应用
+     * 销毁应用 / Destroy application
      */
     destroy() {
         console.log('[OGScope] 销毁应用...');
         
-        // 销毁各个模块
+        // 销毁各个模块 / Destroy each module
         Object.values(this.modules).forEach(module => {
             if (module && typeof module.destroy === 'function') {
                 module.destroy();
@@ -251,11 +251,11 @@ export class OGScopeApp {
     }
 }
 
-// 全局应用实例
+// 全局应用实例 / Global application instance
 let appInstance = null;
 
 /**
- * 初始化应用
+ * 初始化应用 / Initialize application
  */
 export function initializeApp() {
     if (!appInstance) {
@@ -265,13 +265,13 @@ export function initializeApp() {
 }
 
 /**
- * 获取应用实例
+ * 获取应用实例 / Get application examples
  */
 export function getApp() {
     return appInstance;
 }
 
-// 页面加载完成后自动初始化
+// 页面加载完成后自动初始化 / Automatically initializes after the page is loaded.
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
 } else {

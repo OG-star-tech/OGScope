@@ -1,9 +1,8 @@
-/* OGScope - 工具函数 */
-
+/* OGScope - 工具函数 / OGScope - Utility functions */
 /**
- * 格式化时间显示
- * @param {number} seconds - 秒数
- * @returns {string} 格式化后的时间字符串
+ * 格式化时间显示 / Format time display
+ * @param {number} seconds - 秒数 / number of seconds
+ * @returns {string} 格式化后的时间字符串 / Formatted time string
  */
 function formatTime(seconds) {
     const mins = Math.floor(seconds / 60);
@@ -13,10 +12,10 @@ function formatTime(seconds) {
 }
 
 /**
- * 防抖函数
- * @param {Function} func - 要防抖的函数
- * @param {number} wait - 等待时间
- * @returns {Function} 防抖后的函数
+ * 防抖函数 / Debounce function
+ * @param {Function} func - 要防抖的函数 / 要防抖的函数
+ * @param {number} wait - 等待时间 / waiting time
+ * @returns {Function} 防抖后的函数 / Function after anti-shake
  */
 function debounce(func, wait) {
     let timeout;
@@ -31,10 +30,10 @@ function debounce(func, wait) {
 }
 
 /**
- * 节流函数
- * @param {Function} func - 要节流的函数
- * @param {number} limit - 时间限制
- * @returns {Function} 节流后的函数
+ * 节流函数 / Throttle function
+ * @param {Function} func - 要节流的函数 / the function to throttle
+ * @param {number} limit - 时间限制 / time limit
+ * @returns {Function} 节流后的函数 / Throttled function
  */
 function throttle(func, limit) {
     let inThrottle;
@@ -48,70 +47,70 @@ function throttle(func, limit) {
 }
 
 /**
- * 生成随机数
- * @param {number} min - 最小值
- * @param {number} max - 最大值
- * @returns {number} 随机数
+ * 生成随机数 / Generate random numbers
+ * @param {number} min - 最小值 / minimum value
+ * @param {number} max - 最大值 / maximum value
+ * @returns {number} 随机数 / random number
  */
 function random(min, max) {
     return Math.random() * (max - min) + min;
 }
 
 /**
- * 生成随机整数
- * @param {number} min - 最小值
- * @param {number} max - 最大值
- * @returns {number} 随机整数
+ * 生成随机整数 / Generate random integers
+ * @param {number} min - 最小值 / minimum value
+ * @param {number} max - 最大值 / maximum value
+ * @returns {number} 随机整数 / random integer
  */
 function randomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 /**
- * 限制数值范围
- * @param {number} value - 数值
- * @param {number} min - 最小值
- * @param {number} max - 最大值
- * @returns {number} 限制后的数值
+ * 限制数值范围 / Limit the range of values
+ * @param {number} value - 数值 / numerical value
+ * @param {number} min - 最小值 / minimum value
+ * @param {number} max - 最大值 / maximum value
+ * @returns {number} 限制后的数值 / the restricted value
  */
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
 
 /**
- * 线性插值
- * @param {number} start - 起始值
- * @param {number} end - 结束值
- * @param {number} factor - 插值因子 (0-1)
- * @returns {number} 插值结果
+ * 线性插值 / linear interpolation
+ * @param {number} start - 起始值 / starting value
+ * @param {number} end - 结束值 / end value
+ * @param {number} factor - 插值因子 (0-1) / interpolation factor (0-1)
+ * @returns {number} 插值结果 / interpolation result
  */
 function lerp(start, end, factor) {
     return start + (end - start) * factor;
 }
 
 /**
- * 将角度转换为弧度
- * @param {number} degrees - 角度
- * @returns {number} 弧度
+ * 将角度转换为弧度 / Convert angles to radians
+ * @param {number} degrees - 角度 / angle
+ * @returns {number} 弧度 / radians
  */
 function degreesToRadians(degrees) {
     return degrees * (Math.PI / 180);
 }
 
 /**
- * 将弧度转换为角度
- * @param {number} radians - 弧度
- * @returns {number} 角度
+ * 将弧度转换为角度 / Convert radians to degrees
+ * @param {number} radians - 弧度 / radians
+ * @returns {number} 角度 / angle
  */
 function radiansToDegrees(radians) {
     return radians * (180 / Math.PI);
 }
 
 /**
- * 计算两点之间的距离
- * @param {Object} point1 - 第一个点 {x, y}
- * @param {Object} point2 - 第二个点 {x, y}
- * @returns {number} 距离
+ * 计算两点之间的距离 / Calculate the distance between two points
+ * @param {Object} point1 - 第一个点 {x, y} / the first point {x, y}
+ * @param {Object} point2 - 第二个点 {x, y} / the second point {x, y}
+ * @returns {number} 距离 / distance
  */
 function distance(point1, point2) {
     const dx = point2.x - point1.x;
@@ -120,49 +119,49 @@ function distance(point1, point2) {
 }
 
 /**
- * 检查设备是否为移动设备
- * @returns {boolean} 是否为移动设备
+ * 检查设备是否为移动设备 / Check if the device is mobile
+ * @returns {boolean} 是否为移动设备 / whether it is a mobile device
  */
 function isMobile() {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 /**
- * 检查设备是否为触摸设备
- * @returns {boolean} 是否为触摸设备
+ * 检查设备是否为触摸设备 / Check if the device is a touch device
+ * @returns {boolean} 是否为触摸设备 / whether it is a touch device
  */
 function isTouchDevice() {
     return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
 /**
- * 获取设备方向
- * @returns {string} 'portrait' 或 'landscape'
+ * 获取设备方向 / Get device orientation
+ * @returns {string} 'portrait' 或 'landscape' / 'portrait' or 'landscape'
  */
 function getOrientation() {
     return window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
 }
 
 /**
- * 检查是否为横屏
- * @returns {boolean} 是否为横屏
+ * 检查是否为横屏 / Check if it is landscape orientation
+ * @returns {boolean} 是否为横屏 / Whether it is horizontal screen
  */
 function isLandscape() {
     return getOrientation() === 'landscape';
 }
 
 /**
- * 检查是否为竖屏
- * @returns {boolean} 是否为竖屏
+ * 检查是否为竖屏 / Check if it is vertical screen
+ * @returns {boolean} 是否为竖屏 / Whether the screen is vertical
  */
 function isPortrait() {
     return getOrientation() === 'portrait';
 }
 
 /**
- * 添加CSS类
- * @param {Element} element - DOM元素
- * @param {string} className - 类名
+ * 添加CSS类 / Add CSS classes
+ * @param {Element} element - DOM元素 / DOM element
+ * @param {string} className - 类名 / class name
  */
 function addClass(element, className) {
     if (element && element.classList) {
@@ -171,9 +170,9 @@ function addClass(element, className) {
 }
 
 /**
- * 移除CSS类
- * @param {Element} element - DOM元素
- * @param {string} className - 类名
+ * 移除CSS类 / Remove CSS classes
+ * @param {Element} element - DOM元素 / DOM element
+ * @param {string} className - 类名 / class name
  */
 function removeClass(element, className) {
     if (element && element.classList) {
@@ -182,10 +181,10 @@ function removeClass(element, className) {
 }
 
 /**
- * 切换CSS类
- * @param {Element} element - DOM元素
- * @param {string} className - 类名
- * @returns {boolean} 是否包含该类
+ * 切换CSS类 / Switch CSS classes
+ * @param {Element} element - DOM元素 / DOM element
+ * @param {string} className - 类名 / class name
+ * @returns {boolean} 是否包含该类 / whether this class is included
  */
 function toggleClass(element, className) {
     if (element && element.classList) {
@@ -195,19 +194,19 @@ function toggleClass(element, className) {
 }
 
 /**
- * 检查是否包含CSS类
- * @param {Element} element - DOM元素
- * @param {string} className - 类名
- * @returns {boolean} 是否包含该类
+ * 检查是否包含CSS类 / Check if CSS class is included
+ * @param {Element} element - DOM元素 / DOM element
+ * @param {string} className - 类名 / class name
+ * @returns {boolean} 是否包含该类 / whether this class is included
  */
 function hasClass(element, className) {
     return element && element.classList && element.classList.contains(className);
 }
 
 /**
- * 设置元素样式
- * @param {Element} element - DOM元素
- * @param {Object} styles - 样式对象
+ * 设置元素样式 / Set element style
+ * @param {Element} element - DOM元素 / DOM element
+ * @param {Object} styles - 样式对象 / style object
  */
 function setStyles(element, styles) {
     if (element && element.style) {
@@ -216,9 +215,9 @@ function setStyles(element, styles) {
 }
 
 /**
- * 获取元素位置
- * @param {Element} element - DOM元素
- * @returns {Object} 位置对象 {top, left, width, height}
+ * 获取元素位置 / Get element position
+ * @param {Element} element - DOM元素 / DOM element
+ * @returns {Object} 位置对象 {top, left, width, height} / position object {top, left, width, height}
  */
 function getElementPosition(element) {
     if (!element) return null;
@@ -232,18 +231,18 @@ function getElementPosition(element) {
 }
 
 /**
- * 等待指定时间
- * @param {number} ms - 等待时间（毫秒）
- * @returns {Promise} Promise对象
+ * 等待指定时间 / Wait for specified time
+ * @param {number} ms - 等待时间（毫秒） / waiting time (milliseconds)
+ * @returns {Promise} Promise对象 / Promise object
  */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * 深拷贝对象
- * @param {*} obj - 要拷贝的对象
- * @returns {*} 拷贝后的对象
+ * 深拷贝对象 / deep copy object
+ * @param {*} obj - 要拷贝的对象 / the object to be copied
+ * @returns {*} 拷贝后的对象 / copied object
  */
 function deepClone(obj) {
     if (obj === null || typeof obj !== 'object') return obj;
@@ -261,10 +260,10 @@ function deepClone(obj) {
 }
 
 /**
- * 合并对象
- * @param {Object} target - 目标对象
- * @param {...Object} sources - 源对象
- * @returns {Object} 合并后的对象
+ * 合并对象 / Merge objects
+ * @param {Object} target - 目标对象 / target object
+ * @param {...Object} sources - 源对象 / source object
+ * @returns {Object} 合并后的对象 / merged object
  */
 function merge(target, ...sources) {
     if (!sources.length) return target;
@@ -285,27 +284,27 @@ function merge(target, ...sources) {
 }
 
 /**
- * 检查是否为对象
- * @param {*} item - 要检查的项目
- * @returns {boolean} 是否为对象
+ * 检查是否为对象 / Check if it is an object
+ * @param {*} item - 要检查的项目 / the item to check
+ * @returns {boolean} 是否为对象 / whether it is an object
  */
 function isObject(item) {
     return item && typeof item === 'object' && !Array.isArray(item);
 }
 
 /**
- * 生成唯一ID
- * @param {string} prefix - 前缀
- * @returns {string} 唯一ID
+ * 生成唯一ID / Generate unique ID
+ * @param {string} prefix - 前缀 / prefix
+ * @returns {string} 唯一ID / unique ID
  */
 function generateId(prefix = 'id') {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /**
- * 格式化文件大小
- * @param {number} bytes - 字节数
- * @returns {string} 格式化后的文件大小
+ * 格式化文件大小 / Format file size
+ * @param {number} bytes - 字节数 / Number of bytes
+ * @returns {string} 格式化后的文件大小 / formatted file size
  */
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -316,9 +315,9 @@ function formatFileSize(bytes) {
 }
 
 /**
- * 验证邮箱格式
- * @param {string} email - 邮箱地址
- * @returns {boolean} 是否为有效邮箱
+ * 验证邮箱格式 / Verify email format
+ * @param {string} email - 邮箱地址 / email address
+ * @returns {boolean} 是否为有效邮箱 / whether it is a valid email address
  */
 function isValidEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -326,9 +325,9 @@ function isValidEmail(email) {
 }
 
 /**
- * 验证URL格式
- * @param {string} url - URL地址
- * @returns {boolean} 是否为有效URL
+ * 验证URL格式 / Verify URL format
+ * @param {string} url - URL地址 / URL address
+ * @returns {boolean} 是否为有效URL / whether it is a valid URL
  */
 function isValidUrl(url) {
     try {
@@ -340,9 +339,9 @@ function isValidUrl(url) {
 }
 
 /**
- * 获取URL参数
- * @param {string} name - 参数名
- * @returns {string|null} 参数值
+ * 获取URL参数 / Get URL parameters
+ * @param {string} name - 参数名 / parameter name
+ * @returns {string|null} 参数值 / parameter value
  */
 function getUrlParameter(name) {
     const urlParams = new URLSearchParams(window.location.search);
@@ -350,9 +349,9 @@ function getUrlParameter(name) {
 }
 
 /**
- * 设置URL参数
- * @param {string} name - 参数名
- * @param {string} value - 参数值
+ * 设置URL参数 / Set URL parameters
+ * @param {string} name - 参数名 / parameter name
+ * @param {string} value - 参数值 / parameter value
  */
 function setUrlParameter(name, value) {
     const url = new URL(window.location);
@@ -361,8 +360,8 @@ function setUrlParameter(name, value) {
 }
 
 /**
- * 移除URL参数
- * @param {string} name - 参数名
+ * 移除URL参数 / Remove URL parameters
+ * @param {string} name - 参数名 / parameter name
  */
 function removeUrlParameter(name) {
     const url = new URL(window.location);
@@ -370,7 +369,7 @@ function removeUrlParameter(name) {
     window.history.replaceState({}, '', url);
 }
 
-// 导出工具函数
+// 导出工具函数 / Export utility functions
 window.OGScopeUtils = {
     formatTime,
     debounce,

@@ -1,7 +1,6 @@
-/* OGScope - 相机控制模块 */
-
+/* OGScope - 相机控制模块 / OGScope - Camera Control Module */
 /**
- * 相机控制器类
+ * 相机控制器类 / Camera controller class
  */
 class CameraController {
     constructor() {
@@ -20,7 +19,7 @@ class CameraController {
     }
 
     /**
-     * 初始化相机控制器
+     * 初始化相机控制器 / Initialize camera controller
      */
     init() {
         this.videoElement = document.getElementById(OGScopeConstants.ELEMENT_IDS.VIDEO_STREAM);
@@ -30,7 +29,7 @@ class CameraController {
     }
 
     /**
-     * 设置视频元素
+     * 设置视频元素 / Set up video elements
      */
     setupVideoElement() {
         this.videoElement.addEventListener('loadedmetadata', () => {
@@ -68,13 +67,13 @@ class CameraController {
     }
 
     /**
-     * 初始化视频流
+     * 初始化视频流 / Initialize video stream
      */
     async initVideoStream() {
         try {
             console.log('正在初始化视频流...');
             
-            // 尝试获取用户媒体
+            // 尝试获取用户媒体 / Try to get user media
             const constraints = {
                 video: {
                     width: { ideal: this.currentSettings.width },
@@ -99,14 +98,14 @@ class CameraController {
             console.error('视频流初始化失败:', error);
             this.emit('streamError', error);
             
-            // 使用占位符
+            // 使用占位符 / Use placeholders
             this.usePlaceholder();
             return false;
         }
     }
 
     /**
-     * 使用占位符
+     * 使用占位符 / Use placeholders
      */
     usePlaceholder() {
         if (this.videoElement) {
@@ -118,7 +117,7 @@ class CameraController {
     }
 
     /**
-     * 开始流媒体
+     * 开始流媒体 / Start streaming
      */
     async startStream() {
         if (!this.isInitialized) {
@@ -141,7 +140,7 @@ class CameraController {
     }
 
     /**
-     * 停止流媒体
+     * 停止流媒体 / Stop streaming
      */
     stopStream() {
         if (this.videoElement) {
@@ -160,8 +159,8 @@ class CameraController {
     }
 
     /**
-     * 设置相机参数
-     * @param {Object} settings - 相机设置
+     * 设置相机参数 / Set camera parameters
+     * @param {Object} settings - 相机设置 / camera settings
      */
     async setCameraSettings(settings) {
         this.currentSettings = { ...this.currentSettings, ...settings };
@@ -185,8 +184,8 @@ class CameraController {
     }
 
     /**
-     * 获取相机信息
-     * @returns {Object} 相机信息
+     * 获取相机信息 / Get camera information
+     * @returns {Object} 相机信息 / camera information
      */
     getCameraInfo() {
         if (!this.stream) return null;
@@ -207,8 +206,8 @@ class CameraController {
     }
 
     /**
-     * 拍照
-     * @returns {Promise<Blob>} 图片数据
+     * 拍照 / Photograph
+     * @returns {Promise<Blob>} 图片数据 / image data
      */
     async capturePhoto() {
         if (!this.videoElement || !this.isStreaming) {
@@ -235,8 +234,8 @@ class CameraController {
     }
 
     /**
-     * 开始录制
-     * @returns {Promise<MediaRecorder>} 录制器
+     * 开始录制 / Start recording
+     * @returns {Promise<MediaRecorder>} 录制器 / recorder
      */
     async startRecording() {
         if (!this.stream) {
@@ -269,8 +268,8 @@ class CameraController {
     }
 
     /**
-     * 停止录制
-     * @param {MediaRecorder} recorder - 录制器
+     * 停止录制 / Stop recording
+     * @param {MediaRecorder} recorder - 录制器 / recorder
      */
     stopRecording(recorder) {
         if (recorder && recorder.state === 'recording') {
@@ -279,8 +278,8 @@ class CameraController {
     }
 
     /**
-     * 获取视频帧
-     * @returns {ImageData|null} 视频帧数据
+     * 获取视频帧 / Get video frames
+     * @returns {ImageData|null} 视频帧数据 / video frame data
      */
     getVideoFrame() {
         if (!this.videoElement || !this.isStreaming) {
@@ -299,8 +298,8 @@ class CameraController {
     }
 
     /**
-     * 分析图像质量
-     * @returns {Object} 质量分析结果
+     * 分析图像质量 / Analyze image quality
+     * @returns {Object} 质量分析结果 / quality analysis results
      */
     analyzeImageQuality() {
         const frameData = this.getVideoFrame();
@@ -316,7 +315,7 @@ class CameraController {
         let totalContrast = 0;
         let edgeCount = 0;
         
-        // 计算亮度和对比度
+        // 计算亮度和对比度 / Calculate brightness and contrast
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i];
             const g = data[i + 1];
@@ -327,7 +326,7 @@ class CameraController {
         
         const avgBrightness = totalBrightness / (data.length / 4);
         
-        // 计算对比度
+        // 计算对比度 / Calculate contrast
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i];
             const g = data[i + 1];
@@ -338,7 +337,7 @@ class CameraController {
         
         const contrast = Math.sqrt(totalContrast / (data.length / 4));
         
-        // 计算锐度（边缘检测）
+        // 计算锐度（边缘检测） / Compute sharpness (edge ​​detection)
         for (let y = 1; y < height - 1; y++) {
             for (let x = 1; x < width - 1; x++) {
                 const idx = (y * width + x) * 4;
@@ -347,7 +346,7 @@ class CameraController {
                 const b = data[idx + 2];
                 const brightness = (r + g + b) / 3;
                 
-                // Sobel算子
+                // Sobel算子 / Sobel operator
                 const gx = Math.abs(
                     -data[idx - 4] + data[idx + 4] +
                     -2 * data[idx - width * 4] + 2 * data[idx + width * 4] +
@@ -379,8 +378,8 @@ class CameraController {
     }
 
     /**
-     * 检测星点
-     * @returns {Array} 星点列表
+     * 检测星点 / Detect star point
+     * @returns {Array} 星点列表 / star point list
      */
     detectStars() {
         const frameData = this.getVideoFrame();
@@ -393,7 +392,7 @@ class CameraController {
         const height = frameData.height;
         const stars = [];
         
-        // 简单的星点检测算法
+        // 简单的星点检测算法 / Simple star point detection algorithm
         for (let y = 2; y < height - 2; y++) {
             for (let x = 2; x < width - 2; x++) {
                 const idx = (y * width + x) * 4;
@@ -402,11 +401,11 @@ class CameraController {
                 const b = data[idx + 2];
                 const brightness = (r + g + b) / 3;
                 
-                // 检查是否为亮点
+                // 检查是否为亮点 / Check if it is a highlight
                 if (brightness > 200) {
                     let isStar = true;
                     
-                    // 检查周围像素
+                    // 检查周围像素 / Check surrounding pixels
                     for (let dy = -2; dy <= 2 && isStar; dy++) {
                         for (let dx = -2; dx <= 2 && isStar; dx++) {
                             if (dx === 0 && dy === 0) continue;
@@ -439,9 +438,9 @@ class CameraController {
     }
 
     /**
-     * 添加事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 添加事件监听器 / Add event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     on(event, callback) {
         if (!this.eventListeners.has(event)) {
@@ -451,9 +450,9 @@ class CameraController {
     }
 
     /**
-     * 移除事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 移除事件监听器 / Remove event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     off(event, callback) {
         if (this.eventListeners.has(event)) {
@@ -466,9 +465,9 @@ class CameraController {
     }
 
     /**
-     * 触发事件
-     * @param {string} event - 事件名
-     * @param {...any} args - 参数
+     * 触发事件 / trigger event
+     * @param {string} event - 事件名 / event name
+     * @param {...any} args - 参数 / parameters
      */
     emit(event, ...args) {
         if (this.eventListeners.has(event)) {
@@ -483,7 +482,7 @@ class CameraController {
     }
 
     /**
-     * 销毁相机控制器
+     * 销毁相机控制器 / Destroy camera controller
      */
     destroy() {
         this.stopStream();
@@ -492,10 +491,10 @@ class CameraController {
     }
 }
 
-// 创建相机控制器实例
+// 创建相机控制器实例 / Create camera controller instance
 const cameraController = new CameraController();
 
-// 导出相机控制器
+// 导出相机控制器 / Export camera controller
 window.OGScopeCamera = {
     CameraController,
     cameraController

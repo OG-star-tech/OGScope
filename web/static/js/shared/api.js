@@ -1,7 +1,6 @@
-/* OGScope - API通信模块 */
-
+/* OGScope - API通信模块 / OGScope - API communication module */
 /**
- * API通信类
+ * API通信类 / API communication class
  */
 class OGScopeAPI {
     constructor() {
@@ -12,10 +11,10 @@ class OGScopeAPI {
     }
 
     /**
-     * 发送HTTP请求
-     * @param {string} url - 请求URL
-     * @param {Object} options - 请求选项
-     * @returns {Promise} 请求结果
+     * 发送HTTP请求 / Send HTTP request
+     * @param {string} url - 请求URL / request URL
+     * @param {Object} options - 请求选项 / request options
+     * @returns {Promise} 请求结果 / request results
      */
     async request(url, options = {}) {
         const defaultOptions = {
@@ -54,10 +53,10 @@ class OGScopeAPI {
     }
 
     /**
-     * GET请求
-     * @param {string} endpoint - 端点
-     * @param {Object} params - 查询参数
-     * @returns {Promise} 请求结果
+     * GET请求 / GET request
+     * @param {string} endpoint - 端点 / endpoint
+     * @param {Object} params - 查询参数 / query parameters
+     * @returns {Promise} 请求结果 / request results
      */
     async get(endpoint, params = {}) {
         const url = new URL(endpoint, this.baseURL);
@@ -71,10 +70,10 @@ class OGScopeAPI {
     }
 
     /**
-     * POST请求
-     * @param {string} endpoint - 端点
-     * @param {Object} data - 请求数据
-     * @returns {Promise} 请求结果
+     * POST请求 / POST request
+     * @param {string} endpoint - 端点 / endpoint
+     * @param {Object} data - 请求数据 / request data
+     * @returns {Promise} 请求结果 / request results
      */
     async post(endpoint, data = {}) {
         return this.request(endpoint, {
@@ -84,10 +83,10 @@ class OGScopeAPI {
     }
 
     /**
-     * PUT请求
-     * @param {string} endpoint - 端点
-     * @param {Object} data - 请求数据
-     * @returns {Promise} 请求结果
+     * PUT请求 / PUT request
+     * @param {string} endpoint - 端点 / endpoint
+     * @param {Object} data - 请求数据 / request data
+     * @returns {Promise} 请求结果 / request results
      */
     async put(endpoint, data = {}) {
         return this.request(endpoint, {
@@ -97,9 +96,9 @@ class OGScopeAPI {
     }
 
     /**
-     * DELETE请求
-     * @param {string} endpoint - 端点
-     * @returns {Promise} 请求结果
+     * DELETE请求 / DELETE request
+     * @param {string} endpoint - 端点 / endpoint
+     * @returns {Promise} 请求结果 / request results
      */
     async delete(endpoint) {
         return this.request(endpoint, {
@@ -108,10 +107,10 @@ class OGScopeAPI {
     }
 
     /**
-     * 带重试的请求
-     * @param {Function} requestFn - 请求函数
-     * @param {number} retries - 重试次数
-     * @returns {Promise} 请求结果
+     * 带重试的请求 / Request with retry
+     * @param {Function} requestFn - 请求函数 / request function
+     * @param {number} retries - 重试次数 / Number of retries
+     * @returns {Promise} 请求结果 / request results
      */
     async requestWithRetry(requestFn, retries = this.retryCount) {
         for (let i = 0; i < retries; i++) {
@@ -128,7 +127,7 @@ class OGScopeAPI {
 }
 
 /**
- * 视频流API
+ * 视频流API / Video streaming API
  */
 class VideoAPI extends OGScopeAPI {
     constructor() {
@@ -136,57 +135,57 @@ class VideoAPI extends OGScopeAPI {
     }
 
     /**
-     * 获取视频流URL
-     * @returns {string} 视频流URL
+     * 获取视频流URL / Get video stream URL
+     * @returns {string} 视频流URL / Video streaming URL
      */
     getStreamURL() {
         return `${this.baseURL}${OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.VIDEO_STREAM}`;
     }
 
     /**
-     * 获取预览图像URL
-     * @returns {string} 预览图像URL
+     * 获取预览图像URL / Get preview image URL
+     * @returns {string} 预览图像URL / Preview image URL
      */
     getPreviewURL() {
         return `${this.baseURL}${OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.CAMERA_PREVIEW}`;
     }
 
     /**
-     * 设置视频参数
-     * @param {Object} params - 视频参数
-     * @returns {Promise} 设置结果
+     * 设置视频参数 / Set video parameters
+     * @param {Object} params - 视频参数 / video parameters
+     * @returns {Promise} 设置结果 / set the result
      */
     async setVideoParams(params) {
         return this.post('/api/video/params', params);
     }
 
     /**
-     * 获取视频状态
-     * @returns {Promise} 视频状态
+     * 获取视频状态 / Get video status
+     * @returns {Promise} 视频状态 / video status
      */
     async getVideoStatus() {
         return this.get('/api/video/status');
     }
 
     /**
-     * 开始录制
-     * @returns {Promise} 录制结果
+     * 开始录制 / Start recording
+     * @returns {Promise} 录制结果 / recording results
      */
     async startRecording() {
         return this.post('/api/video/record/start');
     }
 
     /**
-     * 停止录制
-     * @returns {Promise} 停止结果
+     * 停止录制 / Stop recording
+     * @returns {Promise} 停止结果 / stop results
      */
     async stopRecording() {
         return this.post('/api/video/record/stop');
     }
 
     /**
-     * 拍照
-     * @returns {Promise} 拍照结果
+     * 拍照 / Photograph
+     * @returns {Promise} 拍照结果 / photo results
      */
     async capturePhoto() {
         return this.post('/api/video/capture');
@@ -194,7 +193,7 @@ class VideoAPI extends OGScopeAPI {
 }
 
 /**
- * 校准API
+ * 校准API / Calibration API
  */
 class AlignmentAPI extends OGScopeAPI {
     constructor() {
@@ -202,50 +201,50 @@ class AlignmentAPI extends OGScopeAPI {
     }
 
     /**
-     * 获取校准状态
-     * @returns {Promise} 校准状态
+     * 获取校准状态 / Get calibration status
+     * @returns {Promise} 校准状态 / calibration status
      */
     async getAlignmentStatus() {
         return this.get(OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.ALIGNMENT_STATUS);
     }
 
     /**
-     * 开始校准
-     * @param {Object} params - 校准参数
-     * @returns {Promise} 校准结果
+     * 开始校准 / Start calibration
+     * @param {Object} params - 校准参数 / calibration parameters
+     * @returns {Promise} 校准结果 / calibration results
      */
     async startAlignment(params = {}) {
         return this.post('/api/alignment/start', params);
     }
 
     /**
-     * 停止校准
-     * @returns {Promise} 停止结果
+     * 停止校准 / Stop calibration
+     * @returns {Promise} 停止结果 / stop results
      */
     async stopAlignment() {
         return this.post('/api/alignment/stop');
     }
 
     /**
-     * 重置校准
-     * @returns {Promise} 重置结果
+     * 重置校准 / reset calibration
+     * @returns {Promise} 重置结果 / reset the result
      */
     async resetAlignment() {
         return this.post('/api/alignment/reset');
     }
 
     /**
-     * 获取校准偏移
-     * @returns {Promise} 偏移数据
+     * 获取校准偏移 / Get calibration offset
+     * @returns {Promise} 偏移数据 / offset data
      */
     async getAlignmentOffset() {
         return this.get('/api/alignment/offset');
     }
 
     /**
-     * 设置校准偏移
-     * @param {Object} offset - 偏移数据
-     * @returns {Promise} 设置结果
+     * 设置校准偏移 / Set calibration offset
+     * @param {Object} offset - 偏移数据 / offset data
+     * @returns {Promise} 设置结果 / set the result
      */
     async setAlignmentOffset(offset) {
         return this.post('/api/alignment/offset', offset);
@@ -253,7 +252,7 @@ class AlignmentAPI extends OGScopeAPI {
 }
 
 /**
- * 系统API
+ * 系统API / System API
  */
 class SystemAPI extends OGScopeAPI {
     constructor() {
@@ -261,56 +260,56 @@ class SystemAPI extends OGScopeAPI {
     }
 
     /**
-     * 获取系统信息
-     * @returns {Promise} 系统信息
+     * 获取系统信息 / Get system information
+     * @returns {Promise} 系统信息 / system information
      */
     async getSystemInfo() {
         return this.get(OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.SYSTEM_INFO);
     }
 
     /**
-     * 获取设备状态
-     * @returns {Promise} 设备状态
+     * 获取设备状态 / Get device status
+     * @returns {Promise} 设备状态 / device status
      */
     async getDeviceStatus() {
         return this.get('/api/system/device/status');
     }
 
     /**
-     * 获取GPS信息
-     * @returns {Promise} GPS信息
+     * 获取GPS信息 / Get GPS information
+     * @returns {Promise} GPS信息 / GPS information
      */
     async getGPSInfo() {
         return this.get('/api/system/gps');
     }
 
     /**
-     * 获取电池信息
-     * @returns {Promise} 电池信息
+     * 获取电池信息 / Get battery information
+     * @returns {Promise} 电池信息 / battery information
      */
     async getBatteryInfo() {
         return this.get('/api/system/battery');
     }
 
     /**
-     * 获取网络信息
-     * @returns {Promise} 网络信息
+     * 获取网络信息 / Get network information
+     * @returns {Promise} 网络信息 / network information
      */
     async getNetworkInfo() {
         return this.get('/api/system/network');
     }
 
     /**
-     * 重启系统
-     * @returns {Promise} 重启结果
+     * 重启系统 / Restart the system
+     * @returns {Promise} 重启结果 / restart result
      */
     async restartSystem() {
         return this.post('/api/system/restart');
     }
 
     /**
-     * 关机
-     * @returns {Promise} 关机结果
+     * 关机 / Shut down
+     * @returns {Promise} 关机结果 / shutdown result
      */
     async shutdownSystem() {
         return this.post('/api/system/shutdown');
@@ -318,7 +317,7 @@ class SystemAPI extends OGScopeAPI {
 }
 
 /**
- * 设置API
+ * 设置API / Setup API
  */
 class SettingsAPI extends OGScopeAPI {
     constructor() {
@@ -326,42 +325,42 @@ class SettingsAPI extends OGScopeAPI {
     }
 
     /**
-     * 获取设置
-     * @returns {Promise} 设置数据
+     * 获取设置 / Get settings
+     * @returns {Promise} 设置数据 / set data
      */
     async getSettings() {
         return this.get(OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.SETTINGS);
     }
 
     /**
-     * 保存设置
-     * @param {Object} settings - 设置数据
-     * @returns {Promise} 保存结果
+     * 保存设置 / Save settings
+     * @param {Object} settings - 设置数据 / settings data
+     * @returns {Promise} 保存结果 / save the result
      */
     async saveSettings(settings) {
         return this.post(OGScopeConstants.APP_CONSTANTS.API_ENDPOINTS.SETTINGS, settings);
     }
 
     /**
-     * 重置设置
-     * @returns {Promise} 重置结果
+     * 重置设置 / Reset settings
+     * @returns {Promise} 重置结果 / reset the result
      */
     async resetSettings() {
         return this.post('/api/settings/reset');
     }
 
     /**
-     * 导出设置
-     * @returns {Promise} 设置数据
+     * 导出设置 / Export settings
+     * @returns {Promise} 设置数据 / set data
      */
     async exportSettings() {
         return this.get('/api/settings/export');
     }
 
     /**
-     * 导入设置
-     * @param {Object} settings - 设置数据
-     * @returns {Promise} 导入结果
+     * 导入设置 / Import settings
+     * @param {Object} settings - 设置数据 / settings data
+     * @returns {Promise} 导入结果 / import results
      */
     async importSettings(settings) {
         return this.post('/api/settings/import', settings);
@@ -369,7 +368,7 @@ class SettingsAPI extends OGScopeAPI {
 }
 
 /**
- * WebSocket连接管理
+ * WebSocket连接管理 / WebSocket connection management
  */
 class WebSocketManager {
     constructor() {
@@ -383,7 +382,7 @@ class WebSocketManager {
     }
 
     /**
-     * 连接WebSocket
+     * 连接WebSocket / Connect WebSocket
      * @param {string} url - WebSocket URL
      */
     connect(url) {
@@ -424,7 +423,7 @@ class WebSocketManager {
     }
 
     /**
-     * 断开WebSocket连接
+     * 断开WebSocket连接 / Disconnect WebSocket
      */
     disconnect() {
         if (this.ws) {
@@ -435,8 +434,8 @@ class WebSocketManager {
     }
 
     /**
-     * 发送消息
-     * @param {Object} data - 消息数据
+     * 发送消息 / Send message
+     * @param {Object} data - 消息数据 / message data
      */
     send(data) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -447,7 +446,7 @@ class WebSocketManager {
     }
 
     /**
-     * 尝试重连
+     * 尝试重连 / Try to reconnect
      * @param {string} url - WebSocket URL
      */
     attemptReconnect(url) {
@@ -464,7 +463,7 @@ class WebSocketManager {
     }
 
     /**
-     * 开始心跳
+     * 开始心跳 / Start heartbeat
      */
     startHeartbeat() {
         this.heartbeatTimer = setInterval(() => {
@@ -473,7 +472,7 @@ class WebSocketManager {
     }
 
     /**
-     * 停止心跳
+     * 停止心跳 / stop heartbeat
      */
     stopHeartbeat() {
         if (this.heartbeatTimer) {
@@ -483,9 +482,9 @@ class WebSocketManager {
     }
 
     /**
-     * 添加事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 添加事件监听器 / Add event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     on(event, callback) {
         if (!this.listeners.has(event)) {
@@ -495,9 +494,9 @@ class WebSocketManager {
     }
 
     /**
-     * 移除事件监听器
-     * @param {string} event - 事件名
-     * @param {Function} callback - 回调函数
+     * 移除事件监听器 / Remove event listener
+     * @param {string} event - 事件名 / event name
+     * @param {Function} callback - 回调函数 / callback function
      */
     off(event, callback) {
         if (this.listeners.has(event)) {
@@ -510,9 +509,9 @@ class WebSocketManager {
     }
 
     /**
-     * 触发事件
-     * @param {string} event - 事件名
-     * @param {...any} args - 参数
+     * 触发事件 / trigger event
+     * @param {string} event - 事件名 / event name
+     * @param {...any} args - 参数 / parameters
      */
     emit(event, ...args) {
         if (this.listeners.has(event)) {
@@ -527,14 +526,14 @@ class WebSocketManager {
     }
 }
 
-// 创建API实例
+// 创建API实例 / Create API instance
 const videoAPI = new VideoAPI();
 const alignmentAPI = new AlignmentAPI();
 const systemAPI = new SystemAPI();
 const settingsAPI = new SettingsAPI();
 const wsManager = new WebSocketManager();
 
-// 导出API
+// 导出API / Export API
 window.OGScopeAPI = {
     VideoAPI,
     AlignmentAPI,

@@ -9,8 +9,8 @@ router = APIRouter()
 
 @router.get("/system/info")
 async def get_system_info():
-    """获取系统信息"""
-    # TODO: 实现系统信息获取
+    """获取系统信息 / Get system information"""
+    # TODO: 实现系统信息获取 / TODO: Implement system information acquisition
     return {
         "platform": "Orange Pi Zero 2W",
         "os": "Debian",

@@ -12,7 +12,7 @@ from pathlib import Path
 BASE_URL = "http://localhost:8000/api/debug/camera"
 
 async def check_camera_status(client):
-    """检查相机状态"""
+    """检查相机状态 / Check camera status"""
     print("🔍 检查相机状态...")
     try:
         response = await client.get(f"{BASE_URL}/status")
@@ -43,7 +43,7 @@ async def check_camera_status(client):
         return False
 
 async def start_camera(client):
-    """启动相机"""
+    """启动相机 / Start camera"""
     print("\n🚀 尝试启动相机...")
     try:
         response = await client.post(f"{BASE_URL}/start")
@@ -64,7 +64,7 @@ async def start_camera(client):
         return False
 
 async def test_preview(client):
-    """测试预览功能"""
+    """测试预览功能 / Test preview functionality"""
     print("\n📷 测试预览功能...")
     try:
         response = await client.get(f"{BASE_URL}/preview")
@@ -95,7 +95,7 @@ async def test_preview(client):
         return False
 
 async def test_histogram(client):
-    """测试直方图功能"""
+    """测试直方图功能 / Test the histogram function"""
     print("\n📈 测试直方图功能...")
     try:
         response = await client.get(f"{BASE_URL}/image-histogram")
@@ -128,10 +128,10 @@ async def test_histogram(client):
         return False
 
 async def check_system_dependencies():
-    """检查系统依赖"""
+    """检查系统依赖 / Check system dependencies"""
     print("\n🔧 检查系统依赖...")
     
-    # 检查 Picamera2
+    # 检查 Picamera2 / Check Picamera2
     try:
         import picamera2
         print("✅ Picamera2 已安装")
@@ -140,7 +140,7 @@ async def check_system_dependencies():
         print("   请运行: sudo apt install python3-picamera2")
         return False
     
-    # 检查 OpenCV
+    # 检查 OpenCV / Check OpenCV
     try:
         import cv2
         print("✅ OpenCV 已安装")
@@ -149,7 +149,7 @@ async def check_system_dependencies():
         print("   请运行: sudo apt install python3-opencv")
         print("   或: pip install opencv-python-headless")
     
-    # 检查 NumPy
+    # 检查 NumPy / Check NumPy
     try:
         import numpy
         print("✅ NumPy 已安装")
@@ -160,10 +160,10 @@ async def check_system_dependencies():
     return True
 
 async def check_camera_hardware():
-    """检查相机硬件"""
+    """检查相机硬件 / Check camera hardware"""
     print("\n📱 检查相机硬件...")
     
-    # 检查相机设备
+    # 检查相机设备 / Check camera equipment
     camera_devices = [
         "/dev/video0",
         "/dev/video1", 
@@ -183,7 +183,7 @@ async def check_camera_hardware():
         print("   请检查相机连接和驱动")
         return False
     
-    # 检查 libcamera
+    # 检查 libcamera / Check libcamera
     try:
         import subprocess
         result = subprocess.run(["libcamera-hello", "--list-cameras"], 
@@ -200,38 +200,38 @@ async def check_camera_hardware():
     return True
 
 async def main():
-    """主诊断函数"""
+    """主诊断函数 / Main diagnostic function"""
     print("🔍 OGScope 相机诊断工具")
     print("=" * 50)
     
-    # 检查系统依赖
+    # 检查系统依赖 / Check system dependencies
     deps_ok = await check_system_dependencies()
     
-    # 检查相机硬件
+    # 检查相机硬件 / Check camera hardware
     hw_ok = await check_camera_hardware()
     
     if not deps_ok or not hw_ok:
         print("\n❌ 系统检查失败，请先解决依赖问题")
         sys.exit(1)
     
-    # 检查服务状态
+    # 检查服务状态 / Check service status
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # 检查相机状态
+        # 检查相机状态 / Check camera status
         status_ok = await check_camera_status(client)
         
         if not status_ok:
-            # 尝试启动相机
+            # 尝试启动相机 / Try launching the camera
             start_ok = await start_camera(client)
             
             if start_ok:
-                # 重新检查状态
+                # 重新检查状态 / Recheck status
                 status_ok = await check_camera_status(client)
         
         if status_ok:
-            # 测试预览
+            # 测试预览 / Test preview
             preview_ok = await test_preview(client)
             
-            # 测试直方图
+            # 测试直方图 / Test histogram
             histogram_ok = await test_histogram(client)
             
             print("\n🎉 诊断完成!")

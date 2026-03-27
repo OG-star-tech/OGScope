@@ -1,7 +1,6 @@
-/* OGScope - UI控制模块 */
-
+/* OGScope - UI控制模块 / OGScope - UI control module */
 /**
- * UI控制器类
+ * UI控制器类 / UI controller class
  */
 class UIController {
     constructor() {
@@ -18,7 +17,7 @@ class UIController {
     }
 
     /**
-     * 初始化UI控制器
+     * 初始化UI控制器 / Initialize UI controller
      */
     init() {
         this.cacheElements();
@@ -28,36 +27,36 @@ class UIController {
     }
 
     /**
-     * 缓存DOM元素
+     * 缓存DOM元素 / Caching DOM elements
      */
     cacheElements() {
         this.elements = {
-            // 主要容器
+            // 主要容器 / main container
             app: document.getElementById(OGScopeConstants.ELEMENT_IDS.APP),
             loadingScreen: document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_SCREEN),
             videoStream: document.getElementById(OGScopeConstants.ELEMENT_IDS.VIDEO_STREAM),
             
-            // 加载相关
+            // 加载相关 / Loading related
             progressBar: document.getElementById(OGScopeConstants.ELEMENT_IDS.PROGRESS_BAR),
             loadingStatus: document.getElementById(OGScopeConstants.ELEMENT_IDS.LOADING_STATUS),
             
-            // 菜单相关
+            // 菜单相关 / Menu related
             menuButton: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_BUTTON),
             menuPanel: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_PANEL),
             menuClose: document.getElementById(OGScopeConstants.ELEMENT_IDS.MENU_CLOSE),
             
-            // 缩放相关
+            // 缩放相关 / Zoom related
             zoomIn: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_IN),
             zoomOut: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_OUT),
             zoomThumb: document.getElementById(OGScopeConstants.ELEMENT_IDS.ZOOM_THUMB),
             
-            // 快门相关
+            // 快门相关 / Shutter related
             shutterToggle: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TOGGLE),
             shutterTools: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TOOLS),
             shutterButton: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_BUTTON),
             shutterTimer: document.getElementById(OGScopeConstants.ELEMENT_IDS.SHUTTER_TIMER),
             
-            // 数据显示
+            // 数据显示 / Data display
             gpsCoord: document.getElementById(OGScopeConstants.ELEMENT_IDS.GPS_COORD),
             altitude: document.getElementById(OGScopeConstants.ELEMENT_IDS.ALTITUDE),
             wifiStrength: document.getElementById(OGScopeConstants.ELEMENT_IDS.WIFI_STRENGTH),
@@ -71,37 +70,37 @@ class UIController {
     }
 
     /**
-     * 设置事件监听器
+     * 设置事件监听器 / Set event listener
      */
     setupEventListeners() {
-        // 菜单控制
+        // 菜单控制 / Menu control
         this.addEventListener(this.elements.menuButton, 'click', () => this.toggleMenu());
         this.addEventListener(this.elements.menuClose, 'click', () => this.closeMenu());
         
-        // 缩放控制
+        // 缩放控制 / Zoom control
         this.addEventListener(this.elements.zoomIn, 'click', () => this.zoomIn());
         this.addEventListener(this.elements.zoomOut, 'click', () => this.zoomOut());
         this.setupZoomSlider();
         
-        // 模式切换
+        // 模式切换 / Mode switching
         this.setupModeSwitcher();
         
-        // 快门控制
+        // 快门控制 / shutter control
         this.setupShutterControl();
         
-        // 高级模式
+        // 高级模式 / Advanced mode
         this.setupAdvancedMode();
         
-        // 窗口事件
+        // 窗口事件 / window events
         this.addEventListener(window, 'resize', () => this.handleResize());
         this.addEventListener(window, 'orientationchange', () => this.handleOrientationChange());
         
-        // 触摸事件
+        // 触摸事件 / touch event
         this.setupTouchEvents();
     }
 
     /**
-     * 设置键盘快捷键
+     * 设置键盘快捷键 / Set keyboard shortcuts
      */
     setupKeyboardShortcuts() {
         this.addEventListener(document, 'keydown', (event) => {
@@ -139,7 +138,7 @@ class UIController {
     }
 
     /**
-     * 设置缩放滑块
+     * 设置缩放滑块 / Set the zoom slider
      */
     setupZoomSlider() {
         if (!this.elements.zoomThumb) return;
@@ -168,7 +167,7 @@ class UIController {
     }
 
     /**
-     * 设置模式切换
+     * 设置模式切换 / Setting mode switch
      */
     setupModeSwitcher() {
         const modeButtons = document.querySelectorAll('.mode-button');
@@ -176,11 +175,11 @@ class UIController {
         modeButtons.forEach(button => {
             this.addEventListener(button, 'click', () => {
                 if (button.classList.contains(OGScopeConstants.CSS_CLASSES.ACTIVE)) {
-                    // 点击当前模式，展开/折叠
+                    // 点击当前模式，展开 / Click on the current mode to expand
                     const switcher = button.parentElement;
                     switcher.classList.toggle(OGScopeConstants.CSS_CLASSES.EXPANDED);
                 } else {
-                    // 点击其他模式，切换模式并折叠
+                    // 点击其他模式，切换模式并折叠 / Click on other modes to switch modes and collapse
                     const mode = button.dataset.mode;
                     this.setMode(mode);
                 }
@@ -189,15 +188,15 @@ class UIController {
     }
 
     /**
-     * 设置快门控制
+     * 设置快门控制 / Set shutter control
      */
     setupShutterControl() {
-        // 快门切换按钮
+        // 快门切换按钮 / Shutter switch button
         this.addEventListener(this.elements.shutterToggle, 'click', () => {
             this.toggleShutterTools();
         });
 
-        // 快门模式切换
+        // 快门模式切换 / Shutter mode switching
         const shutterModes = document.querySelectorAll('.shutter-mode');
         shutterModes.forEach(mode => {
             this.addEventListener(mode, 'click', () => {
@@ -206,22 +205,22 @@ class UIController {
             });
         });
 
-        // 快门按钮
+        // 快门按钮 / shutter button
         this.setupShutterButton();
     }
 
     /**
-     * 设置快门按钮
+     * 设置快门按钮 / Set the shutter button
      */
     setupShutterButton() {
         if (!this.elements.shutterButton) return;
 
-        // 桌面端：鼠标事件
+        // 桌面端：鼠标事件 / Desktop: Mouse events
         this.addEventListener(this.elements.shutterButton, 'mousedown', () => this.startShutter());
         this.addEventListener(this.elements.shutterButton, 'mouseup', () => this.stopShutter());
         this.addEventListener(this.elements.shutterButton, 'mouseleave', () => this.stopShutter());
 
-        // 移动端：触摸事件
+        // 移动端：触摸事件 / Mobile: touch events
         this.addEventListener(this.elements.shutterButton, 'touchstart', (e) => {
             e.preventDefault();
             this.startShutter();
@@ -237,7 +236,7 @@ class UIController {
     }
 
     /**
-     * 设置高级模式
+     * 设置高级模式 / Set advanced mode
      */
     setupAdvancedMode() {
         const advancedButton = document.querySelector('.advanced-button');
@@ -249,10 +248,10 @@ class UIController {
     }
 
     /**
-     * 设置触摸事件
+     * 设置触摸事件 / Set touch events
      */
     setupTouchEvents() {
-        // 阻止默认手势
+        // 阻止默认手势 / Block default gestures
         this.addEventListener(document, 'touchmove', (e) => {
             if (e.scale !== 1) {
                 e.preventDefault();
@@ -265,17 +264,17 @@ class UIController {
     }
 
     /**
-     * 添加事件监听器
-     * @param {Element} element - DOM元素
-     * @param {string} event - 事件名
-     * @param {Function} handler - 处理函数
-     * @param {Object} options - 选项
+     * 添加事件监听器 / Add event listener
+     * @param {Element} element - DOM元素 / DOM element
+     * @param {string} event - 事件名 / event name
+     * @param {Function} handler - 处理函数 / processing function
+     * @param {Object} options - 选项 / options
      */
     addEventListener(element, event, handler, options = {}) {
         if (element) {
             element.addEventListener(event, handler, options);
             
-            // 保存监听器引用以便后续移除
+            // 保存监听器引用以便后续移除 / Save the listener reference for later removal
             const key = `${element.id || element.tagName}_${event}`;
             if (!this.eventListeners.has(key)) {
                 this.eventListeners.set(key, []);
@@ -285,7 +284,7 @@ class UIController {
     }
 
     /**
-     * 切换菜单
+     * 切换菜单 / Toggle menu
      */
     toggleMenu() {
         this.state.isMenuOpen = !this.state.isMenuOpen;
@@ -298,7 +297,7 @@ class UIController {
     }
 
     /**
-     * 打开菜单
+     * 打开菜单 / Open menu
      */
     openMenu() {
         if (this.elements.menuPanel) {
@@ -311,7 +310,7 @@ class UIController {
     }
 
     /**
-     * 关闭菜单
+     * 关闭菜单 / Close menu
      */
     closeMenu() {
         if (this.elements.menuPanel) {
@@ -324,21 +323,21 @@ class UIController {
     }
 
     /**
-     * 放大
+     * 放大 / enlarge
      */
     zoomIn() {
         this.setZoomLevel(Math.min(this.state.zoomLevel + 0.1, 3.0));
     }
 
     /**
-     * 缩小
+     * 缩小 / zoom out
      */
     zoomOut() {
         this.setZoomLevel(Math.max(this.state.zoomLevel - 0.1, 1.0));
     }
 
     /**
-     * 切换缩放
+     * 切换缩放 / Toggle zoom
      */
     toggleZoom() {
         if (this.state.zoomLevel > 1.0) {
@@ -349,21 +348,21 @@ class UIController {
     }
 
     /**
-     * 设置缩放级别
-     * @param {number} level - 缩放级别
+     * 设置缩放级别 / Set zoom level
+     * @param {number} level - 缩放级别 / zoom level
      */
     setZoomLevel(level) {
         this.state.zoomLevel = OGScopeUtils.clamp(level, 1.0, 3.0);
         this.updateZoomUI();
         
-        // 应用缩放到视频
+        // 应用缩放到视频 / Apply zoom to video
         if (this.elements.videoStream) {
             this.elements.videoStream.style.transform = `scale(${this.state.zoomLevel})`;
         }
     }
 
     /**
-     * 更新缩放UI
+     * 更新缩放UI / Update zoom UI
      */
     updateZoomUI() {
         if (this.elements.zoomThumb) {
@@ -373,13 +372,13 @@ class UIController {
     }
 
     /**
-     * 设置模式
-     * @param {string} mode - 模式
+     * 设置模式 / Setup mode
+     * @param {string} mode - 模式 / mode
      */
     setMode(mode) {
         this.state.currentMode = mode;
         
-        // 更新按钮状态
+        // 更新按钮状态 / Update button state
         document.querySelectorAll('.mode-button').forEach(btn => {
             btn.classList.remove(OGScopeConstants.CSS_CLASSES.ACTIVE);
         });
@@ -389,7 +388,7 @@ class UIController {
             activeButton.classList.add(OGScopeConstants.CSS_CLASSES.ACTIVE);
         }
         
-        // 折叠模式切换器
+        // 折叠模式切换器 / Folding mode switch
         const switcher = document.querySelector('.mode-switcher');
         if (switcher) {
             switcher.classList.remove(OGScopeConstants.CSS_CLASSES.EXPANDED);
@@ -399,7 +398,7 @@ class UIController {
     }
 
     /**
-     * 切换快门工具
+     * 切换快门工具 / Switch shutter tool
      */
     toggleShutterTools() {
         if (this.elements.shutterTools) {
@@ -409,7 +408,7 @@ class UIController {
     }
 
     /**
-     * 开始快门
+     * 开始快门 / Start shutter
      */
     startShutter() {
         if (this.state.isShutterPressed) return;
@@ -424,7 +423,7 @@ class UIController {
     }
 
     /**
-     * 停止快门
+     * 停止快门 / Stop shutter
      */
     stopShutter() {
         if (!this.state.isShutterPressed) return;
@@ -438,7 +437,7 @@ class UIController {
     }
 
     /**
-     * 处理快门模式
+     * 处理快门模式 / Handling shutter modes
      */
     handleShutterMode() {
         const activeMode = document.querySelector('.shutter-mode.active');
@@ -458,7 +457,7 @@ class UIController {
     }
 
     /**
-     * 处理单次快门
+     * 处理单次快门 / Process single shutter
      */
     handleSingleShutter() {
         if (this.elements.shutterTimer) {
@@ -478,7 +477,7 @@ class UIController {
     }
 
     /**
-     * 处理B门快门
+     * 处理B门快门 / Handling B shutter
      */
     handleBulbShutter() {
         if (this.elements.shutterTimer) {
@@ -494,7 +493,7 @@ class UIController {
     }
 
     /**
-     * 处理连拍快门
+     * 处理连拍快门 / Handling burst shutter
      */
     handleContinuousShutter() {
         let shotCount = 0;
@@ -511,7 +510,7 @@ class UIController {
     }
 
     /**
-     * 清除快门间隔
+     * 清除快门间隔 / Clear shutter interval
      */
     clearShutterIntervals() {
         if (this.shutterInterval) {
@@ -532,7 +531,7 @@ class UIController {
     }
 
     /**
-     * 切换高级模式
+     * 切换高级模式 / Switch to advanced mode
      */
     toggleAdvancedMode() {
         this.state.isAdvancedMode = !this.state.isAdvancedMode;
@@ -546,54 +545,54 @@ class UIController {
     }
 
     /**
-     * 处理窗口大小变化
+     * 处理窗口大小变化 / Handling window size changes
      */
     handleResize() {
-        // 重新计算布局
+        // 重新计算布局 / Recalculate layout
         this.updateLayout();
     }
 
     /**
-     * 处理方向变化
+     * 处理方向变化 / Handling direction changes
      */
     handleOrientationChange() {
-        // 延迟处理以确保尺寸已更新
+        // 延迟处理以确保尺寸已更新 / Delay processing to ensure dimensions are updated
         setTimeout(() => {
             this.updateLayout();
         }, 100);
     }
 
     /**
-     * 更新布局
+     * 更新布局 / Update layout
      */
     updateLayout() {
-        // 检查是否为横屏
+        // 检查是否为横屏 / Check if it is landscape orientation
         if (OGScopeUtils.isPortrait()) {
-            // 显示横屏提示
+            // 显示横屏提示 / Show landscape tips
             this.showOrientationWarning();
         } else {
-            // 隐藏横屏提示
+            // 隐藏横屏提示 / Hide landscape tips
             this.hideOrientationWarning();
         }
     }
 
     /**
-     * 显示横屏提示
+     * 显示横屏提示 / Show landscape tips
      */
     showOrientationWarning() {
-        // 这里可以添加横屏提示逻辑
+        // 这里可以添加横屏提示逻辑 / Here you can add horizontal screen prompt logic
         console.log('需要横屏使用');
     }
 
     /**
-     * 隐藏横屏提示
+     * 隐藏横屏提示 / Hide landscape tips
      */
     hideOrientationWarning() {
-        // 这里可以添加隐藏横屏提示的逻辑
+        // 这里可以添加隐藏横屏提示的逻辑 / Here you can add logic to hide horizontal screen prompts
     }
 
     /**
-     * 加载设置
+     * 加载设置 / Load settings
      */
     loadSettings() {
         try {
@@ -608,7 +607,7 @@ class UIController {
     }
 
     /**
-     * 保存设置
+     * 保存设置 / Save settings
      */
     saveSettings() {
         try {
@@ -624,8 +623,8 @@ class UIController {
     }
 
     /**
-     * 应用设置
-     * @param {Object} settings - 设置对象
+     * 应用设置 / Apply settings
+     * @param {Object} settings - 设置对象 / settings object
      */
     applySettings(settings) {
         if (settings.mode) {
@@ -640,10 +639,10 @@ class UIController {
     }
 
     /**
-     * 销毁UI控制器
+     * 销毁UI控制器 / Destroy UI controller
      */
     destroy() {
-        // 移除所有事件监听器
+        // 移除所有事件监听器 / Remove all event listeners
         this.eventListeners.forEach((listeners, key) => {
             listeners.forEach(({ element, event, handler, options }) => {
                 element.removeEventListener(event, handler, options);
@@ -651,15 +650,15 @@ class UIController {
         });
         this.eventListeners.clear();
         
-        // 保存设置
+        // 保存设置 / Save settings
         this.saveSettings();
     }
 }
 
-// 创建UI控制器实例
+// 创建UI控制器实例 / Create UI controller instance
 const uiController = new UIController();
 
-// 导出UI控制器
+// 导出UI控制器 / Export UI controller
 window.OGScopeUI = {
     UIController,
     uiController

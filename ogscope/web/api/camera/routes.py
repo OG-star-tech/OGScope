@@ -14,7 +14,7 @@ import io
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# 全局状态
+# 全局状态 / global state
 _camera_instance = None
 _is_streaming = False
 _simulation_mode = should_use_simulation_mode()
@@ -25,7 +25,7 @@ if _simulation_mode:
 else:
     logger.info("检测到树莓派环境，使用真实相机")
     try:
-        # 延迟到首次启动时再初始化，避免阻塞模块导入
+        # 延迟到首次启动时再初始化，避免阻塞模块导入 / Delay initialization until first startup to avoid blocking module import
         _camera_instance = None
     except Exception as e:
         logger.error(f"初始化相机占位失败: {e}")
@@ -33,7 +33,7 @@ else:
 
 @router.get("/camera/status")
 async def get_camera_status():
-    """获取相机状态"""
+    """获取相机状态 / Get camera status"""
     if _simulation_mode:
         return {
             "connected": True,
@@ -69,7 +69,7 @@ async def get_camera_status():
 
 @router.post("/camera/settings")
 async def update_camera_settings(settings: CameraSettings):
-    """更新相机设置"""
+    """更新相机设置 / Update camera settings"""
     if _simulation_mode:
         logger.info(f"模拟模式：更新相机设置 {settings}")
         return {
@@ -78,7 +78,7 @@ async def update_camera_settings(settings: CameraSettings):
             "mode": "simulation"
         }
     else:
-        # TODO: 实现真实相机设置更新
+        # TODO: 实现真实相机设置更新 / TODO: Implement real camera settings update
         return {
             "success": True,
             "settings": settings.dict(),
@@ -88,7 +88,7 @@ async def update_camera_settings(settings: CameraSettings):
 
 @router.get("/camera/config")
 async def get_camera_config():
-    """获取相机配置"""
+    """获取相机配置 / Get camera configuration"""
     from ogscope.config import get_settings
     settings = get_settings()
     
@@ -116,11 +116,11 @@ async def get_camera_config():
 
 @router.post("/camera/config")
 async def update_camera_config(config: dict):
-    """更新相机配置"""
+    """更新相机配置 / Update camera configuration"""
     if _simulation_mode:
         logger.info(f"模拟模式：更新相机配置 {config}")
         
-        # 更新虚拟流参数
+        # 更新虚拟流参数 / Update virtual stream parameters
         if 'exposure_us' in config:
             logger.info(f"模拟曝光时间: {config['exposure_us']}μs")
         
@@ -129,13 +129,13 @@ async def update_camera_config(config: dict):
         
         return {"status": "success", "config": config, "mode": "simulation"}
     else:
-        # TODO: 实现真实相机配置更新逻辑
+        # TODO: 实现真实相机配置更新逻辑 / TODO: Implement real camera configuration update logic
         return {"status": "success", "config": config, "mode": "real"}
 
 
 @router.post("/camera/start")
 async def start_camera():
-    """开始相机预览"""
+    """开始相机预览 / Start camera preview"""
     global _is_streaming
     global _camera_instance
     
@@ -180,7 +180,7 @@ async def start_camera():
 
 @router.post("/camera/stop")
 async def stop_camera():
-    """停止相机预览"""
+    """停止相机预览 / Stop camera preview"""
     global _is_streaming
     global _camera_instance
     
@@ -201,10 +201,10 @@ async def stop_camera():
 
 @router.get("/camera/preview")
 async def get_camera_preview():
-    """获取相机预览图（JPEG）"""
+    """获取相机预览图（JPEG） / Get camera preview (JPEG)"""
     if _simulation_mode:
         if not _is_streaming:
-            # 返回静态占位符图像
+            # 返回静态占位符图像 / Return static placeholder image
             placeholder_image = io.BytesIO()
             placeholder_image.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x90\x00\x00\x00\xf0\x08\x02\x00\x00\x00')
             placeholder_image.seek(0)
@@ -215,7 +215,7 @@ async def get_camera_preview():
                 headers={"Cache-Control": "no-cache"}
             )
         
-        # 生成虚拟视频帧
+        # 生成虚拟视频帧 / Generate virtual video frames
         try:
             frame_data = _virtual_stream.generate_frame()
             return StreamingResponse(
@@ -229,7 +229,7 @@ async def get_camera_preview():
     else:
         try:
             global _camera_instance
-            # 懒加载初始化与启动，避免前端必须显式调用 start
+            # 懒加载初始化与启动，避免前端必须显式调用 start / Lazy loading initialization and startup to avoid the front end having to explicitly call start
             if _camera_instance is None or not getattr(_camera_instance, "is_initialized", False):
                 from ogscope.config import get_settings
                 settings = get_settings()
@@ -255,7 +255,7 @@ async def get_camera_preview():
                 if not _camera_instance.start_capture():
                     raise HTTPException(status_code=500, detail="相机未能启动")
 
-            # 获取一帧并编码为JPEG
+            # 获取一帧并编码为JPEG / Get a frame and encode to JPEG
             frame = _camera_instance.get_video_frame()
             if frame is None:
                 raise HTTPException(status_code=500, detail="无法获取视频帧")
@@ -281,7 +281,7 @@ async def get_camera_preview():
             raise HTTPException(status_code=500, detail="获取预览失败")
 
 
-# 兼容旧前端路径：/camera/stream/start 与 /camera/stream/stop
+# 兼容旧前端路径： / Compatible with old front-end paths:
 @router.post("/camera/stream/start")
 async def compat_start_stream():
     return await start_camera()
@@ -294,7 +294,7 @@ async def compat_stop_stream():
 
 @router.get("/camera/stars")
 async def get_star_positions():
-    """获取星点位置信息（用于校准）"""
+    """获取星点位置信息（用于校准） / Obtain star point position information (for calibration)"""
     if _simulation_mode:
         try:
             stars = _virtual_stream.get_star_positions()
@@ -307,7 +307,7 @@ async def get_star_positions():
             logger.error(f"获取模拟星点位置失败: {e}")
             raise HTTPException(status_code=500, detail="获取星点位置失败")
     else:
-        # TODO: 实现真实星点检测
+        # TODO: 实现真实星点检测 / TODO: Realize real star point detection
         return {
             "stars": [],
             "count": 0,
@@ -317,7 +317,7 @@ async def get_star_positions():
 
 @router.post("/camera/simulation/update-polar-star")
 async def update_polar_star_position(x: float, y: float):
-    """更新极轴星位置（仅模拟模式）"""
+    """更新极轴星位置（仅模拟模式） / Update polar star position (sim mode only)"""
     if not _simulation_mode:
         raise HTTPException(status_code=400, detail="此功能仅在模拟模式下可用")
     
@@ -335,7 +335,7 @@ async def update_polar_star_position(x: float, y: float):
 
 @router.post("/camera/simulation/parameters")
 async def update_simulation_parameters(parameters: dict):
-    """更新模拟参数（仅模拟模式）"""
+    """更新模拟参数（仅模拟模式） / Update simulation parameters (simulation mode only)"""
     if not _simulation_mode:
         raise HTTPException(status_code=400, detail="此功能仅在模拟模式下可用")
     

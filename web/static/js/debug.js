@@ -1,6 +1,6 @@
 /**
- * OGScope 调试控制台 JavaScript
- * 提供相机调试、拍摄控制、参数设置等功能
+ * OGScope 调试控制台 JavaScript / OGScope debug console JavaScript
+ * 提供相机调试、拍摄控制、参数设置等功能 / Provides camera debugging, shooting control, parameter setting and other functions
  */
 
 class DebugConsole {
@@ -18,7 +18,7 @@ class DebugConsole {
             digitalGain: 1.0,
             autoExposure: true,
             rotation: 180,
-            // 新增参数
+            // 新增参数 / New parameters
             contrast: 1.0,
             brightness: 0.0,
             saturation: 1.0,
@@ -38,20 +38,20 @@ class DebugConsole {
         this.statusInterval = null;
         this.previewObjectUrl = null;
         
-        // 智能头部隐藏
+        // 智能头部隐藏 / Intelligent head hiding
         this.lastScrollY = 0;
         this.scrollDirection = 'down';
         this.headerHidden = false;
-        this.scrollThreshold = 10; // 滚动阈值
+        this.scrollThreshold = 10; // 滚动阈值 / scroll threshold
         
-        // 实时数据流分析
+        // 实时数据流分析 / Real-time data flow analysis
         this.streamStats = {
             requestCount: 0,
-            frameCount: 0, // 有效新帧计数（基于 X-Frame-Id）
+            frameCount: 0, // 有效新帧计数（基于 X-Frame-Id） / Valid new frame count (based on X-Frame-Id)
             lastRequestTime: null,
             lastFrameTime: null,
             requestFps: 0.0,
-            fpsCalculated: 0.0, // 有效新帧 FPS
+            fpsCalculated: 0.0, // 有效新帧 FPS / Effective new frame FPS
             resolutionDetected: null,
             dataSize: 0,
             avgFrameSize: 0,
@@ -62,7 +62,7 @@ class DebugConsole {
             startTime: null
         };
 
-        // 直方图（纯前端计算）
+        // 直方图（纯前端计算） / Histogram (pure front-end calculation)
         this.histogramState = {
             enabled: true,
             overlayVisible: false,
@@ -249,20 +249,20 @@ class DebugConsole {
     }
     
     /**
-     * 分析实时数据流
+     * 分析实时数据流 / Analyze real-time data streams
      */
     analyzeStreamData(imageElement, frameMeta = {}) {
         const currentTime = performance.now();
         
-        // 记录开始时间
+        // 记录开始时间 / Recording start time
         if (this.streamStats.startTime === null) {
             this.streamStats.startTime = currentTime;
         }
         
-        // 每次请求都计数（请求吞吐）
+        // 每次请求都计数（请求吞吐） / Each request is counted (request throughput)
         this.streamStats.requestCount++;
 
-        // 计算请求 FPS
+        // 计算请求 FPS / Calculate request FPS
         if (this.streamStats.lastRequestTime !== null) {
             const requestDiff = currentTime - this.streamStats.lastRequestTime;
             if (requestDiff > 10) {
@@ -278,7 +278,7 @@ class DebugConsole {
         }
         this.streamStats.lastRequestTime = currentTime;
         
-        // 检测分辨率并调整容器宽高比
+        // 检测分辨率并调整容器宽高比 / Detect resolution and adjust container aspect ratio
         if (imageElement && imageElement.naturalWidth && imageElement.naturalHeight) {
             const detectedRes = `${imageElement.naturalWidth}x${imageElement.naturalHeight}`;
             if (this.streamStats.resolutionDetected !== detectedRes) {
@@ -293,7 +293,7 @@ class DebugConsole {
             ? frameMeta.frameId !== this.streamStats.lastFrameId
             : true;
 
-        // 仅在检测到新帧时更新“有效新帧 FPS”
+        // 仅在检测到新帧时更新“有效新帧 FPS” / Only update "Valid New Frame FPS" when a new frame is detected
         if (isNewFrame) {
             this.streamStats.frameCount++;
 
@@ -324,7 +324,7 @@ class DebugConsole {
             }
         }
 
-        // 统计接收数据量（按请求流量）
+        // 统计接收数据量（按请求流量） / Statistics of received data volume (according to request traffic)
         if (typeof frameMeta.sizeBytes === 'number' && Number.isFinite(frameMeta.sizeBytes)) {
             this.streamStats.dataSize += frameMeta.sizeBytes;
             if (this.streamStats.requestCount > 0) {
@@ -332,27 +332,27 @@ class DebugConsole {
             }
         }
         
-        // 更新UI显示
+        // 更新UI显示 / Update UI display
         this.updateStreamStatsDisplay();
     }
     
     /**
-     * 根据相机分辨率动态调整视频容器的宽高比
-     * 考虑传感器原生宽高比，避免画面被压缩
+     * 根据相机分辨率动态调整视频容器的宽高比 / Dynamically adjust the video container's aspect ratio based on camera resolution
+     * 考虑传感器原生宽高比，避免画面被压缩 / Consider the sensor's native aspect ratio to avoid image compression
      */
     updateVideoContainerAspectRatio(width, height) {
         const videoContainer = document.querySelector('.video-container');
         if (!videoContainer) return;
         
-        // 固定使用16:9比例，避免画面变形
+        // 固定使用16:9比例，避免画面变形 / Fixed use of 16:9 ratio to avoid image distortion
         const targetAspectRatio = 16 / 9; // 1.778
         
-        // 设置CSS自定义属性
+        // 设置CSS自定义属性 / Set CSS custom properties
         videoContainer.style.aspectRatio = `${targetAspectRatio}`;
         
         console.log(`[UI] 固定使用16:9比例显示视频 (${width}x${height})`);
         
-        // 添加视觉反馈
+        // 添加视觉反馈 / Add visual feedback
         videoContainer.classList.add('aspect-ratio-changing');
         setTimeout(() => {
             videoContainer.classList.remove('aspect-ratio-changing');
@@ -360,7 +360,7 @@ class DebugConsole {
     }
     
     /**
-     * 初始化智能头部隐藏功能
+     * 初始化智能头部隐藏功能 / Initialize the intelligent head hiding function
      */
     initSmartHeader() {
         const header = document.querySelector('.debug-header');
@@ -378,10 +378,10 @@ class DebugConsole {
             }
         };
         
-        // 监听滚动事件
+        // 监听滚动事件 / Listen for scroll events
         window.addEventListener('scroll', handleScroll, { passive: true });
         
-        // 监听触摸滚动（移动端）
+        // 监听触摸滚动（移动端） / Monitor touch scrolling (mobile)
         let touchStartY = 0;
         let touchEndY = 0;
         
@@ -393,7 +393,7 @@ class DebugConsole {
             touchEndY = e.touches[0].clientY;
             const deltaY = touchStartY - touchEndY;
             
-            // 模拟滚动方向检测
+            // 模拟滚动方向检测 / Simulate scroll direction detection
             if (Math.abs(deltaY) > 10) {
                 this.scrollDirection = deltaY > 0 ? 'up' : 'down';
                 this.handleHeaderVisibility();
@@ -401,7 +401,7 @@ class DebugConsole {
             }
         }, { passive: true });
         
-        // 唤醒区域事件监听
+        // 唤醒区域事件监听 / Wake up area event monitoring
         const revealZone = document.getElementById('header-reveal-zone');
         if (revealZone) {
             revealZone.addEventListener('click', () => {
@@ -418,17 +418,17 @@ class DebugConsole {
     }
     
     /**
-     * 处理头部滚动
+     * 处理头部滚动 / Handling head scrolling
      */
     handleHeaderScroll() {
         const currentScrollY = window.scrollY;
         
-        // 检测滚动方向
+        // 检测滚动方向 / Detect scroll direction
         if (currentScrollY > this.lastScrollY && currentScrollY > this.scrollThreshold) {
-            // 向下滚动，隐藏头部
+            // 向下滚动，隐藏头部 / Scroll down to hide header
             this.scrollDirection = 'down';
         } else if (currentScrollY < this.lastScrollY) {
-            // 向上滚动，显示头部
+            // 向上滚动，显示头部 / Scroll up to show header
             this.scrollDirection = 'up';
         }
         
@@ -437,7 +437,7 @@ class DebugConsole {
     }
     
     /**
-     * 处理头部可见性
+     * 处理头部可见性 / Handling header visibility
      */
     handleHeaderVisibility() {
         const header = document.querySelector('.debug-header');
@@ -447,22 +447,22 @@ class DebugConsole {
         const shouldHide = this.scrollDirection === 'down' && this.lastScrollY > this.scrollThreshold;
         
         if (shouldHide && !this.headerHidden) {
-            // 隐藏头部
+            // 隐藏头部 / Hide header
             header.classList.add('hidden');
             this.headerHidden = true;
             
-            // 显示唤醒区域
+            // 显示唤醒区域 / Show wake area
             if (revealZone) {
                 revealZone.classList.add('active');
             }
             
             console.log('[SmartHeader] 头部已隐藏');
         } else if (!shouldHide && this.headerHidden) {
-            // 显示头部
+            // 显示头部 / Show header
             header.classList.remove('hidden');
             this.headerHidden = false;
             
-            // 隐藏唤醒区域
+            // 隐藏唤醒区域 / Hide wake area
             if (revealZone) {
                 revealZone.classList.remove('active');
             }
@@ -472,7 +472,7 @@ class DebugConsole {
     }
     
     /**
-     * 强制显示头部（用于某些交互场景）
+     * 强制显示头部（用于某些交互场景） / Force display of head (used in certain interactive scenarios)
      */
     forceShowHeader() {
         const header = document.querySelector('.debug-header');
@@ -482,7 +482,7 @@ class DebugConsole {
             header.classList.remove('hidden');
             this.headerHidden = false;
             
-            // 隐藏唤醒区域
+            // 隐藏唤醒区域 / Hide wake area
             if (revealZone) {
                 revealZone.classList.remove('active');
             }
@@ -492,7 +492,7 @@ class DebugConsole {
     }
     
     /**
-     * 初始化全屏预览功能
+     * 初始化全屏预览功能 / Initialize full screen preview function
      */
     initFullscreenPreview() {
         const fullscreenToggle = document.getElementById('fullscreen-toggle');
@@ -503,7 +503,7 @@ class DebugConsole {
         
         if (!fullscreenToggle || !fullscreenPreview || !fullscreenImage) return;
         
-        // 打开全屏预览
+        // 打开全屏预览 / Open full screen preview
         fullscreenToggle.addEventListener('click', () => {
             if (previewImage && previewImage.src) {
                 fullscreenImage.src = previewImage.src;
@@ -515,7 +515,7 @@ class DebugConsole {
             }
         });
         
-        // 关闭全屏预览
+        // 关闭全屏预览 / Turn off full screen preview
         if (fullscreenClose) {
             fullscreenClose.addEventListener('click', () => {
                 fullscreenPreview.classList.remove('active');
@@ -524,7 +524,7 @@ class DebugConsole {
             });
         }
         
-        // 点击背景关闭全屏
+        // 点击背景关闭全屏 / Click on the background to close full screen
         fullscreenPreview.addEventListener('click', (e) => {
             if (e.target === fullscreenPreview) {
                 fullscreenPreview.classList.remove('active');
@@ -533,7 +533,7 @@ class DebugConsole {
             }
         });
         
-        // ESC键关闭全屏
+        // ESC键关闭全屏 / ESC key to close full screen
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && fullscreenPreview.classList.contains('active')) {
                 fullscreenPreview.classList.remove('active');
@@ -544,7 +544,7 @@ class DebugConsole {
     }
 
     /**
-     * 应用直方图可见性与按钮状态
+     * 应用直方图可见性与按钮状态 / Apply histogram visibility and button states
      */
     applyHistogramVisibility() {
         const overlay = document.getElementById('histogram-overlay');
@@ -581,7 +581,7 @@ class DebugConsole {
     }
 
     /**
-     * 绘制直方图（纯前端像素计算）
+     * 绘制直方图（纯前端像素计算） / Draw a histogram (pure front-end pixel calculation)
      */
     updateHistogramFromImage(imageElement) {
         if (!this.histogramState.enabled || !imageElement?.naturalWidth || !imageElement?.naturalHeight) {
@@ -596,7 +596,7 @@ class DebugConsole {
         }
         if (!this.histogramCanvasCtx) return;
 
-        // 使用离屏 canvas 采样，降低主线程压力
+        // 使用离屏 canvas 采样，降低主线程压力 / Use off-screen canvas sampling to reduce main thread pressure
         if (!this.histogramOffscreenCanvas) {
             this.histogramOffscreenCanvas = document.createElement('canvas');
             this.histogramOffscreenCtx = this.histogramOffscreenCanvas.getContext('2d', { willReadFrequently: true });
@@ -723,10 +723,10 @@ class DebugConsole {
     }
     
     /**
-     * 更新数据流统计显示
+     * 更新数据流统计显示 / Update data flow statistics display
      */
     updateStreamStatsDisplay() {
-        // 更新分辨率显示
+        // 更新分辨率显示 / Update resolution display
         if (this.streamStats.resolutionDetected) {
             const resolutionElement = document.getElementById('detected-resolution');
             if (resolutionElement) {
@@ -734,7 +734,7 @@ class DebugConsole {
             }
         }
         
-        // 更新FPS显示
+        // 更新FPS显示 / Update FPS display
         const effectiveFpsElement = document.getElementById('calculated-fps');
         if (effectiveFpsElement) {
             effectiveFpsElement.textContent = this.streamStats.fpsCalculated.toFixed(2);
@@ -745,7 +745,7 @@ class DebugConsole {
             requestFpsElement.textContent = this.streamStats.requestFps.toFixed(2);
         }
         
-        // 更新帧计数显示
+        // 更新帧计数显示 / Update frame count display
         const frameCountElement = document.getElementById('frame-count');
         if (frameCountElement) {
             frameCountElement.textContent = this.streamStats.frameCount;
@@ -756,14 +756,14 @@ class DebugConsole {
             requestCountElement.textContent = this.streamStats.requestCount;
         }
         
-        // 更新数据大小显示
+        // 更新数据大小显示 / Update data size display
         const dataSizeElement = document.getElementById('data-size');
         if (dataSizeElement) {
             const dataSizeMB = (this.streamStats.dataSize / (1024 * 1024)).toFixed(2);
             dataSizeElement.textContent = `${dataSizeMB} MB`;
         }
 
-        // 更新平均帧大小显示
+        // 更新平均帧大小显示 / Update average frame size display
         const avgFrameSizeElement = document.getElementById('avg-frame-size');
         if (avgFrameSizeElement) {
             avgFrameSizeElement.textContent = this.streamStats.requestCount > 0
@@ -771,7 +771,7 @@ class DebugConsole {
                 : '--';
         }
 
-        // 更新下行速率显示（按累计流量/运行时长）
+        // 更新下行速率显示（按累计流量 / Update the downstream rate display (by cumulative traffic
         const transferRateElement = document.getElementById('transfer-rate');
         if (transferRateElement) {
             if (this.streamStats.startTime !== null) {
@@ -787,7 +787,7 @@ class DebugConsole {
             }
         }
         
-        // 更新流状态显示
+        // 更新流状态显示 / Update flow status display
         const streamStatusElement = document.getElementById('stream-status');
         if (streamStatusElement) {
             const isActive = this.streamStats.lastRequestTime !== null &&
@@ -796,14 +796,14 @@ class DebugConsole {
             streamStatusElement.className = isActive ? 'status-active' : 'status-inactive';
         }
         
-        // 更新运行时长显示
+        // 更新运行时长显示 / Update running time display
         const runtimeElement = document.getElementById('runtime');
         if (runtimeElement && this.streamStats.startTime !== null) {
             const runtime = (performance.now() - this.streamStats.startTime) / 1000;
             runtimeElement.textContent = `${runtime.toFixed(1)}s`;
         }
 
-        // 更新调试信息显示
+        // 更新调试信息显示 / Update debugging information display
         const debugInfoElement = document.getElementById('debug-info');
         if (debugInfoElement) {
             const frameIdText = this.streamStats.lastFrameId !== null
@@ -819,7 +819,7 @@ class DebugConsole {
     }
     
     /**
-     * 重置数据流统计
+     * 重置数据流统计 / Reset traffic statistics
      */
     resetStreamStats() {
         this.streamStats = {
@@ -842,7 +842,7 @@ class DebugConsole {
     }
     
     /**
-     * 设置画面旋转角度
+     * 设置画面旋转角度 / Set screen rotation angle
      */
     async setRotation(rotation) {
         try {
@@ -872,16 +872,16 @@ class DebugConsole {
     }
     
     /**
-     * 更新旋转角度显示
+     * 更新旋转角度显示 / Update rotation angle display
      */
     updateRotationDisplay() {
-        // 更新当前角度显示
+        // 更新当前角度显示 / Update current angle display
         const rotationElement = document.getElementById('current-rotation');
         if (rotationElement) {
             rotationElement.textContent = `${this.currentSettings.rotation}°`;
         }
         
-        // 更新按钮状态
+        // 更新按钮状态 / Update button state
         document.querySelectorAll('[data-rotation]').forEach(button => {
             const buttonRotation = parseInt(button.dataset.rotation);
             if (buttonRotation === this.currentSettings.rotation) {
@@ -895,51 +895,51 @@ class DebugConsole {
     }
     
     /**
-     * 初始化调试控制台
+     * 初始化调试控制台 / Initialize the debug console
      */
     async init() {
         console.log('[DebugConsole] 初始化调试控制台...');
         await this.initI18n();
         this.applyI18nToPage();
         
-        // 设置事件监听器
+        // 设置事件监听器 / Set event listener
         this.setupEventListeners();
         
-        // 初始化UI
+        // 初始化UI / Initialize UI
         this.initUI();
         
-        // 加载数据
+        // 加载数据 / Load data
         await this.loadPresets();
         await this.loadFiles();
         
-        // 更新相机状态
+        // 更新相机状态 / Update camera status
         await this.updateCameraStatus();
         
-        // 启动图像质量监控
+        // 启动图像质量监控 / Start image quality monitoring
         this.startQualityMonitoring();
         
-        // 初始化智能头部隐藏
+        // 初始化智能头部隐藏 / Initialize smart head hiding
         this.initSmartHeader();
         
         console.log('[DebugConsole] 调试控制台初始化完成');
     }
     
     /**
-     * 设置事件监听器
+     * 设置事件监听器 / Set event listener
      */
     setupEventListeners() {
         document.getElementById('language-select')?.addEventListener('change', (e) => {
             this.setLanguage(e.target.value);
         });
 
-        // 标签页切换
+        // 标签页切换 / Tab switching
         document.querySelectorAll('.tab-button').forEach(button => {
             button.addEventListener('click', (e) => {
                 this.switchTab(e.target.dataset.tab);
             });
         });
         
-        // 相机控制
+        // 相机控制 / camera control
         document.getElementById('start-preview')?.addEventListener('click', () => {
             this.startPreview();
         });
@@ -948,7 +948,7 @@ class DebugConsole {
             this.stopPreview();
         });
         
-        // 拍摄控制
+        // 拍摄控制 / Shooting control
         document.getElementById('capture-image')?.addEventListener('click', () => {
             this.captureImage();
         });
@@ -961,7 +961,7 @@ class DebugConsole {
             this.stopRecording();
         });
         
-        // 参数设置
+        // 参数设置 / Parameter settings
         document.getElementById('exposure-setting')?.addEventListener('input', (e) => {
             this.updateExposureDisplay(parseInt(e.target.value));
         });
@@ -982,22 +982,22 @@ class DebugConsole {
             this.resetSettings();
         });
         
-        // 预设管理
+        // 预设管理 / Default management
         document.getElementById('save-preset')?.addEventListener('click', () => {
             this.savePreset();
         });
         
-        // 文件管理
+        // 文件管理 / File management
         document.getElementById('refresh-files')?.addEventListener('click', () => {
             this.loadFiles();
         });
         
-        // 设置重置统计按钮事件监听器
+        // 设置重置统计按钮事件监听器 / Set the reset statistics button event listener
         document.getElementById('reset-stats')?.addEventListener('click', () => {
             this.resetStreamStats();
         });
         
-        // 设置旋转控制按钮事件监听器
+        // 设置旋转控制按钮事件监听器 / Set up the rotation control button event listener
         document.querySelectorAll('[data-rotation]').forEach(button => {
             button.addEventListener('click', (e) => {
                 const rotation = parseInt(e.target.dataset.rotation);
@@ -1005,7 +1005,7 @@ class DebugConsole {
             });
         });
         
-        // 新增参数控制事件监听器
+        // 新增参数控制事件监听器 / Add new parameter to control event listener
         document.getElementById('contrast-setting')?.addEventListener('input', (e) => {
             this.updateContrastDisplay(parseFloat(e.target.value));
         });
@@ -1046,7 +1046,7 @@ class DebugConsole {
             this.updateWhiteBalanceGainB(parseFloat(e.target.value));
         });
         
-        // 夜间模式控制
+        // 夜间模式控制 / Night mode control
         document.getElementById('night-mode-preset')?.addEventListener('click', () => {
             this.applyNightModePreset();
         });
@@ -1055,7 +1055,7 @@ class DebugConsole {
             this.toggleNightMode();
         });
         
-        // 安全机制
+        // 安全机制 / security mechanism
         document.getElementById('backup-settings')?.addEventListener('click', () => {
             this.backupSettings();
         });
@@ -1064,7 +1064,7 @@ class DebugConsole {
             this.restoreSettings();
         });
 
-        // 直方图控制（纯前端）
+        // 直方图控制（纯前端） / Histogram control (pure front-end)
         document.getElementById('histogram-toggle')?.addEventListener('click', () => {
             if (!this.histogramState.enabled) {
                 this.showNotification('请先在设置中启用直方图', 'info');
@@ -1102,14 +1102,14 @@ class DebugConsole {
             this.histogramState.showOverexposure = !!e.target.checked;
         });
         
-        // 分辨率预设选择
+        // 分辨率预设选择 / Resolution preset selection
         document.querySelectorAll('[data-res]').forEach(button => {
             button.addEventListener('click', (e) => {
                 document.querySelectorAll('[data-res]').forEach(b=>b.classList.remove('btn-primary'));
                 e.currentTarget.classList.add('btn-primary');
             });
         });
-        // 应用分辨率（仅宽高，不影响帧率）
+        // 应用分辨率（仅宽高，不影响帧率） / Apply resolution (width and height only, does not affect frame rate)
         document.getElementById('apply-resolution')?.addEventListener('click', () => {
             const activeBtn = document.querySelector('[data-res].btn-primary');
             if (!activeBtn) {
@@ -1120,7 +1120,7 @@ class DebugConsole {
             this.applySizeOnly(w, h);
         });
 
-        // 应用单独帧率
+        // 应用单独帧率 / Apply individual frame rates
         document.getElementById('apply-fps')?.addEventListener('click', async () => {
             const fpsInput = document.getElementById('fps-input');
             const fps = parseInt(fpsInput?.value || '5');
@@ -1134,7 +1134,7 @@ class DebugConsole {
                 if (btn) btn.disabled = true;
                 this.showNotification('正在设置帧率...', 'info');
                 
-                // 尽量不中断预览直接应用
+                // 尽量不中断预览直接应用 / Try to apply it directly without interrupting the preview
                 const params = new URLSearchParams({ fps: String(fps) });
                 const resp = await fetch(`/api/debug/camera/fps?${params.toString()}`, { method: 'POST' });
                 if (!resp.ok) {
@@ -1151,7 +1151,7 @@ class DebugConsole {
             }
         });
 
-        // 应用采样模式
+        // 应用采样模式 / Apply sampling mode
         document.getElementById('apply-sampling')?.addEventListener('click', async () => {
             const sel = document.getElementById('sampling-select');
             const mode = sel?.value || 'supersample';
@@ -1161,7 +1161,7 @@ class DebugConsole {
                 if (btn) btn.disabled = true;
                 this.showNotification('正在切换采样模式...', 'info');
                 
-                // 停止预览以避免旧源卡住
+                // 停止预览以避免旧源卡住 / Stop preview to avoid getting stuck on old source
                 try { await this.stopPreview(); } catch(_){}
                 const params = new URLSearchParams({ mode });
                 const resp = await fetch(`/api/debug/camera/sampling?${params.toString()}`, { method: 'POST' });
@@ -1170,13 +1170,13 @@ class DebugConsole {
                     throw new Error(err.detail || '设置采样模式失败');
                 }
                 this.showNotification('采样模式已切换', 'success');
-                // 刷新状态并重启预览
+                // 刷新状态并重启预览 / Refresh status and restart preview
                 await this.updateCameraStatus();
                 await this.startPreview();
             } catch (e) {
                 console.error(e);
                 this.showNotification(`设置采样模式失败: ${e.message}`, 'error');
-                // 尝试恢复预览
+                // 尝试恢复预览 / Try to restore preview
                 try {
                     await this.updateCameraStatus();
                     if (this.cameraStatus.streaming) {
@@ -1190,16 +1190,16 @@ class DebugConsole {
             }
         });
         
-        // 键盘快捷键
+        // 键盘快捷键 / keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             this.handleKeyboardShortcuts(e);
         });
 
-        // 启动时同步一次边框状态
+        // 启动时同步一次边框状态 / Synchronize the border state once at startup
         this.setRecOverlay(this.cameraStatus.recording);
         this.applyHistogramVisibility();
         
-        // 快速预设按钮事件监听器
+        // 快速预设按钮事件监听器 / Quickly preset button event listeners
         document.getElementById('daylight-preset')?.addEventListener('click', () => {
             this.applyQuickPreset('daylight');
         });
@@ -1216,20 +1216,20 @@ class DebugConsole {
             this.applyQuickPreset('planetary');
         });
         
-        // 智能调整按钮
+        // 智能调整按钮 / Smart adjustment button
         document.getElementById('auto-adjust')?.addEventListener('click', () => {
             this.performAutoAdjust();
         });
     }
     
     /**
-     * 初始化UI
+     * 初始化UI / Initialize UI
      */
     initUI() {
-        // 设置默认标签页
+        // 设置默认标签页 / Set default tab
         this.switchTab('capture');
         
-        // 初始化参数显示
+        // 初始化参数显示 / Initialization parameter display
         this.updateExposureDisplay(this.currentSettings.exposure);
         this.updateGainDisplay(this.currentSettings.gain);
         this.updateDigitalGainDisplay(this.currentSettings.digitalGain);
@@ -1244,33 +1244,33 @@ class DebugConsole {
         this.updateWhiteBalanceGainR(this.currentSettings.whiteBalanceGainR);
         this.updateWhiteBalanceGainB(this.currentSettings.whiteBalanceGainB);
         
-        // 初始化全屏预览功能
+        // 初始化全屏预览功能 / Initialize full screen preview function
         this.initFullscreenPreview();
         
-        // 添加触摸反馈
+        // 添加触摸反馈 / Add touch feedback
         document.querySelectorAll('.btn, .tab-button, .control-row input').forEach(element => {
             element.classList.add('touch-feedback');
         });
     }
     
     /**
-     * 切换标签页
+     * 切换标签页 / Switch tabs
      */
     switchTab(tabName) {
-        // 强制显示头部（用户正在导航）
+        // 强制显示头部（用户正在导航） / Force display of header (user is navigating)
         this.forceShowHeader();
         
-        // 更新按钮状态
+        // 更新按钮状态 / Update button state
         document.querySelectorAll('.tab-button').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabName);
         });
         
-        // 更新内容显示
+        // 更新内容显示 / Update content display
         document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.toggle('active', content.id === `tab-${tabName}`);
         });
         
-        // 特殊处理
+        // 特殊处理 / special handling
         if (tabName === 'files') {
             this.loadFiles();
         } else if (tabName === 'presets') {
@@ -1279,7 +1279,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新相机状态
+     * 更新相机状态 / Update camera status
      */
     async updateCameraStatus() {
         try {
@@ -1288,7 +1288,7 @@ class DebugConsole {
             
             this.cameraStatus = status;
 
-            // 同步关键参数状态，避免UI与相机真实状态脱节
+            // 同步关键参数状态，避免UI与相机真实状态脱节 / Synchronize the status of key parameters to avoid the disconnection between the UI and the real status of the camera
             const info = status.info || {};
             if (typeof info.auto_exposure === 'boolean') {
                 this.currentSettings.autoExposure = info.auto_exposure;
@@ -1298,11 +1298,11 @@ class DebugConsole {
             this.updateStatusUI();
             this.updateInfoUI();
             
-            // 如果相机正在运行，且预览未激活，则启动预览循环（避免重复重置统计）
+            // 如果相机正在运行，且预览未激活，则启动预览循环（避免重复重置统计） / If the camera is running and preview is not active, start a preview loop (to avoid repeatedly resetting statistics)
             if (status.streaming && !this.previewActive) {
                 this.startPreviewUpdate();
             }
-            // 同步录制状态与计时
+            // 同步录制状态与计时 / Synchronize recording status and timing
             if (this.cameraStatus.recording) {
                 if (!this.recordingStartTime) {
                     this.recordingStartTime = Date.now();
@@ -1323,7 +1323,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新状态UI
+     * 更新状态UI / Update status UI
      */
     updateStatusUI() {
         const statusIndicator = document.getElementById('camera-status');
@@ -1344,20 +1344,20 @@ class DebugConsole {
             statusText.textContent = this.t('status.cameraOffline');
         }
         
-        // 更新预览状态
+        // 更新预览状态 / Update preview status
         document.getElementById('preview-status').textContent = 
             this.cameraStatus.streaming ? this.t('status.running') : this.t('status.notStarted');
         
-        // 更新录制状态
+        // 更新录制状态 / Update recording status
         document.getElementById('recording-status').textContent = 
             this.cameraStatus.recording ? this.t('status.recording') : this.t('status.notRecording');
         
-        // 更新按钮状态
+        // 更新按钮状态 / Update button state
         this.updateButtonStates();
     }
 
     /**
-     * 更新分辨率/帧率显示
+     * 更新分辨率 / Update resolution
      */
     updateInfoUI() {
         const resEl = document.getElementById('resolution');
@@ -1376,11 +1376,11 @@ class DebugConsole {
     }
     
     /**
-     * 启动预览
+     * 启动预览 / Start preview
      */
     async startPreview() {
         try {
-            // 显示启动状态
+            // 显示启动状态 / Show startup status
             this.showNotification('正在启动相机预览...', 'info');
             
             const response = await fetch('/api/debug/camera/start', {
@@ -1404,7 +1404,7 @@ class DebugConsole {
     }
     
     /**
-     * 停止预览
+     * 停止预览 / Stop preview
      */
     async stopPreview() {
         try {
@@ -1425,34 +1425,34 @@ class DebugConsole {
     }
     
     /**
-     * 开始预览更新
+     * 开始预览更新 / Start previewing updates
      */
     startPreviewUpdate() {
-        this.stopPreviewUpdate(); // 清除现有定时器
+        this.stopPreviewUpdate(); // 清除现有定时器 / Clear existing timer
         const previewImg = document.getElementById('preview-image');
         const overlay = document.getElementById('preview-overlay');
         if (!previewImg || !overlay) return;
 
-        // 启动前立即隐藏覆盖层，并重置统计，避免提示一直停留
+        // 启动前立即隐藏覆盖层，并重置统计，避免提示一直停留 / Hide the overlay immediately before starting and reset statistics to avoid prompts remaining
         overlay.classList.add('hidden');
         this.resetStreamStats();
 
-        // 使用单次请求循环（避免并发取消）：每次等上一帧 onload/onerror/超时 后再发起下一帧
+        // 使用单次请求循环（避免并发取消）：每次等上一帧 onload / Use a single request loop (to avoid concurrent cancellation): wait for the previous frame onload each time
         this.previewActive = true;
-        // 提高预览帧率到15fps以获得更流畅的体验
+        // 提高预览帧率到15fps以获得更流畅的体验 / Increase the preview frame rate to 15fps for a smoother experience
         const fps = 15;
         const intervalMs = Math.max(1000 / fps, 50);
         let consecutiveFailures = 0;
         let frameToken = 0;
         let firstFrameAttempts = 0;
-        const maxFirstFrameAttempts = 10;  // 前10次请求使用更短间隔
+        const maxFirstFrameAttempts = 10;  // 前10次请求使用更短间隔 / Use shorter intervals for the first 10 requests
 
         const loop = async () => {
             if (!this.previewActive) return;
             const startedAt = performance.now();
             const myToken = ++frameToken;
             
-            // 增加第一帧尝试计数
+            // 增加第一帧尝试计数 / Increase first frame attempt count
             if (firstFrameAttempts < maxFirstFrameAttempts) {
                 firstFrameAttempts++;
             }
@@ -1525,7 +1525,7 @@ class DebugConsole {
         };
         loop();
 
-        // 看门狗：若2秒未收到帧，强制刷新状态（更敏感的检测）
+        // 看门狗：若2秒未收到帧，强制刷新状态（更敏感的检测） / Watchdog: If no frame is received for 2 seconds, force refresh status (more sensitive detection)
         this.previewWatchdog = setInterval(() => {
             if (this.streamStats.lastFrameTime === null) return;
             const since = performance.now() - this.streamStats.lastFrameTime;
@@ -1536,7 +1536,7 @@ class DebugConsole {
     }
     
     /**
-     * 停止预览更新
+     * 停止预览更新 / Stop preview updates
      */
     stopPreviewUpdate() {
         if (this.previewInterval) {
@@ -1556,18 +1556,18 @@ class DebugConsole {
             URL.revokeObjectURL(this.previewObjectUrl);
             this.previewObjectUrl = null;
         }
-        // 复位预览图片
+        // 复位预览图片 / Reset preview image
         const previewImg = document.getElementById('preview-image');
         if (previewImg) {
             try { previewImg.onload = null; previewImg.onerror = null; } catch(_){}
             previewImg.src = '/static/images/placeholder-camera.png';
         }
-        // 显示覆盖层
+        // 显示覆盖层 / Show overlay
         document.getElementById('preview-overlay').classList.remove('hidden');
     }
     
     /**
-     * 拍摄图片
+     * 拍摄图片 / Take pictures
      */
     async captureImage() {
         if (!this.cameraStatus.streaming) {
@@ -1584,12 +1584,12 @@ class DebugConsole {
                 const result = await response.json();
                 this.showNotification(`照片已保存: ${result.filename}`, 'success');
                 
-                // 更新最后拍摄时间
+                // 更新最后拍摄时间 / Update last shooting time
                 const now = new Date();
                 document.getElementById('last-capture').textContent = 
                     now.toLocaleTimeString();
                 
-                // 刷新文件列表
+                // 刷新文件列表 / Refresh file list
                 await this.loadFiles();
             } else {
                 const error = await response.json();
@@ -1602,7 +1602,7 @@ class DebugConsole {
     }
     
     /**
-     * 开始录制
+     * 开始录制 / Start recording
      */
     async startRecording() {
         if (!this.cameraStatus.streaming) {
@@ -1619,15 +1619,15 @@ class DebugConsole {
                 const result = await response.json();
                 this.showNotification(`开始录制: ${result.filename}`, 'success');
                 
-                // 开始计时
+                // 开始计时 / Start timing
                 this.recordingStartTime = Date.now();
                 this.startRecordingTimer();
                 
-                // 更新按钮状态
+                // 更新按钮状态 / Update button state
                 this.updateRecordingButtons(true);
                 this.setRecOverlay(true);
                 
-                // 更新状态
+                // 更新状态 / update status
                 await this.updateCameraStatus();
             } else {
                 const error = await response.json();
@@ -1640,7 +1640,7 @@ class DebugConsole {
     }
     
     /**
-     * 停止录制
+     * 停止录制 / Stop recording
      */
     async stopRecording() {
         try {
@@ -1663,7 +1663,7 @@ class DebugConsole {
     }
     
     /**
-     * 开始录制计时器
+     * 开始录制计时器 / Start recording timer
      */
     startRecordingTimer() {
         this.recordingInterval = setInterval(() => {
@@ -1675,7 +1675,7 @@ class DebugConsole {
     }
     
     /**
-     * 停止录制计时器
+     * 停止录制计时器 / Stop recording timer
      */
     stopRecordingTimer() {
         if (this.recordingInterval) {
@@ -1685,7 +1685,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新录制时长
+     * 更新录制时长 / Update recording duration
      */
     updateRecordingDuration(duration) {
         const durationElement = document.getElementById('recording-duration');
@@ -1696,7 +1696,7 @@ class DebugConsole {
             durationElement.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
         }
         
-        // 更新录制徽章
+        // 更新录制徽章 / Update recording badge
         const recBadgeTime = document.getElementById('rec-badge-time');
         if (recBadgeTime) {
             const seconds = Math.floor(duration / 1000);
@@ -1707,7 +1707,7 @@ class DebugConsole {
     }
     
     /**
-     * 设置录制覆盖层
+     * 设置录制覆盖层 / 设置录制覆盖层
      */
     setRecOverlay(recording) {
         const recBadge = document.getElementById('rec-badge');
@@ -1717,7 +1717,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新录制按钮状态
+     * 更新录制按钮状态 / Update record button state
      */
     updateRecordingButtons(isRecording) {
         const startBtn = document.getElementById('start-recording');
@@ -1728,7 +1728,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新按钮状态
+     * 更新按钮状态 / Update button state
      */
     updateButtonStates() {
         const startBtn = document.getElementById('start-preview');
@@ -1744,7 +1744,7 @@ class DebugConsole {
     }
     
     /**
-     * 开始状态轮询
+     * 开始状态轮询 / Start status polling
      */
     beginStatusPolling() {
         this.endStatusPolling();
@@ -1754,7 +1754,7 @@ class DebugConsole {
     }
     
     /**
-     * 结束状态轮询
+     * 结束状态轮询 / End status polling
      */
     endStatusPolling() {
         if (this.statusInterval) {
@@ -1764,63 +1764,63 @@ class DebugConsole {
     }
     
     /**
-     * 更新曝光显示
+     * 更新曝光显示 / Update exposure display
      */
     updateExposureDisplay(value) {
         document.getElementById('exposure-value').textContent = value;
     }
     
     /**
-     * 更新增益显示
+     * 更新增益显示 / Update gain display
      */
     updateGainDisplay(value) {
         document.getElementById('gain-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新数字增益显示
+     * 更新数字增益显示 / Updated digital gain display
      */
     updateDigitalGainDisplay(value) {
         document.getElementById('digital-gain-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新对比度显示
+     * 更新对比度显示 / Update contrast display
      */
     updateContrastDisplay(value) {
         document.getElementById('contrast-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新亮度显示
+     * 更新亮度显示 / Update brightness display
      */
     updateBrightnessDisplay(value) {
         document.getElementById('brightness-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新饱和度显示
+     * 更新饱和度显示 / Update saturation display
      */
     updateSaturationDisplay(value) {
         document.getElementById('saturation-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新锐度显示
+     * 更新锐度显示 / Update sharpness display
      */
     updateSharpnessDisplay(value) {
         document.getElementById('sharpness-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新降噪显示
+     * 更新降噪显示 / Update noise reduction display
      */
     updateNoiseReductionDisplay(value) {
         document.getElementById('noise-reduction-value').textContent = value;
     }
 
     /**
-     * 更新自动曝光模式
+     * 更新自动曝光模式 / Update auto-exposure mode
      */
     updateAutoExposureMode(isAuto) {
         this.currentSettings.autoExposure = isAuto;
@@ -1830,7 +1830,7 @@ class DebugConsole {
             modeSelect.value = isAuto ? 'auto' : 'manual';
         }
 
-        // 自动曝光时禁用手动曝光参数，避免控制冲突
+        // 自动曝光时禁用手动曝光参数，避免控制冲突 / Disable manual exposure parameters during automatic exposure to avoid control conflicts
         const manualControls = ['exposure-setting', 'gain-setting', 'digital-gain-setting'];
         manualControls.forEach((id) => {
             const element = document.getElementById(id);
@@ -1850,7 +1850,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新颜色模式显示
+     * 更新颜色模式显示 / Update color mode display
      */
     updateColorMode(mode) {
         const colorModeSelect = document.getElementById('color-mode');
@@ -1858,7 +1858,7 @@ class DebugConsole {
             colorModeSelect.value = mode;
         }
         
-        // 黑白模式时禁用某些颜色相关设置
+        // 黑白模式时禁用某些颜色相关设置 / Disable certain color-related settings when in black and white mode
         const colorRelatedControls = ['saturation-setting', 'white-balance-mode'];
         colorRelatedControls.forEach(id => {
             const element = document.getElementById(id);
@@ -1868,7 +1868,7 @@ class DebugConsole {
             }
         });
         
-        // 更新提示信息
+        // 更新提示信息 / Update prompt information
         const hint = colorModeSelect?.parentElement?.nextElementSibling;
         if (hint && hint.classList.contains('param-hint')) {
             if (mode === 'mono') {
@@ -1882,7 +1882,7 @@ class DebugConsole {
     }
     
     /**
-     * 更新白平衡模式
+     * 更新白平衡模式 / Update white balance mode
      */
     updateWhiteBalanceMode(mode) {
         const gainsContainer = document.getElementById('white-balance-gains');
@@ -1892,21 +1892,21 @@ class DebugConsole {
     }
     
     /**
-     * 更新白平衡红色增益显示
+     * 更新白平衡红色增益显示 / Updated white balance red gain display
      */
     updateWhiteBalanceGainR(value) {
         document.getElementById('wb-gain-r-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 更新白平衡蓝色增益显示
+     * 更新白平衡蓝色增益显示 / Updated white balance blue gain display
      */
     updateWhiteBalanceGainB(value) {
         document.getElementById('wb-gain-b-value').textContent = value.toFixed(1);
     }
     
     /**
-     * 应用设置
+     * 应用设置 / Apply settings
      */
     async applySettings() {
         const settings = {
@@ -1926,7 +1926,7 @@ class DebugConsole {
         };
 
         try {
-            // 先处理颜色模式切换（如果需要）
+            // 先处理颜色模式切换（如果需要） / Handle color mode switching first (if needed)
             if (settings.colorMode !== this.currentSettings.colorMode) {
                 await this.switchColorMode(settings.colorMode);
             }
@@ -1954,7 +1954,7 @@ class DebugConsole {
     }
     
     /**
-     * 切换颜色模式
+     * 切换颜色模式 / Switch color mode
      */
     async switchColorMode(colorMode) {
         try {
@@ -1970,10 +1970,10 @@ class DebugConsole {
                 this.updateColorMode(colorMode);
                 this.showNotification(this.extractApiMessage(result, 'notify.colorModeSwitched'), 'success');
                 
-                // 刷新相机状态
+                // 刷新相机状态 / Refresh camera status
                 await this.updateCameraStatus();
                 
-                // 给用户一些性能提示
+                // 给用户一些性能提示 / Give users some performance tips
                 if (colorMode === 'mono') {
                     setTimeout(() => {
                         this.showNotification('黑白模式已启用，帧率和灵敏度将得到提升', 'info');
@@ -1987,13 +1987,13 @@ class DebugConsole {
             console.error('[DebugConsole] 颜色模式切换失败:', error);
             this.showNotification(`颜色模式切换失败: ${error.message}`, 'error');
             
-            // 恢复UI状态
+            // 恢复UI状态 / Restore UI state
             this.updateColorMode(this.currentSettings.colorMode);
         }
     }
     
     /**
-     * 重置设置
+     * 重置设置 / Reset settings
      */
     async resetSettings() {
         try {
@@ -2004,10 +2004,10 @@ class DebugConsole {
             if (response.ok) {
                 this.showNotification('相机已重置到默认设置', 'success');
                 
-                // 重新加载相机状态以获取默认值
+                // 重新加载相机状态以获取默认值 / Reload camera state to get default values
                 await this.updateCameraStatus();
                 
-                // 更新UI显示
+                // 更新UI显示 / Update UI display
                 if (this.cameraStatus.info) {
                     this.updateExposureDisplay(this.cameraStatus.info.exposure_us);
                     this.updateGainDisplay(this.cameraStatus.info.analogue_gain);
@@ -2024,7 +2024,7 @@ class DebugConsole {
     }
     
     /**
-     * 应用夜间模式预设
+     * 应用夜间模式预设 / Apply night mode preset
      */
     async applyNightModePreset() {
         try {
@@ -2047,7 +2047,7 @@ class DebugConsole {
     }
     
     /**
-     * 切换夜间模式
+     * 切换夜间模式 / Switch to night mode
      */
     async toggleNightMode() {
         try {
@@ -2074,7 +2074,7 @@ class DebugConsole {
     }
     
     /**
-     * 备份设置
+     * 备份设置 / Backup settings
      */
     async backupSettings() {
         try {
@@ -2095,7 +2095,7 @@ class DebugConsole {
     }
     
     /**
-     * 恢复设置
+     * 恢复设置 / Restore settings
      */
     async restoreSettings() {
         try {
@@ -2117,7 +2117,7 @@ class DebugConsole {
     }
     
     /**
-     * 仅应用尺寸（宽高），不影响帧率
+     * 仅应用尺寸（宽高），不影响帧率 / Applies only dimensions (width and height), does not affect frame rate
      */
     async applySizeOnly(width, height) {
         try {
@@ -2135,7 +2135,7 @@ class DebugConsole {
     }
     
     /**
-     * 启动图像质量监控
+     * 启动图像质量监控 / Start image quality monitoring
      */
     startQualityMonitoring() {
         this.stopQualityMonitoring();
@@ -2150,13 +2150,13 @@ class DebugConsole {
             } catch (error) {
                 console.error('[QualityMonitoring] 获取图像质量失败:', error);
             }
-        }, 3000); // 每3秒更新一次
+        }, 3000); // 每3秒更新一次 / Updates every 3 seconds
         
         console.log('[QualityMonitoring] 图像质量监控已启动');
     }
     
     /**
-     * 停止图像质量监控
+     * 停止图像质量监控 / Stop image quality monitoring
      */
     stopQualityMonitoring() {
         if (this.qualityMonitoringInterval) {
@@ -2167,12 +2167,12 @@ class DebugConsole {
     }
     
     /**
-     * 更新图像质量指标
+     * 更新图像质量指标 / Update image quality metrics
      */
     updateQualityMetrics(quality) {
         const normalizedQuality = this.normalizeQualityMetrics(quality);
 
-        // 更新噪点水平
+        // 更新噪点水平 / Update noise level
         const noiseBar = document.getElementById('noise-level-bar');
         const noiseValue = document.getElementById('noise-level');
         if (noiseBar && noiseValue) {
@@ -2180,7 +2180,7 @@ class DebugConsole {
             noiseValue.textContent = `${normalizedQuality.noiseLevel10.toFixed(1)}`;
         }
         
-        // 更新曝光充足度
+        // 更新曝光充足度 / Update exposure adequacy
         const exposureBar = document.getElementById('exposure-bar');
         const exposureValue = document.getElementById('exposure-level');
         if (exposureBar && exposureValue) {
@@ -2188,7 +2188,7 @@ class DebugConsole {
             exposureValue.textContent = `${normalizedQuality.exposureLevel10.toFixed(1)}`;
         }
         
-        // 更新增益水平
+        // 更新增益水平 / Update gain level
         const gainBar = document.getElementById('gain-bar');
         const gainValue = document.getElementById('gain-level');
         if (gainBar && gainValue) {
@@ -2196,12 +2196,12 @@ class DebugConsole {
             gainValue.textContent = `${normalizedQuality.gainLevel.toFixed(1)}`;
         }
         
-        // 更新建议
+        // 更新建议 / Update suggestions
         this.updateQualityRecommendations(normalizedQuality);
     }
     
     /**
-     * 归一化质量指标（兼容 exposure_adequacy 与 exposure_level）
+     * 归一化质量指标（兼容 exposure_adequacy 与 exposure_level） / Normalized quality index (compatible with exposure_adequacy and exposure_level)
      */
     normalizeQualityMetrics(quality = {}) {
         const hasExposureAdequacy = typeof quality.exposure_adequacy === 'number';
@@ -2229,7 +2229,7 @@ class DebugConsole {
     }
 
     /**
-     * 更新质量建议
+     * 更新质量建议 / Update quality recommendations
      */
     updateQualityRecommendations(quality) {
         const recommendationsContainer = document.getElementById('quality-recommendations');
@@ -2261,7 +2261,7 @@ class DebugConsole {
     }
     
     /**
-     * 加载预设
+     * 加载预设 / Load preset
      */
     async loadPresets() {
         try {
@@ -2278,7 +2278,7 @@ class DebugConsole {
     }
     
     /**
-     * 渲染预设列表
+     * 渲染预设列表 / Render preset list
      */
     renderPresets() {
         const presetsGrid = document.getElementById('presets-grid');
@@ -2336,7 +2336,7 @@ class DebugConsole {
     }
     
     /**
-     * 保存预设
+     * 保存预设 / save preset
      */
     async savePreset() {
         const name = document.getElementById('preset-name').value.trim();
@@ -2360,17 +2360,17 @@ class DebugConsole {
                     analogue_gain: parseFloat(document.getElementById('gain-setting').value),
                     digital_gain: parseFloat(document.getElementById('digital-gain-setting').value),
                     auto_exposure: document.getElementById('auto-exposure-mode').value === 'auto',
-                    // 图像增强参数
+                    // 图像增强参数 / Image enhancement parameters
                     contrast: parseFloat(document.getElementById('contrast-setting').value),
                     brightness: parseFloat(document.getElementById('brightness-setting').value),
                     saturation: parseFloat(document.getElementById('saturation-setting').value),
                     sharpness: parseFloat(document.getElementById('sharpness-setting').value),
-                    // 高级参数
+                    // 高级参数 / Advanced parameters
                     noise_reduction: parseInt(document.getElementById('noise-reduction-setting').value),
                     white_balance_mode: document.getElementById('white-balance-mode').value,
                     white_balance_gain_r: parseFloat(document.getElementById('wb-gain-r').value),
                     white_balance_gain_b: parseFloat(document.getElementById('wb-gain-b').value),
-                    // 其他参数
+                    // 其他参数 / Other parameters
                     rotation: this.currentSettings.rotation,
                     color_mode: document.getElementById('color-mode').value
                 })
@@ -2379,11 +2379,11 @@ class DebugConsole {
             if (response.ok) {
                 this.showNotification('预设保存成功', 'success');
                 
-                // 清空表单
+                // 清空表单 / Clear form
                 document.getElementById('preset-name').value = '';
                 document.getElementById('preset-description').value = '';
                 
-                // 重新加载预设
+                // 重新加载预设 / Reload preset
                 await this.loadPresets();
             } else {
                 const error = await response.json();
@@ -2396,7 +2396,7 @@ class DebugConsole {
     }
     
     /**
-     * 获取预设数据
+     * 获取预设数据 / Get default data
      */
     async getPresetData(presetName) {
         try {
@@ -2413,11 +2413,11 @@ class DebugConsole {
     }
     
     /**
-     * 应用预设
+     * 应用预设 / Apply preset
      */
     async applyPreset(presetName) {
         try {
-            // 先获取预设数据
+            // 先获取预设数据 / Get the default data first
             const presetData = await this.getPresetData(presetName);
             if (!presetData) {
                 throw new Error('预设数据不存在');
@@ -2430,10 +2430,10 @@ class DebugConsole {
             if (response.ok) {
                 this.showNotification(`预设 '${presetName}' 已应用`, 'success');
                 
-                // 重新加载相机状态
+                // 重新加载相机状态 / Reload camera state
                 await this.updateCameraStatus();
                 
-                // 更新UI控件值
+                // 更新UI控件值 / Update UI control value
                 document.getElementById('exposure-setting').value = presetData.exposure_us;
                 document.getElementById('gain-setting').value = presetData.analogue_gain;
                 document.getElementById('digital-gain-setting').value = presetData.digital_gain || 1.0;
@@ -2471,7 +2471,7 @@ class DebugConsole {
                     this.updateAutoExposureMode(!!presetData.auto_exposure);
                 }
                 
-                // 更新显示值
+                // 更新显示值 / Update display value
                 this.updateExposureDisplay(presetData.exposure_us);
                 this.updateGainDisplay(presetData.analogue_gain);
                 this.updateDigitalGainDisplay(presetData.digital_gain ?? 1.0);
@@ -2485,7 +2485,7 @@ class DebugConsole {
                 this.updateWhiteBalanceGainB(presetData.white_balance_gain_b ?? 1.0);
                 this.updateColorMode(presetData.color_mode ?? 'color');
                 
-                // 更新旋转角度
+                // 更新旋转角度 / Update rotation angle
                 if (presetData.rotation !== undefined) {
                     this.currentSettings.rotation = presetData.rotation;
                     this.updateRotationDisplay();
@@ -2502,7 +2502,7 @@ class DebugConsole {
     }
     
     /**
-     * 删除预设
+     * 删除预设 / Delete preset
      */
     async deletePreset(presetName) {
         if (!confirm(this.t('confirm.deletePreset', { name: presetName }))) {
@@ -2528,7 +2528,7 @@ class DebugConsole {
     }
     
     /**
-     * 加载文件列表
+     * 加载文件列表 / Load file list
      */
     async loadFiles() {
         try {
@@ -2545,7 +2545,7 @@ class DebugConsole {
     }
     
     /**
-     * 渲染文件列表
+     * 渲染文件列表 / Render file list
      */
     renderFiles() {
         const filesList = document.getElementById('files-list');
@@ -2590,7 +2590,7 @@ class DebugConsole {
     }
     
     /**
-     * 下载文件
+     * 下载文件 / Download file
      */
     downloadFile(filename) {
         const link = document.createElement('a');
@@ -2604,7 +2604,7 @@ class DebugConsole {
     }
     
     /**
-     * 显示文件信息
+     * 显示文件信息 / Show file information
      */
     async showFileInfo(filename) {
         try {
@@ -2658,10 +2658,10 @@ class DebugConsole {
     }
     
     /**
-     * 删除文件
+     * 删除文件 / Delete files
      */
     async deleteFile(filename) {
-        // 确认删除
+        // 确认删除 / Confirm deletion
         if (!confirm(this.t('confirm.deleteFile', { name: filename }))) {
             return;
         }
@@ -2679,7 +2679,7 @@ class DebugConsole {
             const result = await response.json();
             this.showNotification(this.extractApiMessage(result, 'notify.fileDeleteSuccess'), 'success');
             
-            // 重新加载文件列表
+            // 重新加载文件列表 / Reload file list
             await this.loadFiles();
             
         } catch (error) {
@@ -2689,7 +2689,7 @@ class DebugConsole {
     }
     
     /**
-     * 格式化文件大小
+     * 格式化文件大小 / Format file size
      */
     formatFileSize(bytes) {
         if (bytes === 0) return '0 B';
@@ -2702,10 +2702,10 @@ class DebugConsole {
     }
     
     /**
-     * 处理键盘快捷键
+     * 处理键盘快捷键 / Handle keyboard shortcuts
      */
     handleKeyboardShortcuts(e) {
-        // 防止在输入框中触发快捷键
+        // 防止在输入框中触发快捷键 / Prevent shortcut keys from being triggered in input boxes
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
             return;
         }
@@ -2752,10 +2752,10 @@ class DebugConsole {
     }
     
     /**
-     * 显示通知
+     * 显示通知 / Show notification
      */
     showNotification(message, type = 'info') {
-        // 显示重要通知时强制显示头部
+        // 显示重要通知时强制显示头部 / Force header to be displayed when showing important notifications
         if (type === 'error' || type === 'warning') {
             this.forceShowHeader();
         }
@@ -2768,12 +2768,12 @@ class DebugConsole {
         
         notifications.appendChild(notification);
         
-        // 显示动画
+        // 显示动画 / show animation
         setTimeout(() => {
             notification.classList.add('show');
         }, 100);
         
-        // 自动隐藏
+        // 自动隐藏 / auto-hide
         setTimeout(() => {
             notification.classList.remove('show');
             setTimeout(() => {
@@ -2785,7 +2785,7 @@ class DebugConsole {
     }
     
     /**
-     * 显示模态框
+     * 显示模态框 / Show modal box
      */
     showModal(title, content) {
         const modal = document.createElement('div');
@@ -2804,12 +2804,12 @@ class DebugConsole {
         
         document.body.appendChild(modal);
         
-        // 显示动画
+        // 显示动画 / show animation
         setTimeout(() => {
             modal.classList.add('show');
         }, 100);
         
-        // 关闭事件
+        // 关闭事件 / close event
         modal.querySelector('.modal-close').addEventListener('click', () => {
             this.closeModal(modal);
         });
@@ -2822,7 +2822,7 @@ class DebugConsole {
     }
     
     /**
-     * 关闭模态框
+     * 关闭模态框 / Close modal box
      */
     closeModal(modal) {
         modal.classList.remove('show');
@@ -2834,7 +2834,7 @@ class DebugConsole {
     }
     
     /**
-     * 应用快速预设
+     * 应用快速预设 / Apply quick presets
      */
     async applyQuickPreset(presetType) {
         const presets = {
@@ -2891,7 +2891,7 @@ class DebugConsole {
         }
         
         try {
-            // 更新UI控件
+            // 更新UI控件 / Update UI controls
             document.getElementById('exposure-setting').value = preset.exposure;
             document.getElementById('gain-setting').value = preset.gain;
             document.getElementById('digital-gain-setting').value = preset.digitalGain;
@@ -2902,7 +2902,7 @@ class DebugConsole {
             document.getElementById('noise-reduction-setting').value = preset.noiseReduction;
             document.getElementById('white-balance-mode').value = preset.whiteBalanceMode;
             
-            // 更新显示值
+            // 更新显示值 / Update display value
             this.updateExposureDisplay(preset.exposure);
             this.updateGainDisplay(preset.gain);
             this.updateDigitalGainDisplay(preset.digitalGain);
@@ -2913,10 +2913,10 @@ class DebugConsole {
             this.updateNoiseReductionDisplay(preset.noiseReduction);
             this.updateWhiteBalanceMode(preset.whiteBalanceMode);
 
-            // 快速预设属于手动调参场景，自动切换到手动曝光
+            // 快速预设属于手动调参场景，自动切换到手动曝光 / Quick preset is a manual parameter adjustment scene and automatically switches to manual exposure.
             this.updateAutoExposureMode(false);
             
-            // 应用设置
+            // 应用设置 / Apply settings
             await this.applySettings();
             
             const presetNames = {
@@ -2935,7 +2935,7 @@ class DebugConsole {
     }
     
     /**
-     * 执行智能调整
+     * 执行智能调整 / Perform smart adjustments
      */
     async performAutoAdjust() {
         if (!this.cameraStatus.streaming) {
@@ -2951,7 +2951,7 @@ class DebugConsole {
         try {
             this.showNotification('正在分析图像质量...', 'info');
             
-            // 获取图像质量指标
+            // 获取图像质量指标 / Get image quality metrics
             const response = await fetch('/api/debug/camera/image-quality');
             if (!response.ok) {
                 throw new Error('获取图像质量失败');
@@ -2960,44 +2960,44 @@ class DebugConsole {
             const data = await response.json();
             const quality = this.normalizeQualityMetrics(data.quality || {});
             
-            // 基于质量指标自动调整参数
+            // 基于质量指标自动调整参数 / Automatically adjust parameters based on quality indicators
             const currentExposure = parseInt(document.getElementById('exposure-setting').value);
             const currentGain = parseFloat(document.getElementById('gain-setting').value);
             
             let adjustments = {};
             let suggestions = [];
             
-            // 曝光调整
+            // 曝光调整 / exposure adjustment
             if (quality.exposureLevel10 < 3) {
-                // 曝光不足
+                // 曝光不足 / Underexposure
                 adjustments.exposure = Math.min(100000, Math.round(currentExposure * 1.5));
                 suggestions.push('增加曝光时间以提高亮度');
             } else if (quality.exposureLevel10 > 8) {
-                // 过曝
+                // 过曝 / overexposed
                 adjustments.exposure = Math.max(1000, Math.round(currentExposure * 0.7));
                 suggestions.push('减少曝光时间以避免过曝');
             }
             
-            // 增益调整
+            // 增益调整 / Gain adjustment
             if (quality.noiseLevel10 > 7) {
-                // 噪点过高
+                // 噪点过高 / Noise is too high
                 adjustments.gain = Math.max(1.0, currentGain * 0.8);
                 suggestions.push('降低增益以减少噪点');
             } else if (quality.gainLevel < 3 && quality.exposureLevel10 < 5) {
-                // 增益过低且曝光不足
+                // 增益过低且曝光不足 / Gain is too low and underexposed
                 adjustments.gain = Math.min(16.0, currentGain * 1.3);
                 suggestions.push('适当提高增益');
             }
             
-            // 降噪调整
+            // 降噪调整 / Noise reduction adjustment
             if (quality.noiseLevel10 > 6) {
                 adjustments.noiseReduction = Math.min(4, quality.noiseLevel10 > 8 ? 3 : 2);
                 suggestions.push('启用降噪功能');
             }
             
-            // 对比度调整
+            // 对比度调整 / Contrast adjustment
             if (quality.exposureLevel10 > 5 && quality.exposureLevel10 < 7) {
-                adjustments.contrast = 1.2; // 适中曝光时提高对比度
+                adjustments.contrast = 1.2; // 适中曝光时提高对比度 / Improve contrast at moderate exposures
                 suggestions.push('适当提高对比度');
             }
             
@@ -3006,7 +3006,7 @@ class DebugConsole {
                 return;
             }
             
-            // 应用调整
+            // 应用调整 / Apply adjustments
             if (adjustments.exposure) {
                 document.getElementById('exposure-setting').value = adjustments.exposure;
                 this.updateExposureDisplay(adjustments.exposure);
@@ -3027,7 +3027,7 @@ class DebugConsole {
                 this.updateContrastDisplay(adjustments.contrast);
             }
             
-            // 应用设置
+            // 应用设置 / Apply settings
             await this.applySettings();
             
             this.showNotification(`智能调整完成: ${suggestions.join(', ')}`, 'success');
@@ -3039,12 +3039,12 @@ class DebugConsole {
     }
 }
 
-// 页面加载完成后初始化调试控制台
+// 页面加载完成后初始化调试控制台 / Initialize the debugging console after the page is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.debugConsole = new DebugConsole();
 });
 
-// 添加模态框样式
+// 添加模态框样式 / Add modal box style
 const modalStyles = `
 .modal {
     position: fixed;
@@ -3131,7 +3131,7 @@ const modalStyles = `
 }
 `;
 
-// 添加样式到页面
+// 添加样式到页面 / Add styles to the page
 const styleSheet = document.createElement('style');
 styleSheet.textContent = modalStyles;
 document.head.appendChild(styleSheet);

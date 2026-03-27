@@ -59,6 +59,7 @@ ogscope/
 - 类型提示: 使用 Python 类型注解
 - 文档字符串: Google 风格
 - 导入顺序: 标准库 → 第三方库 → 本地模块
+- 注释规范: 以后新增或修改注释必须使用中英文双语（中文 / English）
 
 ## 测试标记
 
@@ -67,16 +68,6 @@ ogscope/
 - `@pytest.mark.hardware`: 需要实际硬件的测试
 - `@pytest.mark.slow`: 运行较慢的测试
 
-## 配置管理
-
-- 默认配置: `default_config.json`
-- 环境变量: `.env` (从 `.env.example` 复制)
-- 运行时配置: `ogscope/config.py` (Pydantic Settings)
-
-## 参考项目
-
-- **PiFinder**: 板块求解寻星器架构参考
-- **OpenMV Polar Scope**: 极轴镜算法参考
 
 ## 注意事项
 
@@ -106,7 +97,7 @@ ogscope/
 - **虚拟环境目录**: [用户自定义]
 
 ### 系统服务配置
-项目已配置为系统服务，服务配置文件位于 `/etc/systemd/system/ogscope.service`：
+在开发板运行时项目已配置为系统服务，服务配置文件位于 `/etc/systemd/system/ogscope.service`：
 
 ```ini
 [Unit]
@@ -128,6 +119,8 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 ```
+
+在本地运行时，使用虚拟环境，因为有些硬件只能在开发板上调用，所以本地只是代码编写，远程测试
 
 **重要说明**：
 - 系统库（如 `libcamera`、`picamera2`）安装在系统环境中，通过 `PYTHONPATH` 环境变量注入到虚拟环境
@@ -206,24 +199,4 @@ chore: 构建/工具变更 / Build/tool changes
 3. **服务重启**: 项目以系统服务方式运行，修改后需要重启服务
 4. **调试前确认**: 如果有不明白的地方，先询问用户再开始工作
 
-### 常用调试命令
-```bash
-# 上传文件到开发板
-scp -P 22 /path/to/local/file ogstartech@192.168.31.16:/path/to/remote/file
-
-# 连接开发板
-ssh -p 22 ogstartech@192.168.31.16
-
-# 重启服务
-sudo systemctl restart ogscope
-
-# 查看服务状态
-sudo systemctl status ogscope
-
-# 查看服务日志
-sudo journalctl -u ogscope -f
-
-# 测试接口
-curl http://localhost:8000/api/debug/camera/image-quality
-```
 

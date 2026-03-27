@@ -1,13 +1,13 @@
 /**
  * OGScope Service Worker
- * 实现PWA离线功能和缓存策略
+ * 实现PWA离线功能和缓存策略 / Implement PWA offline functions and caching strategies
  */
 
 const CACHE_NAME = 'ogscope-v1.0.0';
 const STATIC_CACHE = 'ogscope-static-v1';
 const DYNAMIC_CACHE = 'ogscope-dynamic-v1';
 
-// 需要缓存的静态资源
+// 需要缓存的静态资源 / Static resources that need to be cached
 const STATIC_ASSETS = [
   '/',
   '/static/css/style.css',
@@ -17,21 +17,21 @@ const STATIC_ASSETS = [
   '/manifest.json'
 ];
 
-// 需要缓存的API路径模式
+// 需要缓存的API路径模式 / API path patterns that need to be cached
 const API_CACHE_PATTERNS = [
   /^\/api\/camera\/preview/,
   /^\/api\/camera\/config/,
   /^\/api\/status/
 ];
 
-// 不需要缓存的路径
+// 不需要缓存的路径 / No cached path is required
 const NO_CACHE_PATTERNS = [
   /^\/api\/camera\/stream/,
   /^\/api\/websocket/
 ];
 
 /**
- * 安装事件 - 缓存静态资源
+ * 安装事件 - 缓存静态资源 / Installation events - caching static resources
  */
 self.addEventListener('install', event => {
   console.log('[SW] Installing Service Worker...');
@@ -53,7 +53,7 @@ self.addEventListener('install', event => {
 });
 
 /**
- * 激活事件 - 清理旧缓存
+ * 激活事件 - 清理旧缓存 / Activation event - clean old cache
  */
 self.addEventListener('activate', event => {
   console.log('[SW] Activating Service Worker...');
@@ -78,46 +78,46 @@ self.addEventListener('activate', event => {
 });
 
 /**
- * 获取事件 - 实现缓存策略
+ * 获取事件 - 实现缓存策略 / Get events - implement caching strategy
  */
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
   
-  // 跳过非HTTP请求
+  // 跳过非HTTP请求 / Skip non-HTTP requests
   if (!url.protocol.startsWith('http')) {
     return;
   }
   
-  // 跳过不需要缓存的路径
+  // 跳过不需要缓存的路径 / Skip paths that don't need to be cached
   if (NO_CACHE_PATTERNS.some(pattern => pattern.test(url.pathname))) {
     return;
   }
   
-  // 静态资源缓存优先策略
+  // 静态资源缓存优先策略 / Static resource cache priority strategy
   if (STATIC_ASSETS.includes(url.pathname)) {
     event.respondWith(cacheFirst(request));
     return;
   }
   
-  // API请求网络优先策略
+  // API请求网络优先策略 / API request network priority policy
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirst(request));
     return;
   }
   
-  // 页面请求缓存优先策略
+  // 页面请求缓存优先策略 / Page request cache priority strategy
   if (request.mode === 'navigate') {
     event.respondWith(cacheFirst(request));
     return;
   }
   
-  // 其他请求网络优先
+  // 其他请求网络优先 / Other requests network priority
   event.respondWith(networkFirst(request));
 });
 
 /**
- * 缓存优先策略
+ * 缓存优先策略 / Cache priority strategy
  */
 async function cacheFirst(request) {
   try {
@@ -142,7 +142,7 @@ async function cacheFirst(request) {
 }
 
 /**
- * 网络优先策略
+ * 网络优先策略 / network first policy
  */
 async function networkFirst(request) {
   try {
@@ -162,7 +162,7 @@ async function networkFirst(request) {
       return cachedResponse;
     }
     
-    // 返回离线页面或错误响应
+    // 返回离线页面或错误响应 / Return offline page or error response
     if (request.mode === 'navigate') {
       return caches.match('/offline.html');
     }
@@ -179,7 +179,7 @@ async function networkFirst(request) {
 }
 
 /**
- * 推送通知事件
+ * 推送通知事件 / Push notification events
  */
 self.addEventListener('push', event => {
   console.log('[SW] Push message received');
@@ -213,7 +213,7 @@ self.addEventListener('push', event => {
 });
 
 /**
- * 通知点击事件
+ * 通知点击事件 / Notification click event
  */
 self.addEventListener('notificationclick', event => {
   console.log('[SW] Notification clicked:', event.notification.tag);
@@ -225,9 +225,9 @@ self.addEventListener('notificationclick', event => {
       clients.openWindow('/')
     );
   } else if (event.action === 'close') {
-    // 关闭通知，不做任何操作
+    // 关闭通知，不做任何操作 / Turn off notifications and do nothing
   } else {
-    // 默认行为：打开应用
+    // 默认行为：打开应用 / Default behavior: Open app
     event.waitUntil(
       clients.matchAll().then(clientList => {
         for (const client of clientList) {
@@ -244,7 +244,7 @@ self.addEventListener('notificationclick', event => {
 });
 
 /**
- * 后台同步事件
+ * 后台同步事件 / Background sync events
  */
 self.addEventListener('sync', event => {
   console.log('[SW] Background sync:', event.tag);
@@ -255,14 +255,14 @@ self.addEventListener('sync', event => {
 });
 
 /**
- * 执行后台同步
+ * 执行后台同步 / Perform background sync
  */
 async function doBackgroundSync() {
   try {
-    // 同步相机配置
+    // 同步相机配置 / Sync camera configuration
     await syncCameraConfig();
     
-    // 同步校准数据
+    // 同步校准数据 / Synchronize calibration data
     await syncAlignmentData();
     
     console.log('[SW] Background sync completed');
@@ -272,25 +272,25 @@ async function doBackgroundSync() {
 }
 
 /**
- * 同步相机配置
+ * 同步相机配置 / Sync camera configuration
  */
 async function syncCameraConfig() {
-  // 从IndexedDB获取待同步的配置
-  // 发送到服务器
-  // 清理本地数据
+  // 从IndexedDB获取待同步的配置 / Get the configuration to be synchronized from IndexedDB
+  // 发送到服务器 / Send to server
+  // 清理本地数据 / Clean local data
 }
 
 /**
- * 同步校准数据
+ * 同步校准数据 / Synchronize calibration data
  */
 async function syncAlignmentData() {
-  // 从IndexedDB获取待同步的校准数据
-  // 发送到服务器
-  // 清理本地数据
+  // 从IndexedDB获取待同步的校准数据 / Get calibration data to be synchronized from IndexedDB
+  // 发送到服务器 / Send to server
+  // 清理本地数据 / Clean local data
 }
 
 /**
- * 消息事件处理
+ * 消息事件处理 / Message event handling
  */
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {

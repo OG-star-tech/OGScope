@@ -8,10 +8,10 @@ from ogscope.web.api.alignment.routes import router as alignment_router
 from ogscope.web.api.system.routes import router as system_router
 from ogscope.web.api.debug.routes import router as debug_router
 
-# 创建主路由器
+# 创建主路由器 / Create the main router
 router = APIRouter()
 
-# 注册各个模块的路由
+# 注册各个模块的路由 / Register routes for each module
 router.include_router(camera_router)
 router.include_router(alignment_router)
 router.include_router(system_router)
@@ -20,7 +20,7 @@ router.include_router(debug_router)
 
 @router.get("/api")
 async def api_root():
-    """API根路径"""
+    """API根路径 / API root path"""
     return {
         "name": "OGScope API",
         "version": "1.0.0",

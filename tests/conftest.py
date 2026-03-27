@@ -10,13 +10,13 @@ from ogscope.web.app import app
 
 @pytest.fixture
 def client():
-    """FastAPI 测试客户端"""
+    """FastAPI 测试客户端 / FastAPI test client"""
     return TestClient(app)
 
 
 @pytest.fixture
 def temp_debug_dir(monkeypatch, tmp_path: Path):
-    """将调试目录重定向到临时目录，避免污染用户目录。"""
+    """将调试目录重定向到临时目录，避免污染用户目录。 / Redirect the debug directory to a temporary directory to avoid polluting the user directory."""
     from ogscope.web.api.debug import services as debug_services
 
     debug_root = tmp_path / "dev_captures"

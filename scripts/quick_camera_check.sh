@@ -1,10 +1,10 @@
 #!/bin/bash
-# 快速相机状态检查脚本
+# 快速相机状态检查脚本 / Quick camera status check script
 
 echo "🔍 OGScope 相机快速诊断"
 echo "=========================="
 
-# 检查服务状态
+# 检查服务状态 / Check service status
 echo "📋 检查服务状态..."
 sudo systemctl status ogscope --no-pager -l
 

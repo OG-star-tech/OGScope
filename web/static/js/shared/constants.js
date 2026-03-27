@@ -1,15 +1,14 @@
-/* OGScope - 常量定义 */
-
+/* OGScope - 常量定义 / OGScope - constant definition */
 /**
- * 应用常量
+ * 应用常量 / application constants
  */
 const APP_CONSTANTS = {
-    // 应用信息
+    // 应用信息 / Application information
     APP_NAME: 'OGScope',
     APP_VERSION: '1.0.0',
     APP_DESCRIPTION: '电子极轴镜系统',
     
-    // 默认配置
+    // 默认配置 / Default configuration
     DEFAULT_CONFIG: {
         video: {
             width: 1920,
@@ -30,7 +29,7 @@ const APP_CONSTANTS = {
         }
     },
     
-    // API端点
+    // API端点 / API endpoint
     API_ENDPOINTS: {
         VIDEO_STREAM: '/api/video/stream',
         CAMERA_PREVIEW: '/api/camera/preview',
@@ -39,46 +38,46 @@ const APP_CONSTANTS = {
         SETTINGS: '/api/settings'
     },
     
-    // 事件类型
+    // 事件类型 / event type
     EVENTS: {
-        // 视频相关
+        // 视频相关 / Video related
         VIDEO_LOADED: 'video:loaded',
         VIDEO_ERROR: 'video:error',
         VIDEO_PAUSED: 'video:paused',
         VIDEO_RESUMED: 'video:resumed',
         
-        // 校准相关
+        // 校准相关 / Calibration related
         ALIGNMENT_START: 'alignment:start',
         ALIGNMENT_PROGRESS: 'alignment:progress',
         ALIGNMENT_COMPLETE: 'alignment:complete',
         ALIGNMENT_ERROR: 'alignment:error',
         
-        // UI相关
+        // UI相关 / UI related
         UI_MODE_CHANGE: 'ui:mode:change',
         UI_SETTINGS_OPEN: 'ui:settings:open',
         UI_SETTINGS_CLOSE: 'ui:settings:close',
         
-        // 系统相关
+        // 系统相关 / System related
         SYSTEM_CONNECTED: 'system:connected',
         SYSTEM_DISCONNECTED: 'system:disconnected',
         SYSTEM_ERROR: 'system:error'
     },
     
-    // 模式类型
+    // 模式类型 / Mode type
     MODES: {
         POLAR: 'polar',
         STAR: 'star',
         GUIDE: 'guide'
     },
     
-    // 快门模式
+    // 快门模式 / shutter mode
     SHUTTER_MODES: {
         SINGLE: 'single',
         BULB: 'bulb',
         CONTINUOUS: 'continuous'
     },
     
-    // 状态类型
+    // 状态类型 / status type
     STATUS: {
         IDLE: 'idle',
         LOADING: 'loading',
@@ -88,14 +87,14 @@ const APP_CONSTANTS = {
         WARNING: 'warning'
     },
     
-    // 动画持续时间
+    // 动画持续时间 / animation duration
     ANIMATION_DURATION: {
         FAST: 150,
         NORMAL: 300,
         SLOW: 500
     },
     
-    // 响应式断点
+    // 响应式断点 / Responsive breakpoints
     BREAKPOINTS: {
         MOBILE: 480,
         TABLET: 768,
@@ -103,7 +102,7 @@ const APP_CONSTANTS = {
         LARGE: 1366
     },
     
-    // 颜色主题
+    // 颜色主题 / color theme
     THEMES: {
         DARK: {
             primary: '#ff3333',
@@ -134,7 +133,7 @@ const APP_CONSTANTS = {
         }
     },
     
-    // 语言配置
+    // 语言配置 / Language configuration
     LANGUAGES: {
         'zh-CN': {
             name: '简体中文',
@@ -146,13 +145,13 @@ const APP_CONSTANTS = {
         }
     },
     
-    // 单位系统
+    // 单位系统 / unit system
     UNITS: {
         METRIC: 'metric',
         IMPERIAL: 'imperial'
     },
     
-    // 精度设置
+    // 精度设置 / Precision settings
     PRECISION: {
         COORDINATES: 4,
         OFFSET: 1,
@@ -160,7 +159,7 @@ const APP_CONSTANTS = {
         BATTERY: 0
     },
     
-    // 更新间隔
+    // 更新间隔 / update interval
     UPDATE_INTERVALS: {
         GPS: 2000,
         BATTERY: 5000,
@@ -169,7 +168,7 @@ const APP_CONSTANTS = {
         OFFSET: 1000
     },
     
-    // 错误代码
+    // 错误代码 / error code
     ERROR_CODES: {
         CAMERA_NOT_FOUND: 'CAMERA_NOT_FOUND',
         CAMERA_PERMISSION_DENIED: 'CAMERA_PERMISSION_DENIED',
@@ -178,7 +177,7 @@ const APP_CONSTANTS = {
         SYSTEM_ERROR: 'SYSTEM_ERROR'
     },
     
-    // 错误消息
+    // 错误消息 / error message
     ERROR_MESSAGES: {
         CAMERA_NOT_FOUND: '未找到摄像头设备',
         CAMERA_PERMISSION_DENIED: '摄像头权限被拒绝',
@@ -187,7 +186,7 @@ const APP_CONSTANTS = {
         SYSTEM_ERROR: '系统错误'
     },
     
-    // 成功消息
+    // 成功消息 / success message
     SUCCESS_MESSAGES: {
         CAMERA_CONNECTED: '摄像头连接成功',
         ALIGNMENT_COMPLETE: '校准完成',
@@ -195,7 +194,7 @@ const APP_CONSTANTS = {
         SYSTEM_READY: '系统就绪'
     },
     
-    // 警告消息
+    // 警告消息 / warning message
     WARNING_MESSAGES: {
         LOW_BATTERY: '电量不足',
         WEAK_SIGNAL: '信号较弱',
@@ -205,7 +204,7 @@ const APP_CONSTANTS = {
 };
 
 /**
- * 本地存储键名
+ * 本地存储键名 / local storage key name
  */
 const STORAGE_KEYS = {
     SETTINGS: 'ogscope_settings',
@@ -217,10 +216,10 @@ const STORAGE_KEYS = {
 };
 
 /**
- * CSS类名
+ * CSS类名 / CSS class name
  */
 const CSS_CLASSES = {
-    // 状态类
+    // 状态类 / Status class
     LOADING: 'loading',
     LOADED: 'loaded',
     HIDDEN: 'hidden',
@@ -231,7 +230,7 @@ const CSS_CLASSES = {
     SUCCESS: 'success',
     WARNING: 'warning',
     
-    // 动画类
+    // 动画类 / Animation
     FADE_IN: 'fade-in',
     FADE_OUT: 'fade-out',
     SLIDE_UP: 'slide-up',
@@ -241,7 +240,7 @@ const CSS_CLASSES = {
     SCALE_IN: 'scale-in',
     SCALE_OUT: 'scale-out',
     
-    // 组件类
+    // 组件类 / Component class
     MENU_OPEN: 'open',
     EXPANDED: 'expanded',
     PRESSING: 'pressing',
@@ -249,35 +248,35 @@ const CSS_CLASSES = {
 };
 
 /**
- * DOM元素ID
+ * DOM元素ID / DOM element ID
  */
 const ELEMENT_IDS = {
-    // 主要容器
+    // 主要容器 / main container
     APP: 'app',
     LOADING_SCREEN: 'loading-screen',
     VIDEO_STREAM: 'video-stream',
     
-    // 加载相关
+    // 加载相关 / Loading related
     PROGRESS_BAR: 'progress-bar',
     LOADING_STATUS: 'loading-status',
     
-    // 菜单相关
+    // 菜单相关 / Menu related
     MENU_BUTTON: 'menu-button',
     MENU_PANEL: 'menu-panel',
     MENU_CLOSE: 'menu-close',
     
-    // 缩放相关
+    // 缩放相关 / Zoom related
     ZOOM_IN: 'zoom-in',
     ZOOM_OUT: 'zoom-out',
     ZOOM_THUMB: 'zoom-thumb',
     
-    // 快门相关
+    // 快门相关 / Shutter related
     SHUTTER_TOGGLE: 'shutter-toggle',
     SHUTTER_TOOLS: 'shutter-tools',
     SHUTTER_BUTTON: 'shutter-button',
     SHUTTER_TIMER: 'shutter-timer',
     
-    // 数据显示
+    // 数据显示 / Data display
     GPS_COORD: 'gps-coord',
     ALTITUDE: 'altitude',
     WIFI_STRENGTH: 'wifi-strength',
@@ -290,34 +289,34 @@ const ELEMENT_IDS = {
 };
 
 /**
- * 键盘快捷键
+ * 键盘快捷键 / keyboard shortcuts
  */
 const KEYBOARD_SHORTCUTS = {
-    // 功能键
+    // 功能键 / Function keys
     TOGGLE_MENU: 'Escape',
     TOGGLE_FULLSCREEN: 'F11',
     TOGGLE_ZOOM: 'z',
     CAPTURE_SCREEN: 'c',
     
-    // 模式切换
+    // 模式切换 / Mode switching
     POLAR_MODE: '1',
     STAR_MODE: '2',
     GUIDE_MODE: '3',
     
-    // 快门控制
+    // 快门控制 / shutter control
     SHUTTER_RELEASE: 'Space',
     SHUTTER_BULB: 'b',
     
-    // 校准控制
+    // 校准控制 / Calibration control
     START_ALIGNMENT: 'a',
     RESET_ALIGNMENT: 'r',
     
-    // 设置
+    // 设置 / Settings
     OPEN_SETTINGS: 's',
     TOGGLE_THEME: 't'
 };
 
-// 导出常量
+// 导出常量 / Export constants
 window.OGScopeConstants = {
     APP_CONSTANTS,
     STORAGE_KEYS,

@@ -15,11 +15,11 @@ from ogscope.utils.logging_config import setup_logging
 
 
 def setup_environment() -> Settings:
-    """初始化环境"""
-    # 加载配置
+    """初始化环境 / Initialize environment"""
+    # 加载配置 / Load configuration
     settings = get_settings()
     
-    # 配置日志
+    # 配置日志 / Configuration log
     setup_logging(settings.log_level, settings.log_file)
     
     logger.info(f"OGScope v{__version__} 启动中...")
@@ -30,16 +30,16 @@ def setup_environment() -> Settings:
 
 
 async def main() -> int:
-    """主函数"""
+    """主函数 / main function"""
     try:
         settings = setup_environment()
         
-        # TODO: 初始化各个模块
-        # - 相机模块
-        # - 显示模块
-        # - 算法模块
+        # TODO: 初始化各个模块 / TODO: Initialize each module
+        # - 相机模块 / - camera module
+        # - 显示模块 / - Display module
+        # - 算法模块 / - Algorithm module
         
-        # 启动 FastAPI Web 服务
+        # 启动 FastAPI Web 服务 / Start the FastAPI web service
         logger.info(f"启动 Web 服务: http://{settings.host}:{settings.port}")
         
         config = uvicorn.Config(
@@ -65,7 +65,7 @@ async def main() -> int:
 
 
 def cli() -> None:
-    """命令行入口点"""
+    """命令行入口点 / Command line entry point"""
     exit_code = asyncio.run(main())
     sys.exit(exit_code)
 

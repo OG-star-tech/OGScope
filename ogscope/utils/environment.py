@@ -17,32 +17,32 @@ def is_raspberry_pi() -> bool:
         bool: 如果是树莓派环境返回True，否则返回False
     """
     try:
-        # 方法1: 检查 /proc/cpuinfo 中的硬件信息
+        # 方法1: 检查 / Method 1: Check
         if Path("/proc/cpuinfo").exists():
             with open("/proc/cpuinfo", "r") as f:
                 cpuinfo = f.read()
                 if "BCM" in cpuinfo or "Raspberry Pi" in cpuinfo:
                     return True
         
-        # 方法2: 检查 /proc/device-tree/model
+        # 方法2: 检查 / Method 2: Check
         if Path("/proc/device-tree/model").exists():
             with open("/proc/device-tree/model", "r") as f:
                 model = f.read()
                 if "Raspberry Pi" in model:
                     return True
         
-        # 方法3: 检查环境变量
+        # 方法3: 检查环境变量 / Method 3: Check environment variables
         if os.environ.get("RASPBERRY_PI") == "1":
             return True
         
-        # 方法4: 检查是否存在树莓派特有的GPIO库
+        # 方法4: 检查是否存在树莓派特有的GPIO库 / Method 4: Check if there is a Raspberry Pi-specific GPIO library
         try:
             import RPi.GPIO
             return True
         except ImportError:
             pass
         
-        # 方法5: 检查是否存在picamera2库
+        # 方法5: 检查是否存在picamera2库 / 方法5: 检查是否存在picamera2库
         try:
             import picamera2
             return True
@@ -70,10 +70,10 @@ def get_device_info() -> dict:
         "python_version": platform.python_version(),
     }
     
-    # 如果是Linux系统，尝试获取更多信息
+    # 如果是Linux系统，尝试获取更多信息 / If it is a Linux system, try to get more information
     if platform.system() == "Linux":
         try:
-            # 获取CPU信息
+            # 获取CPU信息 / Get CPU information
             if Path("/proc/cpuinfo").exists():
                 with open("/proc/cpuinfo", "r") as f:
                     cpuinfo = f.read()
@@ -88,7 +88,7 @@ def get_device_info() -> dict:
                                 info["model"] = line.split(":")[1].strip()
                                 break
             
-            # 获取内存信息
+            # 获取内存信息 / Get memory information
             if Path("/proc/meminfo").exists():
                 with open("/proc/meminfo", "r") as f:
                     meminfo = f.read()
@@ -117,7 +117,7 @@ def get_camera_capabilities() -> dict:
         "available_cameras": [],
     }
     
-    # 检查picamera2
+    # 检查picamera2 / Check picamera2
     try:
         import picamera2
         capabilities["has_picamera2"] = True
@@ -125,7 +125,7 @@ def get_camera_capabilities() -> dict:
     except ImportError:
         pass
     
-    # 检查OpenCV相机
+    # 检查OpenCV相机 / Check OpenCV camera
     try:
         import cv2
         cap = cv2.VideoCapture(0)
@@ -136,10 +136,10 @@ def get_camera_capabilities() -> dict:
     except Exception:
         pass
     
-    # 检查USB相机
+    # 检查USB相机 / Check USB camera
     try:
         import cv2
-        for i in range(5):  # 检查前5个设备
+        for i in range(5):  # 检查前5个设备 / Check top 5 devices
             cap = cv2.VideoCapture(i)
             if cap.isOpened():
                 capabilities["has_usb_camera"] = True
@@ -159,15 +159,15 @@ def should_use_simulation_mode() -> bool:
     Returns:
         bool: 如果应该使用模拟模式返回True
     """
-    # 强制使用模拟模式的环境变量
+    # 强制使用模拟模式的环境变量 / Environment variables to force use of simulation mode
     if os.environ.get("OGSCOPE_SIMULATION_MODE") == "1":
         return True
     
-    # 强制禁用模拟模式的环境变量
+    # 强制禁用模拟模式的环境变量 / Environment variable to force disabling of simulation mode
     if os.environ.get("OGSCOPE_SIMULATION_MODE") == "0":
         return False
     
-    # 默认逻辑：非树莓派环境使用模拟模式
+    # 默认逻辑：非树莓派环境使用模拟模式 / Default logic: non-Raspberry Pi environments use simulation mode
     return not is_raspberry_pi()
 
 
@@ -182,10 +182,10 @@ def get_simulation_config() -> dict:
         "enabled": should_use_simulation_mode(),
         "virtual_resolution": (1920, 1080),
         "virtual_fps": 30,
-        "virtual_exposure": 10000,  # 微秒
+        "virtual_exposure": 10000,  # 微秒 / microseconds
         "virtual_gain": 1.0,
-        "star_field_density": 0.1,  # 星点密度
-        "polar_star_position": (0.5, 0.3),  # 极轴星位置 (x, y)
-        "noise_level": 0.05,  # 噪声水平
-        "atmospheric_turbulence": True,  # 大气湍流效果
+        "star_field_density": 0.1,  # 星点密度 / Star point density
+        "polar_star_position": (0.5, 0.3),  # 极轴星位置 (x, y) / Polar star position (x, y)
+        "noise_level": 0.05,  # 噪声水平 / noise level
+        "atmospheric_turbulence": True,  # 大气湍流效果 / atmospheric turbulence effect
     }

@@ -1,6 +1,6 @@
 /**
- * OGScope PWA功能模块
- * 处理PWA相关的所有功能
+ * OGScope PWA功能模块 / OGScope PWA function module
+ * 处理PWA相关的所有功能 / Handles all PWA related functions
  */
 
 import { Utils, EventEmitter } from '../shared/utils.js';
@@ -15,7 +15,7 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 初始化PWA管理器
+     * 初始化PWA管理器 / Initialize PWA Manager
      */
     init() {
         this.setupEventListeners();
@@ -24,10 +24,10 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 设置事件监听器
+     * 设置事件监听器 / Set event listener
      */
     setupEventListeners() {
-        // PWA安装提示事件
+        // PWA安装提示事件 / PWA installation prompt event
         window.addEventListener('beforeinstallprompt', (e) => {
             console.log('[PWA] 安装提示事件触发');
             e.preventDefault();
@@ -35,7 +35,7 @@ export class PWAManager extends EventEmitter {
             this.emit(EVENTS.PWA_INSTALL_PROMPT, e);
         });
 
-        // PWA安装完成事件
+        // PWA安装完成事件 / PWA installation completion event
         window.addEventListener('appinstalled', () => {
             console.log('[PWA] 应用已安装');
             this.isInstalled = true;
@@ -43,7 +43,7 @@ export class PWAManager extends EventEmitter {
             this.emit(EVENTS.PWA_INSTALLED);
         });
 
-        // Service Worker更新事件
+        // Service Worker更新事件 / Service Worker update event
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 console.log('[PWA] Service Worker已更新');
@@ -53,8 +53,8 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 注册Service Worker
-     * @returns {Promise<boolean>} 是否注册成功
+     * 注册Service Worker / Register Service Worker
+     * @returns {Promise<boolean>} 是否注册成功 / Whether the registration is successful
      */
     async registerServiceWorker() {
         if (!('serviceWorker' in navigator)) {
@@ -68,7 +68,7 @@ export class PWAManager extends EventEmitter {
             
             console.log('[PWA] Service Worker注册成功:', registration);
             
-            // 检查更新
+            // 检查更新 / Check for updates
             registration.addEventListener('updatefound', () => {
                 const newWorker = registration.installing;
                 newWorker.addEventListener('statechange', () => {
@@ -87,16 +87,16 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 检查安装状态
+     * 检查安装状态 / Check installation status
      */
     checkInstallationStatus() {
-        // 检查是否在独立模式下运行（已安装）
+        // 检查是否在独立模式下运行（已安装） / Check if running in standalone mode (already installed)
         if (window.matchMedia('(display-mode: standalone)').matches) {
             this.isInstalled = true;
             console.log('[PWA] 应用已在独立模式下运行');
         }
         
-        // 检查是否在iOS Safari中添加到主屏幕
+        // 检查是否在iOS Safari中添加到主屏幕 / Check if added to home screen in iOS Safari
         if (window.navigator.standalone === true) {
             this.isInstalled = true;
             console.log('[PWA] 应用已在iOS主屏幕中');
@@ -104,8 +104,8 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 显示安装提示
-     * @returns {boolean} 是否可以显示提示
+     * 显示安装提示 / Show installation prompts
+     * @returns {boolean} 是否可以显示提示 / Whether prompts can be displayed
      */
     showInstallPrompt() {
         if (!this.deferredPrompt) {
@@ -118,14 +118,14 @@ export class PWAManager extends EventEmitter {
             return false;
         }
 
-        // 触发安装提示显示事件
+        // 触发安装提示显示事件 / Trigger the installation prompt display event
         this.emit('pwa:install:show');
         return true;
     }
 
     /**
-     * 安装应用
-     * @returns {Promise<boolean>} 是否安装成功
+     * 安装应用 / Install app
+     * @returns {Promise<boolean>} 是否安装成功 / Whether the installation was successful
      */
     async installApp() {
         if (!this.deferredPrompt) {
@@ -136,10 +136,10 @@ export class PWAManager extends EventEmitter {
         try {
             console.log('[PWA] 开始安装应用...');
             
-            // 显示安装提示
+            // 显示安装提示 / Show installation prompts
             this.deferredPrompt.prompt();
             
-            // 等待用户响应
+            // 等待用户响应 / Wait for user response
             const { outcome } = await this.deferredPrompt.userChoice;
             
             console.log('[PWA] 用户选择:', outcome);
@@ -152,7 +152,7 @@ export class PWAManager extends EventEmitter {
                 this.emit('pwa:install:rejected');
             }
             
-            // 清除提示
+            // 清除提示 / Clear prompt
             this.deferredPrompt = null;
             return outcome === 'accepted';
         } catch (error) {
@@ -162,24 +162,24 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 检查是否可以安装
-     * @returns {boolean} 是否可以安装
+     * 检查是否可以安装 / Check if it can be installed
+     * @returns {boolean} 是否可以安装 / Whether it can be installed
      */
     canInstall() {
         return this.deferredPrompt !== null && !this.isInstalled;
     }
 
     /**
-     * 检查是否已安装
-     * @returns {boolean} 是否已安装
+     * 检查是否已安装 / Check if it is installed
+     * @returns {boolean} 是否已安装 / Whether it is installed
      */
     isAppInstalled() {
         return this.isInstalled;
     }
 
     /**
-     * 获取PWA信息
-     * @returns {Object} PWA信息
+     * 获取PWA信息 / Get PWA information
+     * @returns {Object} PWA信息 / PWA information
      */
     getPWAInfo() {
         return {
@@ -192,8 +192,8 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 更新Service Worker
-     * @returns {Promise<boolean>} 是否更新成功
+     * 更新Service Worker / Update Service Worker
+     * @returns {Promise<boolean>} 是否更新成功 / Whether the update is successful
      */
     async updateServiceWorker() {
         if (!('serviceWorker' in navigator)) {
@@ -215,15 +215,15 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 检查网络状态
-     * @returns {boolean} 是否在线
+     * 检查网络状态 / Check network status
+     * @returns {boolean} 是否在线 / whether online
      */
     isOnline() {
         return Utils.isOnline();
     }
 
     /**
-     * 添加离线事件监听
+     * 添加离线事件监听 / Add offline event listening
      */
     setupOfflineHandling() {
         window.addEventListener('online', () => {
@@ -238,8 +238,8 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 获取应用版本信息
-     * @returns {Object} 版本信息
+     * 获取应用版本信息 / Get application version information
+     * @returns {Object} 版本信息 / version information
      */
     getVersionInfo() {
         return {
@@ -255,8 +255,8 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 请求通知权限
-     * @returns {Promise<boolean>} 是否获得权限
+     * 请求通知权限 / Request notification permission
+     * @returns {Promise<boolean>} 是否获得权限 / whether to obtain permission
      */
     async requestNotificationPermission() {
         if (!('Notification' in window)) {
@@ -283,10 +283,10 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 显示通知
-     * @param {string} title - 通知标题
-     * @param {Object} options - 通知选项
-     * @returns {Notification} 通知对象
+     * 显示通知 / Show notification
+     * @param {string} title - 通知标题 / notification title
+     * @param {Object} options - 通知选项 / notification options
+     * @returns {Notification} 通知对象 / notification object
      */
     showNotification(title, options = {}) {
         if (!('Notification' in window) || Notification.permission !== 'granted') {
@@ -306,7 +306,7 @@ export class PWAManager extends EventEmitter {
     }
 
     /**
-     * 销毁PWA管理器
+     * 销毁PWA管理器 / Destroy PWA Manager
      */
     destroy() {
         this.deferredPrompt = null;
