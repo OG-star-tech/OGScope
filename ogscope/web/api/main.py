@@ -18,24 +18,3 @@ router.include_router(system_router)
 router.include_router(debug_router)
 
 
-@router.get("/api")
-async def api_root():
-    """API根路径 / API root path"""
-    return {
-        "name": "OGScope API",
-        "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs",
-        "modules": {
-            "camera": "相机控制API",
-            "alignment": "极轴校准API", 
-            "system": "系统信息API",
-            "debug": "调试控制台API"
-        },
-        "endpoints": {
-            "camera": "/api/camera/",
-            "alignment": "/api/alignment/",
-            "system": "/api/system/",
-            "debug": "/api/debug/"
-        }
-    }

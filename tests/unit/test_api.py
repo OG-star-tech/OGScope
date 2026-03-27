@@ -33,15 +33,6 @@ def test_app_api_root(client):
     assert data["docs"] == "/docs"
 
 
-@pytest.mark.unit
-def test_router_api_root(client):
-    """测试路由模块级 / Test routing module level"""
-    response = client.get("/api/api")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["name"] == "OGScope API"
-    assert "debug" in data["modules"]
-
 
 @pytest.mark.unit
 def test_camera_status(client):

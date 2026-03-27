@@ -1,20 +1,9 @@
 """
-极轴校准相关API路由
+极轴校准相关API路由 / Polar alignment API routes
 """
 from fastapi import APIRouter
-from ogscope.web.api.models.schemas import PolarAlignStatus, AlignmentStatus
 
 router = APIRouter()
-
-
-@router.post("/polar-align/start")
-async def start_polar_alignment():
-    """开始极轴校准 / Start polar alignment"""
-    # TODO: 实现极轴校准启动 / TODO: Implement polar axis calibration startup
-    return {
-        "success": True,
-        "message": "极轴校准已启动",
-    }
 
 
 @router.post("/alignment/start")
@@ -44,23 +33,3 @@ async def get_alignment_status():
     }
 
 
-@router.get("/polar-align/status")
-async def get_polar_align_status() -> PolarAlignStatus:
-    """获取极轴校准状态 / Get polar calibration status"""
-    # TODO: 实现状态获取 / TODO: Implement status acquisition
-    return PolarAlignStatus(
-        is_running=False,
-        progress=0.0,
-        azimuth_error=0.0,
-        altitude_error=0.0,
-    )
-
-
-@router.post("/polar-align/stop")
-async def stop_polar_alignment():
-    """停止极轴校准 / Stop polar calibration"""
-    # TODO: 实现极轴校准停止 / TODO: Implement polar axis calibration stop
-    return {
-        "success": True,
-        "message": "极轴校准已停止",
-    }

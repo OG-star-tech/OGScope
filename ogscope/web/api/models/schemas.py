@@ -22,14 +22,6 @@ class CameraSettings(BaseModel):
     colorMode: Optional[str] = 'color'  # 颜色模式: 'color' | 'mono'
 
 
-class PolarAlignStatus(BaseModel):
-    """极轴校准状态 / Polar alignment status"""
-    is_running: bool
-    progress: float  # 0-100
-    azimuth_error: float  # 方位误差 (角分) / Bearing error (angular minutes)
-    altitude_error: float  # 高度误差 (角分) / Height error (arc minutes)
-
-
 class CameraPreset(BaseModel):
     """相机预设 / camera presets"""
     name: str
