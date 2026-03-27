@@ -33,3 +33,33 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
 
     return debug_root
 
+
+@pytest.fixture
+def temp_catalog_dir(tmp_path: Path):
+    """重定向星表目录到临时路径 / Redirect catalog directory to temp path."""
+    from ogscope.data.catalog.service import catalog_service
+
+    catalog_root = tmp_path / "catalog"
+    catalog_service.reconfigure_storage(catalog_root)
+    return catalog_root
+
+
+@pytest.fixture
+def temp_analysis_dir(tmp_path: Path):
+    """重定向分析目录到临时路径 / Redirect analysis directory to temp path."""
+    from ogscope.web.api.analysis.services import analysis_service
+
+    analysis_root = tmp_path / "analysis"
+    upload_root = analysis_root / "uploads"
+    jobs_root = analysis_root / "jobs"
+    results_root = analysis_root / "results"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    results_root.mkdir(parents=True, exist_ok=True)
+
+    analysis_service.upload_root = upload_root
+    analysis_service.jobs_root = jobs_root
+    analysis_service.results_root = results_root
+    analysis_service._jobs = {}
+    return analysis_root
+

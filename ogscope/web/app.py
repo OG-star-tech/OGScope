@@ -53,6 +53,14 @@ openapi_tags = [
         "name": "Debug - 调试",
         "description": "调试控制台接口 / Debug console endpoints",
     },
+    {
+        "name": "Analysis - 分析",
+        "description": "素材分析与任务管理 / Asset analysis and job management",
+    },
+    {
+        "name": "Catalog - 星表",
+        "description": "星表下载、索引与状态 / Catalog download, indexing, and status",
+    },
 ]
 
 # 创建 FastAPI 应用（禁用默认 ReDoc，使用自定义稳定版本）
@@ -117,6 +125,19 @@ async def debug_console(request: Request):
         }
     )
 
+
+@app.get("/debug/analysis", response_class=HTMLResponse)
+async def debug_analysis_console(request: Request):
+    """星图解算调试页面 / Plate solve debug page"""
+    return templates.TemplateResponse(
+        "debug_analysis.html",
+        {
+            "request": request,
+            "version": __version__,
+            "app_name": "OGScope Plate Solve Debug Console",
+        },
+    )
+
 @app.get("/api")
 async def api_root():
     """API根路径 / API root path"""
@@ -128,7 +149,9 @@ async def api_root():
         "endpoints": {
             "camera": "/api/camera/",
             "alignment": "/api/alignment/",
-            "system": "/api/system/"
+            "system": "/api/system/",
+            "analysis": "/api/analysis/",
+            "catalog": "/api/catalog/",
         }
     }
 

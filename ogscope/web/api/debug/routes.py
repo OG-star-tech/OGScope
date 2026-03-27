@@ -10,6 +10,7 @@ from ogscope.web.api.debug.services import (
     DebugPresetService, 
     DebugFileService
 )
+from ogscope.core.realtime import realtime_solve_service
 
 router = APIRouter()
 
@@ -346,5 +347,40 @@ async def delete_capture_file(filename: str):
     """删除拍摄文件 / Delete shooting files"""
     try:
         return await DebugFileService.delete_file(filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 实时解算 ==================== / ==================== Realtime Solving ====================
+
+
+@router.post("/debug/analysis/realtime/start")
+async def start_realtime_solving(
+    hint_ra_deg: float | None = Query(default=None),
+    hint_dec_deg: float | None = Query(default=None),
+):
+    """启动实时解算 / Start realtime solving"""
+    try:
+        return await realtime_solve_service.start(
+            hint_ra_deg=hint_ra_deg, hint_dec_deg=hint_dec_deg
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/analysis/realtime/stop")
+async def stop_realtime_solving():
+    """停止实时解算 / Stop realtime solving"""
+    try:
+        return await realtime_solve_service.stop()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/analysis/realtime/status")
+async def get_realtime_solving_status():
+    """获取实时解算状态 / Get realtime solving status"""
+    try:
+        return await realtime_solve_service.get_status()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
