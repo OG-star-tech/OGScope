@@ -159,7 +159,7 @@ ssh orangepi
 
 ### 3.2 PyCharm 配置
 
-详细步骤见 [PyCharm 远程开发配置](./development/pycharm-remote.md)
+建议以 [开发指南](./development/README.md) 中的“远程开发（手动部署 + systemd）”流程为准。
 
 **快速版本**：
 

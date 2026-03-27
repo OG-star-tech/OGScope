@@ -87,23 +87,23 @@ python -m ogscope.main
 - [硬件调试](docs/hardware/hardware-debug.md)
 
 ### 开发文档
-- [开发指南](docs/development/README.md)
-- [PyCharm 远程开发](docs/development/pycharm-remote.md)
+- [开发指南（中文）](docs/development/README.md)
+- [开发指南（English）](docs/development/README_EN.md)
 - [FastAPI 开发](docs/development/fastapi-guide.md)
 - [测试指南](docs/development/testing-guide.md)
 
 ## 开发
 
-详见 [开发文档](docs/development/README.md)
+详见 [开发文档（中文）](docs/development/README.md) /
+[Development Guide (English)](docs/development/README_EN.md)
 
-### 远程开发配置 (PyCharm Pro)
+### 远程开发配置
 
-推荐使用 PyCharm 的文件同步功能进行开发：
+当前推荐流程详见 [开发指南](docs/development/README.md)：
 
-1. 配置 SSH 连接到 Raspberry Pi Zero 2W
-2. 设置文件自动同步到开发板
-3. 在本地开发，远程测试硬件功能
-4. 详细步骤见 [PyCharm 文件同步开发指南](docs/development/pycharm-remote.md)
+1. 在本地 IDE 编写代码
+2. 手动上传代码到开发板
+3. 使用 `systemd` 重启并验证服务
 
 ## 项目结构
 

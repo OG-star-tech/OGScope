@@ -1,23 +1,38 @@
 #!/bin/bash
 # OGScope 安装脚本
-# 适用于 Raspberry Pi Zero 2W (Raspberry Pi OS)
+# 适用于 Raspberry Pi / Orange Pi (Debian/Ubuntu 系)
 
-set -e  # 遇到错误立即退出
+set -euo pipefail
 
 echo "======================================"
 echo "  OGScope 安装脚本"
 echo "======================================"
 
 # 检查是否为 root
-if [ "$EUID" -eq 0 ]; then 
+if [ "${EUID}" -eq 0 ]; then
     echo "❌ 请不要使用 root 用户运行此脚本"
     exit 1
 fi
 
+# 基本路径
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SERVICE_NAME="ogscope"
+SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+
+echo "📁 项目目录: ${PROJECT_DIR}"
+
+# 检查项目结构
+if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
+    echo "❌ 未找到 pyproject.toml，请在项目目录中执行此脚本"
+    exit 1
+fi
+
+cd "${PROJECT_DIR}"
+
 # 更新系统
 echo "📦 更新系统包..."
 sudo apt update
-sudo apt upgrade -y
 
 # 安装系统依赖
 echo "📦 安装系统依赖..."
@@ -27,6 +42,7 @@ sudo apt install -y \
     python3-venv \
     python3-dev \
     git \
+    curl \
     build-essential \
     libopencv-dev \
     libjpeg-dev \
@@ -37,96 +53,98 @@ sudo apt install -y \
     python3-picamera2 \
     python3-numpy
 
+# Python 版本提示
+PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+echo "🐍 当前 python3 版本: ${PY_VER}"
+echo "ℹ️ 项目要求: Python ^3.10（详见 pyproject.toml）"
+
 # 安装 Poetry
-if ! command -v poetry &> /dev/null; then
+if ! command -v poetry >/dev/null 2>&1; then
     echo "📦 安装 Poetry..."
     curl -sSL https://install.python-poetry.org | python3 -
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    export PATH="$HOME/.local/bin:$PATH"
-else
-    echo "✅ Poetry 已安装"
+fi
+
+# 设置 Poetry 路径
+export PATH="${HOME}/.local/bin:${PATH}"
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "${HOME}/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${HOME}/.bashrc"
 fi
 
 # 验证 Poetry 安装
-poetry --version || {
-    echo "❌ Poetry 安装失败"
-    exit 1
-}
-
-# 启用树莓派相机接口
-echo "📷 启用树莓派相机接口..."
-sudo raspi-config nonint do_camera 0
-
-# 创建项目目录
-INSTALL_DIR="$HOME/OGScope"
-if [ ! -d "$INSTALL_DIR" ]; then
-    echo "📁 创建项目目录: $INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR"
-else
-    echo "✅ 项目目录已存在: $INSTALL_DIR"
-fi
-
-cd "$INSTALL_DIR"
-
-# 克隆或更新代码（如果是从 GitHub 安装）
-if [ -d ".git" ]; then
-    echo "🔄 更新代码..."
-    git pull
-else
-    echo "⚠️  请手动克隆代码或复制文件到 $INSTALL_DIR"
-fi
+poetry --version >/dev/null
+echo "✅ Poetry 已安装: $(poetry --version)"
 
 # 安装 Python 依赖
 echo "📦 安装 Python 依赖..."
-poetry install --no-interaction --no-root
+poetry install --no-interaction
 
-# 创建必要的目录
-echo "📁 创建数据目录..."
-mkdir -p logs data uploads
-
-# 创建配置文件
-if [ ! -f "config.json" ]; then
-    echo "⚙️  创建配置文件..."
-    cp default_config.json config.json
-    echo "⚠️  请编辑 config.json 修改配置"
+# 解析虚拟环境解释器路径
+VENV_PATH="$(poetry env info --path)"
+VENV_PYTHON="${VENV_PATH}/bin/python"
+if [ ! -x "${VENV_PYTHON}" ]; then
+    echo "❌ 未找到虚拟环境解释器: ${VENV_PYTHON}"
+    exit 1
 fi
 
-# 配置 systemd 服务
-echo "⚙️  配置系统服务..."
-sudo tee /etc/systemd/system/ogscope.service > /dev/null <<EOF
+# 创建必要目录
+echo "📁 创建必要目录..."
+mkdir -p logs data uploads
+
+# 兼容不同发行版的系统 Python 包路径
+PY_PATHS=()
+[ -d "/usr/lib/python3/dist-packages" ] && PY_PATHS+=("/usr/lib/python3/dist-packages")
+[ -d "/usr/local/lib/python3.13/dist-packages" ] && PY_PATHS+=("/usr/local/lib/python3.13/dist-packages")
+[ -d "/usr/local/lib/python3.12/dist-packages" ] && PY_PATHS+=("/usr/local/lib/python3.12/dist-packages")
+[ -d "/usr/local/lib/python3.11/dist-packages" ] && PY_PATHS+=("/usr/local/lib/python3.11/dist-packages")
+[ -d "/usr/local/lib/python3.10/dist-packages" ] && PY_PATHS+=("/usr/local/lib/python3.10/dist-packages")
+
+PYTHONPATH_VALUE="$(IFS=:; echo "${PY_PATHS[*]}")"
+[ -z "${PYTHONPATH_VALUE}" ] && PYTHONPATH_VALUE="/usr/lib/python3/dist-packages"
+
+LD_LIBRARY_PATH_VALUE="/usr/lib/aarch64-linux-gnu"
+
+# 生成 systemd 服务
+echo "⚙️ 配置 systemd 服务: ${SERVICE_PATH}"
+sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
-Description=OGScope Electronic Polar Scope
+Description=OGScope Service
 After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$HOME/.local/bin/poetry run python -m ogscope.main
+User=${USER}
+WorkingDirectory=${PROJECT_DIR}
+Environment=PYTHONPATH=${PYTHONPATH_VALUE}
+Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH_VALUE}
+Environment=OGSCOPE_RELOAD=false
+Environment=OGSCOPE_LOG_LEVEL=INFO
+ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure
-RestartSec=10
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 重新加载 systemd
+# 重新加载并启用服务
 sudo systemctl daemon-reload
-
-# 启用服务
-echo "🚀 启用 OGScope 服务..."
-sudo systemctl enable ogscope.service
+sudo systemctl enable "${SERVICE_NAME}"
 
 echo ""
 echo "======================================"
-echo "  ✅ 安装完成！"
+echo "  ✅ 安装完成"
 echo "======================================"
+echo "服务名称: ${SERVICE_NAME}"
+echo "虚拟环境: ${VENV_PATH}"
+echo "启动命令: ${VENV_PYTHON} -m ogscope.main"
+echo "PYTHONPATH: ${PYTHONPATH_VALUE}"
+echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH_VALUE}"
 echo ""
 echo "下一步："
-echo "1. 编辑配置: nano $INSTALL_DIR/config.json"
-echo "2. 启动服务: sudo systemctl start ogscope"
-echo "3. 查看状态: sudo systemctl status ogscope"
-echo "4. 查看日志: journalctl -u ogscope -f"
+echo "1. 启动服务: sudo systemctl start ${SERVICE_NAME}"
+echo "2. 查看状态: sudo systemctl status ${SERVICE_NAME}"
+echo "3. 查看日志: sudo journalctl -u ${SERVICE_NAME} -f"
+echo "4. 重启调试: sudo systemctl restart ${SERVICE_NAME}"
 echo "5. 访问 Web: http://$(hostname -I | awk '{print $1}'):8000"
 echo ""
 

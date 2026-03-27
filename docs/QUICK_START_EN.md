@@ -122,7 +122,7 @@ After starting the application, access:
 ## 📚 Next Steps
 
 - Read [Development Guide](development/README.md)
-- Check [PyCharm Remote Development](development/pycharm-remote.md)
+- Follow the remote workflow in [Development Guide](development/README.md)
 - Explore [API Documentation](API_ARCHITECTURE.md)
 
 ## 🆘 Troubleshooting

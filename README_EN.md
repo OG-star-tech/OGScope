@@ -87,23 +87,23 @@ After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
 - [Hardware Debugging](docs/hardware/hardware-debug.md)
 
 ### Development Documentation
-- [Development Guide](docs/development/README.md)
-- [PyCharm Remote Development](docs/development/pycharm-remote.md)
+- [Development Guide (English)](docs/development/README_EN.md)
+- [Development Guide (中文)](docs/development/README.md)
 - [FastAPI Development](docs/development/fastapi-guide.md)
 - [Testing Guide](docs/development/testing-guide.md)
 
 ## Development
 
-See [Development Documentation](docs/development/README.md) for details.
+See [Development Guide (English)](docs/development/README_EN.md) for details.
 
-### Remote Development Configuration (PyCharm Pro)
+### Remote Development Configuration
 
-Recommended approach using PyCharm's file synchronization:
+The current recommended workflow is documented in the
+[Development Guide (English)](docs/development/README_EN.md):
 
-1. Configure SSH connection to Raspberry Pi Zero 2W
-2. Set up automatic file synchronization to the development board
-3. Develop locally, test hardware functions remotely
-4. Detailed steps in [PyCharm File Sync Development Guide](docs/development/pycharm-remote.md)
+1. Write code in local IDE
+2. Upload code manually to the dev board
+3. Restart and verify service via `systemd`
 
 ## Project Structure
 
