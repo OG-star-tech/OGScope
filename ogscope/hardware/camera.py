@@ -54,6 +54,9 @@ class CameraInterface(ABC):
 
 class IMX327MIPICamera(CameraInterface):
     """IMX327 MIPI 相机驱动 - 基于 Picamera2 / IMX327 MIPI camera driver - based on Picamera2"""
+    SENSOR_MAX_WIDTH = 1920
+    SENSOR_MAX_HEIGHT = 1020
+    PREVIEW_BUFFER_COUNT = 2
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -62,8 +65,9 @@ class IMX327MIPICamera(CameraInterface):
         self.is_capturing = False
         
         # 相机参数 / Camera parameters
-        self.width = config.get('width', 640)
-        self.height = config.get('height', 360)
+        requested_width = int(config.get('width', 640))
+        requested_height = int(config.get('height', 360))
+        self.width, self.height = self._sanitize_output_resolution(requested_width, requested_height)
         self.fps = config.get('fps', 5)
         self.exposure_us = config.get('exposure_us', 10000)
         self.analogue_gain = config.get('analogue_gain', 1.0)
@@ -74,37 +78,56 @@ class IMX327MIPICamera(CameraInterface):
         self.color_mode = config.get('color_mode', 'color')  # 'color' | 'mono'
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率） / Sampling mode and size (supersample: acquisition resolution can be higher than output resolution)
         self.sampling_mode = config.get('sampling_mode', 'supersample')  # supersample | native | crop
-        
-        # 根据采样模式设置捕获和输出分辨率 / Set capture and output resolution according to sampling mode
-        if self.sampling_mode == 'supersample':
-            # 超采样模式：设置更高的捕获分辨率，输出分辨率为配置的分辨率 / Oversampling mode: Set a higher capture resolution, and the output resolution is the configured resolution
-            self.output_width = self.width
-            self.output_height = self.height
-            # 设置捕获分辨率为更高的分辨率（推荐2x超采样） / Set the capture resolution to a higher resolution (2x oversampling recommended)
-            self.capture_width = max(self.width * 2, 1280)  # 至少1280宽度 / At least 1280 width
-            self.capture_height = max(self.height * 2, 720)  # 至少720高度 / At least 720 height
-            # 确保捕获分辨率为16:9比例 / Make sure the capture resolution is 16:9 ratio
-            self._adjust_capture_resolution_to_aspect_ratio()
-        else:
-            # native/crop模式：捕获和输出分辨率相同 / native/crop mode: capture and output resolutions are the same
-            self.capture_width = self.width
-            self.capture_height = self.height
-            self.output_width = self.width
-            self.output_height = self.height
+        (
+            self.sampling_mode,
+            self.capture_width,
+            self.capture_height,
+            self.output_width,
+            self.output_height,
+        ) = self._resolve_sampling_layout(self.sampling_mode, self.width, self.height)
         
         logger.info(f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps")
     
-    def _adjust_capture_resolution_to_aspect_ratio(self):
-        """调整捕获分辨率为16:9比例 / Adjust capture resolution to 16:9 ratio"""
-        target_aspect_ratio = 16.0 / 9.0
-        current_aspect_ratio = self.capture_width / self.capture_height
-        
-        if abs(current_aspect_ratio - target_aspect_ratio) > 0.01:  # 允许小的误差 / Allow small errors
-            # 以宽度为准，调整高度 / Adjust height based on width
-            self.capture_height = int(self.capture_width / target_aspect_ratio)
-            # 确保高度是偶数（某些相机要求） / Make sure the height is an even number (required by some cameras)
-            if self.capture_height % 2 != 0:
-                self.capture_height += 1
+    @staticmethod
+    def _align_even(value: int) -> int:
+        value = max(2, int(value))
+        return value if value % 2 == 0 else value - 1
+
+    def _sanitize_output_resolution(self, width: int, height: int) -> Tuple[int, int]:
+        safe_w = min(self.SENSOR_MAX_WIDTH, max(160, int(width)))
+        safe_h = min(self.SENSOR_MAX_HEIGHT, max(120, int(height)))
+        safe_w = self._align_even(safe_w)
+        safe_h = self._align_even(safe_h)
+        if (safe_w, safe_h) != (int(width), int(height)):
+            logger.warning(
+                f"请求分辨率 {width}x{height} 超出 IMX327 安全范围，已调整为 {safe_w}x{safe_h}"
+            )
+        return safe_w, safe_h
+
+    def _resolve_sampling_layout(
+        self, mode: str, output_width: int, output_height: int
+    ) -> Tuple[str, int, int, int, int]:
+        output_width, output_height = self._sanitize_output_resolution(
+            output_width, output_height
+        )
+        if mode not in {"supersample", "native", "crop"}:
+            mode = "native"
+
+        if mode != "supersample":
+            return mode, output_width, output_height, output_width, output_height
+
+        capture_w = min(self.SENSOR_MAX_WIDTH, max(output_width * 2, 1280))
+        capture_h = min(self.SENSOR_MAX_HEIGHT, max(output_height * 2, 720))
+        capture_w = self._align_even(capture_w)
+        capture_h = self._align_even(capture_h)
+
+        if capture_w <= output_width or capture_h <= output_height:
+            logger.warning(
+                "当前分辨率下超采样无有效增益，自动切换为 native 模式"
+            )
+            return "native", output_width, output_height, output_width, output_height
+
+        return "supersample", capture_w, capture_h, output_width, output_height
     
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
@@ -118,9 +141,9 @@ class IMX327MIPICamera(CameraInterface):
             main_format = "RGB888"
             
             # 配置相机 / Configure camera
-            camera_config = self.camera.create_still_configuration(
+            camera_config = self.camera.create_video_configuration(
                 main={"size": (self.capture_width, self.capture_height), "format": main_format},
-                raw={"size": (self.capture_width, self.capture_height), "format": "SRGGB12"}
+                buffer_count=self.PREVIEW_BUFFER_COUNT,
             )
             
             self.camera.configure(camera_config)
@@ -161,7 +184,8 @@ class IMX327MIPICamera(CameraInterface):
             # 使用视频配置以获得更高实时性 / Use video configuration for greater real-time performance
             try:
                 video_config = self.camera.create_video_configuration(
-                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
+                    buffer_count=self.PREVIEW_BUFFER_COUNT,
                 )
                 self.camera.configure(video_config)
             except Exception as e:
@@ -291,12 +315,16 @@ class IMX327MIPICamera(CameraInterface):
             logger.error("相机未初始化")
             return False
         
-        new_w, new_h = int(width), int(height)
+        new_w, new_h = self._sanitize_output_resolution(int(width), int(height))
         if fps is not None:
             self.fps = int(fps)
 
         # 检查是否真的需要改变 / Check if changes are really needed
-        if self.sampling_mode == 'supersample':
+        effective_mode, new_capture_w, new_capture_h, new_output_w, new_output_h = (
+            self._resolve_sampling_layout(self.sampling_mode, new_w, new_h)
+        )
+
+        if effective_mode == 'supersample':
             current_output_w = self.output_width
             current_output_h = self.output_height
             if current_output_w == new_w and current_output_h == new_h:
@@ -319,29 +347,25 @@ class IMX327MIPICamera(CameraInterface):
 
         was_capturing = self.is_capturing
         try:
-            if self.sampling_mode == 'supersample':
+            if effective_mode == 'supersample':
                 # 超采样模式：只更新输出分辨率 / Supersampling mode: only update output resolution
-                self.output_width = new_w
-                self.output_height = new_h
-                self.width = new_w
-                self.height = new_h
-                
-                # 检查是否需要提升捕获分辨率 / Check if you need to increase the capture resolution
-                target_capture_width = max(new_w * 2, 1280)
-                target_capture_height = max(new_h * 2, 720)
-                need_reconfig = (target_capture_width > self.capture_width) or (target_capture_height > self.capture_height)
-                
+                self.sampling_mode = effective_mode
+                self.output_width = new_output_w
+                self.output_height = new_output_h
+                self.width = new_output_w
+                self.height = new_output_h
+
+                need_reconfig = (
+                    (new_capture_w != self.capture_width)
+                    or (new_capture_h != self.capture_height)
+                )
+
                 if need_reconfig:
-                    # 需要提升捕获分辨率 / Need to increase capture resolution
-                    if was_capturing:
-                        if not self.stop_capture():
-                            return False
-                    # 设置更高的捕获分辨率（至少2x超采样） / Set higher capture resolution (at least 2x oversampling)
-                    self.capture_width = target_capture_width
-                    self.capture_height = target_capture_height
-                    self._adjust_capture_resolution_to_aspect_ratio()
+                    if was_capturing and not self.stop_capture():
+                        return False
+                    self.capture_width = new_capture_w
+                    self.capture_height = new_capture_h
                 else:
-                    # 不需要重新配置硬件，只需要更新帧率 / No need to reconfigure hardware, just update frame rate
                     try:
                         self.camera.set_controls({"FrameRate": self.fps})
                     except Exception:
@@ -352,23 +376,24 @@ class IMX327MIPICamera(CameraInterface):
                 if was_capturing:
                     if not self.stop_capture():
                         return False
-                self.capture_width = new_w
-                self.capture_height = new_h
-                self.output_width = new_w
-                self.output_height = new_h
-                self.width = new_w
-                self.height = new_h
+                self.sampling_mode = effective_mode
+                self.capture_width = new_output_w
+                self.capture_height = new_output_h
+                self.output_width = new_output_w
+                self.output_height = new_output_h
+                self.width = new_output_w
+                self.height = new_output_h
 
             # 只有在需要重新配置时才调用configure / Only call configure when reconfiguration is required
             try:
                 video_config = self.camera.create_video_configuration(
-                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
+                    buffer_count=self.PREVIEW_BUFFER_COUNT,
                 )
                 self.camera.configure(video_config)
             except Exception:
                 still_cfg = self.camera.create_still_configuration(
-                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
-                    raw={"size": (self.capture_width, self.capture_height), "format": "SRGGB12"}
+                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
                 )
                 self.camera.configure(still_cfg)
             try:
@@ -507,40 +532,56 @@ class IMX327MIPICamera(CameraInterface):
             return False
         try:
             old_mode = self.sampling_mode
-            self.sampling_mode = mode
-            logger.info(f"采样模式从 {old_mode} 切换到: {mode}")
-            
-            if mode != 'supersample':
-                # native/crop 下输出与采集一致 / The output under native/crop is consistent with the collection
-                self.capture_width = self.width
-                self.capture_height = self.height
-                self.output_width = self.width
-                self.output_height = self.height
-                logger.info(f"非超采样模式，捕获和输出分辨率设置为: {self.output_width}x{self.output_height}")
-            else:
-                # 超采样模式：设置更高的捕获分辨率 / Oversampling mode: Set higher capture resolution
-                self.output_width = self.width
-                self.output_height = self.height
-                # 设置捕获分辨率为更高的分辨率 / Set the capture resolution to a higher resolution
-                self.capture_width = max(self.width * 2, 1280)
-                self.capture_height = max(self.height * 2, 720)
-                self._adjust_capture_resolution_to_aspect_ratio()
-                
-                # 记录详细配置信息 / Record detailed configuration information
-                logger.info(f"超采样模式激活:")
-                logger.info(f"  - 捕获分辨率: {self.capture_width}x{self.capture_height}")
-                logger.info(f"  - 输出分辨率: {self.output_width}x{self.output_height}")
-                if self.capture_width > self.output_width and self.capture_height > self.output_height:
-                    ratio = min(self.capture_width / self.output_width, self.capture_height / self.output_height)
-                    logger.info(f"  - 超采样比例: {ratio:.2f}x")
-                    if ratio >= 1.5:
-                        logger.info("  - 超采样质量: 优秀")
-                    elif ratio >= 1.2:
-                        logger.info("  - 超采样质量: 良好")
-                    else:
-                        logger.warning("  - 超采样质量: 较低，建议调整分辨率")
-                else:
-                    logger.warning("  - 警告: 捕获分辨率不高于输出分辨率，超采样效果有限")
+            old_capture_w = self.capture_width
+            old_capture_h = self.capture_height
+            (
+                effective_mode,
+                capture_w,
+                capture_h,
+                output_w,
+                output_h,
+            ) = self._resolve_sampling_layout(mode, self.width, self.height)
+
+            self.sampling_mode = effective_mode
+            self.capture_width = capture_w
+            self.capture_height = capture_h
+            self.output_width = output_w
+            self.output_height = output_h
+            self.width = output_w
+            self.height = output_h
+            logger.info(f"采样模式从 {old_mode} 切换到: {self.sampling_mode}")
+
+            need_reconfig = (
+                (old_capture_w != self.capture_width)
+                or (old_capture_h != self.capture_height)
+                or (old_mode != self.sampling_mode)
+            )
+            if not need_reconfig:
+                return True
+
+            was_capturing = self.is_capturing
+            if was_capturing and not self.stop_capture():
+                return False
+
+            try:
+                video_config = self.camera.create_video_configuration(
+                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
+                    buffer_count=self.PREVIEW_BUFFER_COUNT,
+                )
+                self.camera.configure(video_config)
+            except Exception:
+                still_cfg = self.camera.create_still_configuration(
+                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+                )
+                self.camera.configure(still_cfg)
+
+            try:
+                self.camera.set_controls({"FrameRate": self.fps})
+            except Exception:
+                pass
+
+            if was_capturing:
+                return self.start_capture()
             
             return True
         except Exception as e:

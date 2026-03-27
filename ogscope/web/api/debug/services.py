@@ -51,7 +51,7 @@ def get_camera_instance():
             "analogue_gain": settings.camera_gain,
             "auto_exposure": True,  # 调试控制台默认自动曝光优先 / The debugging console defaults to automatic exposure priority.
             "rotation": 180,  # 默认180度旋转 / Default 180 degree rotation
-            "sampling_mode": "supersample",
+            "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
             # 新增参数 / New parameters
             "noise_reduction": 0,
             "white_balance_mode": "auto",
@@ -419,14 +419,24 @@ class DebugCameraService:
         # 验证设置是否生效 / Verify whether the settings take effect
         info = camera.get_camera_info()
         current_mode = info.get('sampling_mode', 'unknown')
-        if current_mode != mode:
+        requested_mode = mode
+        if requested_mode == "supersample" and current_mode == "native":
+            # 在高分辨率场景下会自动降级为 native，这是预期行为 / In high-resolution scenarios, it is expected to automatically downgrade to native.
+            pass
+        elif current_mode != requested_mode:
             raise Exception(f"采样模式设置未生效，当前模式: {current_mode}")
         
         await DebugCameraService._restart_preview_grabber()
         return {
             "success": True,
             "info": info,
-            **i18n_payload("server.samplingModeSet", f"采样模式已设置为 {mode}", {"mode": mode})
+            "requested_mode": requested_mode,
+            "effective_mode": current_mode,
+            **i18n_payload(
+                "server.samplingModeSet",
+                f"采样模式请求为 {requested_mode}，实际生效为 {current_mode}",
+                {"requested_mode": requested_mode, "effective_mode": current_mode},
+            )
         }
 
     @staticmethod

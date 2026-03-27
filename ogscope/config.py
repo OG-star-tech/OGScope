@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     camera_width: int = Field(default=640, description="图像宽度")
     camera_height: int = Field(default=360, description="图像高度")
     camera_fps: int = Field(default=15, description="帧率")
+    camera_sampling_mode: str = Field(
+        default="native", description="采样模式: supersample/native/crop"
+    )
     camera_exposure: int = Field(default=10000, description="曝光时间(us)")
     camera_gain: float = Field(default=1.0, description="增益")
     
