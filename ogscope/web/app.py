@@ -34,12 +34,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # TODO: 释放相机资源 / TODO: Release camera resources
 
 
+# API 文档分组标签 / API documentation group tags
+openapi_tags = [
+    {
+        "name": "Camera - 相机",
+        "description": "相机控制与图像获取 / Camera control and image capture",
+    },
+    {
+        "name": "Alignment - 极轴校准",
+        "description": "极轴校准流程与状态 / Polar alignment workflow and status",
+    },
+    {
+        "name": "System - 系统",
+        "description": "系统信息与配置管理 / System information and configuration",
+    },
+    {
+        "name": "Debug - 调试",
+        "description": "调试控制台接口 / Debug console endpoints",
+    },
+]
+
 # 创建 FastAPI 应用 / Create a FastAPI application
 app = FastAPI(
     title="OGScope API",
     description="电子极轴镜 Web API",
     version=__version__,
     lifespan=lifespan,
+    openapi_tags=openapi_tags,
 )
 
 # 初始化模板引擎 / Initialize template engine

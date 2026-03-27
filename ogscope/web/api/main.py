@@ -11,10 +11,10 @@ from ogscope.web.api.debug.routes import router as debug_router
 # 创建主路由器 / Create the main router
 router = APIRouter()
 
-# 注册各个模块的路由 / Register routes for each module
-router.include_router(camera_router)
-router.include_router(alignment_router)
-router.include_router(system_router)
-router.include_router(debug_router)
+# 注册各个模块的路由（含分组标签）/ Register routes for each module (with group tags)
+router.include_router(camera_router, tags=["Camera - 相机"])
+router.include_router(alignment_router, tags=["Alignment - 极轴校准"])
+router.include_router(system_router, tags=["System - 系统"])
+router.include_router(debug_router, tags=["Debug - 调试"])
 
 
