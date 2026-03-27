@@ -1384,8 +1384,19 @@ class DebugConsole {
         const info = this.cameraStatus.info || {};
         const width = info.width || (info.resolution ? parseInt(String(info.resolution).split('x')[0]) : null);
         const height = info.height || (info.resolution ? parseInt(String(info.resolution).split('x')[1]) : null);
+        const captureWidth = info.capture_width || null;
+        const captureHeight = info.capture_height || null;
         if (width && height) {
-            resEl.textContent = `${width}x${height}`;
+            const outputPixels = width * height;
+            const outputMP = (outputPixels / 1_000_000).toFixed(2);
+            if (captureWidth && captureHeight) {
+                const capturePixels = captureWidth * captureHeight;
+                const scaleRatio = outputPixels / capturePixels;
+                const scalePercent = (scaleRatio * 100).toFixed(1);
+                resEl.textContent = `${width}x${height} (${outputMP}MP, 全视野:${captureWidth}x${captureHeight}, ${scalePercent}%)`;
+            } else {
+                resEl.textContent = `${width}x${height} (${outputMP}MP)`;
+            }
         } else {
             resEl.textContent = '--';
         }
@@ -2251,7 +2262,14 @@ class DebugConsole {
                 const err = await resp.json();
                 throw new Error(err.detail || '设置分辨率失败');
             }
-            this.showNotification(`分辨率已设置为 ${width}x${height}`, 'success');
+            const body = await resp.json();
+            const info = body.info || {};
+            const appliedW = info.width || width;
+            const appliedH = info.height || height;
+            const captureW = info.capture_width || null;
+            const captureH = info.capture_height || null;
+            const suffix = (captureW && captureH) ? `，全视野采集 ${captureW}x${captureH}` : '';
+            this.showNotification(`分辨率请求 ${width}x${height}，实际生效 ${appliedW}x${appliedH}${suffix}`, 'success');
             await this.updateCameraStatus();
         } catch (e) {
             console.error(e);

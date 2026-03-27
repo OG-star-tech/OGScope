@@ -112,22 +112,51 @@ class IMX327MIPICamera(CameraInterface):
         )
         if mode not in {"supersample", "native", "crop"}:
             mode = "native"
-
-        if mode != "supersample":
-            return mode, output_width, output_height, output_width, output_height
-
-        capture_w = min(self.SENSOR_MAX_WIDTH, max(output_width * 2, 1280))
-        capture_h = min(self.SENSOR_MAX_HEIGHT, max(output_height * 2, 720))
-        capture_w = self._align_even(capture_w)
-        capture_h = self._align_even(capture_h)
-
-        if capture_w <= output_width or capture_h <= output_height:
+        capture_w = self.SENSOR_MAX_WIDTH
+        capture_h = self.SENSOR_MAX_HEIGHT
+        if mode == "supersample" and (
+            output_width >= capture_w or output_height >= capture_h
+        ):
             logger.warning(
                 "当前分辨率下超采样无有效增益，自动切换为 native 模式"
             )
-            return "native", output_width, output_height, output_width, output_height
+            mode = "native"
+        return mode, capture_w, capture_h, output_width, output_height
 
-        return "supersample", capture_w, capture_h, output_width, output_height
+    def _resize_preserve_fov(
+        self, image: np.ndarray, target_width: int, target_height: int
+    ) -> np.ndarray:
+        import cv2
+
+        src_h, src_w = image.shape[:2]
+        if src_w == target_width and src_h == target_height:
+            return image
+
+        scale = min(target_width / src_w, target_height / src_h)
+        resized_w = max(1, int(round(src_w * scale)))
+        resized_h = max(1, int(round(src_h * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized = cv2.resize(image, (resized_w, resized_h), interpolation=interpolation)
+
+        if resized_w == target_width and resized_h == target_height:
+            return resized
+
+        pad_x = max(0, target_width - resized_w)
+        pad_y = max(0, target_height - resized_h)
+        left = pad_x // 2
+        right = pad_x - left
+        top = pad_y // 2
+        bottom = pad_y - top
+        border_value = (0, 0, 0) if len(resized.shape) == 3 else 0
+        return cv2.copyMakeBorder(
+            resized,
+            top,
+            bottom,
+            left,
+            right,
+            cv2.BORDER_CONSTANT,
+            value=border_value,
+        )
     
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
@@ -255,18 +284,20 @@ class IMX327MIPICamera(CameraInterface):
                 # 暂时返回原始数据 / Temporarily return to original data
                 pass
             
-            # 软件降采样（超采样模式） / Software downsampling (oversampling mode)
+            # 输出重采样（保持最大视野） / Output resampling (preserve maximum field of view)
             try:
-                if self.sampling_mode == 'supersample':
-                    if (self.output_width, self.output_height) != (self.capture_width, self.capture_height):
-                        import cv2
-                        original_shape = image.shape[:2]
-                        image = cv2.resize(image, (self.output_width, self.output_height), interpolation=cv2.INTER_AREA)
-                        logger.debug(f"超采样降采样: {original_shape[1]}x{original_shape[0]} -> {self.output_width}x{self.output_height}")
-                    else:
-                        logger.debug("超采样模式但输出尺寸与捕获尺寸相同，跳过降采样")
+                if (self.output_width, self.output_height) != (image.shape[1], image.shape[0]):
+                    original_shape = image.shape[:2]
+                    image = self._resize_preserve_fov(
+                        image,
+                        self.output_width,
+                        self.output_height,
+                    )
+                    logger.debug(
+                        f"输出重采样: {original_shape[1]}x{original_shape[0]} -> {self.output_width}x{self.output_height}"
+                    )
             except Exception as e:
-                logger.warning(f"降采样失败（忽略，使用原图）: {e}")
+                logger.warning(f"输出重采样失败（忽略，使用原图）: {e}")
 
             # 应用旋转 / Apply rotation
             if self.rotation != 0:
@@ -319,89 +350,58 @@ class IMX327MIPICamera(CameraInterface):
         if fps is not None:
             self.fps = int(fps)
 
-        # 检查是否真的需要改变 / Check if changes are really needed
         effective_mode, new_capture_w, new_capture_h, new_output_w, new_output_h = (
             self._resolve_sampling_layout(self.sampling_mode, new_w, new_h)
         )
+        if (
+            self.output_width == new_output_w
+            and self.output_height == new_output_h
+            and self.capture_width == new_capture_w
+            and self.capture_height == new_capture_h
+            and self.sampling_mode == effective_mode
+        ):
+            try:
+                self.camera.set_controls({"FrameRate": self.fps})
+            except Exception:
+                pass
+            return True
 
-        if effective_mode == 'supersample':
-            current_output_w = self.output_width
-            current_output_h = self.output_height
-            if current_output_w == new_w and current_output_h == new_h:
-                # 输出分辨率相同，只需要更新帧率 / The output resolution is the same, only the frame rate needs to be updated
-                try:
-                    self.camera.set_controls({"FrameRate": self.fps})
-                except Exception:
-                    pass
-                return True
-        else:
-            current_w = self.width
-            current_h = self.height
-            if current_w == new_w and current_h == new_h:
-                # 分辨率相同，只需要更新帧率 / The resolution is the same, just the frame rate needs to be updated
-                try:
-                    self.camera.set_controls({"FrameRate": self.fps})
-                except Exception:
-                    pass
-                return True
-
+        old_capture_w = self.capture_width
+        old_capture_h = self.capture_height
         was_capturing = self.is_capturing
         try:
-            if effective_mode == 'supersample':
-                # 超采样模式：只更新输出分辨率 / Supersampling mode: only update output resolution
-                self.sampling_mode = effective_mode
-                self.output_width = new_output_w
-                self.output_height = new_output_h
-                self.width = new_output_w
-                self.height = new_output_h
+            self.sampling_mode = effective_mode
+            self.capture_width = new_capture_w
+            self.capture_height = new_capture_h
+            self.output_width = new_output_w
+            self.output_height = new_output_h
+            self.width = new_output_w
+            self.height = new_output_h
 
-                need_reconfig = (
-                    (new_capture_w != self.capture_width)
-                    or (new_capture_h != self.capture_height)
-                )
-
-                if need_reconfig:
-                    if was_capturing and not self.stop_capture():
-                        return False
-                    self.capture_width = new_capture_w
-                    self.capture_height = new_capture_h
-                else:
-                    try:
-                        self.camera.set_controls({"FrameRate": self.fps})
-                    except Exception:
-                        pass
-                    return True
-            else:
-                # native/crop模式：捕获和输出分辨率相同 / native/crop mode: capture and output resolutions are the same
-                if was_capturing:
-                    if not self.stop_capture():
-                        return False
-                self.sampling_mode = effective_mode
-                self.capture_width = new_output_w
-                self.capture_height = new_output_h
-                self.output_width = new_output_w
-                self.output_height = new_output_h
-                self.width = new_output_w
-                self.height = new_output_h
-
-            # 只有在需要重新配置时才调用configure / Only call configure when reconfiguration is required
-            try:
-                video_config = self.camera.create_video_configuration(
-                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
-                    buffer_count=self.PREVIEW_BUFFER_COUNT,
-                )
-                self.camera.configure(video_config)
-            except Exception:
-                still_cfg = self.camera.create_still_configuration(
-                    main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
-                )
-                self.camera.configure(still_cfg)
+            need_reconfig = (
+                old_capture_w != self.capture_width
+                or old_capture_h != self.capture_height
+            )
+            if need_reconfig:
+                if was_capturing and not self.stop_capture():
+                    return False
+                try:
+                    video_config = self.camera.create_video_configuration(
+                        main={"size": (self.capture_width, self.capture_height), "format": "RGB888"},
+                        buffer_count=self.PREVIEW_BUFFER_COUNT,
+                    )
+                    self.camera.configure(video_config)
+                except Exception:
+                    still_cfg = self.camera.create_still_configuration(
+                        main={"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+                    )
+                    self.camera.configure(still_cfg)
             try:
                 self.camera.set_controls({"FrameRate": self.fps})
             except Exception:
                 pass
 
-            if was_capturing:
+            if need_reconfig and was_capturing:
                 return self.start_capture()
             return True
         except Exception as e:
@@ -554,7 +554,6 @@ class IMX327MIPICamera(CameraInterface):
             need_reconfig = (
                 (old_capture_w != self.capture_width)
                 or (old_capture_h != self.capture_height)
-                or (old_mode != self.sampling_mode)
             )
             if not need_reconfig:
                 return True
