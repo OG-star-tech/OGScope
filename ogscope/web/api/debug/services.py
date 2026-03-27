@@ -4,6 +4,9 @@
 import os
 import json
 import asyncio
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -22,6 +25,8 @@ latest_preview_jpeg: Optional[bytes] = None
 last_preview_time: Optional[float] = None
 latest_preview_id: int = 0
 preview_grabber_task = None
+PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
+PREVIEW_PIPELINE_WORKERS = 2
 
 
 def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -526,30 +531,62 @@ class DebugCameraService:
         await DebugCameraService._ensure_preview_grabber()
 
     @staticmethod
+    def _capture_preview_frame(camera):
+        """抓取预览帧（线程池执行） / Capture preview frame (run in thread pool)"""
+        try:
+            return camera.get_video_frame()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _encode_preview_jpeg(image, quality: int) -> Optional[bytes]:
+        """编码 JPEG（线程池执行） / Encode JPEG (run in thread pool)"""
+        try:
+            import cv2
+
+            ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+            if not ok:
+                return None
+            return buf.tobytes()
+        except Exception:
+            return None
+
+    @staticmethod
     async def _preview_grabber_loop():
         """后台抓取最新帧，编码为 JPEG 缓存，降低单次请求阻塞与抖动 / The latest frames are captured in the background and encoded into JPEG cache to reduce single request blocking and jitter."""
         global latest_preview_jpeg, last_preview_time, latest_preview_id
         camera = get_camera_instance()
         if not camera or not camera.is_capturing:
             return
-        import cv2
-        import time
         target_fps = max(1, int(camera.get_camera_info().get('fps', 5)))
         interval = 1.0 / target_fps
+        loop = asyncio.get_running_loop()
+        # 使用双工人流水线：一个抓帧，一个编码，提升 Zero2W 下实时预览稳定性 / Use a two-worker pipeline: one captures frames and one encodes, improving preview stability on Zero2W.
+        executor = ThreadPoolExecutor(
+            max_workers=PREVIEW_PIPELINE_WORKERS, thread_name_prefix="preview-pipe"
+        )
         try:
+            capture_future = loop.run_in_executor(
+                executor, DebugCameraService._capture_preview_frame, camera
+            )
             while True:
                 start = time.time()
-                try:
-                    image = camera.get_video_frame()
-                    if image is not None:
-                        ok, buf = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                        if ok:
-                            latest_preview_jpeg = buf.tobytes()
-                            last_preview_time = time.time()
-                            latest_preview_id += 1
-                except Exception:
-                    # 忽略单帧失败 / Ignore single frame failures
-                    pass
+                image = await asyncio.wrap_future(capture_future)
+                # 先提交下一帧抓取，让抓取与编码并行 / Submit next frame capture first to overlap capture and encoding
+                capture_future = loop.run_in_executor(
+                    executor, DebugCameraService._capture_preview_frame, camera
+                )
+                if image is not None:
+                    jpeg_bytes = await loop.run_in_executor(
+                        executor,
+                        DebugCameraService._encode_preview_jpeg,
+                        image,
+                        PREVIEW_JPEG_QUALITY,
+                    )
+                    if jpeg_bytes is not None:
+                        latest_preview_jpeg = jpeg_bytes
+                        last_preview_time = time.time()
+                        latest_preview_id += 1
                 # 按 fps 节流 / Throttle by fps
                 spent = time.time() - start
                 await asyncio.sleep(max(0.0, interval - spent))
@@ -558,8 +595,9 @@ class DebugCameraService:
             raise
         except Exception as e:
             # 记录其他异常 / Log other exceptions
-            import logging
             logging.getLogger(__name__).error(f"预览抓取器异常: {e}")
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
