@@ -2,6 +2,7 @@
 FastAPI Web 应用
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
@@ -78,6 +79,13 @@ app = FastAPI(
 settings = get_settings()
 templates = Jinja2Templates(directory=str(settings.template_dir))
 
+
+def _asset_stamp(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime)
+    except Exception:
+        return 0
+
 # 配置 CORS (允许跨域请求) / Configure CORS (allow cross-origin requests)
 app.add_middleware(
     CORSMiddleware,
@@ -116,12 +124,14 @@ async def root(request: Request):
 @app.get("/debug", response_class=HTMLResponse)
 async def debug_console(request: Request):
     """调试控制台页面 / Debug console page"""
+    debug_js_path = settings.static_dir / "js" / "debug.js"
     return templates.TemplateResponse(
         "debug.html", 
         {
             "request": request,
             "version": __version__,
-            "app_name": "OGScope Debug Console"
+            "app_name": "OGScope Debug Console",
+            "debug_assets_version": _asset_stamp(debug_js_path),
         }
     )
 

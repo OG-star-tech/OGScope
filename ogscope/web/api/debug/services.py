@@ -560,7 +560,26 @@ class DebugCameraService:
             # 记录其他异常 / Log other exceptions
             import logging
             logging.getLogger(__name__).error(f"预览抓取器异常: {e}")
-    
+
+    @staticmethod
+    async def set_auto_exposure_mode(enabled: bool):
+        """仅切换自动曝光模式 / Toggle auto-exposure mode only"""
+        camera = get_camera_instance()
+        if not camera or not camera.is_initialized:
+            raise Exception("相机未初始化")
+
+        if not hasattr(camera, 'set_auto_exposure'):
+            raise Exception("当前相机不支持自动曝光切换")
+
+        if not camera.set_auto_exposure(bool(enabled)):
+            raise Exception("设置自动曝光模式失败")
+
+        return {
+            "success": True,
+            **i18n_payload("server.autoExposureUpdated", "曝光模式已更新"),
+            "auto_exposure": bool(enabled),
+        }
+
     @staticmethod
     async def update_settings(settings: Dict[str, Any]):
         """更新调试相机设置 / Update debug camera settings"""

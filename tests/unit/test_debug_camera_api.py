@@ -18,6 +18,7 @@ class FakeCamera:
         self.sampling_mode = "supersample"
         self.rotation = 180
         self.auto_exposure = True
+        self.white_balance_mode = "auto"
         self.exposure_us = 10000
         self.analogue_gain = 1.0
         self.digital_gain = 1.0
@@ -34,6 +35,7 @@ class FakeCamera:
             "sampling_mode": self.sampling_mode,
             "rotation": self.rotation,
             "auto_exposure": self.auto_exposure,
+            "white_balance_mode": self.white_balance_mode,
             "exposure_us": self.exposure_us,
             "analogue_gain": self.analogue_gain,
             "digital_gain": self.digital_gain,
@@ -91,6 +93,7 @@ class FakeCamera:
         return True
 
     def set_white_balance(self, mode, gain_r=1.0, gain_b=1.0):
+        self.white_balance_mode = mode
         return True
 
     def set_color_mode(self, color_mode):
@@ -212,4 +215,26 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
     body = response.json()
     assert body["success"] is True
     assert body["settings"]["exposure"] == 12000
+
+
+@pytest.mark.unit
+def test_debug_camera_auto_exposure_switch_success(client, fake_camera_env):
+    response = client.post("/api/debug/camera/auto-exposure", params={"enabled": False})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["auto_exposure"] is False
+    assert fake_camera_env.auto_exposure is False
+
+
+@pytest.mark.unit
+def test_debug_camera_white_balance_switch_success(client, fake_camera_env):
+    response = client.post(
+        "/api/debug/camera/white-balance",
+        params={"mode": "night", "gain_r": 1.0, "gain_b": 1.0},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert fake_camera_env.white_balance_mode == "night"
 

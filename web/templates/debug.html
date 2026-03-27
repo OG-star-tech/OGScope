@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="/static/css/debug.css">
     
     <!-- Preload Critical Resources -->
-    <link rel="preload" href="/static/js/debug.js" as="script">
+    <link rel="preload" href="/static/js/debug.js?v={{ version }}&av={{ debug_assets_version }}" as="script">
 </head>
 <body class="debug-console">
     <div id="debug-app">
@@ -490,12 +490,18 @@
                             <h4 data-i18n="settings.advancedSection">⚙️ 高级参数</h4>
                             <div class="control-group">
                                 <label for="auto-exposure-mode" data-i18n="settings.exposureMode">曝光模式</label>
+                                <div class="param-hint">
+                                    <span data-i18n="settings.currentApplied">当前生效</span>:
+                                    <span id="auto-exposure-current">--</span>
+                                </div>
                                 <div class="control-row">
                                     <select id="auto-exposure-mode">
                                         <option value="auto" selected data-i18n="settings.exposureModeAuto">自动曝光 (推荐)</option>
                                         <option value="manual" data-i18n="settings.exposureModeManual">手动曝光</option>
                                     </select>
+                                    <button class="btn btn-secondary btn-small" id="apply-auto-exposure-mode" data-i18n="settings.applyChange">应用修改</button>
                                 </div>
+                                <div class="param-hint" id="auto-exposure-dirty-hint" data-i18n="settings.pendingSync">待修改值与当前生效值一致</div>
                                 <div class="param-hint" data-i18n="settings.exposureModeHint">自动曝光在动态光线下更稳定；智能调整仅用于手动模式</div>
                             </div>
 
@@ -510,24 +516,36 @@
                             
                             <div class="control-group">
                                 <label for="color-mode" data-i18n="settings.colorMode">颜色模式</label>
+                                <div class="param-hint">
+                                    <span data-i18n="settings.currentApplied">当前生效</span>:
+                                    <span id="color-mode-current">--</span>
+                                </div>
                                 <div class="control-row">
                                     <select id="color-mode">
                                         <option value="color" selected data-i18n="settings.colorModeColor">彩色</option>
                                         <option value="mono" data-i18n="settings.colorModeMono">黑白</option>
                                     </select>
+                                    <button class="btn btn-secondary btn-small" id="apply-color-mode" data-i18n="settings.applyChange">应用修改</button>
                                 </div>
+                                <div class="param-hint" id="color-mode-dirty-hint" data-i18n="settings.pendingSync">待修改值与当前生效值一致</div>
                                 <div class="param-hint" data-i18n="settings.colorModeHint">黑白模式性能更好，适合极轴校准</div>
                             </div>
                             
                             <div class="control-group">
                                 <label for="white-balance-mode" data-i18n="settings.whiteBalanceMode">白平衡模式</label>
+                                <div class="param-hint">
+                                    <span data-i18n="settings.currentApplied">当前生效</span>:
+                                    <span id="white-balance-mode-current">--</span>
+                                </div>
                                 <div class="control-row">
                                     <select id="white-balance-mode">
                                         <option value="auto" selected data-i18n="settings.whiteBalanceAuto">自动</option>
                                         <option value="manual" data-i18n="settings.whiteBalanceManual">手动</option>
                                         <option value="night" data-i18n="settings.whiteBalanceNight">夜间</option>
                                     </select>
+                                    <button class="btn btn-secondary btn-small" id="apply-white-balance-mode" data-i18n="settings.applyChange">应用修改</button>
                                 </div>
+                                <div class="param-hint" id="white-balance-mode-dirty-hint" data-i18n="settings.pendingSync">待修改值与当前生效值一致</div>
                                 <div class="param-hint" data-i18n="settings.whiteBalanceHint">自动模式适合大多数情况</div>
                             </div>
                             
@@ -682,6 +700,6 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/js/debug.js?v={{ version }}"></script>
+    <script src="/static/js/debug.js?v={{ version }}&av={{ debug_assets_version }}"></script>
 </body>
 </html>

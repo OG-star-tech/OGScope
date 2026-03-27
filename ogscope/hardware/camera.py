@@ -76,6 +76,9 @@ class IMX327MIPICamera(CameraInterface):
         self.auto_gain = config.get('auto_gain', False)
         self.rotation = config.get('rotation', 0)
         self.color_mode = config.get('color_mode', 'color')  # 'color' | 'mono'
+        self.white_balance_mode = config.get('white_balance_mode', 'auto')
+        self.white_balance_gain_r = config.get('white_balance_gain_r', 1.0)
+        self.white_balance_gain_b = config.get('white_balance_gain_b', 1.0)
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率） / Sampling mode and size (supersample: acquisition resolution can be higher than output resolution)
         self.sampling_mode = config.get('sampling_mode', 'supersample')  # supersample | native | crop
         (
@@ -612,6 +615,9 @@ class IMX327MIPICamera(CameraInterface):
                 "output_width": self.output_width,
                 "output_height": self.output_height,
                 "color_mode": self.color_mode,
+                "white_balance_mode": self.white_balance_mode,
+                "white_balance_gain_r": self.white_balance_gain_r,
+                "white_balance_gain_b": self.white_balance_gain_b,
             }
         except Exception as e:
             logger.error(f"获取相机信息失败: {e}")
@@ -710,12 +716,16 @@ class IMX327MIPICamera(CameraInterface):
         try:
             if mode == "auto":
                 self.camera.set_controls({"AwbEnable": True})
+                self.white_balance_mode = "auto"
                 logger.info("白平衡设置为自动模式")
             elif mode == "manual":
                 self.camera.set_controls({
                     "AwbEnable": False,
                     "ColourGains": (gain_r, gain_b)
                 })
+                self.white_balance_mode = "manual"
+                self.white_balance_gain_r = gain_r
+                self.white_balance_gain_b = gain_b
                 logger.info(f"白平衡设置为手动模式: R={gain_r}, B={gain_b}")
             elif mode == "night":
                 # 夜间模式：稍微偏暖色调 / Night mode: Slightly warmer tones
@@ -723,6 +733,9 @@ class IMX327MIPICamera(CameraInterface):
                     "AwbEnable": False,
                     "ColourGains": (1.1, 0.9)
                 })
+                self.white_balance_mode = "night"
+                self.white_balance_gain_r = 1.1
+                self.white_balance_gain_b = 0.9
                 logger.info("白平衡设置为夜间模式")
             else:
                 logger.error(f"不支持的白平衡模式: {mode}")

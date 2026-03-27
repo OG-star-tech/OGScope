@@ -1045,24 +1045,48 @@ class DebugConsole {
             this.updateNoiseReductionDisplay(parseInt(e.target.value));
         });
 
-        document.getElementById('auto-exposure-mode')?.addEventListener('change', (e) => {
-            this.updateAutoExposureMode(e.target.value === 'auto');
+        document.getElementById('auto-exposure-mode')?.addEventListener('change', () => {
+            this.refreshModeApplyStates();
         });
         
         document.getElementById('color-mode')?.addEventListener('change', (e) => {
             this.updateColorMode(e.target.value);
+            this.refreshModeApplyStates();
         });
         
         document.getElementById('white-balance-mode')?.addEventListener('change', (e) => {
             this.updateWhiteBalanceMode(e.target.value);
+            this.refreshModeApplyStates();
+        });
+
+        document.getElementById('apply-auto-exposure-mode')?.addEventListener('click', async () => {
+            const modeSelect = document.getElementById('auto-exposure-mode');
+            if (!modeSelect) {
+                return;
+            }
+            await this.applyAutoExposureMode(modeSelect.value === 'auto');
+        });
+
+        document.getElementById('apply-color-mode')?.addEventListener('click', async () => {
+            const colorModeSelect = document.getElementById('color-mode');
+            if (!colorModeSelect) {
+                return;
+            }
+            await this.switchColorMode(colorModeSelect.value);
+        });
+
+        document.getElementById('apply-white-balance-mode')?.addEventListener('click', async () => {
+            await this.applyWhiteBalanceMode();
         });
         
         document.getElementById('wb-gain-r')?.addEventListener('input', (e) => {
             this.updateWhiteBalanceGainR(parseFloat(e.target.value));
+            this.refreshModeApplyStates();
         });
         
         document.getElementById('wb-gain-b')?.addEventListener('input', (e) => {
             this.updateWhiteBalanceGainB(parseFloat(e.target.value));
+            this.refreshModeApplyStates();
         });
         
         // 夜间模式控制 / Night mode control
@@ -1262,6 +1286,8 @@ class DebugConsole {
         this.updateWhiteBalanceMode(this.currentSettings.whiteBalanceMode);
         this.updateWhiteBalanceGainR(this.currentSettings.whiteBalanceGainR);
         this.updateWhiteBalanceGainB(this.currentSettings.whiteBalanceGainB);
+        this.updateModeCurrentDisplays();
+        this.refreshModeApplyStates();
         
         // 初始化全屏预览功能 / Initialize full screen preview function
         this.initFullscreenPreview();
@@ -1311,8 +1337,24 @@ class DebugConsole {
             const info = status.info || {};
             if (typeof info.auto_exposure === 'boolean') {
                 this.currentSettings.autoExposure = info.auto_exposure;
-                this.updateAutoExposureMode(info.auto_exposure);
+                this.updateAutoExposureMode(info.auto_exposure, false);
             }
+            if (typeof info.color_mode === 'string') {
+                this.currentSettings.colorMode = info.color_mode;
+                this.updateColorMode(info.color_mode, false);
+            }
+            if (typeof info.white_balance_mode === 'string') {
+                this.currentSettings.whiteBalanceMode = info.white_balance_mode;
+                this.updateWhiteBalanceMode(info.white_balance_mode, false);
+            }
+            if (typeof info.white_balance_gain_r === 'number') {
+                this.currentSettings.whiteBalanceGainR = info.white_balance_gain_r;
+            }
+            if (typeof info.white_balance_gain_b === 'number') {
+                this.currentSettings.whiteBalanceGainB = info.white_balance_gain_b;
+            }
+            this.updateModeCurrentDisplays();
+            this.refreshModeApplyStates();
 
             this.updateStatusUI();
             this.updateInfoUI();
@@ -1958,11 +2000,11 @@ class DebugConsole {
     /**
      * 更新自动曝光模式 / Update auto-exposure mode
      */
-    updateAutoExposureMode(isAuto) {
+    updateAutoExposureMode(isAuto, syncSelect = true) {
         this.currentSettings.autoExposure = isAuto;
 
         const modeSelect = document.getElementById('auto-exposure-mode');
-        if (modeSelect) {
+        if (modeSelect && syncSelect) {
             modeSelect.value = isAuto ? 'auto' : 'manual';
         }
 
@@ -1988,9 +2030,9 @@ class DebugConsole {
     /**
      * 更新颜色模式显示 / Update color mode display
      */
-    updateColorMode(mode) {
+    updateColorMode(mode, syncSelect = true) {
         const colorModeSelect = document.getElementById('color-mode');
-        if (colorModeSelect) {
+        if (colorModeSelect && syncSelect) {
             colorModeSelect.value = mode;
         }
         
@@ -2020,10 +2062,114 @@ class DebugConsole {
     /**
      * 更新白平衡模式 / Update white balance mode
      */
-    updateWhiteBalanceMode(mode) {
+    updateWhiteBalanceMode(mode, syncSelect = true) {
+        const whiteBalanceModeSelect = document.getElementById('white-balance-mode');
+        if (whiteBalanceModeSelect && syncSelect) {
+            whiteBalanceModeSelect.value = mode;
+        }
+
         const gainsContainer = document.getElementById('white-balance-gains');
         if (gainsContainer) {
             gainsContainer.style.display = mode === 'manual' ? 'block' : 'none';
+        }
+    }
+
+    /**
+     * 更新模式类参数的当前生效值显示 / Update current applied values for mode settings
+     */
+    updateModeCurrentDisplays() {
+        const exposureCurrent = document.getElementById('auto-exposure-current');
+        if (exposureCurrent) {
+            const modeSelect = document.getElementById('auto-exposure-mode');
+            const effectiveAutoExposure = typeof this.currentSettings.autoExposure === 'boolean'
+                ? this.currentSettings.autoExposure
+                : (modeSelect ? modeSelect.value === 'auto' : true);
+            exposureCurrent.textContent = effectiveAutoExposure
+                ? this.t('settings.exposureModeAuto')
+                : this.t('settings.exposureModeManual');
+        }
+
+        const colorCurrent = document.getElementById('color-mode-current');
+        if (colorCurrent) {
+            const colorModeSelect = document.getElementById('color-mode');
+            const effectiveColorMode = this.currentSettings.colorMode
+                || (colorModeSelect ? colorModeSelect.value : 'color');
+            colorCurrent.textContent = effectiveColorMode === 'mono'
+                ? this.t('settings.colorModeMono')
+                : this.t('settings.colorModeColor');
+        }
+
+        const whiteBalanceCurrent = document.getElementById('white-balance-mode-current');
+        if (whiteBalanceCurrent) {
+            const whiteBalanceModeSelect = document.getElementById('white-balance-mode');
+            const mode = this.currentSettings.whiteBalanceMode
+                || (whiteBalanceModeSelect ? whiteBalanceModeSelect.value : 'auto');
+            const modeTextMap = {
+                auto: this.t('settings.whiteBalanceAuto'),
+                manual: this.t('settings.whiteBalanceManual'),
+                night: this.t('settings.whiteBalanceNight')
+            };
+            whiteBalanceCurrent.textContent = modeTextMap[mode] || mode || '--';
+        }
+    }
+
+    /**
+     * 刷新模式应用按钮状态 / Refresh apply button state for mode settings
+     */
+    refreshModeApplyStates() {
+        const autoExposureSelect = document.getElementById('auto-exposure-mode');
+        const colorModeSelect = document.getElementById('color-mode');
+        const whiteBalanceModeSelect = document.getElementById('white-balance-mode');
+
+        this.refreshSingleModeApplyState(
+            'apply-auto-exposure-mode',
+            'auto-exposure-dirty-hint',
+            autoExposureSelect ? (autoExposureSelect.value === 'auto') !== this.currentSettings.autoExposure : false
+        );
+        this.refreshSingleModeApplyState(
+            'apply-color-mode',
+            'color-mode-dirty-hint',
+            colorModeSelect ? colorModeSelect.value !== this.currentSettings.colorMode : false
+        );
+        this.refreshSingleModeApplyState(
+            'apply-white-balance-mode',
+            'white-balance-mode-dirty-hint',
+            (() => {
+                if (!whiteBalanceModeSelect) {
+                    return false;
+                }
+                const modeChanged = whiteBalanceModeSelect.value !== this.currentSettings.whiteBalanceMode;
+                if (modeChanged) {
+                    return true;
+                }
+                if (whiteBalanceModeSelect.value !== 'manual') {
+                    return false;
+                }
+                const gainR = parseFloat(document.getElementById('wb-gain-r')?.value || '1.0');
+                const gainB = parseFloat(document.getElementById('wb-gain-b')?.value || '1.0');
+                const sameGainR = Math.abs(gainR - (this.currentSettings.whiteBalanceGainR ?? 1.0)) < 1e-6;
+                const sameGainB = Math.abs(gainB - (this.currentSettings.whiteBalanceGainB ?? 1.0)) < 1e-6;
+                return !(sameGainR && sameGainB);
+            })()
+        );
+    }
+
+    /**
+     * 单项模式按钮状态刷新 / Refresh single mode apply button state
+     */
+    refreshSingleModeApplyState(buttonId, hintId, hasPendingChange) {
+        const applyButton = document.getElementById(buttonId);
+        if (applyButton) {
+            // 保持可点击，避免“按钮无反应”的误判；无变更时由点击逻辑给出提示 / Keep clickable to avoid "button no response"; show hint in click logic when unchanged
+            applyButton.disabled = false;
+        }
+
+        const hint = document.getElementById(hintId);
+        if (hint) {
+            hint.textContent = hasPendingChange
+                ? this.t('settings.pendingUnsynced')
+                : this.t('settings.pendingSync');
+            hint.style.color = hasPendingChange ? 'var(--debug-warning)' : 'var(--debug-text-secondary)';
         }
     }
     
@@ -2040,6 +2186,80 @@ class DebugConsole {
     updateWhiteBalanceGainB(value) {
         document.getElementById('wb-gain-b-value').textContent = value.toFixed(1);
     }
+
+    /**
+     * 仅应用曝光模式切换 / Apply exposure mode switch only
+     */
+    async applyAutoExposureMode(isAuto) {
+        if (isAuto === this.currentSettings.autoExposure) {
+            this.showNotification('曝光模式未变化', 'info');
+            this.refreshModeApplyStates();
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/debug/camera/auto-exposure?enabled=${isAuto}`, {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '曝光模式更新失败');
+            }
+
+            this.currentSettings.autoExposure = isAuto;
+            await this.updateCameraStatus();
+            this.refreshModeApplyStates();
+        } catch (error) {
+            console.error('[DebugConsole] 曝光模式切换失败:', error);
+            this.showNotification(`曝光模式切换失败: ${error.message}`, 'error');
+            // 回滚到相机真实状态，避免 UI 与设备状态不一致 / Roll back to actual camera state to avoid inconsistency between UI and device state
+            await this.updateCameraStatus();
+            this.refreshModeApplyStates();
+        }
+    }
+
+    /**
+     * 仅应用白平衡模式切换 / Apply white-balance mode switch only
+     */
+    async applyWhiteBalanceMode() {
+        const modeSelect = document.getElementById('white-balance-mode');
+        if (!modeSelect) {
+            return;
+        }
+
+        const mode = modeSelect.value;
+        const gainR = parseFloat(document.getElementById('wb-gain-r')?.value || '1.0');
+        const gainB = parseFloat(document.getElementById('wb-gain-b')?.value || '1.0');
+        const sameMode = mode === this.currentSettings.whiteBalanceMode;
+        const sameGainR = Math.abs(gainR - (this.currentSettings.whiteBalanceGainR ?? 1.0)) < 1e-6;
+        const sameGainB = Math.abs(gainB - (this.currentSettings.whiteBalanceGainB ?? 1.0)) < 1e-6;
+        if (sameMode && (mode !== 'manual' || (sameGainR && sameGainB))) {
+            this.showNotification('白平衡参数未变化', 'info');
+            this.refreshModeApplyStates();
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `/api/debug/camera/white-balance?mode=${encodeURIComponent(mode)}&gain_r=${gainR}&gain_b=${gainB}`,
+                { method: 'POST' }
+            );
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '白平衡模式切换失败');
+            }
+
+            this.currentSettings.whiteBalanceMode = mode;
+            await this.updateCameraStatus();
+            this.refreshModeApplyStates();
+        } catch (error) {
+            console.error('[DebugConsole] 白平衡模式切换失败:', error);
+            this.showNotification(`白平衡模式切换失败: ${error.message}`, 'error');
+            await this.updateCameraStatus();
+            this.refreshModeApplyStates();
+        }
+    }
     
     /**
      * 应用设置 / Apply settings
@@ -2049,24 +2269,14 @@ class DebugConsole {
             exposure: parseInt(document.getElementById('exposure-setting').value),
             gain: parseFloat(document.getElementById('gain-setting').value),
             digitalGain: parseFloat(document.getElementById('digital-gain-setting').value),
-            autoExposure: document.getElementById('auto-exposure-mode').value === 'auto',
             contrast: parseFloat(document.getElementById('contrast-setting').value),
             brightness: parseFloat(document.getElementById('brightness-setting').value),
             saturation: parseFloat(document.getElementById('saturation-setting').value),
             sharpness: parseFloat(document.getElementById('sharpness-setting').value),
-            noiseReduction: parseInt(document.getElementById('noise-reduction-setting').value),
-            whiteBalanceMode: document.getElementById('white-balance-mode').value,
-            whiteBalanceGainR: parseFloat(document.getElementById('wb-gain-r').value),
-            whiteBalanceGainB: parseFloat(document.getElementById('wb-gain-b').value),
-            colorMode: document.getElementById('color-mode').value
+            noiseReduction: parseInt(document.getElementById('noise-reduction-setting').value)
         };
 
         try {
-            // 先处理颜色模式切换（如果需要） / Handle color mode switching first (if needed)
-            if (settings.colorMode !== this.currentSettings.colorMode) {
-                await this.switchColorMode(settings.colorMode);
-            }
-            
             const response = await fetch('/api/debug/camera/settings', {
                 method: 'POST',
                 headers: {
@@ -2093,6 +2303,11 @@ class DebugConsole {
      * 切换颜色模式 / Switch color mode
      */
     async switchColorMode(colorMode) {
+        if (colorMode === this.currentSettings.colorMode) {
+            this.showNotification('颜色模式未变化', 'info');
+            this.refreshModeApplyStates();
+            return;
+        }
         try {
             this.showNotification(`正在切换到${colorMode === 'mono' ? '黑白' : '彩色'}模式...`, 'info');
             
@@ -2108,6 +2323,7 @@ class DebugConsole {
                 
                 // 刷新相机状态 / Refresh camera status
                 await this.updateCameraStatus();
+                this.refreshModeApplyStates();
                 
                 // 给用户一些性能提示 / Give users some performance tips
                 if (colorMode === 'mono') {
@@ -2125,6 +2341,7 @@ class DebugConsole {
             
             // 恢复UI状态 / Restore UI state
             this.updateColorMode(this.currentSettings.colorMode);
+            this.refreshModeApplyStates();
         }
     }
     
@@ -2627,6 +2844,8 @@ class DebugConsole {
                 this.updateWhiteBalanceGainR(presetData.white_balance_gain_r ?? 1.0);
                 this.updateWhiteBalanceGainB(presetData.white_balance_gain_b ?? 1.0);
                 this.updateColorMode(presetData.color_mode ?? 'color');
+                this.updateModeCurrentDisplays();
+                this.refreshModeApplyStates();
                 
                 // 更新旋转角度 / Update rotation angle
                 if (presetData.rotation !== undefined) {
@@ -3056,8 +3275,15 @@ class DebugConsole {
             this.updateNoiseReductionDisplay(preset.noiseReduction);
             this.updateWhiteBalanceMode(preset.whiteBalanceMode);
 
-            // 快速预设属于手动调参场景，自动切换到手动曝光 / Quick preset is a manual parameter adjustment scene and automatically switches to manual exposure.
-            this.updateAutoExposureMode(false);
+            // 快速预设属于手动调参场景，先将待应用值切到手动曝光 / Quick preset is a manual tuning scenario, set pending value to manual exposure first.
+            const autoExposureSelect = document.getElementById('auto-exposure-mode');
+            if (autoExposureSelect) {
+                autoExposureSelect.value = 'manual';
+            }
+            this.refreshModeApplyStates();
+
+            await this.applyAutoExposureMode(false);
+            await this.applyWhiteBalanceMode();
             
             // 应用设置 / Apply settings
             await this.applySettings();

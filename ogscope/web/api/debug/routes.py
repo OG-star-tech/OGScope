@@ -202,6 +202,15 @@ async def update_debug_camera_settings(settings: CameraSettings):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/debug/camera/auto-exposure")
+async def set_debug_camera_auto_exposure(enabled: bool = Query(...)):
+    """仅切换自动曝光模式 / Toggle auto-exposure mode only"""
+    try:
+        return await DebugCameraService.set_auto_exposure_mode(enabled)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/debug/camera/reset")
 async def reset_debug_camera():
     """重置相机到默认设置 / Reset camera to default settings"""
@@ -261,6 +270,19 @@ async def set_camera_color_mode(color_mode: str = Query(..., pattern="^(color|mo
     """设置相机颜色模式 / Set camera color mode"""
     try:
         return await DebugCameraService.set_color_mode(color_mode)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/white-balance")
+async def set_camera_white_balance(
+    mode: str = Query(..., pattern="^(auto|manual|night)$"),
+    gain_r: float = Query(1.0, ge=0.1, le=3.0),
+    gain_b: float = Query(1.0, ge=0.1, le=3.0),
+):
+    """设置白平衡模式 / Set white balance mode"""
+    try:
+        return await DebugCameraService.set_white_balance(mode, gain_r, gain_b)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
