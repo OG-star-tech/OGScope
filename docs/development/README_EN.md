@@ -207,7 +207,55 @@ curl http://localhost:8000/health
 curl http://localhost:8000/api
 ```
 
-## 9. Troubleshooting Checklist
+## 9. API Documentation and Interactive Debugging
+
+### 9.1 Documentation Endpoints
+
+Once the service is running, FastAPI provides interactive API documentation automatically:
+
+| URL | Description |
+|-----|-------------|
+| `http://<host>:8000/docs` | Swagger UI — interactive API testing |
+| `http://<host>:8000/redoc` | ReDoc — structured API documentation |
+| `http://<host>:8000/openapi.json` | OpenAPI Schema (JSON) |
+
+### 9.2 API Grouping (Tags)
+
+All endpoints are grouped by module in the documentation. Grouping is controlled via the `tags` parameter during router registration:
+
+| Group | Module | Description |
+|-------|--------|-------------|
+| Camera - 相机 | `ogscope.web.api.camera` | Camera control and image capture |
+| Alignment - 极轴校准 | `ogscope.web.api.alignment` | Polar alignment workflow and status |
+| System - 系统 | `ogscope.web.api.system` | System information and configuration |
+| Debug - 调试 | `ogscope.web.api.debug` | Debug console endpoints |
+
+Tags are specified in `ogscope/web/api/main.py` via the `tags` parameter of `include_router()`. Group descriptions are defined in the `openapi_tags` list in `ogscope/web/app.py`.
+
+### 9.3 Adding Documentation for New API Modules
+
+When adding a new API module, update two files to ensure proper documentation grouping:
+
+1. **`ogscope/web/app.py`** — add a group description to the `openapi_tags` list:
+
+```python
+{
+    "name": "NewModule - 新模块",
+    "description": "Module description / 模块说明",
+},
+```
+
+2. **`ogscope/web/api/main.py`** — specify `tags` when registering the router:
+
+```python
+router.include_router(new_router, tags=["NewModule - 新模块"])
+```
+
+### 9.4 Custom ReDoc Configuration
+
+The project uses a custom ReDoc route with a pinned version (`redoc@2.1.5`) instead of FastAPI's default `redoc@next`, to avoid blank pages caused by unstable pre-release builds. See the `custom_redoc()` function in `ogscope/web/app.py`.
+
+## 10. Troubleshooting Checklist
 
 If service fails to start, check:
 
@@ -217,7 +265,7 @@ If service fails to start, check:
 - `LD_LIBRARY_PATH` includes `libcamera` library path
 - code upload is complete and dependencies are installed
 
-## 10. Command Cheatsheet
+## 11. Command Cheatsheet
 
 ```bash
 poetry install

@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -54,13 +55,15 @@ openapi_tags = [
     },
 ]
 
-# 创建 FastAPI 应用 / Create a FastAPI application
+# 创建 FastAPI 应用（禁用默认 ReDoc，使用自定义稳定版本）
+# Create a FastAPI application (disable default ReDoc, use custom stable version)
 app = FastAPI(
     title="OGScope API",
     description="电子极轴镜 Web API",
     version=__version__,
     lifespan=lifespan,
     openapi_tags=openapi_tags,
+    redoc_url=None,
 )
 
 # 初始化模板引擎 / Initialize template engine
@@ -128,6 +131,16 @@ async def api_root():
             "system": "/api/system/"
         }
     }
+
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc():
+    """自定义 ReDoc 页面，使用固定稳定版本 / Custom ReDoc page with pinned stable version"""
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js",
+    )
 
 
 @app.get("/health")

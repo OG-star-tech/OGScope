@@ -216,7 +216,55 @@ curl http://localhost:8000/health
 curl http://localhost:8000/api
 ```
 
-## 9. 常见故障排查
+## 9. API 文档与在线调试
+
+### 9.1 文档入口
+
+服务启动后，FastAPI 自动提供交互式 API 文档：
+
+| 地址 | 说明 |
+|------|------|
+| `http://<host>:8000/docs` | Swagger UI — 交互式接口测试 |
+| `http://<host>:8000/redoc` | ReDoc — 结构化接口文档 |
+| `http://<host>:8000/openapi.json` | OpenAPI Schema (JSON) |
+
+### 9.2 API 分组（Tags）
+
+所有接口在文档中按模块分组展示，分组通过路由注册时的 `tags` 参数控制：
+
+| 分组 | 模块 | 说明 |
+|------|------|------|
+| Camera - 相机 | `ogscope.web.api.camera` | 相机控制与图像获取 |
+| Alignment - 极轴校准 | `ogscope.web.api.alignment` | 极轴校准流程与状态 |
+| System - 系统 | `ogscope.web.api.system` | 系统信息与配置管理 |
+| Debug - 调试 | `ogscope.web.api.debug` | 调试控制台接口 |
+
+分组在 `ogscope/web/api/main.py` 中通过 `include_router()` 的 `tags` 参数指定，描述信息在 `ogscope/web/app.py` 的 `openapi_tags` 中定义。
+
+### 9.3 新增 API 模块时的文档配置
+
+新增一个 API 模块后，需在两处添加配置，以确保文档正确分组：
+
+1. **`ogscope/web/app.py`** — 在 `openapi_tags` 列表中添加分组描述：
+
+```python
+{
+    "name": "NewModule - 新模块",
+    "description": "模块说明 / Module description",
+},
+```
+
+2. **`ogscope/web/api/main.py`** — 注册路由时指定 `tags`：
+
+```python
+router.include_router(new_router, tags=["NewModule - 新模块"])
+```
+
+### 9.4 ReDoc 自定义说明
+
+项目使用自定义 ReDoc 路由（固定版本 `redoc@2.1.5`），而非 FastAPI 默认的 `redoc@next`，以避免预发布版本不稳定导致页面空白。相关配置见 `ogscope/web/app.py` 中的 `custom_redoc()` 函数。
+
+## 10. 常见故障排查
 
 若服务启动失败，优先检查：
 
@@ -226,7 +274,7 @@ curl http://localhost:8000/api
 - `LD_LIBRARY_PATH` 是否包含 `libcamera` 相关库路径
 - 最近代码上传是否完整，依赖是否已重新安装
 
-## 10. 常用命令速查
+## 11. 常用命令速查
 
 ```bash
 # 安装/更新依赖
