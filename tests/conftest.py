@@ -3,6 +3,7 @@ Pytest 配置和共享 fixtures
 """
 import pytest
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from ogscope.web.app import app
 
@@ -14,15 +15,21 @@ def client():
 
 
 @pytest.fixture
-def mock_camera():
-    """模拟相机"""
-    # TODO: 实现模拟相机
-    pass
+def temp_debug_dir(monkeypatch, tmp_path: Path):
+    """将调试目录重定向到临时目录，避免污染用户目录。"""
+    from ogscope.web.api.debug import services as debug_services
 
+    debug_root = tmp_path / "dev_captures"
+    debug_root.mkdir(parents=True, exist_ok=True)
 
-@pytest.fixture
-def sample_image():
-    """示例图像"""
-    # TODO: 提供测试用图像
-    pass
+    monkeypatch.setattr(debug_services, "DEBUG_CAPTURES_DIR", debug_root)
+    monkeypatch.setattr(debug_services, "camera_instance", None)
+    monkeypatch.setattr(debug_services, "is_recording", False)
+    monkeypatch.setattr(debug_services, "recording_task", None)
+    monkeypatch.setattr(debug_services, "latest_preview_jpeg", None)
+    monkeypatch.setattr(debug_services, "last_preview_time", None)
+    monkeypatch.setattr(debug_services, "latest_preview_id", 0)
+    monkeypatch.setattr(debug_services, "preview_grabber_task", None)
+
+    return debug_root
 

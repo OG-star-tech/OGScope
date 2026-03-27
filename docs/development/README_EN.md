@@ -6,6 +6,8 @@ This document explains how OGScope is actually run on development boards
 (Raspberry Pi / Orange Pi), including dependency requirements, service startup,
 and the team-standard debug workflow.
 
+For testing workflow, see [Testing Guide](testing-guide.md).
+
 Recommended workflow: **edit locally -> upload to board -> restart with
 `systemd` -> verify**.  
 This matches real hardware runtime behavior.
