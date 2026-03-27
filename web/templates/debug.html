@@ -425,6 +425,17 @@
                         <div class="param-section">
                             <h4>⚙️ 高级参数</h4>
                             <div class="control-group">
+                                <label for="auto-exposure-mode">曝光模式</label>
+                                <div class="control-row">
+                                    <select id="auto-exposure-mode">
+                                        <option value="auto" selected>自动曝光 (推荐)</option>
+                                        <option value="manual">手动曝光</option>
+                                    </select>
+                                </div>
+                                <div class="param-hint">自动曝光在动态光线下更稳定；智能调整仅用于手动模式</div>
+                            </div>
+
+                            <div class="control-group">
                                 <label for="noise-reduction-setting">降噪级别</label>
                                 <div class="control-row">
                                     <input type="range" id="noise-reduction-setting" min="0" max="4" step="1" value="0">

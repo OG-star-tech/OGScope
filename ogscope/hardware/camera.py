@@ -171,6 +171,24 @@ class IMX327MIPICamera(CameraInterface):
                 self.camera.set_controls({"FrameRate": self.fps})
             except Exception:
                 pass
+
+            # 重新配置后重放曝光控制，避免状态漂移到驱动默认值
+            try:
+                if self.auto_exposure:
+                    self.camera.set_controls({"AeEnable": True})
+                else:
+                    controls = {
+                        "AeEnable": False,
+                        "ExposureTime": self.exposure_us,
+                        "AnalogueGain": self.analogue_gain,
+                    }
+                    try:
+                        self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
+                    except Exception:
+                        self.camera.set_controls(controls)
+            except Exception as e:
+                logger.warning(f"重放曝光控制失败，使用驱动默认控制: {e}")
+
             self.camera.start()
             self.is_capturing = True
             logger.info("相机开始捕获")
@@ -396,8 +414,9 @@ class IMX327MIPICamera(CameraInterface):
             return False
         
         try:
-            self.camera.set_controls({"ExposureTime": exposure_us})
+            self.camera.set_controls({"AeEnable": False, "ExposureTime": exposure_us})
             self.exposure_us = exposure_us
+            self.auto_exposure = False
             logger.info(f"曝光时间设置为: {exposure_us}μs")
             return True
         except Exception as e:
@@ -411,6 +430,12 @@ class IMX327MIPICamera(CameraInterface):
             return False
         
         try:
+            # 手动设置增益时显式关闭自动曝光，避免控制冲突
+            try:
+                self.camera.set_controls({"AeEnable": False})
+            except Exception:
+                pass
+
             # 优先同时设置，若不支持 DigitalGain 则退化仅设置 AnalogueGain
             try:
                 self.camera.set_controls({
@@ -423,10 +448,38 @@ class IMX327MIPICamera(CameraInterface):
                 })
             self.analogue_gain = analogue_gain
             self.digital_gain = digital_gain
+            self.auto_exposure = False
             logger.info(f"增益设置为: 模拟={analogue_gain}, 数字={digital_gain}")
             return True
         except Exception as e:
             logger.error(f"设置增益失败: {e}")
+            return False
+
+    def set_auto_exposure(self, enabled: bool) -> bool:
+        """设置自动曝光开关"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+
+        try:
+            self.camera.set_controls({"AeEnable": enabled})
+            self.auto_exposure = enabled
+
+            # 关闭自动曝光时，立即重放当前手动参数，确保状态一致
+            if not enabled:
+                controls = {
+                    "ExposureTime": self.exposure_us,
+                    "AnalogueGain": self.analogue_gain,
+                }
+                try:
+                    self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
+                except Exception:
+                    self.camera.set_controls(controls)
+
+            logger.info(f"自动曝光已{'启用' if enabled else '关闭'}")
+            return True
+        except Exception as e:
+            logger.error(f"设置自动曝光失败: {e}")
             return False
     
     def set_rotation(self, rotation: int) -> bool:

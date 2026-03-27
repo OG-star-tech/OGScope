@@ -38,6 +38,7 @@ def get_camera_instance():
             "fps": 5,  # 调试控制台默认使用 5fps（用户未指定时）
             "exposure_us": settings.camera_exposure,
             "analogue_gain": settings.camera_gain,
+            "auto_exposure": True,  # 调试控制台默认自动曝光优先
             "rotation": 180,  # 默认180度旋转
             "sampling_mode": "supersample",
             # 新增参数
@@ -526,13 +527,18 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         try:
+            # 优先处理自动曝光开关，避免自动/手动控制混用
+            auto_exposure = settings.get("autoExposure", getattr(camera, "auto_exposure", False))
+            if hasattr(camera, 'set_auto_exposure'):
+                camera.set_auto_exposure(bool(auto_exposure))
+
             # 更新基础相机参数
-            if "exposure" in settings:
+            if not auto_exposure and "exposure" in settings:
                 camera.set_exposure(settings["exposure"])
             
-            if "gain" in settings and "digitalGain" in settings:
+            if not auto_exposure and "gain" in settings and "digitalGain" in settings:
                 camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
-            elif "gain" in settings:
+            elif not auto_exposure and "gain" in settings:
                 camera.set_gain(settings["gain"])
             
             # 更新图像增强参数
@@ -856,9 +862,15 @@ class DebugPresetService:
             # 应用预设到相机
             camera = get_camera_instance()
             if camera and camera.is_initialized:
+                # 自动曝光优先，避免手动参数与AE冲突
+                auto_exposure = preset.get("auto_exposure", False)
+                if hasattr(camera, 'set_auto_exposure'):
+                    camera.set_auto_exposure(auto_exposure)
+
                 # 基础参数
-                camera.set_exposure(preset["exposure_us"])
-                camera.set_gain(preset["analogue_gain"], preset.get("digital_gain", 1.0))
+                if not auto_exposure:
+                    camera.set_exposure(preset["exposure_us"])
+                    camera.set_gain(preset["analogue_gain"], preset.get("digital_gain", 1.0))
                 
                 # 图像增强参数
                 if any(key in preset for key in ["contrast", "brightness", "saturation", "sharpness"]):

@@ -16,6 +16,7 @@ class DebugConsole {
             exposure: 10000,
             gain: 1.0,
             digitalGain: 1.0,
+            autoExposure: true,
             rotation: 180,
             // 新增参数
             contrast: 1.0,
@@ -560,6 +561,10 @@ class DebugConsole {
         document.getElementById('noise-reduction-setting')?.addEventListener('input', (e) => {
             this.updateNoiseReductionDisplay(parseInt(e.target.value));
         });
+
+        document.getElementById('auto-exposure-mode')?.addEventListener('change', (e) => {
+            this.updateAutoExposureMode(e.target.value === 'auto');
+        });
         
         document.getElementById('color-mode')?.addEventListener('change', (e) => {
             this.updateColorMode(e.target.value);
@@ -730,6 +735,7 @@ class DebugConsole {
         this.updateSaturationDisplay(this.currentSettings.saturation);
         this.updateSharpnessDisplay(this.currentSettings.sharpness);
         this.updateNoiseReductionDisplay(this.currentSettings.noiseReduction);
+        this.updateAutoExposureMode(this.currentSettings.autoExposure);
         this.updateColorMode(this.currentSettings.colorMode);
         this.updateWhiteBalanceMode(this.currentSettings.whiteBalanceMode);
         this.updateWhiteBalanceGainR(this.currentSettings.whiteBalanceGainR);
@@ -778,6 +784,14 @@ class DebugConsole {
             const status = await response.json();
             
             this.cameraStatus = status;
+
+            // 同步关键参数状态，避免UI与相机真实状态脱节
+            const info = status.info || {};
+            if (typeof info.auto_exposure === 'boolean') {
+                this.currentSettings.autoExposure = info.auto_exposure;
+                this.updateAutoExposureMode(info.auto_exposure);
+            }
+
             this.updateStatusUI();
             this.updateInfoUI();
             
@@ -1268,6 +1282,36 @@ class DebugConsole {
     updateNoiseReductionDisplay(value) {
         document.getElementById('noise-reduction-value').textContent = value;
     }
+
+    /**
+     * 更新自动曝光模式
+     */
+    updateAutoExposureMode(isAuto) {
+        this.currentSettings.autoExposure = isAuto;
+
+        const modeSelect = document.getElementById('auto-exposure-mode');
+        if (modeSelect) {
+            modeSelect.value = isAuto ? 'auto' : 'manual';
+        }
+
+        // 自动曝光时禁用手动曝光参数，避免控制冲突
+        const manualControls = ['exposure-setting', 'gain-setting', 'digital-gain-setting'];
+        manualControls.forEach((id) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.disabled = isAuto;
+                if (element.parentElement) {
+                    element.parentElement.style.opacity = isAuto ? '0.5' : '1';
+                }
+            }
+        });
+
+        const autoAdjustBtn = document.getElementById('auto-adjust');
+        if (autoAdjustBtn) {
+            autoAdjustBtn.disabled = isAuto;
+            autoAdjustBtn.title = isAuto ? '请先切换到手动曝光模式' : '';
+        }
+    }
     
     /**
      * 更新颜色模式显示
@@ -1333,6 +1377,7 @@ class DebugConsole {
             exposure: parseInt(document.getElementById('exposure-setting').value),
             gain: parseFloat(document.getElementById('gain-setting').value),
             digitalGain: parseFloat(document.getElementById('digital-gain-setting').value),
+            autoExposure: document.getElementById('auto-exposure-mode').value === 'auto',
             contrast: parseFloat(document.getElementById('contrast-setting').value),
             brightness: parseFloat(document.getElementById('brightness-setting').value),
             saturation: parseFloat(document.getElementById('saturation-setting').value),
@@ -1731,9 +1776,10 @@ class DebugConsole {
                         ${preset.sharpness !== undefined ? ` 锐化${preset.sharpness}` : ''}
                     </div>
                     ` : ''}
-                    ${preset.noise_reduction !== undefined || preset.white_balance_mode !== undefined || preset.color_mode !== undefined ? `
+                    ${preset.auto_exposure !== undefined || preset.noise_reduction !== undefined || preset.white_balance_mode !== undefined || preset.color_mode !== undefined ? `
                     <div class="param-line">
                         <strong>高级:</strong>
+                        ${preset.auto_exposure !== undefined ? ` ${preset.auto_exposure ? '自动曝光' : '手动曝光'}` : ''}
                         ${preset.color_mode !== undefined ? ` ${preset.color_mode === 'mono' ? '黑白' : '彩色'}模式` : ''}
                         ${preset.noise_reduction !== undefined ? ` 降噪${preset.noise_reduction}级` : ''}
                         ${preset.white_balance_mode !== undefined ? ` 白平衡${preset.white_balance_mode}` : ''}
@@ -1777,6 +1823,7 @@ class DebugConsole {
                     exposure_us: parseInt(document.getElementById('exposure-setting').value),
                     analogue_gain: parseFloat(document.getElementById('gain-setting').value),
                     digital_gain: parseFloat(document.getElementById('digital-gain-setting').value),
+                    auto_exposure: document.getElementById('auto-exposure-mode').value === 'auto',
                     // 图像增强参数
                     contrast: parseFloat(document.getElementById('contrast-setting').value),
                     brightness: parseFloat(document.getElementById('brightness-setting').value),
@@ -1882,6 +1929,10 @@ class DebugConsole {
                 
                 if (presetData.color_mode !== undefined) {
                     document.getElementById('color-mode').value = presetData.color_mode;
+                }
+
+                if (presetData.auto_exposure !== undefined) {
+                    this.updateAutoExposureMode(!!presetData.auto_exposure);
                 }
                 
                 // 更新显示值
@@ -2325,6 +2376,9 @@ class DebugConsole {
             this.updateSharpnessDisplay(preset.sharpness);
             this.updateNoiseReductionDisplay(preset.noiseReduction);
             this.updateWhiteBalanceMode(preset.whiteBalanceMode);
+
+            // 快速预设属于手动调参场景，自动切换到手动曝光
+            this.updateAutoExposureMode(false);
             
             // 应用设置
             await this.applySettings();
@@ -2350,6 +2404,11 @@ class DebugConsole {
     async performAutoAdjust() {
         if (!this.cameraStatus.streaming) {
             this.showNotification('请先启动相机预览', 'warning');
+            return;
+        }
+
+        if (this.currentSettings.autoExposure) {
+            this.showNotification('自动曝光模式下无需智能调整，请先切换为手动曝光', 'info');
             return;
         }
         

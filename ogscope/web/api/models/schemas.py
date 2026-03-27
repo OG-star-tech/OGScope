@@ -9,6 +9,7 @@ class CameraSettings(BaseModel):
     """相机设置"""
     exposure: int  # 曝光时间 (微秒)
     gain: float    # 增益
+    autoExposure: Optional[bool] = True  # 自动曝光开关
     digitalGain: Optional[float] = 1.0  # 数字增益
     contrast: Optional[float] = 1.0     # 对比度
     brightness: Optional[float] = 0.0   # 亮度
