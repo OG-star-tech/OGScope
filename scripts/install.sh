@@ -48,8 +48,6 @@ sudo apt install -y \
     libjpeg-dev \
     libpng-dev \
     libfreetype6-dev \
-    libatlas-base-dev \
-    libspidev-dev \
     python3-picamera2 \
     python3-numpy
 

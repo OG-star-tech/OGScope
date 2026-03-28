@@ -19,6 +19,10 @@ DEBUG_CAPTURES_DIR.mkdir(exist_ok=True)
 camera_instance = None
 is_recording = False
 recording_task = None
+# 录制会话元数据（用于停止时写入侧车） / Recording session metadata (for sidecar on stop)
+recording_stem: Optional[str] = None
+recording_t0_mono: Optional[float] = None
+recording_fps_value: float = 15.0
 
 # 预览帧缓存与抓取任务 / Preview frame buffering and grabbing tasks
 latest_preview_jpeg: Optional[bytes] = None
@@ -77,30 +81,101 @@ def get_camera_instance():
     return camera_instance
 
 
-def generate_filename(prefix: str = "IMG") -> str:
-    """生成文件名 / Generate file name"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{prefix}_{timestamp}"
+def _capture_timestamp_for_stem() -> str:
+    """生成带毫秒的时间戳，降低同秒碰撞 / Timestamp with milliseconds to reduce same-second collisions"""
+    dt = datetime.now()
+    return dt.strftime("%Y%m%d_%H%M%S") + f"_{dt.microsecond // 1000:03d}"
 
 
-def save_capture_info(filename: str, camera_params: Dict[str, Any], file_size: int):
-    """保存拍摄信息到txt文件 / Save shooting information to txt file"""
-    info_file = DEBUG_CAPTURES_DIR / f"{filename}.txt"
-    
-    info_data = {
-        "filename": filename,
-        "timestamp": datetime.now().isoformat(),
-        "exposure_us": camera_params.get("exposure_us", 0),
-        "analogue_gain": camera_params.get("analogue_gain", 1.0),
-        "digital_gain": camera_params.get("digital_gain", 1.0),
-        "resolution": f"{camera_params.get('width', 1920)}x{camera_params.get('height', 1080)}",
-        "file_size": file_size,
-        "camera_type": camera_params.get("type", "imx327_mipi"),
-        "fps": camera_params.get("fps", 15)
+def _to_json_safe(value: Any) -> Any:
+    """将嵌套结构转为可 JSON 序列化的类型 / Convert nested structures to JSON-serializable types"""
+    if isinstance(value, dict):
+        return {str(k): _to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def build_param_slug(camera_info: Dict[str, Any]) -> str:
+    """从相机信息生成简短、文件名安全的参数片段 / Short filesystem-safe param slug from camera info"""
+    if not camera_info:
+        return ""
+    parts: List[str] = []
+    exp = camera_info.get("exposure_us")
+    if exp is not None:
+        try:
+            parts.append(f"e{int(exp)}us")
+        except (TypeError, ValueError):
+            pass
+    ag = camera_info.get("analogue_gain")
+    if ag is not None:
+        try:
+            parts.append(f"ag{float(ag):.1f}".replace(".", "p"))
+        except (TypeError, ValueError):
+            pass
+    dg = camera_info.get("digital_gain")
+    if dg is not None:
+        try:
+            if abs(float(dg) - 1.0) > 0.01:
+                parts.append(f"dg{float(dg):.1f}".replace(".", "p"))
+        except (TypeError, ValueError):
+            pass
+    fps = camera_info.get("fps")
+    if fps is not None:
+        try:
+            parts.append(f"{float(fps):g}fps")
+        except (TypeError, ValueError):
+            pass
+    sm = camera_info.get("sampling_mode")
+    if sm and str(sm) != "native":
+        parts.append(str(sm)[:24])
+    ow = camera_info.get("output_width") or camera_info.get("width")
+    oh = camera_info.get("output_height") or camera_info.get("height")
+    if ow and oh:
+        try:
+            parts.append(f"{int(ow)}x{int(oh)}")
+        except (TypeError, ValueError):
+            pass
+    slug = "_".join(parts)
+    for bad in '<>:"/\\|?*':
+        slug = slug.replace(bad, "-")
+    return slug[:120]
+
+
+def generate_capture_stem(prefix: str, camera_info: Dict[str, Any]) -> str:
+    """生成带参数摘要的文件名主干（无扩展名）/ File stem (no extension) with param summary"""
+    ts = _capture_timestamp_for_stem()
+    slug = build_param_slug(camera_info)
+    if slug:
+        return f"{prefix}_{ts}_{slug}"
+    return f"{prefix}_{ts}"
+
+
+def save_capture_sidecar(
+    stem: str,
+    camera_params: Dict[str, Any],
+    *,
+    kind: str,
+    media_filename: str,
+    file_size: int,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    """将完整拍摄/录制参数写入同名 .txt 侧车 / Write full capture params to sidecar .txt file"""
+    info_file = DEBUG_CAPTURES_DIR / f"{stem}.txt"
+    payload: Dict[str, Any] = {
+        "kind": kind,
+        "media_file": media_filename,
+        "sidecar_version": 2,
+        "created_at": datetime.now().isoformat(),
+        "file_size_bytes": file_size,
+        "camera": _to_json_safe(camera_params),
     }
-    
-    with open(info_file, 'w', encoding='utf-8') as f:
-        json.dump(info_data, f, indent=2, ensure_ascii=False)
+    if extra:
+        payload["extra"] = _to_json_safe(extra)
+    with open(info_file, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 class DebugCameraService:
@@ -205,23 +280,29 @@ class DebugCameraService:
             if image is None:
                 raise Exception("图像捕获失败")
             
-            # 生成文件名 / Generate file name
-            filename = generate_filename("IMG")
-            image_path = DEBUG_CAPTURES_DIR / f"{filename}.jpg"
+            # 生成文件名（含参数摘要）/ File name with param summary in stem
+            camera_info = camera.get_camera_info()
+            stem = generate_capture_stem("IMG", camera_info)
+            image_path = DEBUG_CAPTURES_DIR / f"{stem}.jpg"
             
             # 保存图像 / save image
             success = cv2.imwrite(str(image_path), image)
             if not success:
                 raise Exception("图像保存失败")
             
-            # 保存拍摄信息 / Save shooting information
-            camera_info = camera.get_camera_info()
+            # 保存拍摄信息侧车 / Save capture sidecar (.txt)
             file_size = image_path.stat().st_size
-            save_capture_info(filename, camera_info, file_size)
+            save_capture_sidecar(
+                stem,
+                camera_info,
+                kind="photo",
+                media_filename=f"{stem}.jpg",
+                file_size=file_size,
+            )
             
             return {
                 "success": True,
-                "filename": f"{filename}.jpg",
+                "filename": f"{stem}.jpg",
                 "path": str(image_path),
                 "size": file_size
             }
@@ -253,7 +334,7 @@ class DebugCameraService:
     @staticmethod
     async def start_recording():
         """开始录制视频 / Start recording video"""
-        global is_recording, recording_task
+        global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         
         if is_recording:
             raise Exception("已在录制中")
@@ -263,24 +344,28 @@ class DebugCameraService:
             raise Exception("相机未运行")
         
         try:
+            import time
+
             import cv2
-            import numpy as np
             
-            filename = generate_filename("VID")
-            video_path = DEBUG_CAPTURES_DIR / f"{filename}.avi"
+            camera_info = camera.get_camera_info()
+            stem = generate_capture_stem("VID", camera_info)
+            video_path = DEBUG_CAPTURES_DIR / f"{stem}.avi"
             
             # 创建视频写入器（MJPG / Create video writer (MJPG
             fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            camera_info = camera.get_camera_info()
             width = camera_info.get('width', 1920)
             height = camera_info.get('height', 1080)
-            fps = camera_info.get('fps', 15)
+            fps = float(camera_info.get('fps', 15))
+            recording_fps_value = fps
             
             video_writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
             
             if not video_writer.isOpened():
                 raise Exception("视频写入器创建失败")
             
+            recording_stem = stem
+            recording_t0_mono = time.monotonic()
             is_recording = True
             
             # 启动录制任务 / Start recording task
@@ -305,7 +390,7 @@ class DebugCameraService:
             
             return {
                 "success": True,
-                "filename": f"{filename}.avi",
+                "filename": f"{stem}.avi",
                 "path": str(video_path)
             }
             
@@ -317,16 +402,47 @@ class DebugCameraService:
     @staticmethod
     async def stop_recording():
         """停止录制视频 / Stop recording video"""
-        global is_recording, recording_task
+        global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         
         if not is_recording:
             raise Exception("未在录制中")
+        
+        import time
+
+        stem = recording_stem
+        t0 = recording_t0_mono
+        nominal_fps = recording_fps_value
         
         is_recording = False
         
         if recording_task:
             await recording_task
             recording_task = None
+        
+        # 写入录制参数侧车（与视频同名 .txt）/ Write recording sidecar (.txt) next to video file
+        if stem:
+            video_path = DEBUG_CAPTURES_DIR / f"{stem}.avi"
+            duration_s = 0.0
+            if t0 is not None:
+                duration_s = max(0.0, time.monotonic() - t0)
+            file_size = int(video_path.stat().st_size) if video_path.exists() else 0
+            camera = get_camera_instance()
+            camera_info = camera.get_camera_info() if camera else {}
+            save_capture_sidecar(
+                stem,
+                camera_info,
+                kind="video",
+                media_filename=f"{stem}.avi",
+                file_size=file_size,
+                extra={
+                    "duration_s": round(duration_s, 3),
+                    "nominal_fps": nominal_fps,
+                    "codec_fourcc": "MJPG",
+                    "container": "AVI",
+                },
+            )
+        recording_stem = None
+        recording_t0_mono = None
         
         return {"success": True, **i18n_payload("server.recordingStopped", "录制已停止")}
 
@@ -1123,10 +1239,37 @@ class DebugFileService:
                 "type": file_type
             }
             
-            # 读取拍摄信息 / Read shooting information
+            # 读取拍摄信息；将 camera 内字段展开到顶层以兼容前端详情 / Read sidecar; flatten camera for UI
             if info_path.exists():
                 with open(info_path, 'r', encoding='utf-8') as f:
                     capture_info = json.load(f)
+                    if isinstance(capture_info, dict):
+                        cam = capture_info.get("camera")
+                        if isinstance(cam, dict):
+                            for k in (
+                                "exposure_us",
+                                "analogue_gain",
+                                "digital_gain",
+                                "fps",
+                                "auto_exposure",
+                                "rotation",
+                                "sampling_mode",
+                                "color_mode",
+                                "sensor",
+                                "resolution",
+                            ):
+                                if k not in capture_info and k in cam:
+                                    capture_info[k] = cam[k]
+                            if capture_info.get("resolution") is None:
+                                ow = cam.get("output_width") or cam.get("width")
+                                oh = cam.get("output_height") or cam.get("height")
+                                if ow and oh:
+                                    capture_info["resolution"] = f"{ow}x{oh}"
+                        extra = capture_info.get("extra")
+                        if isinstance(extra, dict):
+                            for k, v in extra.items():
+                                if k not in capture_info:
+                                    capture_info[k] = v
                     info.update(capture_info)
             
             return info

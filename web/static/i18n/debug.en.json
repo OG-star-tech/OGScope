@@ -218,6 +218,7 @@
   "notify.presetDeleted": "Preset '{name}' deleted",
   "notify.deletePresetFailed": "Failed to delete preset: {error}",
   "notify.downloadStarted": "Download started: {filename}",
+  "notify.downloadStartedWithSidecar": "Download started: {filename} and sidecar {sidecar}",
   "notify.fileDeleted": "File {filename} deleted",
   "notify.fileDeleteSuccess": "File deleted",
   "notify.deleteFileFailed": "Failed to delete file: {error}",

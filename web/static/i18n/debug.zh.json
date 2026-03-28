@@ -218,6 +218,7 @@
   "notify.presetDeleted": "预设 '{name}' 已删除",
   "notify.deletePresetFailed": "删除预设失败: {error}",
   "notify.downloadStarted": "开始下载: {filename}",
+  "notify.downloadStartedWithSidecar": "开始下载: {filename} 与参数侧车 {sidecar}",
   "notify.fileDeleted": "文件 {filename} 删除成功",
   "notify.fileDeleteSuccess": "文件删除成功",
   "notify.deleteFileFailed": "删除文件失败: {error}",

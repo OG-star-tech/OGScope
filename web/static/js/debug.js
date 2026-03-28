@@ -3035,17 +3035,49 @@ class DebugConsole {
     }
     
     /**
-     * 下载文件 / Download file
+     * 下载文件；若为图片/视频则尝试同时下载同名 .txt 参数侧车 / Download file; fetch sidecar .txt for media
      */
-    downloadFile(filename) {
+    async downloadFile(filename) {
         const link = document.createElement('a');
         link.href = `/api/debug/files/${encodeURIComponent(filename)}`;
         link.download = filename;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
-        this.showNotification(`开始下载: ${filename}`, 'info');
+
+        const mediaMatch = filename.match(/\.(jpe?g|png|bmp|tiff?|webp|mp4|avi|mov|mkv|wmv|flv|webm|m4v)$/i);
+        let sidecarName = '';
+        let sidecarOk = false;
+        if (mediaMatch) {
+            const stem = filename.slice(0, -mediaMatch[0].length);
+            sidecarName = `${stem}.txt`;
+            try {
+                const res = await fetch(`/api/debug/files/${encodeURIComponent(sidecarName)}`);
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = sidecarName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    sidecarOk = true;
+                }
+            } catch (e) {
+                console.warn('[DebugConsole] sidecar download skipped:', e);
+            }
+        }
+
+        if (sidecarOk) {
+            this.showNotification(
+                this.t('notify.downloadStartedWithSidecar', { filename, sidecar: sidecarName }),
+                'info'
+            );
+        } else {
+            this.showNotification(this.t('notify.downloadStarted', { filename }), 'info');
+        }
     }
     
     /**
@@ -3088,6 +3120,12 @@ class DebugConsole {
                         <div class="info-item">
                             <span class="info-label">${this.t('files.resolution')}</span>
                             <span class="info-value">${info.resolution}</span>
+                        </div>
+                        ` : ''}
+                        ${info.duration_s != null && info.duration_s !== undefined ? `
+                        <div class="info-item">
+                            <span class="info-label">时长 / Duration</span>
+                            <span class="info-value">${info.duration_s}s</span>
                         </div>
                         ` : ''}
                     </div>
