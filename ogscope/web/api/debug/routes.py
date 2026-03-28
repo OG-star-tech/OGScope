@@ -380,11 +380,18 @@ async def delete_capture_file(filename: str):
 async def start_realtime_solving(
     hint_ra_deg: float | None = Query(default=None),
     hint_dec_deg: float | None = Query(default=None),
+    fov_estimate: float | None = Query(default=None),
+    fov_max_error: float | None = Query(default=None),
+    solve_timeout_ms: int | None = Query(default=None),
 ):
     """启动实时解算 / Start realtime solving"""
     try:
         return await realtime_solve_service.start(
-            hint_ra_deg=hint_ra_deg, hint_dec_deg=hint_dec_deg
+            hint_ra_deg=hint_ra_deg,
+            hint_dec_deg=hint_dec_deg,
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

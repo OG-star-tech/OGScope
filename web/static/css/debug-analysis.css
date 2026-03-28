@@ -111,3 +111,31 @@ select {
   font-size: 12px;
   line-height: 1.45;
 }
+
+.help-text {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #cbd5e1;
+  margin: 0 0 10px;
+}
+
+.help-text code {
+  background: #0b1220;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.stream-preview {
+  margin-top: 10px;
+}
+
+.stream-container {
+  margin-top: 8px;
+}
+
+.stream-container img {
+  border-radius: 8px;
+  border: 1px solid #374151;
+  max-width: 100%;
+}

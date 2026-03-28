@@ -1,9 +1,11 @@
 """
 Pytest 配置和共享 fixtures
 """
+
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from ogscope.web.app import app
 
@@ -35,13 +37,33 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
 
 
 @pytest.fixture
-def temp_catalog_dir(tmp_path: Path):
-    """重定向星表目录到临时路径 / Redirect catalog directory to temp path."""
-    from ogscope.data.catalog.service import catalog_service
+def mock_plate_solve(monkeypatch):
+    """避免测试依赖 default_database.npz / Avoid tests requiring default_database.npz."""
 
-    catalog_root = tmp_path / "catalog"
-    catalog_service.reconfigure_storage(catalog_root)
-    return catalog_root
+    def _fake_solve(self, stars, frame_shape, **kwargs):
+        from ogscope.algorithms.plate_solve.solver import SolveResult
+
+        return SolveResult(
+            ra_deg=12.0,
+            dec_deg=80.0,
+            detected_stars=len(stars),
+            solve_source="full",
+            status="MATCH_FOUND",
+            status_code=1,
+            roll_deg=0.0,
+            fov_deg=16.0,
+            matches=min(8, len(stars)),
+            prob=0.001,
+            rmse_arcsec=10.0,
+            t_solve_ms=5.0,
+            t_extract_ms=None,
+            raw={},
+        )
+
+    monkeypatch.setattr(
+        "ogscope.algorithms.plate_solve.solver.PlateSolver.solve",
+        _fake_solve,
+    )
 
 
 @pytest.fixture
@@ -62,4 +84,3 @@ def temp_analysis_dir(tmp_path: Path):
     analysis_service.results_root = results_root
     analysis_service._jobs = {}
     return analysis_root
-

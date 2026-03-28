@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -58,7 +59,11 @@ class AnalysisService:
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
         self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
-        self.solver = PlateSolver(fov_deg=settings.solver_fov_deg)
+        self.solver = PlateSolver(
+            fov_deg=settings.solver_fov_deg,
+            fov_max_error_deg=settings.solver_fov_max_error_deg,
+            solve_timeout_ms=settings.solver_timeout_ms,
+        )
         self.default_hint_ra = settings.solver_hint_ra_deg
         self.default_hint_dec = settings.solver_hint_dec_deg
         self._jobs: dict[str, AnalysisJob] = {}
@@ -85,6 +90,9 @@ class AnalysisService:
         hint_dec_deg: float | None = None,
         frame_step: int = 1,
         max_frames: int = 180,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         """创建并执行任务 / Create and execute job"""
         if input_type not in {"image", "video"}:
@@ -103,19 +111,27 @@ class AnalysisService:
             job.message = "开始分析 / Analysis started"
             self._persist_job(job)
             if input_type == "image":
-                results = self._analyze_image(
+                results = await asyncio.to_thread(
+                    self._analyze_image,
                     source=source,
                     hint_ra_deg=hint_ra_deg,
                     hint_dec_deg=hint_dec_deg,
+                    fov_estimate=fov_estimate,
+                    fov_max_error=fov_max_error,
+                    solve_timeout_ms=solve_timeout_ms,
                 )
             else:
-                results = self._analyze_video(
+                results = await asyncio.to_thread(
+                    self._analyze_video,
                     source=source,
                     hint_ra_deg=hint_ra_deg,
                     hint_dec_deg=hint_dec_deg,
                     frame_step=frame_step,
                     max_frames=max_frames,
                     job=job,
+                    fov_estimate=fov_estimate,
+                    fov_max_error=fov_max_error,
+                    solve_timeout_ms=solve_timeout_ms,
                 )
             result_path = self.results_root / f"{job.job_id}.json"
             result_payload = {
@@ -141,16 +157,26 @@ class AnalysisService:
         return job.to_dict()
 
     async def solve_single_image(
-        self, input_name: str, hint_ra_deg: float | None = None, hint_dec_deg: float | None = None
+        self,
+        input_name: str,
+        hint_ra_deg: float | None = None,
+        hint_dec_deg: float | None = None,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         """直接解算单图 / Solve a single image directly"""
         source = self.upload_root / Path(input_name).name
         if not source.exists():
             raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
-        rows = self._analyze_image(
+        rows = await asyncio.to_thread(
+            self._analyze_image,
             source=source,
             hint_ra_deg=hint_ra_deg,
             hint_dec_deg=hint_dec_deg,
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
         )
         return {
             "success": True,
@@ -188,7 +214,13 @@ class AnalysisService:
         )
 
     def _analyze_image(
-        self, source: Path, hint_ra_deg: float | None, hint_dec_deg: float | None
+        self,
+        source: Path,
+        hint_ra_deg: float | None,
+        hint_dec_deg: float | None,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
@@ -201,6 +233,9 @@ class AnalysisService:
             hint_ra_deg=hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra,
             hint_dec_deg=hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec,
             solve_source="full",
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
         )
         row = {"frame_index": 0, **solved.to_dict()}
         return [row]
@@ -213,6 +248,9 @@ class AnalysisService:
         frame_step: int,
         max_frames: int,
         job: AnalysisJob,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析视频 / Analyze video"""
         cap = cv2.VideoCapture(str(source))
@@ -240,6 +278,9 @@ class AnalysisService:
                 hint_ra_deg=hint_ra,
                 hint_dec_deg=hint_dec,
                 solve_source="full",
+                fov_estimate=fov_estimate,
+                fov_max_error=fov_max_error,
+                solve_timeout_ms=solve_timeout_ms,
             )
             hint_ra = solved.ra_deg
             hint_dec = solved.dec_deg

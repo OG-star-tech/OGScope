@@ -23,7 +23,7 @@ class _FakeCamera:
 
 
 @pytest.mark.unit
-def test_realtime_solver_status_endpoints(client, monkeypatch):
+def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve):
     """测试实时解算启停接口 / Test realtime solver start and stop endpoints."""
     from ogscope.web.api.debug import routes as debug_routes
 

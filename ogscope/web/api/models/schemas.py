@@ -81,36 +81,6 @@ class AlignmentStatus(BaseModel):
     progress: int
 
 
-class CatalogDownloadRequest(BaseModel):
-    """星表下载请求 / Catalog download request"""
-
-    source: str = "seed"
-    url: Optional[str] = None
-    magnitude_limit: float = 8.5
-
-
-class CatalogBuildIndexRequest(BaseModel):
-    """星表索引构建请求 / Catalog build index request"""
-
-    magnitude_limit: float = 8.5
-    ra_bin_size_deg: float = 15.0
-
-
-class CatalogStarUpsertRequest(BaseModel):
-    """星点新增/更新请求 / Catalog star upsert request"""
-
-    source_id: str
-    ra: float
-    dec: float
-    pmra: float = 0.0
-    pmdec: float = 0.0
-    phot_g_mean_mag: float
-    name_en: Optional[str] = None
-    name_zh: Optional[str] = None
-    description_en: Optional[str] = None
-    description_zh: Optional[str] = None
-
-
 class AnalysisJobCreateRequest(BaseModel):
     """分析任务创建请求 / Analysis job create request"""
 
@@ -120,6 +90,9 @@ class AnalysisJobCreateRequest(BaseModel):
     hint_dec_deg: Optional[float] = None
     frame_step: int = 1
     max_frames: int = 180
+    fov_estimate: Optional[float] = None
+    fov_max_error: Optional[float] = None
+    solve_timeout_ms: Optional[int] = None
 
 
 class SolveFrameResult(BaseModel):
@@ -128,8 +101,8 @@ class SolveFrameResult(BaseModel):
     frame_index: int
     ra_deg: float
     dec_deg: float
-    confidence: float
     solve_source: str
+    status: str = ""
 
 
 class AnalysisJobStatusResponse(BaseModel):

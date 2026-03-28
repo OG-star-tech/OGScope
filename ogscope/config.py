@@ -59,7 +59,22 @@ class Settings(BaseSettings):
     analysis_dir: Path = Field(
         default=Path("./data/analysis"), description="分析任务目录"
     )
-    catalog_dir: Path = Field(default=Path("./data/catalog"), description="星表目录")
+    plate_solve_dir: Path = Field(
+        default=Path("./data/plate_solve"),
+        description="Tetra3 图案库目录 / Tetra3 pattern database directory",
+    )
+    solver_tetra_database_path: Optional[Path] = Field(
+        default=None,
+        description="default_database.npz 绝对路径；None 则使用 vendor 内 data/default_database.npz / Absolute path to default_database.npz",
+    )
+    solver_fov_max_error_deg: Optional[float] = Field(
+        default=None,
+        description="FOV 估计允许误差(度)；None 为库默认 / Max FOV estimate error in degrees",
+    )
+    solver_timeout_ms: int = Field(
+        default=8000,
+        description="Tetra3 单次解算超时毫秒 / Tetra3 solve timeout in ms",
+    )
     static_dir: Path = Field(default=Path("./web/static"), description="静态文件目录")
     template_dir: Path = Field(default=Path("./web/templates"), description="模板目录")
 
@@ -85,7 +100,7 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
-        self.catalog_dir.mkdir(parents=True, exist_ok=True)
+        self.plate_solve_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache()

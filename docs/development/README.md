@@ -6,6 +6,8 @@
 
 测试实践请见：[测试指南](testing-guide.md)。
 
+爱好者复刻与一键部署清单见：[DEPLOY.md](DEPLOY.md)。
+
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。
 
@@ -17,7 +19,13 @@
 - 建议开发板使用 Python 3.10 及以上版本
 - 若其他文档出现 `3.9+`，应视为历史描述
 
-### 1.2 安装 Poetry 与 Python 依赖
+### 1.2 Poetry、PEP 668 与虚拟环境（必读）
+
+- **必须使用 Poetry 创建的项目内虚拟环境**（`.venv`），**禁止**全局设置 `virtualenvs.create false` 后在系统 Python 上混装依赖；否则易触发 **PEP 668**（发行版保护系统 site-packages，`pip`/`poetry` 无法改写系统包）。
+- 开发板推荐由 `scripts/install.sh` 统一写入：`virtualenvs.create true`、`virtualenvs.in-project true`，并尽量启用 **`virtualenvs.options.system-site-packages true`**，使 venv 能解析通过 `apt` 安装的 `picamera2` 等系统包。
+- **生产/板端**默认仅安装运行时依赖：`poetry install --only main`（脚本默认）。若需 pytest、类型检查等，在开发机或板上设置 `OGSCOPE_INSTALL_DEV=1` 后重装。
+
+### 1.3 安装 Poetry 与 Python 依赖
 
 ```bash
 # 进入项目目录
@@ -27,18 +35,26 @@ cd /path/to/OGScope
 curl -sSL https://install.python-poetry.org | python3 -
 export PATH="$HOME/.local/bin:$PATH"
 
-# 安装项目依赖
+# 开发机：完整依赖（含 dev）
 poetry install
+
+# 开发板（手动维护时）：仅运行时依赖，与 install.sh 默认一致
+# poetry install --no-interaction --only main
 ```
 
-### 1.3 使用安装脚本（推荐首次部署）
+### 1.4 使用安装脚本（推荐首次部署）
 
 仓库提供 `scripts/install.sh`，用于在开发板执行一次性环境准备。脚本会：
 
+- 读取 `/etc/os-release` 识别发行版，**仅支持 Debian/Ubuntu 系**（含 **Raspberry Pi OS**、Orange Pi Debian 等）；非该系将退出，避免误改软件源
 - 安装系统依赖与 Poetry
-- 安装项目 Python 依赖
+- 配置 Poetry 使用项目 `.venv` 与 `system-site-packages`（Poetry 版本支持时）
+- 默认执行 `poetry install --only main`（设 `OGSCOPE_INSTALL_DEV=1` 可装 dev）
+- 可选 `OGSCOPE_APT_SLOW=1`：分批 `apt` 并在批次间暂停，减轻低配板内存压力
+- **`OGSCOPE_MIRROR`**：`auto`（默认，按 `LANG`/`LC_*` 与系统时区启发）、`cn`（中国大陆镜像：apt 清华源 + PyPI 清华）、`international`（不替换 apt，PyPI 走默认）。在国内但语言为英文时，请显式 `export OGSCOPE_MIRROR=cn`。
+- 创建 `logs`、`uploads`、`data/plate_solve` 等目录
 - 生成/更新 `systemd` 服务（`ogscope.service`）
-- 注入 `PYTHONPATH` 与 `LD_LIBRARY_PATH`
+- 注入 `PYTHONPATH` 与 `LD_LIBRARY_PATH`（按实际存在的路径）
 - 启用服务开机自启
 
 执行方式：
@@ -49,10 +65,10 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-### 1.4 依赖维护建议
+### 1.5 依赖维护建议
 
 - 保持 `poetry.lock` 与仓库同步
-- 每次上传较大改动后，执行一次 `poetry install`
+- 每次上传较大改动后，在板上执行 `./scripts/board-update.sh`，或手动 `poetry install --only main` 后 `sudo systemctl restart ogscope`
 - 服务运行时优先使用固定虚拟环境解释器（见第 5 节）
 
 ## 2. 系统环境依赖（重点）
@@ -82,6 +98,8 @@ sudo apt install -y \
 - 这些系统路径默认不一定在 Poetry 虚拟环境的 `sys.path` 中
 - 结果是：服务运行于虚拟环境时，可能找不到 `picamera2` 等系统包
 
+**与 `system-site-packages` 的关系**：启用后，venv 的 `sys.path` 会包含系统 site-packages，一般即可 `import picamera2`；`systemd` 里仍保留 `PYTHONPATH`，用于覆盖不同发行版下 `/usr/local/lib/python3.x/dist-packages` 等路径，二者叠加不冲突。
+
 因此在服务配置中显式注入 `PYTHONPATH`，将系统 Python 包路径加入解释器搜索路径，例如：
 
 ```ini
@@ -107,6 +125,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/install.sh`
   - 作用：安装依赖并生成 service
   - 状态：安装辅助脚本，不是运行时自动调用入口
+- `scripts/board-update.sh`
+  - 作用：已安装环境下的增量更新（可选 `OGSCOPE_GIT_PULL=1` 执行 `git pull`、`poetry install`、重启 `ogscope`）
+  - 状态：日常部署推荐入口
 - `scripts/start_debug_console.sh`
   - 作用：手动设置 `PYTHONPATH`/`LD_LIBRARY_PATH` 后前台启动
   - 状态：手动调试辅助脚本，不是默认生产启动链路
@@ -162,14 +183,24 @@ sudo systemctl status ogscope
 
 ### 6.2 日常代码更新（推荐）
 
-代码更新后（`git pull` 或手动上传）执行以下流程：
+代码更新后（`git pull` 或手动上传）可一键执行（镜像策略与 `install.sh` 相同，通过 `OGSCOPE_MIRROR` 控制）：
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/board-update.sh
+# 若需先拉取远端代码（仅 git 仓库）：OGSCOPE_GIT_PULL=1 ./scripts/board-update.sh
+# 中国大陆：OGSCOPE_MIRROR=cn ./scripts/board-update.sh
+./scripts/board-update.sh
+```
+
+或手动执行：
 
 ```bash
 # 进入项目目录
 cd /path/to/OGScope
 
-# 同步依赖（有 pyproject.toml/poetry.lock 变更时必须执行）
-poetry install
+# 同步依赖（有 pyproject.toml/poetry.lock 变更时必须执行；板端建议仅 main）
+poetry install --no-interaction --only main
 
 # 重启服务使新代码生效
 sudo systemctl restart ogscope
@@ -277,7 +308,7 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 ## 11. 常用命令速查
 
 ```bash
-# 安装/更新依赖
+# 安装/更新依赖（开发机）；板端可用 ./scripts/board-update.sh
 poetry install
 
 # 前台手动启动（调试时）

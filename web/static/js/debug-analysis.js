@@ -30,90 +30,34 @@
     return data;
   }
 
-  async function onCatalogDownload() {
-    const source = $("catalog-source").value;
-    const url = $("catalog-url").value.trim() || null;
-    const magnitude_limit = Number($("magnitude-limit").value);
-    const data = await request("/api/catalog/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, url, magnitude_limit }),
-    });
-    setOutput("catalog-status", data);
+  function readSolverQueryParams() {
+    const fov = parseFloat($("fov-estimate").value);
+    const fovMax = $("fov-max-error").value.trim();
+    const timeout = $("solve-timeout-ms").value.trim();
+    const hintRa = $("hint-ra").value.trim();
+    const hintDec = $("hint-dec").value.trim();
+    const params = new URLSearchParams();
+    if (!Number.isNaN(fov)) params.set("fov_estimate", String(fov));
+    if (fovMax !== "") params.set("fov_max_error", fovMax);
+    if (timeout !== "") params.set("solve_timeout_ms", timeout);
+    if (hintRa !== "") params.set("hint_ra_deg", hintRa);
+    if (hintDec !== "") params.set("hint_dec_deg", hintDec);
+    return params;
   }
 
-  async function onCatalogBuild() {
-    const magnitude_limit = Number($("magnitude-limit").value);
-    const ra_bin_size_deg = Number($("ra-bin-size").value);
-    const data = await request("/api/catalog/build-index", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ magnitude_limit, ra_bin_size_deg }),
-    });
-    setOutput("catalog-status", data);
-  }
-
-  async function onCatalogStatus() {
-    const data = await request("/api/catalog/status");
-    setOutput("catalog-status", data);
-  }
-
-  function readStarPayload() {
-    return {
-      source_id: $("star-source-id").value.trim(),
-      ra: Number($("star-ra").value),
-      dec: Number($("star-dec").value),
-      pmra: Number($("star-pmra").value),
-      pmdec: Number($("star-pmdec").value),
-      phot_g_mean_mag: Number($("star-mag").value),
-      name_en: $("star-name-en").value.trim(),
-      name_zh: $("star-name-zh").value.trim(),
-      description_en: $("star-desc-en").value.trim(),
-      description_zh: $("star-desc-zh").value.trim(),
-    };
-  }
-
-  async function onStarCreate() {
-    const payload = readStarPayload();
-    const data = await request("/api/catalog/stars", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setOutput("star-output", data);
-  }
-
-  async function onStarUpdate() {
-    const payload = readStarPayload();
-    const sid = payload.source_id;
-    const data = await request(`/api/catalog/stars/${encodeURIComponent(sid)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    setOutput("star-output", data);
-  }
-
-  async function onStarDelete() {
-    const sid = $("star-source-id").value.trim();
-    const data = await request(`/api/catalog/stars/${encodeURIComponent(sid)}`, {
-      method: "DELETE",
-    });
-    setOutput("star-output", data);
-  }
-
-  async function onStarGet() {
-    const sid = $("star-source-id").value.trim();
-    const data = await request(`/api/catalog/stars/${encodeURIComponent(sid)}`);
-    setOutput("star-output", data);
-  }
-
-  async function onStarList() {
-    const q = $("star-query").value.trim();
-    const params = new URLSearchParams({ limit: "50", offset: "0" });
-    if (q) params.set("source_query", q);
-    const data = await request(`/api/catalog/stars?${params.toString()}`);
-    setOutput("star-output", data);
+  function readSolverBody() {
+    const fov = parseFloat($("fov-estimate").value);
+    const fovMax = $("fov-max-error").value.trim();
+    const timeout = $("solve-timeout-ms").value.trim();
+    const hintRa = $("hint-ra").value.trim();
+    const hintDec = $("hint-dec").value.trim();
+    const body = {};
+    if (!Number.isNaN(fov)) body.fov_estimate = fov;
+    if (fovMax !== "") body.fov_max_error = parseFloat(fovMax);
+    if (timeout !== "") body.solve_timeout_ms = parseInt(timeout, 10);
+    if (hintRa !== "") body.hint_ra_deg = parseFloat(hintRa);
+    if (hintDec !== "") body.hint_dec_deg = parseFloat(hintDec);
+    return body;
   }
 
   async function onUpload() {
@@ -136,13 +80,8 @@
     if (!state.uploadedFileName) {
       throw new Error("请先上传图片 / Please upload an image first");
     }
-    const hint_ra_deg = Number($("hint-ra").value);
-    const hint_dec_deg = Number($("hint-dec").value);
-    const params = new URLSearchParams({
-      input_name: state.uploadedFileName,
-      hint_ra_deg: String(hint_ra_deg),
-      hint_dec_deg: String(hint_dec_deg),
-    });
+    const params = readSolverQueryParams();
+    params.set("input_name", state.uploadedFileName);
     const data = await request(`/api/analysis/solve/image?${params.toString()}`, {
       method: "POST",
     });
@@ -153,21 +92,19 @@
     if (!state.uploadedFileName) {
       throw new Error("请先上传视频 / Please upload a video first");
     }
-    const hint_ra_deg = Number($("hint-ra").value);
-    const hint_dec_deg = Number($("hint-dec").value);
     const frame_step = Number($("frame-step").value);
     const max_frames = Number($("max-frames").value);
+    const body = {
+      input_name: state.uploadedFileName,
+      input_type: "video",
+      frame_step,
+      max_frames,
+      ...readSolverBody(),
+    };
     const data = await request("/api/analysis/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input_name: state.uploadedFileName,
-        input_type: "video",
-        hint_ra_deg,
-        hint_dec_deg,
-        frame_step,
-        max_frames,
-      }),
+      body: JSON.stringify(body),
     });
     state.lastJobId = data.job_id;
     setOutput("analysis-output", data);
@@ -186,12 +123,7 @@
   }
 
   async function onRealtimeStart() {
-    const hint_ra_deg = Number($("hint-ra").value);
-    const hint_dec_deg = Number($("hint-dec").value);
-    const params = new URLSearchParams({
-      hint_ra_deg: String(hint_ra_deg),
-      hint_dec_deg: String(hint_dec_deg),
-    });
+    const params = readSolverQueryParams();
     const data = await request(
       `/api/debug/analysis/realtime/start?${params.toString()}`,
       { method: "POST" }
@@ -241,14 +173,22 @@
     checkbox.dispatchEvent(new Event("change"));
   }
 
-  bindClick("catalog-download-btn", onCatalogDownload);
-  bindClick("catalog-build-btn", onCatalogBuild);
-  bindClick("catalog-status-btn", onCatalogStatus);
-  bindClick("star-create-btn", onStarCreate);
-  bindClick("star-update-btn", onStarUpdate);
-  bindClick("star-delete-btn", onStarDelete);
-  bindClick("star-get-btn", onStarGet);
-  bindClick("star-list-btn", onStarList);
+  function setupStreamEmbed() {
+    const cb = $("embed-stream");
+    const container = $("stream-container");
+    const img = $("stream-img");
+    if (!cb || !container || !img) return;
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        container.hidden = false;
+        img.src = "/api/debug/camera/stream?quality=60";
+      } else {
+        container.hidden = true;
+        img.removeAttribute("src");
+      }
+    });
+  }
+
   bindClick("upload-btn", onUpload);
   bindClick("solve-image-btn", onSolveImage);
   bindClick("create-video-job-btn", onCreateVideoJob);
@@ -257,5 +197,5 @@
   bindClick("realtime-stop-btn", onRealtimeStop);
   bindClick("realtime-status-btn", onRealtimeStatus);
   setupAutoPoll();
-  onCatalogStatus().catch(() => null);
+  setupStreamEmbed();
 })();

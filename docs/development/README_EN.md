@@ -8,6 +8,8 @@ and the team-standard debug workflow.
 
 For testing workflow, see [Testing Guide](testing-guide.md).
 
+Hobbyist checklist: [DEPLOY_EN.md](DEPLOY_EN.md).
+
 Recommended workflow: **edit locally -> upload to board -> restart with
 `systemd` -> verify**.  
 This matches real hardware runtime behavior.
@@ -20,23 +22,45 @@ This matches real hardware runtime behavior.
 - Recommended board runtime: Python 3.10+
 - Any `3.9+` wording in old docs should be treated as historical
 
-### 1.2 Install Poetry and Python packages
+### 1.2 Poetry, PEP 668, and the virtual environment (required reading)
+
+- **You must use a Poetry-managed project venv** (`.venv`). Do **not** set
+  `virtualenvs.create false` globally and mix packages into the system Python;
+  that leads to **PEP 668** errors (distribution-managed site-packages cannot be
+  modified by `pip`/`poetry`).
+- On the board, run `scripts/install.sh` to set `virtualenvs.create true`,
+  `virtualenvs.in-project true`, and preferably
+  **`virtualenvs.options.system-site-packages true`** so the venv can import
+  `apt`-installed `picamera2`.
+- **Production defaults** to runtime-only deps: `poetry install --only main`
+  (script default). For pytest and dev tools, set `OGSCOPE_INSTALL_DEV=1` on a
+  dev machine or board and reinstall.
+
+### 1.3 Install Poetry and Python packages
 
 ```bash
 cd /path/to/OGScope
 curl -sSL https://install.python-poetry.org | python3 -
 export PATH="$HOME/.local/bin:$PATH"
+# dev machine: full dependency set including dev
 poetry install
+# board (manual): match install.sh default
+# poetry install --no-interaction --only main
 ```
 
-### 1.3 Install script (recommended for first-time setup)
+### 1.4 Install script (recommended for first-time setup)
 
 The repository provides `scripts/install.sh`. It performs initial board setup:
 
+- reads `/etc/os-release` and **only supports Debian/Ubuntu family** (including **Raspberry Pi OS**); aborts on other distros for safety
 - installs system dependencies and Poetry
-- installs project dependencies
+- configures Poetry for `.venv` and `system-site-packages` (when supported)
+- defaults to `poetry install --only main` (set `OGSCOPE_INSTALL_DEV=1` for dev)
+- optional `OGSCOPE_APT_SLOW=1`: stagger `apt` and pause between batches on low-memory boards
+- **`OGSCOPE_MIRROR`**: `auto` (default, heuristic from `LANG`/`LC_*` and timezone), `cn` (mainland China mirrors for apt + PyPI via Tsinghua), `international` (do not rewrite apt; default PyPI). If you are in China but use `en_US` locale, set `export OGSCOPE_MIRROR=cn`.
+- creates `logs`, `uploads`, `data/plate_solve`, etc.
 - creates/updates `systemd` service (`ogscope.service`)
-- injects `PYTHONPATH` and `LD_LIBRARY_PATH`
+- injects `PYTHONPATH` and `LD_LIBRARY_PATH` (paths that exist)
 - enables service autostart
 
 Run:
@@ -47,10 +71,11 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-### 1.4 Dependency maintenance
+### 1.5 Dependency maintenance
 
 - keep `poetry.lock` in sync with the repository
-- run `poetry install` after significant code updates
+- after updates on the board, run `./scripts/board-update.sh`, or
+  `poetry install --only main` then `sudo systemctl restart ogscope`
 - prefer a fixed venv Python in service startup (see section 5)
 
 ## 2. System Dependencies (Important)
@@ -84,6 +109,11 @@ This is a key runtime detail for this project.
 
 Result: service may fail to import packages such as `picamera2`.
 
+**Relationship to `system-site-packages`**: when enabled, the venv `sys.path`
+includes system site-packages, which is usually enough to `import picamera2`.
+`PYTHONPATH` in `systemd` still covers distro-specific paths such as
+`/usr/local/lib/python3.x/dist-packages`; both layers work together.
+
 So the service explicitly injects `PYTHONPATH`, for example:
 
 ```ini
@@ -109,6 +139,10 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/install.sh`
   - purpose: setup/install and create service
   - status: installer utility, not a runtime auto-invoked entrypoint
+- `scripts/board-update.sh`
+  - purpose: incremental update after install (optional `OGSCOPE_GIT_PULL=1` for
+    `git pull`, `poetry install`, restart `ogscope`)
+  - status: recommended for routine deployment
 - `scripts/start_debug_console.sh`
   - purpose: foreground run with `PYTHONPATH`/`LD_LIBRARY_PATH`
   - status: manual debug helper, not default production startup
@@ -164,11 +198,20 @@ sudo systemctl status ogscope
 
 ### 6.2 Daily update flow
 
-After code updates (`git pull` or manual upload), run:
+After code updates (`git pull` or manual upload), you can run:
 
 ```bash
 cd /path/to/OGScope
-poetry install
+chmod +x scripts/board-update.sh
+# with git and need pull: OGSCOPE_GIT_PULL=1 ./scripts/board-update.sh
+./scripts/board-update.sh
+```
+
+Or manually:
+
+```bash
+cd /path/to/OGScope
+poetry install --no-interaction --only main
 sudo systemctl restart ogscope
 sudo systemctl status ogscope
 sudo journalctl -u ogscope -f
@@ -268,6 +311,7 @@ If service fails to start, check:
 ## 11. Command Cheatsheet
 
 ```bash
+# dev machine; on board use ./scripts/board-update.sh
 poetry install
 poetry run python -m ogscope.main
 sudo systemctl restart ogscope

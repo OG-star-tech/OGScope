@@ -35,11 +35,10 @@ def _build_test_video(path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_analysis_upload_and_single_image_solve(client, temp_analysis_dir, temp_catalog_dir, tmp_path: Path):
+def test_analysis_upload_and_single_image_solve(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
     """测试上传与单图解算 / Test upload and single-image solve."""
-    client.post("/api/catalog/download", json={"source": "seed"})
-    client.post("/api/catalog/build-index", json={"magnitude_limit": 8.5})
-
     image_path = tmp_path / "stars.jpg"
     _build_star_image(image_path)
     with image_path.open("rb") as f:
@@ -60,15 +59,12 @@ def test_analysis_upload_and_single_image_solve(client, temp_analysis_dir, temp_
     result = solve_data["result"]
     assert "ra_deg" in result
     assert "dec_deg" in result
-    assert "confidence" in result
+    assert "status" in result
 
 
 @pytest.mark.unit
-def test_analysis_video_job(client, temp_analysis_dir, temp_catalog_dir, tmp_path: Path):
+def test_analysis_video_job(client, temp_analysis_dir, mock_plate_solve, tmp_path: Path):
     """测试视频任务分析 / Test video job analysis."""
-    client.post("/api/catalog/download", json={"source": "seed"})
-    client.post("/api/catalog/build-index", json={"magnitude_limit": 8.5})
-
     video_path = tmp_path / "stars.mp4"
     _build_test_video(video_path)
     with video_path.open("rb") as f:

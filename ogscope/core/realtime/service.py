@@ -10,7 +10,6 @@ from typing import Any
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.star_extract import StarExtractor, StarPoint
-from ogscope.algorithms.star_match import FastTracker
 from ogscope.config import get_settings
 from ogscope.web.api.debug.services import DebugCameraService
 
@@ -27,22 +26,33 @@ class RealtimeState:
 
 
 class RealtimeSolveService:
-    """实时解算器 / Realtime solver"""
+    """实时解算器：周期性 Tetra3 全量解算 / Realtime solver with periodic Tetra3"""
 
     def __init__(self) -> None:
         settings = get_settings()
         self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
-        self.solver = PlateSolver(fov_deg=settings.solver_fov_deg)
-        self.tracker = FastTracker()
+        self.solver = PlateSolver(
+            fov_deg=settings.solver_fov_deg,
+            fov_max_error_deg=settings.solver_fov_max_error_deg,
+            solve_timeout_ms=settings.solver_timeout_ms,
+        )
         self.state = RealtimeState()
         self._task: asyncio.Task[None] | None = None
         self._previous_stars: list[StarPoint] | None = None
         self._hint_ra = settings.solver_hint_ra_deg
         self._hint_dec = settings.solver_hint_dec_deg
         self._fullsolve_interval = max(1, settings.solver_fullsolve_interval_frames)
+        self._fov_estimate: float | None = None
+        self._fov_max_error: float | None = None
+        self._solve_timeout_ms: int | None = None
 
     async def start(
-        self, hint_ra_deg: float | None = None, hint_dec_deg: float | None = None
+        self,
+        hint_ra_deg: float | None = None,
+        hint_dec_deg: float | None = None,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
         if self.state.running:
@@ -51,6 +61,9 @@ class RealtimeSolveService:
             self._hint_ra = hint_ra_deg
         if hint_dec_deg is not None:
             self._hint_dec = hint_dec_deg
+        self._fov_estimate = fov_estimate
+        self._fov_max_error = fov_max_error
+        self._solve_timeout_ms = solve_timeout_ms
         self.state = RealtimeState(running=True)
         self._previous_stars = None
         self._task = asyncio.create_task(self._loop())
@@ -98,39 +111,35 @@ class RealtimeSolveService:
                     or self._previous_stars is None
                 )
                 if use_fullsolve:
-                    solved = self.solver.solve(
-                        stars=stars,
-                        frame_shape=frame.shape,
-                        hint_ra_deg=self._hint_ra,
-                        hint_dec_deg=self._hint_dec,
-                        solve_source="full",
+                    solved = await asyncio.to_thread(
+                        self._solve_frame_sync,
+                        frame,
+                        stars,
                     )
                     self._apply_solve_result(solved)
                     self.state.fullsolve_count += 1
-                else:
-                    track = self.tracker.track(self._previous_stars or [], stars)
-                    deg_per_px = self.solver.fov_deg / max(frame.shape[1], 1)
-                    self._hint_dec = float(
-                        max(-90.0, min(90.0, self._hint_dec - track.delta_y * deg_per_px))
-                    )
-                    self._hint_ra = float((self._hint_ra + track.delta_x * deg_per_px) % 360.0)
-                    solved = self.solver.solve(
-                        stars=stars,
-                        frame_shape=frame.shape,
-                        hint_ra_deg=self._hint_ra,
-                        hint_dec_deg=self._hint_dec,
-                        solve_source="track",
-                    )
-                    base = solved.to_dict()
-                    base["track"] = track.to_dict()
-                    self.state.last_result = base
-                    self._hint_ra = solved.ra_deg
-                    self._hint_dec = solved.dec_deg
                 self._previous_stars = stars
                 await asyncio.sleep(0.02)
             except Exception as exc:  # noqa: BLE001
                 self.state.last_error = str(exc)
                 await asyncio.sleep(0.1)
+
+    def _solve_frame_sync(
+        self,
+        frame: Any,
+        stars: list[StarPoint],
+    ) -> SolveResult:
+        """同步解算单帧（线程池中调用）/ Sync solve for one frame."""
+        return self.solver.solve(
+            stars=stars,
+            frame_shape=frame.shape,
+            hint_ra_deg=self._hint_ra,
+            hint_dec_deg=self._hint_dec,
+            solve_source="realtime",
+            fov_estimate=self._fov_estimate,
+            fov_max_error=self._fov_max_error,
+            solve_timeout_ms=self._solve_timeout_ms,
+        )
 
     def _apply_solve_result(self, solved: SolveResult) -> None:
         """写入解算结果 / Persist solve result"""

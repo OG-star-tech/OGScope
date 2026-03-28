@@ -18,104 +18,54 @@
 
         <main class="main-grid">
             <section class="card">
-                <h2>1. 星表管理</h2>
-                <div class="row">
-                    <label for="catalog-source">数据源</label>
-                    <select id="catalog-source">
-                        <option value="seed">内置亮星种子（推荐）</option>
-                        <option value="hyg">HYG 全量星表（推荐：星数更多）</option>
-                        <option value="url">自定义 URL（CSV）</option>
-                    </select>
+                <h2>1. Tetra3 解算说明</h2>
+                <p class="help-text">
+                    使用 vendored Tetra3（Cedar-Solve）图案库 <code>default_database.npz</code>，为 lost-in-space 解算；需提供大致水平视场角 FOV（度）。
+                    请将 <code>default_database.npz</code> 放到 <code>data/plate_solve/</code> 或配置环境变量 <code>OGSCOPE_SOLVER_TETRA_DATABASE_PATH</code>。
+                </p>
+                <p class="help-text">
+                    摄像头实时预览（MJPEG）：
+                    <a href="/debug" target="_blank" rel="noopener">调试控制台</a> 中启动采集后，可打开
+                    <a href="/api/debug/camera/stream?quality=70" target="_blank" rel="noopener">/api/debug/camera/stream</a>
+                    查看画面；本页「实时解算」使用同一路相机帧。
+                </p>
+                <div class="stream-preview">
+                    <label class="inline"><input type="checkbox" id="embed-stream"> 内嵌预览（降质 JPEG）</label>
+                    <div id="stream-container" class="stream-container" hidden>
+                        <img id="stream-img" alt="camera stream" src="" width="320">
+                    </div>
                 </div>
-                <div class="row">
-                    <label for="catalog-url">URL</label>
-                    <input id="catalog-url" type="text" placeholder="https://example.com/catalog.csv">
-                </div>
-                <div class="row">
-                    <label for="magnitude-limit">星等上限</label>
-                    <input id="magnitude-limit" type="number" step="0.1" value="8.5">
-                </div>
-                <div class="row">
-                    <label for="ra-bin-size">RA 分桶角度</label>
-                    <input id="ra-bin-size" type="number" step="1" value="15">
-                </div>
-                <div class="actions">
-                    <button class="btn primary" id="catalog-download-btn">下载/生成星表</button>
-                    <button class="btn primary" id="catalog-build-btn">构建索引</button>
-                    <button class="btn" id="catalog-status-btn">刷新状态</button>
-                </div>
-                <pre id="catalog-status" class="output">等待操作...</pre>
             </section>
 
             <section class="card">
-                <h2>1.1 星点 CRUD</h2>
+                <h2>2. 解算参数（Tetra3）</h2>
                 <div class="row">
-                    <label for="star-source-id">source_id</label>
-                    <input id="star-source-id" type="text" value="custom_star_001">
+                    <label for="fov-estimate">水平 FOV 估计(度)</label>
+                    <input id="fov-estimate" type="number" step="0.1" value="16" placeholder="必填量级">
                 </div>
                 <div class="row">
-                    <label for="star-ra">RA</label>
-                    <input id="star-ra" type="number" step="0.0001" value="120.0">
+                    <label for="fov-max-error">FOV 允许误差(度)</label>
+                    <input id="fov-max-error" type="number" step="0.1" placeholder="可选">
                 </div>
                 <div class="row">
-                    <label for="star-dec">Dec</label>
-                    <input id="star-dec" type="number" step="0.0001" value="45.0">
+                    <label for="solve-timeout-ms">解算超时(ms)</label>
+                    <input id="solve-timeout-ms" type="number" step="100" value="8000" min="500">
                 </div>
                 <div class="row">
-                    <label for="star-pmra">pmRA</label>
-                    <input id="star-pmra" type="number" step="0.0001" value="0.0">
-                </div>
-                <div class="row">
-                    <label for="star-pmdec">pmDec</label>
-                    <input id="star-pmdec" type="number" step="0.0001" value="0.0">
-                </div>
-                <div class="row">
-                    <label for="star-mag">Gmag</label>
-                    <input id="star-mag" type="number" step="0.01" value="6.5">
-                </div>
-                <div class="row">
-                    <label for="star-query">查询条件</label>
-                    <input id="star-query" type="text" placeholder="source_id关键字">
-                </div>
-                <div class="row">
-                    <label for="star-name-en">英文名</label>
-                    <input id="star-name-en" type="text" value="Custom Star">
-                </div>
-                <div class="row">
-                    <label for="star-name-zh">中文名</label>
-                    <input id="star-name-zh" type="text" value="自定义恒星">
-                </div>
-                <div class="row">
-                    <label for="star-desc-en">英文描述</label>
-                    <input id="star-desc-en" type="text" value="Custom star for debugging">
-                </div>
-                <div class="row">
-                    <label for="star-desc-zh">中文描述</label>
-                    <input id="star-desc-zh" type="text" value="用于调试的自定义恒星">
-                </div>
-                <div class="actions">
-                    <button class="btn primary" id="star-create-btn">新增</button>
-                    <button class="btn primary" id="star-update-btn">更新</button>
-                    <button class="btn danger" id="star-delete-btn">删除</button>
-                    <button class="btn" id="star-get-btn">按ID查询</button>
-                    <button class="btn" id="star-list-btn">分页查询</button>
-                </div>
-                <pre id="star-output" class="output">等待操作...</pre>
-            </section>
-
-            <section class="card">
-                <h2>2. 素材上传与分析</h2>
-                <div class="row">
-                    <label for="analysis-file">上传图片/视频</label>
-                    <input id="analysis-file" type="file" accept="image/*,video/*">
-                </div>
-                <div class="row">
-                    <label for="hint-ra">RA 提示(度)</label>
+                    <label for="hint-ra">RA 提示(度，可选)</label>
                     <input id="hint-ra" type="number" step="0.1" value="45">
                 </div>
                 <div class="row">
-                    <label for="hint-dec">Dec 提示(度)</label>
+                    <label for="hint-dec">Dec 提示(度，可选)</label>
                     <input id="hint-dec" type="number" step="0.1" value="80">
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>3. 素材上传与分析</h2>
+                <div class="row">
+                    <label for="analysis-file">上传图片/视频</label>
+                    <input id="analysis-file" type="file" accept="image/*,video/*">
                 </div>
                 <div class="row">
                     <label for="frame-step">视频抽帧间隔</label>
@@ -135,7 +85,8 @@
             </section>
 
             <section class="card">
-                <h2>3. 实时解算</h2>
+                <h2>4. 实时解算（调试相机）</h2>
+                <p class="help-text">需先在调试控制台启动相机预览/采集。</p>
                 <div class="actions">
                     <button class="btn primary" id="realtime-start-btn">启动实时解算</button>
                     <button class="btn danger" id="realtime-stop-btn">停止实时解算</button>

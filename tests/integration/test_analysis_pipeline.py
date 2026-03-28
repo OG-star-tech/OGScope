@@ -18,23 +18,10 @@ def _make_frame(path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_end_to_end_catalog_and_image_analysis(
-    client, temp_catalog_dir, temp_analysis_dir, tmp_path: Path
+def test_end_to_end_image_analysis(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
 ):
-    """验证星表到单图解算全链路 / Validate end-to-end catalog to single-image solving."""
-    resp_download = client.post(
-        "/api/catalog/download",
-        json={"source": "seed", "magnitude_limit": 8.5},
-    )
-    assert resp_download.status_code == 200
-
-    resp_index = client.post(
-        "/api/catalog/build-index",
-        json={"magnitude_limit": 8.5, "ra_bin_size_deg": 15.0},
-    )
-    assert resp_index.status_code == 200
-    assert resp_index.json()["status"] == "ready"
-
+    """验证上传与单图解算全链路 / Validate upload to single-image solving."""
     image = tmp_path / "integration_stars.jpg"
     _make_frame(image)
     with image.open("rb") as f:
@@ -51,4 +38,4 @@ def test_end_to_end_catalog_and_image_analysis(
     assert resp_solve.status_code == 200
     payload = resp_solve.json()
     assert payload["success"] is True
-    assert payload["result"]["solve_source"] in {"full", "track"}
+    assert payload["result"]["solve_source"] == "full"

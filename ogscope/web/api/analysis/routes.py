@@ -35,6 +35,9 @@ async def create_analysis_job(payload: AnalysisJobCreateRequest):
             hint_dec_deg=payload.hint_dec_deg,
             frame_step=payload.frame_step,
             max_frames=payload.max_frames,
+            fov_estimate=payload.fov_estimate,
+            fov_max_error=payload.fov_max_error,
+            solve_timeout_ms=payload.solve_timeout_ms,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -45,6 +48,9 @@ async def solve_single_image(
     input_name: str = Query(...),
     hint_ra_deg: float | None = Query(default=None),
     hint_dec_deg: float | None = Query(default=None),
+    fov_estimate: float | None = Query(default=None),
+    fov_max_error: float | None = Query(default=None),
+    solve_timeout_ms: int | None = Query(default=None),
 ):
     """直接解算单图 / Solve single image directly"""
     try:
@@ -52,6 +58,9 @@ async def solve_single_image(
             input_name=input_name,
             hint_ra_deg=hint_ra_deg,
             hint_dec_deg=hint_dec_deg,
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -161,7 +161,6 @@ async def api_root():
             "alignment": "/api/alignment/",
             "system": "/api/system/",
             "analysis": "/api/analysis/",
-            "catalog": "/api/catalog/",
         }
     }
 
