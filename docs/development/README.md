@@ -128,6 +128,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/board-update.sh`
   - 作用：已安装环境下的增量更新（可选 `OGSCOPE_GIT_PULL=1` 执行 `git pull`、`poetry install`、重启 `ogscope`）
   - 状态：日常部署推荐入口
+- `scripts/uninstall.sh`
+  - 作用：停止并移除 `ogscope` systemd 单元、可选删除 `.venv`；默认保留 `logs/`、`data/` 等；需确认（交互输入 `YES` 或 `OGSCOPE_UNINSTALL_CONFIRM=1`）
+  - 状态：卸载辅助脚本；不卸载系统 apt 包与全局 Poetry
 - `scripts/start_debug_console.sh`
   - 作用：手动设置 `PYTHONPATH`/`LD_LIBRARY_PATH` 后前台启动
   - 状态：手动调试辅助脚本，不是默认生产启动链路

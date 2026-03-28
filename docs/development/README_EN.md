@@ -143,6 +143,11 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
   - purpose: incremental update after install (optional `OGSCOPE_GIT_PULL=1` for
     `git pull`, `poetry install`, restart `ogscope`)
   - status: recommended for routine deployment
+- `scripts/uninstall.sh`
+  - purpose: stop and remove `ogscope` systemd unit, optionally remove `.venv`;
+    keeps `logs/`, `data/` by default; requires confirmation (`YES` or
+    `OGSCOPE_UNINSTALL_CONFIRM=1`)
+  - status: uninstall helper; does not remove apt packages or global Poetry
 - `scripts/start_debug_console.sh`
   - purpose: foreground run with `PYTHONPATH`/`LD_LIBRARY_PATH`
   - status: manual debug helper, not default production startup
