@@ -58,6 +58,7 @@ class AnalysisService:
         self.upload_root.mkdir(parents=True, exist_ok=True)
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
+        self._solver_max_stars = settings.solver_max_stars
         self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
         self.solver = PlateSolver(
             fov_deg=settings.solver_fov_deg,
@@ -226,10 +227,10 @@ class AnalysisService:
         frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError("无法读取图片 / Unable to read image")
-        stars = self.extractor.extract(frame)
-        solved = self.solver.solve(
-            stars=stars,
-            frame_shape=frame.shape,
+        # 与 Tetra3 solve_from_image 一致：内置提星（背景减除+σ 阈值），非自研 OTSU / Match Cedar-Solve extraction
+        solved = self.solver.solve_from_bgr_frame(
+            frame_bgr=frame,
+            max_stars=self._solver_max_stars,
             hint_ra_deg=hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra,
             hint_dec_deg=hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec,
             solve_source="full",

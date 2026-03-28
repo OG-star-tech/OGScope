@@ -60,9 +60,33 @@ def mock_plate_solve(monkeypatch):
             raw={},
         )
 
+    def _fake_solve_from_bgr(self, frame_bgr, max_stars, **kwargs):
+        from ogscope.algorithms.plate_solve.solver import SolveResult
+
+        return SolveResult(
+            ra_deg=12.0,
+            dec_deg=80.0,
+            detected_stars=8,
+            solve_source="full",
+            status="MATCH_FOUND",
+            status_code=1,
+            roll_deg=0.0,
+            fov_deg=16.0,
+            matches=6,
+            prob=0.001,
+            rmse_arcsec=10.0,
+            t_solve_ms=5.0,
+            t_extract_ms=1.0,
+            raw={},
+        )
+
     monkeypatch.setattr(
         "ogscope.algorithms.plate_solve.solver.PlateSolver.solve",
         _fake_solve,
+    )
+    monkeypatch.setattr(
+        "ogscope.algorithms.plate_solve.solver.PlateSolver.solve_from_bgr_frame",
+        _fake_solve_from_bgr,
     )
 
 

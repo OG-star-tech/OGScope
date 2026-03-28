@@ -143,6 +143,9 @@ captured_images/
 *.fits
 *.fit
 
+# Tetra3 图案库（体积大，本地或部署时放入 / Large pattern DB; copy on deploy）
+data/plate_solve/default_database.npz
+
 # 星表数据（太大，不提交）
 star_catalogs/*.dat
 star_catalogs/*.bin
