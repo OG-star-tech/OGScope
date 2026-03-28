@@ -6,10 +6,63 @@
 
 测试实践请见：[测试指南](testing-guide.md)。
 
-爱好者复刻与一键部署清单见：[DEPLOY.md](DEPLOY.md)。
-
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。
+
+## 0. 部署速查（爱好者复刻）
+
+本节与 **§1–§11** 的关系：**只列最常用命令与检查项**；Poetry/PEP 668、镜像选项、卸载与排错原理见后文对应章节。
+
+### 0.1 系统要求
+
+- 单板：**ARM**（`aarch64` 或 `armhf`），如 Raspberry Pi / Orange Pi  
+- 系统：**Debian/apt** 系镜像（与 `picamera2`/`libcamera` 文档一致；脚本会读 `/etc/os-release`，见 **§1.4**）  
+- Python：**3.10+**（以 `pyproject.toml` 为准）  
+- 网络：首次安装需拉取依赖；浏览器访问 Web 需可达设备 **TCP 8000**（按需防火墙放行）
+
+### 0.2 首次安装
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/install.sh
+./scripts/install.sh
+```
+
+说明摘要：默认 `poetry install --only main`；国内网络可 **`export OGSCOPE_MIRROR=cn`**；低配板可 **`OGSCOPE_APT_SLOW=1`**。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
+
+### 0.3 星图解算数据
+
+将 **`default_database.npz`** 放到 **`data/plate_solve/`**（不随仓库分发）。放置与配置见 [plate-solve-data.md](plate-solve-data.md)。
+
+### 0.4 日常更新
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/board-update.sh
+# 可选：OGSCOPE_GIT_PULL=1  OGSCOPE_MIRROR=cn
+./scripts/board-update.sh
+```
+
+详情见 **§6.2**。
+
+### 0.5 卸载与健康检查
+
+- 卸载服务与 `.venv`：见 **§6.3**（`scripts/uninstall.sh`）  
+- 健康检查与日志：
+
+```bash
+curl -s http://127.0.0.1:8000/health
+sudo systemctl status ogscope
+sudo journalctl -u ogscope -f
+```
+
+### 0.6 常见故障（简表）
+
+| 现象 | 处理方向 |
+|------|----------|
+| `ImportError: picamera2` | 用 `apt` 装相机栈；venv 由 `install.sh` 配置（**§1.2、§3**） |
+| PEP 668 / 系统 pip 被拒 | 只用项目 `.venv`，勿在系统 Python 上混装（**§1.2**） |
+| 服务无法启动 | 查 `WorkingDirectory`、`ExecStart`、`journalctl`（**§10**） |
 
 ## 1. Python 版本与项目依赖
 

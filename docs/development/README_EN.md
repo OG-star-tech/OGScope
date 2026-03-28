@@ -8,11 +8,64 @@ and the team-standard debug workflow.
 
 For testing workflow, see [Testing Guide](testing-guide.md).
 
-Hobbyist checklist: [DEPLOY_EN.md](DEPLOY_EN.md).
-
 Recommended workflow: **edit locally -> upload to board -> restart with
 `systemd` -> verify**.  
 This matches real hardware runtime behavior.
+
+## 0. Quick deployment checklist (hobbyists)
+
+This section lists **common commands and checks only**. For Poetry/PEP 668, mirror options, uninstall, and troubleshooting details, see **§1–§11** below.
+
+### 0.1 Requirements
+
+- Board: **ARM** (`aarch64` or `armhf`), e.g. Raspberry Pi / Orange Pi  
+- OS: **Debian/apt**-based images (compatible with `picamera2`/`libcamera`; install script reads `/etc/os-release`, see **§1.4**)  
+- Python: **3.10+** (see `pyproject.toml`)  
+- Network: first install downloads dependencies; Web UI needs **TCP 8000** reachable (configure firewall as needed)
+
+### 0.2 First-time install
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/install.sh
+./scripts/install.sh
+```
+
+Summary: default `poetry install --only main`; in mainland China use **`export OGSCOPE_MIRROR=cn`**; low-memory boards: **`OGSCOPE_APT_SLOW=1`**. Full options: **§1.4**. After install: `sudo systemctl start ogscope`.
+
+### 0.3 Plate-solve data
+
+Place **`default_database.npz`** under **`data/plate_solve/`** (not shipped in the repo). See [plate-solve-data.md](plate-solve-data.md).
+
+### 0.4 Routine updates
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/board-update.sh
+# optional: OGSCOPE_GIT_PULL=1  OGSCOPE_MIRROR=cn
+./scripts/board-update.sh
+```
+
+Details: **§6.2**.
+
+### 0.5 Uninstall and health check
+
+- Remove service and `.venv`: **§6.3** (`scripts/uninstall.sh`)  
+- Health and logs:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+sudo systemctl status ogscope
+sudo journalctl -u ogscope -f
+```
+
+### 0.6 Troubleshooting (short)
+
+| Symptom | Where to look |
+|---------|----------------|
+| `ImportError: picamera2` | Install camera stack with `apt`; venv from `install.sh` (**§1.2, §3**) |
+| PEP 668 | Use project `.venv` only; do not mix into system Python (**§1.2**) |
+| Service fails to start | `WorkingDirectory`, `ExecStart`, `journalctl` (**§10**) |
 
 ## 1. Python Version and Project Dependencies
 
