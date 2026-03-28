@@ -408,6 +408,7 @@ If service fails to start, check:
 - `PYTHONPATH` includes system `dist-packages`
 - `LD_LIBRARY_PATH` includes `libcamera` library path
 - code upload is complete and dependencies are installed
+- **`No module named 'scipy'`**: `board-update.sh` / `install.sh` verify imports after `poetry install` and retry with `--no-cache` plus a pip fallback; if it still fails, remove `.venv` and run `OGSCOPE_MIRROR=cn ./scripts/board-update.sh` (or `./scripts/install.sh`)
 
 ## 11. Command Cheatsheet
 

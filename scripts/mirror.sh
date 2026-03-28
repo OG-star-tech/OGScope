@@ -166,3 +166,45 @@ ogscope_apply_apt_mirror_cn() {
 
     echo "✅ apt 镜像已写入（已备份 *.bak.ogscope.${stamp}）/ Apt mirror applied (backups created)"
 }
+
+# 验证 venv 中 numpy/scipy 可导入 / Verify numpy & scipy import (catches stale Poetry state)
+# Poetry 有时显示「无依赖更新」但大 wheel 未实际安装 / Poetry may skip while wheels missing
+ogscope_verify_numpy_scipy() {
+    poetry run python -c "import numpy, scipy" 2>/dev/null
+}
+
+# 若 systemd 已存在但 ExecStart 不是当前 Poetry venv，则修正（避免 ~/.virtualenvs/ 与项目 .venv 混用）
+# If unit exists but ExecStart points elsewhere than current Poetry venv, fix it (avoids ~/.virtualenvs vs .venv mismatch)
+# 参数 / Args: $1 = unit 文件路径 / unit file path, $2 = venv 内 python 可执行文件绝对路径 / absolute path to venv python
+ogscope_sync_systemd_execstart_if_needed() {
+    local unit_path="${1:?}"
+    local venv_python="${2:?}"
+    local expected_line="ExecStart=${venv_python} -m ogscope.main"
+
+    if [ ! -f "${unit_path}" ]; then
+        echo "ℹ️  未找到 ${unit_path}，跳过 ExecStart 同步（请先运行 install.sh）/ No unit; skip sync (run install.sh first)"
+        return 0
+    fi
+    if [ ! -x "${venv_python}" ]; then
+        echo "❌ 解释器不可执行 / Python not executable: ${venv_python}" >&2
+        return 1
+    fi
+
+    local cur_line
+    cur_line="$(grep '^ExecStart=' "${unit_path}" | head -n1 || true)"
+    if [ -z "${cur_line}" ]; then
+        echo "❌ ${unit_path} 中无 ExecStart / No ExecStart in unit" >&2
+        return 1
+    fi
+
+    if [ "${cur_line}" = "${expected_line}" ]; then
+        echo "✅ systemd ExecStart 与当前 Poetry venv 一致 / ExecStart matches Poetry venv"
+        return 0
+    fi
+
+    echo "⚙️  修正 systemd ExecStart（曾指向旧虚拟环境路径）/ Fixing ExecStart (was stale venv path)"
+    echo "   旧 / Old: ${cur_line}"
+    echo "   新 / New: ${expected_line}"
+    sudo sed -i "s|^ExecStart=.*|${expected_line}|" "${unit_path}"
+    echo "✅ 已更新 ${unit_path} / Unit updated"
+}

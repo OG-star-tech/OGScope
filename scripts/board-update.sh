@@ -64,6 +64,26 @@ fi
 
 poetry "${INSTALL_ARGS[@]}"
 
+# numpy/scipy 与 lock 一致；Poetry 偶发「无更新」但 wheel 未落盘 / Align deps with lock; retry if missing
+if ! ogscope_verify_numpy_scipy; then
+    echo "⚠️ numpy/scipy 导入失败，使用 --no-cache 重试 poetry install / Import failed; retrying poetry with --no-cache"
+    poetry "${INSTALL_ARGS[@]}" --no-cache
+fi
+if ! ogscope_verify_numpy_scipy; then
+    echo "⚠️ 仍缺少 scipy，使用 pip 补装（与 pyproject 版本约束一致）/ scipy still missing; pip install (same constraints)"
+    poetry run pip install --no-cache-dir "scipy>=1.10,<1.17"
+fi
+if ! ogscope_verify_numpy_scipy; then
+    echo "❌ numpy/scipy 仍不可用。请删除 .venv 后重试: rm -rf .venv && OGSCOPE_MIRROR=cn ./scripts/board-update.sh"
+    echo "❌ Still failing. Try: rm -rf .venv && ./scripts/board-update.sh"
+    exit 1
+fi
+echo "✅ numpy/scipy 已就绪 / numpy & scipy OK"
+
+VENV_PYTHON="$(poetry env info --path)/bin/python"
+SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+ogscope_sync_systemd_execstart_if_needed "${SERVICE_PATH}" "${VENV_PYTHON}"
+
 echo "🔄 重启服务 / Restarting service..."
 sudo systemctl daemon-reload
 sudo systemctl restart "${SERVICE_NAME}"

@@ -403,6 +403,7 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 - `PYTHONPATH` 是否包含系统 `dist-packages`
 - `LD_LIBRARY_PATH` 是否包含 `libcamera` 相关库路径
 - 最近代码上传是否完整，依赖是否已重新安装
+- **`No module named 'scipy'`**：`board-update.sh` / `install.sh` 会在 `poetry install` 后校验并自动 `--no-cache` 重试与 pip 补装；若仍失败，删除 `.venv` 后执行 `OGSCOPE_MIRROR=cn ./scripts/board-update.sh`（或重装 `./scripts/install.sh`）
 
 ## 11. 常用命令速查
 

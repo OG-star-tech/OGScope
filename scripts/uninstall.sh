@@ -6,6 +6,7 @@
 #   OGSCOPE_UNINSTALL_CONFIRM=1 — 必须设置，否则脚本退出（防误删）/ Must be set to proceed (safety)
 #   OGSCOPE_UNINSTALL_KEEP_VENV=1 — 保留项目 .venv / Keep project virtualenv
 #   OGSCOPE_UNINSTALL_REMOVE_DATA=1 — 同时删除 logs/、uploads/、data/ 下内容（危险）/ Also remove logs, uploads, data (destructive)
+#   OGSCOPE_UNINSTALL_REMOVE_LEGACY_POETRY_VENV=1 — 删除旧版 Poetry 全局名 venv：~/.virtualenvs/OGScope（若存在）/ Remove legacy Poetry venv at ~/.virtualenvs/OGScope if present
 
 set -euo pipefail
 
@@ -75,6 +76,20 @@ elif [ -d "${PROJECT_DIR}/.venv" ]; then
     echo "✅ .venv 已删除 / .venv removed"
 else
     echo "ℹ️  无 .venv 目录 / No .venv directory"
+fi
+
+# 旧版安装曾将 venv 放在 ~/.virtualenvs/OGScope，与当前「项目内 .venv」并存易混淆；可选删除 / Legacy global venv name; optional cleanup
+if [ "${OGSCOPE_UNINSTALL_REMOVE_LEGACY_POETRY_VENV:-}" = "1" ]; then
+    _legacy_venv="${HOME}/.virtualenvs/OGScope"
+    if [ -d "${_legacy_venv}" ]; then
+        echo "🗑️  删除遗留 Poetry 虚拟环境 / Removing legacy Poetry venv: ${_legacy_venv}"
+        rm -rf "${_legacy_venv}"
+        echo "✅ 已删除 / Removed"
+    else
+        echo "ℹ️  无 ${_legacy_venv} / No legacy venv at that path"
+    fi
+else
+    echo "ℹ️  若存在旧路径 ~/.virtualenvs/OGScope，可设 OGSCOPE_UNINSTALL_REMOVE_LEGACY_POETRY_VENV=1 一并删除 / Optional: remove legacy ~/.virtualenvs/OGScope"
 fi
 
 # 用户数据（可选）/ Optional user data
