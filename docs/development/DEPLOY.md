@@ -40,6 +40,16 @@ chmod +x scripts/board-update.sh
 ./scripts/board-update.sh
 ```
 
+## 卸载
+
+移除 systemd 服务与项目 `.venv`（默认保留 `data/` 等）请使用 `scripts/uninstall.sh`，详见 [开发指南](README.md) **§6.3 卸载**。
+
+```bash
+chmod +x scripts/uninstall.sh
+# 交互确认 或 OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
+./scripts/uninstall.sh
+```
+
 ## 健康检查与日志
 
 ```bash

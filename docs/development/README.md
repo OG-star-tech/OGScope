@@ -218,6 +218,49 @@ sudo journalctl -u ogscope -f
 - 若仅前端模板/静态文件变更，通常不需要 `poetry install`
 - 若服务文件配置有改动，需先 `sudo systemctl daemon-reload`
 
+### 6.3 卸载服务与本地环境（`scripts/uninstall.sh`）
+
+在需要**移除 systemd 服务**、清理项目内 **`.venv`**，或换目录重装时使用 `scripts/uninstall.sh`。脚本**不会**卸载系统已通过 `apt` 安装的包（如 `python3-picamera2`），也**不会**卸载用户级全局 **Poetry**；仅处理 OGScope 服务单元与项目目录内可选内容。
+
+**会执行的操作 / What it does**
+
+- `systemctl stop` / `disable` `ogscope`
+- 删除 `/etc/systemd/system/ogscope.service`（若存在），并 `daemon-reload`
+- 默认删除项目根目录下的 **`.venv`**（可用环境变量保留，见下）
+
+**默认保留 / Kept by default**
+
+- `logs/`、`uploads/`、`data/`（含 `data/plate_solve` 等）；若需一并删除，须显式开启（见下）
+
+**环境变量 / Environment**
+
+| 变量 | 含义 |
+|------|------|
+| `OGSCOPE_UNINSTALL_CONFIRM=1` | **非交互场景必须设置**（如 CI、脚本），否则脚本在非 TTY 下直接退出 |
+| `OGSCOPE_UNINSTALL_KEEP_VENV=1` | 保留 `.venv`，不删除虚拟环境 |
+| `OGSCOPE_UNINSTALL_REMOVE_DATA=1` | **危险**：删除 `logs/`、`uploads/`、`data/`（含星库等用户数据） |
+
+**交互确认 / Interactive**：在终端前台运行时，若未设置 `OGSCOPE_UNINSTALL_CONFIRM=1`，需输入全大写 **`YES`** 才会继续。
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/uninstall.sh
+
+# 交互：按提示输入 YES
+./scripts/uninstall.sh
+
+# 非交互：确认后执行
+OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
+
+# 保留虚拟环境，仅移除服务
+OGSCOPE_UNINSTALL_CONFIRM=1 OGSCOPE_UNINSTALL_KEEP_VENV=1 ./scripts/uninstall.sh
+
+# 同时删除日志与数据目录（慎用）
+OGSCOPE_UNINSTALL_CONFIRM=1 OGSCOPE_UNINSTALL_REMOVE_DATA=1 ./scripts/uninstall.sh
+```
+
+卸载后若需再次部署，重新执行 `./scripts/install.sh` 即可。
+
 ## 7. PyCharm 远程开发（当前实践）
 
 当前采用的是 **“本地 IDE 编辑 + 手动部署到开发板”** 模式，而不是由 IDE 直接接管远程运行。
@@ -321,4 +364,8 @@ poetry run python -m ogscope.main
 sudo systemctl restart ogscope
 sudo systemctl status ogscope
 sudo journalctl -u ogscope -f
+
+# 卸载服务与 .venv（详见 §6.3；需确认或 OGSCOPE_UNINSTALL_CONFIRM=1）
+# ./scripts/uninstall.sh
+# OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```

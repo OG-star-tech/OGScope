@@ -39,6 +39,16 @@ chmod +x scripts/board-update.sh
 ./scripts/board-update.sh
 ```
 
+## Uninstall
+
+To remove the systemd unit and project `.venv` (by default keeps `data/`, etc.), use `scripts/uninstall.sh`. See **§6.3** in the [Development Guide](README_EN.md).
+
+```bash
+chmod +x scripts/uninstall.sh
+# Interactive, or: OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
+./scripts/uninstall.sh
+```
+
 ## Health check and logs
 
 ```bash

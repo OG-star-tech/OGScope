@@ -227,6 +227,49 @@ Notes:
 - if only templates/static files changed, `poetry install` is usually not needed
 - if service file changed, run `sudo systemctl daemon-reload` first
 
+### 6.3 Uninstall service and local environment (`scripts/uninstall.sh`)
+
+Use `scripts/uninstall.sh` when you need to **remove the systemd unit**, delete the project **`.venv`**, or clean up before reinstalling in another directory. The script **does not** remove packages installed with `apt` (e.g. `python3-picamera2`) or the user-level **Poetry** installation; it only manages the OGScope service file and optional content under the project tree.
+
+**What it does**
+
+- `systemctl stop` / `disable` `ogscope`
+- removes `/etc/systemd/system/ogscope.service` if present, then `daemon-reload`
+- by default removes `.venv` at the project root (can be kept; see below)
+
+**Kept by default**
+
+- `logs/`, `uploads/`, `data/` (including `data/plate_solve/`); to remove them you must opt in (below)
+
+**Environment variables**
+
+| Variable | Meaning |
+|----------|---------|
+| `OGSCOPE_UNINSTALL_CONFIRM=1` | **Required for non-interactive** runs (CI, scripts); without it, the script exits when stdin is not a TTY |
+| `OGSCOPE_UNINSTALL_KEEP_VENV=1` | keep `.venv` |
+| `OGSCOPE_UNINSTALL_REMOVE_DATA=1` | **dangerous**: deletes `logs/`, `uploads/`, `data/` (user data including plate DB) |
+
+**Interactive**: if `OGSCOPE_UNINSTALL_CONFIRM=1` is not set and the session is a TTY, type **`YES`** in full caps to proceed.
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/uninstall.sh
+
+# Interactive: type YES when prompted
+./scripts/uninstall.sh
+
+# Non-interactive
+OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
+
+# Remove service only, keep venv
+OGSCOPE_UNINSTALL_CONFIRM=1 OGSCOPE_UNINSTALL_KEEP_VENV=1 ./scripts/uninstall.sh
+
+# Also remove logs and data (use with care)
+OGSCOPE_UNINSTALL_CONFIRM=1 OGSCOPE_UNINSTALL_REMOVE_DATA=1 ./scripts/uninstall.sh
+```
+
+To deploy again after uninstall, run `./scripts/install.sh`.
+
 ## 7. PyCharm Remote Development (Current Practice)
 
 Current practice is **local IDE editing + manual deployment to board**, not
@@ -322,4 +365,8 @@ poetry run python -m ogscope.main
 sudo systemctl restart ogscope
 sudo systemctl status ogscope
 sudo journalctl -u ogscope -f
+
+# Uninstall service and .venv (see §6.3; requires confirm or OGSCOPE_UNINSTALL_CONFIRM=1)
+# ./scripts/uninstall.sh
+# OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```
