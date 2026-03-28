@@ -81,6 +81,17 @@
                     <button class="btn primary" id="create-video-job-btn">创建视频任务</button>
                     <button class="btn" id="query-job-btn">查询最近任务</button>
                 </div>
+                <div class="solve-preview-toolbar">
+                    <span class="solve-preview-label">叠加层 / Overlay:</span>
+                    <label class="inline"><input type="checkbox" id="layer-matched" checked> 匹配星 / Matched</label>
+                    <label class="inline"><input type="checkbox" id="layer-pattern" checked> 图案星 / Pattern</label>
+                    <label class="inline"><input type="checkbox" id="layer-all" checked> 全部质心 / All centroids</label>
+                </div>
+                <div id="solve-preview-wrap" class="solve-preview-wrap" hidden>
+                    <img id="solve-preview-img" class="solve-preview-img" alt="solve preview" />
+                    <canvas id="solve-preview-canvas" class="solve-preview-canvas" width="1" height="1"></canvas>
+                    <div id="solve-overlay-panel" class="solve-overlay-panel" aria-live="polite"></div>
+                </div>
                 <pre id="analysis-output" class="output">等待操作...</pre>
             </section>
 

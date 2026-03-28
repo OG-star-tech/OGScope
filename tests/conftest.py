@@ -58,6 +58,23 @@ def mock_plate_solve(monkeypatch):
             t_solve_ms=5.0,
             t_extract_ms=None,
             raw={},
+            solve_overlay={
+                "frame_shape": [480, 640],
+                "stars_matched": [
+                    {
+                        "x": 100.0,
+                        "y": 200.0,
+                        "ra_deg": 12.0,
+                        "dec_deg": 80.0,
+                        "mag": 5.2,
+                    },
+                ],
+                "stars_pattern": [{"x": 110.0, "y": 210.0}],
+                "stars_all_centroids": [
+                    {"x": 100.0, "y": 200.0},
+                    {"x": 300.0, "y": 400.0},
+                ],
+            },
         )
 
     def _fake_solve_from_bgr(self, frame_bgr, max_stars, **kwargs):
@@ -78,6 +95,20 @@ def mock_plate_solve(monkeypatch):
             t_solve_ms=5.0,
             t_extract_ms=1.0,
             raw={},
+            solve_overlay={
+                "frame_shape": [480, 640],
+                "stars_matched": [
+                    {
+                        "x": 320.0,
+                        "y": 240.0,
+                        "ra_deg": 12.0,
+                        "dec_deg": 80.0,
+                        "mag": 4.5,
+                    },
+                ],
+                "stars_pattern": [{"x": 315.0, "y": 235.0}],
+                "stars_all_centroids": [{"x": 320.0, "y": 240.0}],
+            },
         )
 
     monkeypatch.setattr(

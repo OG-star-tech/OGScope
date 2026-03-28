@@ -42,6 +42,7 @@ def _json_safe(obj: Any) -> Any:
         return [_json_safe(x) for x in obj]
     return obj
 
+
 _tetra_lock = threading.Lock()
 _tetra_instance: Any = None
 _tetra_load_key: str | None = None
@@ -98,6 +99,8 @@ class SolveResult:
     t_solve_ms: float | None
     t_extract_ms: float | None
     raw: dict[str, Any] = field(default_factory=dict)
+    # 原图像素系下的叠加数据（与 Canvas x,y 一致）/ Overlay in original image pixels (Canvas x,y)
+    solve_overlay: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         base = {
@@ -115,6 +118,8 @@ class SolveResult:
             "t_solve_ms": self.t_solve_ms,
             "t_extract_ms": self.t_extract_ms,
         }
+        if self.solve_overlay is not None:
+            base["solve_overlay"] = _json_safe(self.solve_overlay)
         if self.raw:
             # Tetra3 原始字段含 numpy 标量（如 uint16），FastAPI 无法直接 JSON 编码 / Tetra3 raw may contain numpy scalars
             base["tetra"] = _json_safe(self.raw)
@@ -161,6 +166,13 @@ class PlateSolver:
         )
 
         if len(stars) < 4:
+            sorted_stars = sorted(stars, key=lambda s: s.flux, reverse=True)
+            cyx = np.array([[s.y, s.x] for s in sorted_stars], dtype=np.float64)
+            overlay = (
+                _make_solve_overlay({}, cyx, (height, width), (height, width))
+                if len(cyx) > 0
+                else None
+            )
             return SolveResult(
                 ra_deg=0.0,
                 dec_deg=0.0,
@@ -176,6 +188,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=None,
                 raw={"reason": "need_at_least_4_stars"},
+                solve_overlay=overlay,
             )
 
         sorted_stars = sorted(stars, key=lambda s: s.flux, reverse=True)
@@ -189,6 +202,7 @@ class PlateSolver:
                 fov_estimate=fov_est,
                 fov_max_error=fov_err,
                 solve_timeout=timeout,
+                return_matches=True,
             )
         except OSError as exc:
             return SolveResult(
@@ -208,7 +222,14 @@ class PlateSolver:
                 raw={"error": str(exc)},
             )
 
-        return _tetra_dict_to_result(out, len(stars), solve_source)
+        return _tetra_dict_to_result(
+            out,
+            len(stars),
+            solve_source,
+            centroids_yx=centroids,
+            frame_shape_original=(height, width),
+            solve_shape=(height, width),
+        )
 
     def solve_from_bgr_frame(
         self,
@@ -283,6 +304,12 @@ class PlateSolver:
 
         detected = int(len(centroids))
         if detected < 4:
+            cyx = np.asarray(centroids, dtype=np.float64)
+            overlay = (
+                _make_solve_overlay({}, cyx, (h0, w0), (height, width))
+                if len(cyx) > 0
+                else None
+            )
             return SolveResult(
                 ra_deg=0.0,
                 dec_deg=0.0,
@@ -298,6 +325,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=t_extract_ms,
                 raw={"reason": "need_at_least_4_stars"},
+                solve_overlay=overlay,
             )
 
         try:
@@ -308,6 +336,7 @@ class PlateSolver:
                 fov_estimate=fov_est,
                 fov_max_error=fov_err,
                 solve_timeout=timeout,
+                return_matches=True,
             )
         except OSError as exc:
             return SolveResult(
@@ -328,11 +357,78 @@ class PlateSolver:
             )
 
         out["T_extract"] = t_extract_ms
-        return _tetra_dict_to_result(out, detected, solve_source)
+        return _tetra_dict_to_result(
+            out,
+            detected,
+            solve_source,
+            centroids_yx=np.asarray(centroids, dtype=np.float64),
+            frame_shape_original=(h0, w0),
+            solve_shape=(height, width),
+        )
+
+
+def _make_solve_overlay(
+    tetra_out: dict[str, Any],
+    centroids_yx: np.ndarray,
+    frame_shape_original: tuple[int, int],
+    solve_shape: tuple[int, int],
+) -> dict[str, Any] | None:
+    """从 Tetra 输出与质心构造 solve_overlay（原图 x,y 像素）/ Build solve_overlay in original pixels."""
+    h0, w0 = int(frame_shape_original[0]), int(frame_shape_original[1])
+    h1, w1 = int(solve_shape[0]), int(solve_shape[1])
+    if h1 <= 0 or w1 <= 0:
+        return None
+    sx = w0 / float(w1)
+    sy = h0 / float(h1)
+
+    stars_all: list[dict[str, float]] = []
+    arr = np.asarray(centroids_yx, dtype=np.float64)
+    if arr.size > 0 and arr.ndim == 2 and arr.shape[1] >= 2:
+        for row in arr:
+            y_s, x_s = float(row[0]), float(row[1])
+            stars_all.append({"x": x_s * sx, "y": y_s * sy})
+
+    stars_matched: list[dict[str, Any]] = []
+    raw_matched = tetra_out.get("matched_centroids")
+    raw_catalog = tetra_out.get("matched_stars")
+    raw_cat_ids = tetra_out.get("matched_catID")
+    if raw_matched:
+        for i, mc in enumerate(raw_matched):
+            y_s, x_s = float(mc[0]), float(mc[1])
+            entry: dict[str, Any] = {"x": x_s * sx, "y": y_s * sy}
+            if raw_catalog is not None and i < len(raw_catalog):
+                ms = raw_catalog[i]
+                entry["ra_deg"] = float(ms[0])
+                entry["dec_deg"] = float(ms[1])
+                entry["mag"] = float(ms[2])
+            if raw_cat_ids is not None and i < len(raw_cat_ids):
+                cid = raw_cat_ids[i]
+                entry["cat_id"] = _json_safe(cid) if cid is not None else None
+            stars_matched.append(entry)
+
+    stars_pattern: list[dict[str, float]] = []
+    raw_pat = tetra_out.get("pattern_centroids")
+    if raw_pat:
+        for pc in raw_pat:
+            y_s, x_s = float(pc[0]), float(pc[1])
+            stars_pattern.append({"x": x_s * sx, "y": y_s * sy})
+
+    return {
+        "frame_shape": [h0, w0],
+        "stars_matched": stars_matched,
+        "stars_pattern": stars_pattern,
+        "stars_all_centroids": stars_all,
+    }
 
 
 def _tetra_dict_to_result(
-    out: dict[str, Any], detected_stars: int, solve_source: str
+    out: dict[str, Any],
+    detected_stars: int,
+    solve_source: str,
+    *,
+    centroids_yx: np.ndarray | None = None,
+    frame_shape_original: tuple[int, int] | None = None,
+    solve_shape: tuple[int, int] | None = None,
 ) -> SolveResult:
     """Tetra 返回 dict → SolveResult / Map Tetra output dict to SolveResult."""
     st = out.get("status")
@@ -345,6 +441,16 @@ def _tetra_dict_to_result(
     dec_f = float(dec) if dec is not None else 0.0
 
     raw = {k: v for k, v in out.items() if k not in ("RA", "Dec")}
+
+    overlay: dict[str, Any] | None = None
+    if (
+        centroids_yx is not None
+        and frame_shape_original is not None
+        and solve_shape is not None
+    ):
+        overlay = _make_solve_overlay(
+            out, centroids_yx, frame_shape_original, solve_shape
+        )
 
     return SolveResult(
         ra_deg=ra_f,
@@ -361,6 +467,7 @@ def _tetra_dict_to_result(
         t_solve_ms=_maybe_float(out.get("T_solve")),
         t_extract_ms=_maybe_float(out.get("T_extract")),
         raw=raw,
+        solve_overlay=overlay,
     )
 
 

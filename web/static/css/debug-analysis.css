@@ -139,3 +139,77 @@ select {
   border: 1px solid #374151;
   max-width: 100%;
 }
+
+/* 解算原图叠加 / Solve preview overlay */
+.solve-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 10px 0 8px;
+  font-size: 0.88rem;
+}
+
+.solve-preview-label {
+  color: #9ca3af;
+}
+
+.solve-preview-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin-bottom: 12px;
+  vertical-align: top;
+}
+
+.solve-preview-wrap:not([hidden]) {
+  display: inline-block;
+}
+
+.solve-preview-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #374151;
+}
+
+.solve-preview-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  border-radius: 8px;
+}
+
+.solve-overlay-panel {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: min(92%, 360px);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(55, 65, 81, 0.9);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #e5e7eb;
+  pointer-events: none;
+}
+
+.solve-overlay-panel dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+}
+
+.solve-overlay-panel dt {
+  color: #9ca3af;
+  font-weight: normal;
+}
+
+.solve-overlay-panel dd {
+  margin: 0;
+  word-break: break-word;
+}

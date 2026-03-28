@@ -3,6 +3,9 @@
     uploadedFileName: null,
     lastJobId: null,
     pollTimer: null,
+    previewObjectUrl: null,
+    lastSolveOverlay: null,
+    lastSolveResult: null,
   };
 
   function $(id) {
@@ -60,6 +63,151 @@
     return body;
   }
 
+  function formatNum(v, digits) {
+    if (v === undefined || v === null || Number.isNaN(v)) return "—";
+    return Number(v).toFixed(digits);
+  }
+
+  /**
+   * 将解算摘要写入左上角浮层 / Fill summary panel from solve result.
+   * 与视频/实时流可复用同一 payload 形状 / Same shape for video/live later.
+   */
+  function renderSolveOverlayPanel(result) {
+    const panel = $("solve-overlay-panel");
+    if (!panel) return;
+    if (!result || typeof result !== "object") {
+      panel.innerHTML = "";
+      return;
+    }
+    const rows = [
+      ["RA°", formatNum(result.ra_deg, 4)],
+      ["Dec°", formatNum(result.dec_deg, 4)],
+      ["FOV°", formatNum(result.fov_deg, 3)],
+      ["Roll°", formatNum(result.roll_deg, 2)],
+      ["Matches", result.matches != null ? String(result.matches) : "—"],
+      ["RMSE″", formatNum(result.rmse_arcsec, 2)],
+      ["Prob", formatNum(result.prob, 4)],
+      ["Status", result.status != null ? String(result.status) : "—"],
+    ];
+    const parts = ["<dl>"];
+    for (const [k, v] of rows) {
+      parts.push(`<dt>${k}</dt><dd>${v}</dd>`);
+    }
+    parts.push("</dl>");
+    panel.innerHTML = parts.join("");
+  }
+
+  /**
+   * 在 canvas 上绘制叠加（与图像像素坐标一致）/ Draw overlay in image pixel coords.
+   */
+  function drawSolveOverlay(canvas, img, overlay, layers) {
+    if (!canvas || !img || !overlay) return;
+    const w = img.naturalWidth || 1;
+    const h = img.naturalHeight || 1;
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = `${img.clientWidth}px`;
+    canvas.style.height = `${img.clientHeight}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const drawAll = layers && layers.all;
+    const drawPat = layers && layers.pattern;
+    const drawMat = layers && layers.matched;
+
+    if (drawAll && Array.isArray(overlay.stars_all_centroids)) {
+      ctx.fillStyle = "rgba(156, 163, 175, 0.85)";
+      for (const s of overlay.stars_all_centroids) {
+        const x = s.x;
+        const y = s.y;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    if (drawPat && Array.isArray(overlay.stars_pattern)) {
+      ctx.strokeStyle = "rgba(251, 146, 60, 0.95)";
+      ctx.lineWidth = 2;
+      for (const s of overlay.stars_pattern) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    if (drawMat && Array.isArray(overlay.stars_matched)) {
+      ctx.strokeStyle = "rgba(34, 197, 94, 0.95)";
+      ctx.fillStyle = "rgba(34, 197, 94, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.font = "11px system-ui, sans-serif";
+      for (const s of overlay.stars_matched) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        if (s.mag != null) {
+          const label = `m${formatNum(s.mag, 1)}`;
+          ctx.fillText(label, s.x + 4, s.y - 4);
+        }
+      }
+    }
+  }
+
+  function readLayerToggles() {
+    return {
+      matched: $("layer-matched") && $("layer-matched").checked,
+      pattern: $("layer-pattern") && $("layer-pattern").checked,
+      all: $("layer-all") && $("layer-all").checked,
+    };
+  }
+
+  function refreshOverlayDraw() {
+    const img = $("solve-preview-img");
+    const canvas = $("solve-preview-canvas");
+    if (!img || !canvas || !state.lastSolveOverlay) return;
+    drawSolveOverlay(canvas, img, state.lastSolveOverlay, readLayerToggles());
+  }
+
+  function setupResizeSync() {
+    const img = $("solve-preview-img");
+    if (!img || !window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => {
+      refreshOverlayDraw();
+    });
+    ro.observe(img);
+  }
+
+  function showPreviewFromFile(file) {
+    const wrap = $("solve-preview-wrap");
+    const img = $("solve-preview-img");
+    if (!wrap || !img) return;
+    if (state.previewObjectUrl) {
+      URL.revokeObjectURL(state.previewObjectUrl);
+      state.previewObjectUrl = null;
+    }
+    state.previewObjectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      wrap.hidden = false;
+      refreshOverlayDraw();
+    };
+    img.src = state.previewObjectUrl;
+  }
+
+  function applySolveResultToPreview(result) {
+    state.lastSolveResult = result;
+    state.lastSolveOverlay = result && result.solve_overlay ? result.solve_overlay : null;
+    renderSolveOverlayPanel(result);
+    const img = $("solve-preview-img");
+    if (!img) return;
+    if (img.complete && img.naturalWidth) {
+      refreshOverlayDraw();
+    } else {
+      img.addEventListener("load", () => refreshOverlayDraw(), { once: true });
+    }
+  }
+
   async function onUpload() {
     const fileInput = $("analysis-file");
     if (!fileInput.files || fileInput.files.length === 0) {
@@ -74,6 +222,9 @@
     });
     state.uploadedFileName = data.filename;
     setOutput("analysis-output", data);
+    if (file.type.startsWith("image/")) {
+      showPreviewFromFile(file);
+    }
   }
 
   async function onSolveImage() {
@@ -86,6 +237,9 @@
       method: "POST",
     });
     setOutput("analysis-output", data);
+    if (data && data.result) {
+      applySolveResultToPreview(data.result);
+    }
   }
 
   async function onCreateVideoJob() {
@@ -189,6 +343,26 @@
     });
   }
 
+  function setupLayerToggles() {
+    ["layer-matched", "layer-pattern", "layer-all"].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener("change", () => refreshOverlayDraw());
+    });
+  }
+
+  function setupFileInputPreview() {
+    const fileInput = $("analysis-file");
+    if (!fileInput) return;
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files.length > 0) {
+        const f = fileInput.files[0];
+        if (f.type.startsWith("image/")) {
+          showPreviewFromFile(f);
+        }
+      }
+    });
+  }
+
   bindClick("upload-btn", onUpload);
   bindClick("solve-image-btn", onSolveImage);
   bindClick("create-video-job-btn", onCreateVideoJob);
@@ -198,4 +372,7 @@
   bindClick("realtime-status-btn", onRealtimeStatus);
   setupAutoPoll();
   setupStreamEmbed();
+  setupLayerToggles();
+  setupFileInputPreview();
+  setupResizeSync();
 })();
