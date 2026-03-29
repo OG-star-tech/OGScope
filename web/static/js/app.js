@@ -237,7 +237,8 @@ class OGScopeApp {
             const lonMin = Math.floor((lon - lonDeg) * 60);
             const lonSec = Math.floor(((lon - lonDeg) * 60 - lonMin) * 60);
             
-            gpsElement.textContent = `${latDeg}°${latMin}'${latSec}"N &nbsp;&nbsp; ${lonDeg}°${lonMin}'${lonSec}"E`;
+            const sep = "\u00A0\u00A0";
+            gpsElement.textContent = `${latDeg}°${latMin}'${latSec}"N${sep}${lonDeg}°${lonMin}'${lonSec}"E`;
         }
     }
 

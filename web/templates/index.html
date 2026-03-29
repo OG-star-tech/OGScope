@@ -1,220 +1,301 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html class="dark" lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>OGScope - 电子极轴镜</title>
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#FF4500">
+    <title>OGScope - 电子极轴镜 / Electronic polar scope</title>
+
+    <meta name="theme-color" content="#0e0e0e">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="OGScope">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="msapplication-TileColor" content="#FF4500">
+    <meta name="msapplication-TileColor" content="#0e0e0e">
     <meta name="msapplication-tap-highlight" content="no">
-    
-    <!-- PWA Manifest -->
+
     <link rel="manifest" href="/manifest.json">
-    
-    <!-- Apple Touch Icons -->
     <link rel="apple-touch-icon" href="/static/images/icon-192x192.png">
     <link rel="apple-touch-icon" sizes="152x152" href="/static/images/icon-152x152.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/images/icon-192x192.png">
-    
-    <!-- Favicon -->
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/icon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/icon-16x16.png">
-    
-    <!-- 现代化字体 -->
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
 
-    <!-- 模块化CSS文件 -->
-    <link rel="stylesheet" href="/static/css/core/base.css">
-    <link rel="stylesheet" href="/static/css/core/layout.css">
-    <link rel="stylesheet" href="/static/css/core/components.css">
-    <link rel="stylesheet" href="/static/css/core/themes.css">
-    <link rel="stylesheet" href="/static/css/shared/animations.css">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              surface: "#131313",
+              "surface-tint": "#ffb4a8",
+              "secondary-fixed": "#ffdad4",
+              "on-error-container": "#ffdad6",
+              "error-container": "#93000a",
+              "inverse-primary": "#c00100",
+              outline: "#b18780",
+              "tertiary-container": "#ff5541",
+              "on-secondary-fixed": "#3e0502",
+              "on-error": "#690005",
+              "secondary-fixed-dim": "#ffb4a8",
+              "on-surface-variant": "#ebbbb4",
+              "on-primary-container": "#5c0000",
+              "surface-variant": "#353535",
+              "inverse-surface": "#e2e2e2",
+              "inverse-on-surface": "#303030",
+              background: "#131313",
+              "surface-container-high": "#2a2a2a",
+              secondary: "#ffb4a8",
+              "on-surface": "#e2e2e2",
+              tertiary: "#ffb4a8",
+              "primary-fixed-dim": "#ffb4a8",
+              "surface-container-low": "#1b1b1b",
+              "surface-bright": "#393939",
+              primary: "#ffb4a8",
+              "on-primary-fixed-variant": "#930100",
+              error: "#ffb4ab",
+              "primary-fixed": "#ffdad4",
+              "surface-container-lowest": "#0e0e0e",
+              "on-tertiary-container": "#5c0000",
+              "secondary-container": "#7b3228",
+              "outline-variant": "#603e39",
+              "surface-container-highest": "#353535",
+              "on-tertiary-fixed-variant": "#930000",
+              "tertiary-fixed": "#ffdad4",
+              "surface-container": "#1f1f1f",
+              "on-secondary-fixed-variant": "#783026",
+              "tertiary-fixed-dim": "#ffb4a8",
+              "on-secondary": "#5b1a12",
+              "on-tertiary": "#690000",
+              "surface-dim": "#131313",
+              "on-secondary-container": "#ff9f90",
+              "primary-container": "#ff5540",
+              "on-primary": "#690100",
+              "on-background": "#e2e2e2",
+              "on-tertiary-fixed": "#410000",
+              "on-primary-fixed": "#410000",
+            },
+            fontFamily: {
+              headline: ["Space Grotesk", "sans-serif"],
+              body: ["Inter", "sans-serif"],
+              label: ["Space Grotesk", "sans-serif"],
+            },
+            borderRadius: { DEFAULT: "0px", lg: "0px", xl: "0px", full: "9999px" },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="/static/css/hud-home.css">
 </head>
-<body>
-    <!-- 加载屏 -->
+<body class="h-dvh max-h-dvh overflow-hidden bg-background text-on-background font-body select-none">
+    <!-- 加载屏 / Loading screen -->
     <div id="loading-screen">
-        <div class="loading-logo">⊕</div>
-        <div class="loading-text">OGSCOPE</div>
-        <div class="progress-bar-container">
-            <div class="progress-bar" id="progress-bar"></div>
+                <div class="loading-logo font-headline text-5xl text-primary mb-6 tracking-[0.3em]">⊕</div>
+        <div class="loading-text font-headline text-sm text-primary uppercase tracking-[0.35em] mb-8">OGScope</div>
+        <div class="w-48 max-w-[70vw] h-1 bg-surface-container-high rounded-none mb-4 overflow-hidden">
+            <div class="progress-bar h-full bg-primary transition-all duration-300" id="progress-bar" style="width: 0%"></div>
         </div>
-        <div class="loading-status" id="loading-status">正在初始化...</div>
+        <div class="loading-status font-body text-xs text-on-surface-variant" id="loading-status">正在初始化… / Initializing…</div>
     </div>
 
-    <!-- 主应用 -->
     <div id="app">
-        <!-- 视频容器 -->
-        <div class="video-container">
-            <video id="video-stream" autoplay playsinline muted>
-                您的浏览器不支持视频播放
-            </video>
+        <!-- 顶栏 / Top bar -->
+        <header class="pointer-events-none fixed top-0 left-0 right-0 z-[60] box-border flex h-[calc(var(--hud-header-h)+env(safe-area-inset-top,0px))] flex-shrink-0 flex-col items-center justify-center gap-1 bg-transparent pl-[var(--hud-left-rail)] pr-[var(--hud-right-rail)] pt-[env(safe-area-inset-top,0px)] pb-0.5 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-2">
+            <div class="pointer-events-auto min-w-0 justify-self-start sm:leading-tight">
+                <h1 class="hud-brand-title flex min-w-0 items-center gap-1 truncate text-[10px] font-bold uppercase tracking-widest text-red-600 sm:text-xs">
+                    <span class="shrink-0 font-headline leading-none">OGScope</span>
+                    <span class="hud-brand-version shrink-0 font-headline text-[9px] font-medium normal-case leading-none tracking-normal text-stone-500 sm:text-[10px]">{{ version }}</span>
+                </h1>
+            </div>
+            <div class="hud-telemetry-strip pointer-events-auto flex min-h-0 w-full flex-nowrap items-center justify-center gap-x-1 overflow-x-auto overscroll-x-contain text-[9px] leading-tight sm:w-auto sm:max-w-[min(100%,52vw)] sm:gap-x-2 sm:text-[10px] sm:justify-center">
+                <span class="shrink-0 font-headline text-red-400/95">定位</span>
+                <span class="shrink-0 font-body text-stone-400 tabular-nums whitespace-nowrap" id="gps-coord">—</span>
+                <span class="shrink-0 text-stone-700 px-0.5" aria-hidden="true">|</span>
+                <span class="shrink-0 font-headline text-red-400/95">海拔</span>
+                <span class="shrink-0 font-body text-stone-400 tabular-nums" id="altitude">—</span>
+                <span class="shrink-0 text-stone-700 px-0.5" aria-hidden="true">|</span>
+                <span class="shrink-0 text-stone-500">WiFi</span>
+                <span class="shrink-0 tabular-nums text-stone-400" id="wifi-strength">—</span>
+                <span class="shrink-0 text-stone-700 px-0.5" aria-hidden="true">|</span>
+                <span class="shrink-0 text-stone-500">GPS</span>
+                <span class="shrink-0 tabular-nums text-stone-400" id="gps-strength">—</span>
+                <span class="shrink-0 text-stone-700 px-0.5" aria-hidden="true">|</span>
+                <span class="hud-battery-wrap shrink-0 text-stone-400">
+                    <span class="material-symbols-outlined hud-battery-icon text-red-500" aria-hidden="true">battery_horiz_050</span>
+                    <span class="tabular-nums leading-none" id="battery-level">—</span>
+                </span>
+            </div>
+            <div class="hidden min-w-0 sm:block" aria-hidden="true"></div>
+        </header>
 
-            <!-- 视频内叠加层 -->
-            <div class="overlay">
-                <!-- 顶部中央：GPS坐标 -->
-                <div class="top-center-info">
-                    <div class="gps-coordinate" id="gps-coord">39°54'26"N &nbsp;&nbsp; 116°23'29"E</div>
+        <!-- 左侧仅缩放，纵向居中，避让安全区 / Left rail: zoom only, centered, safe-area aware -->
+        <div class="fixed left-0 top-0 bottom-0 z-40 flex w-[var(--hud-left-rail)] flex-col items-center justify-center border-r border-stone-800/50 bg-stone-900/40 px-1.5 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-md" aria-label="缩放 / Zoom">
+            <div class="flex flex-col items-center gap-6 sm:gap-8">
+                <button type="button" id="zoom-in" class="flex h-11 w-11 items-center justify-center border border-outline-variant/30 transition-all hover:bg-surface-bright active:scale-90 sm:h-12 sm:w-12" aria-label="放大 / Zoom in">
+                    <span class="material-symbols-outlined text-lg text-on-surface-variant" aria-hidden="true">add</span>
+                </button>
+                <div class="relative h-16 w-px bg-outline-variant/30 sm:h-20">
+                    <div id="zoom-thumb" class="absolute left-1/2 w-4 -translate-x-1/2 bg-primary" style="top: 100%; height: 2px"></div>
+                </div>
+                <button type="button" id="zoom-out" class="flex h-11 w-11 items-center justify-center border border-outline-variant/30 transition-all hover:bg-surface-bright active:scale-90 sm:h-12 sm:w-12" aria-label="缩小 / Zoom out">
+                    <span class="material-symbols-outlined text-lg text-on-surface-variant" aria-hidden="true">remove</span>
+                </button>
+                <span class="font-headline text-[7px] text-stone-600 sm:text-[8px]">缩放 / ZOOM</span>
+            </div>
+        </div>
+
+        <!-- 右侧：调节、图层、可折叠模式 / Right rail: ADJ, layers, collapsible modes -->
+        <nav class="fixed right-0 top-0 bottom-0 z-40 flex w-[var(--hud-right-rail)] flex-col items-center justify-center overflow-visible border-l border-stone-800/50 bg-stone-900/40 px-1.5 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-md" aria-label="HUD 工具与模式 / HUD tools and modes">
+            <!-- 模式 + 调节 + 图层 + 设置（模式与设置已对调）/ Mode, ADJ, MOD, Settings -->
+            <div class="flex w-full flex-col items-center gap-3 sm:gap-4">
+                <!-- 模式：与 ADJ/MOD 同风格；列表向画面内侧（左）飞出 / Mode flyout toward viewport -->
+                <div class="relative flex w-full flex-col items-center">
+                <button type="button" id="mode-rail-toggle" class="group flex flex-col items-center gap-1" aria-expanded="false" aria-controls="mode-rail-panel" aria-haspopup="true">
+                    <div class="relative flex h-11 w-11 items-center justify-center border border-stone-700 transition-colors duration-100 group-hover:border-primary/60 group-active:scale-95 sm:h-12 sm:w-12">
+                        <span class="material-symbols-outlined text-xl text-stone-500 transition-colors group-hover:text-primary sm:text-[22px]" aria-hidden="true">view_cozy</span>
+                        <span class="material-symbols-outlined pointer-events-none absolute bottom-0.5 right-0.5 text-[14px] text-stone-500 transition-transform group-hover:text-primary" id="mode-rail-chevron" aria-hidden="true">expand_more</span>
+                    </div>
+                    <span class="font-headline text-[8px] tracking-widest text-stone-500 transition-colors group-hover:text-primary sm:text-[9px]">模式 / MODE</span>
+                </button>
+                <div id="mode-rail-panel" class="hud-mode-flyout pointer-events-auto hidden flex flex-col items-stretch gap-0 overflow-y-auto overscroll-contain border border-outline-variant/30 bg-stone-900/90 backdrop-blur-md" role="menu" aria-label="工作模式 / Work modes">
+                    <button type="button" class="mode-button active flex flex-col items-center gap-0.5 border-b border-stone-800/60 py-2.5 text-stone-500 transition-all duration-300 hover:text-red-300" data-mode="polar" role="menuitem">
+                        <span class="material-symbols-outlined text-[22px]" aria-hidden="true">visibility</span>
+                        <span class="font-headline text-center text-[8px] leading-tight tracking-widest">观测</span>
+                        <span class="hidden font-headline text-[6px] tracking-widest text-stone-500 opacity-80 sm:block">SIGHT</span>
+                    </button>
+                    <button type="button" class="mode-button flex flex-col items-center gap-0.5 border-b border-stone-800/60 py-2.5 text-stone-500 transition-all duration-300 hover:text-red-300" data-mode="star" role="menuitem">
+                        <span class="material-symbols-outlined text-[22px]" aria-hidden="true">flare</span>
+                        <span class="font-headline text-center text-[8px] leading-tight tracking-widest">寻星</span>
+                        <span class="hidden font-headline text-[6px] tracking-widest text-stone-500 opacity-80 sm:block">STAR</span>
+                    </button>
+                    <button type="button" class="mode-button flex flex-col items-center gap-0.5 py-2.5 text-stone-500 transition-all duration-300 hover:text-red-300" data-mode="guide" role="menuitem">
+                        <span class="material-symbols-outlined text-[22px]" aria-hidden="true">architecture</span>
+                        <span class="font-headline text-center text-[8px] leading-tight tracking-widest">导星</span>
+                        <span class="hidden font-headline text-[6px] tracking-widest text-stone-500 opacity-80 sm:block">GUIDE</span>
+                    </button>
+                </div>
+                </div>
+                <button type="button" class="group flex flex-col items-center gap-1">
+                    <div class="flex h-11 w-11 items-center justify-center border border-primary/40 transition-colors duration-100 group-hover:bg-primary/20 group-active:scale-95 sm:h-12 sm:w-12">
+                        <span class="material-symbols-outlined text-xl text-primary sm:text-[22px]" aria-hidden="true">tune</span>
+                    </div>
+                    <span class="font-headline text-[8px] font-bold tracking-widest text-primary sm:text-[9px]">调节 / ADJ</span>
+                </button>
+                <button type="button" class="group flex flex-col items-center gap-1">
+                    <div class="flex h-11 w-11 items-center justify-center border border-stone-700 transition-colors duration-100 group-hover:border-primary/60 group-active:scale-95 sm:h-12 sm:w-12">
+                        <span class="material-symbols-outlined text-xl text-stone-500 transition-colors group-hover:text-primary sm:text-[22px]" aria-hidden="true">layers</span>
+                    </div>
+                    <span class="font-headline text-[8px] tracking-widest text-stone-500 transition-colors group-hover:text-primary sm:text-[9px]">图层 / MOD</span>
+                </button>
+                <a href="/debug" class="group flex flex-col items-center gap-1 no-underline">
+                    <div class="flex h-11 w-11 items-center justify-center border border-stone-700 transition-colors duration-100 group-hover:border-primary/60 group-active:scale-95 sm:h-12 sm:w-12">
+                        <span class="material-symbols-outlined text-xl text-stone-500 transition-colors group-hover:text-primary sm:text-[22px]" aria-hidden="true">settings</span>
+                    </div>
+                    <span class="font-headline text-[8px] tracking-widest text-stone-500 transition-colors group-hover:text-primary sm:text-[9px]">设置 / SET</span>
+                </a>
+            </div>
+        </nav>
+
+        <!-- 主画面全屏铺满，顶底栏仅悬浮叠在上面 / Main viewport full-bleed; top/bottom bars float above -->
+        <main class="fixed inset-0 z-10 flex flex-col overflow-hidden">
+            <div class="hud-viewport-host">
+                <div class="hud-viewport-center">
+                    <div class="relative hud-viewport-frame border border-outline-variant/20 bg-surface-container-lowest overflow-hidden">
+                <video id="video-stream" class="absolute inset-0 w-full h-full object-cover z-0" autoplay playsinline muted>
+                    您的浏览器不支持视频播放 / Video not supported
+                </video>
+                <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_0%,_#0e0e0e_55%)] z-10 pointer-events-none"></div>
+
+                <div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                    <div class="absolute w-[30%] aspect-square border border-outline/20 rounded-full"></div>
+                    <div class="absolute w-[46%] aspect-square border border-outline/10 rounded-full"></div>
+                    <div class="absolute w-[15%] aspect-square border border-outline/40 rounded-full"></div>
+                    <div class="absolute w-full h-[0.5px] bg-outline/20"></div>
+                    <div class="absolute h-full w-[0.5px] bg-outline/20"></div>
+                    <div class="absolute left-1/2 top-[42%] flex -translate-x-1/2 flex-col items-center">
+                        <div class="w-3 h-3 bg-primary border border-on-primary-container shadow-[0_0_12px_rgba(255,85,64,0.6)]"></div>
+                        <span class="font-headline text-[9px] sm:text-[10px] text-primary mt-2 glow-red">北极星参考 / POLARIS</span>
+                    </div>
+                    <div class="guide-line z-30"></div>
                 </div>
 
-                <!-- 左上角：海拔 -->
-                <div class="top-left-info">
-                    <div class="altitude-info">
-                        <div class="altitude-value" id="altitude">43.8 m</div>
-                    </div>
-                </div>
+                <div class="absolute inset-0 hud-scanline pointer-events-none opacity-20 z-[25]"></div>
 
-                <!-- 右上角：WiFi、GPS信号、电量 -->
-                <div class="top-right-info">
-                    <div class="status-indicator">
-                        <span class="status-icon" id="wifi-icon">
-                            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#ff6666">
-                                <path d="M1.17157 5.82843L0 7L1.41421 8.41421L2.58579 7.24264C4.02173 5.8067 5.96928 5 8 5C10.0307 5 11.9783 5.8067 13.4142 7.24264L14.5858 8.41421L16 7L14.8284 5.82843C13.0174 4.01742 10.5612 3 8 3C5.43884 3 2.98259 4.01741 1.17157 5.82843Z"/>
-                                <path d="M13.1716 9.82842L12 8.65686C10.9391 7.59599 9.5003 7 8.00001 7C6.49971 7 5.06087 7.59599 4.00001 8.65685L2.82843 9.82843L4.24264 11.2426L5.41422 10.0711C6.10001 9.38527 7.03015 9 8.00001 9C8.96986 9 9.9 9.38527 10.5858 10.0711L11.7574 11.2426L13.1716 9.82842Z"/>
-                                <path d="M10.3432 12.6569L9.17158 11.4853C8.86086 11.1746 8.43943 11 8 11C7.56058 11 7.13915 11.1746 6.82843 11.4853L5.65686 12.6569L8.00001 15L10.3432 12.6569Z"/>
-                            </svg>
-                        </span>
-                        <span class="status-value" id="wifi-strength">95%</span>
-                    </div>
-                    <div class="status-indicator">
-                        <span class="status-icon" id="gps-icon">
-                            <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#ff6666">
-                                <path d="M502.8 264.1l-80.37-80.37l47.87-47.88c13-13.12 13-34.37 0-47.5l-47.5-47.5c-13.12-13.12-34.38-13.12-47.5 0l-47.88 47.88L247.1 9.25C241 3.375 232.9 0 224.5 0c-8.5 0-16.62 3.375-22.5 9.25l-96.75 96.75c-12.38 12.5-12.38 32.62 0 45.12L185.5 231.5L175.8 241.4c-54-24.5-116.3-22.5-168.5 5.375c-8.498 4.625-9.623 16.38-2.873 23.25l107.6 107.5l-17.88 17.75c-2.625-.75-5-1.625-7.75-1.625c-17.75 0-32 14.38-32 32c0 17.75 14.25 32 32 32c17.62 0 32-14.25 32-32c0-2.75-.875-5.125-1.625-7.75l17.75-17.88l107.6 107.6c6.75 6.75 18.62 5.625 23.12-2.875c27.88-52.25 29.88-114.5 5.375-168.5l10-9.873l80.25 80.36c12.5 12.38 32.62 12.38 44.1 0l96.75-96.75C508.6 304.1 512 295.1 512 287.5C512 279.1 508.6 270.1 502.8 264.1zM219.5 197.4L150.6 128.5l73.87-73.75l68.86 68.88L219.5 197.4zM383.5 361.4L314.6 292.5l73.75-73.88l68.88 68.87L383.5 361.4z"/>
-                            </svg>
-                        </span>
-                        <span class="status-value" id="gps-strength">98%</span>
-                    </div>
-                    <div class="status-indicator">
-                        <span class="status-icon" id="battery-icon">
-                            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#ff6666">
-                                <path d="M8 19H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6.625L8.458 7H4v10h4v2zm4.375 0l1.167-2H18V7h-4V5h5a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-6.625zM21 9h2v6h-2V9zm-9 2h3l-5 8v-6H7l5-8v6z"/>
-                            </svg>
-                        </span>
-                        <span class="status-value" id="battery-level">87%</span>
-                    </div>
-                </div>
-
-                <!-- 左下角：校准偏移 -->
-                <div class="bottom-left-info">
-                    <div class="info-panel calibration-offset">
-                        <div class="info-label">极轴偏差</div>
-                        <div class="offset-item">
-                            <span class="offset-label">方位</span>
-                            <span class="offset-value" id="azimuth-offset">+2.3°</span>
+                <!-- 左右内缩避让侧栏；上下 padding 不变 / Horizontal inset clears side rails; vertical padding unchanged -->
+                <div class="pointer-events-none absolute inset-0 z-[30] flex flex-col justify-between pt-4 pb-4 pl-[calc(var(--hud-left-rail)+1.5rem)] pr-[calc(var(--hud-right-rail)+1.5rem)] sm:pt-8 sm:pb-8 sm:pl-[calc(var(--hud-left-rail)+2.25rem)] sm:pr-[calc(var(--hud-right-rail)+2.25rem)]">
+                    <div class="flex justify-end items-start">
+                        <div class="flex flex-col gap-1 text-right">
+                            <span class="font-headline text-[9px] sm:text-[10px] tracking-[0.15rem] text-primary/60">FOV 6.5°</span>
+                            <span class="font-headline text-[9px] sm:text-[10px] tracking-[0.15rem] text-primary/60">MAG 14.2×</span>
                         </div>
-                        <div class="offset-item">
-                            <span class="offset-label">高度</span>
-                            <span class="offset-value" id="altitude-offset">-1.7°</span>
+                    </div>
+                    <div class="flex justify-between items-end gap-2 sm:gap-3">
+                        <div class="max-w-[38%] border-l-2 border-primary/80 bg-primary/5 p-2 backdrop-blur-sm sm:max-w-[210px] sm:p-2.5">
+                            <div class="mb-0.5 font-headline text-[8px] uppercase tracking-widest text-primary/90 sm:text-[9px]">星点质量 / Stars</div>
+                            <div class="mb-0.5 h-0.5 w-full overflow-hidden bg-primary/20">
+                                <div id="quality-fill" class="h-full bg-primary" style="width:72%"></div>
+                            </div>
+                            <span class="font-body text-[9px] text-on-surface-variant sm:text-[10px]" id="quality-value">良好</span>
+                        </div>
+                        <div class="min-w-0 max-w-[55%] text-right sm:max-w-[48%]">
+                            <div class="font-headline text-[8px] uppercase tracking-widest text-primary/90 sm:text-[9px]">对准误差 / Error</div>
+                            <div class="font-headline text-lg tabular-nums tracking-tight text-primary glow-red sm:text-xl">04.22″</div>
+                            <div class="text-[7px] uppercase text-stone-500 sm:text-[8px]">角秒 RMS / arcsec</div>
+                            <div class="mt-1 font-mono text-[8px] text-stone-400 sm:mt-1.5 sm:text-[9px]">
+                                <span id="azimuth-offset">+0.0°</span> <span class="text-stone-600">|</span> <span id="altitude-offset">+0.0°</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- 右下角：图像质量 -->
-                <div class="bottom-right-info">
-                    <div class="info-panel image-quality">
-                        <div class="info-label">星点清晰度</div>
-                        <div class="quality-bar">
-                            <div class="quality-fill" id="quality-fill"></div>
-                        </div>
-                        <span class="quality-value" id="quality-value">良好</span>
                     </div>
                 </div>
-
-                <!-- 中心准星 -->
-                <div class="crosshair">
-                    <div class="crosshair-line-h"></div>
-                    <div class="crosshair-line-v"></div>
-                    <div class="crosshair-circle"></div>
-                </div>
-
-                <!-- 目标引导线 -->
-                <div class="guide-line">
-                    <div class="guide-target"></div>
-                </div>
             </div>
-        </div>
+        </main>
 
-        <!-- 外部控件 -->
-        
-        <!-- 右上角菜单 -->
-        <button class="menu-button" id="menu-button">☰</button>
-
-        <!-- 右侧缩放控件 -->
-        <div class="zoom-control">
-            <button class="zoom-button" id="zoom-in">+</button>
-            <div class="zoom-slider">
-                <div class="zoom-slider-thumb" id="zoom-thumb"></div>
-            </div>
-            <button class="zoom-button" id="zoom-out">−</button>
-        </div>
-
-        <!-- 右下角模式切换 -->
-        <div class="mode-switcher">
-            <button class="mode-button active" data-mode="polar">极轴</button>
-            <button class="mode-button" data-mode="star">寻星</button>
-            <button class="mode-button" data-mode="guide">导星</button>
-        </div>
-
-        <!-- 左上角高级模式 -->
-        <button class="advanced-button">
-            <span>⚙</span>
-            <span>高级</span>
-        </button>
-
-        <!-- 快门控制 -->
-        <div class="shutter-control-container">
-            <button class="tool-toggle" id="shutter-toggle">📸</button>
-            <div class="tool-group" id="shutter-tools">
-                <div class="shutter-controls">
-                    <div class="shutter-mode-selector">
-                        <button class="shutter-mode active" data-mode="single">单次</button>
-                        <button class="shutter-mode" data-mode="bulb">B门</button>
-                        <button class="shutter-mode" data-mode="continuous">连拍</button>
-                    </div>
-                    <button class="shutter-button" id="shutter-button"></button>
-                    <div class="shutter-timer" id="shutter-timer"></div>
+        <!-- 底栏 / Footer（四项居中，贴底；版本号已移至顶栏） -->
+        <footer class="pointer-events-none fixed bottom-0 left-0 right-0 z-50 box-border flex h-[calc(var(--hud-footer-h)+env(safe-area-inset-bottom,0px))] items-center bg-transparent pl-[var(--hud-left-rail)] pr-[var(--hud-right-rail)] pb-[env(safe-area-inset-bottom,0px)] pt-1 sm:px-6">
+            <div class="pointer-events-auto mx-auto flex w-full max-w-full flex-wrap items-center justify-center gap-x-5 gap-y-1 sm:gap-x-8 lg:gap-x-12">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-red-500 drop-shadow-[0_0_8px_rgba(255,85,64,0.4)]" aria-hidden="true">gps_fixed</span>
+                    <span class="font-headline text-[9px] sm:text-[10px] text-red-400 tracking-widest">极轴锁定 / LOCK</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-stone-600" aria-hidden="true">height</span>
+                    <span class="font-headline text-[9px] sm:text-[10px] text-stone-600 tracking-widest">赤纬 / DEC <span class="tabular-nums">--</span></span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-stone-600" aria-hidden="true">adjust</span>
+                    <span class="font-headline text-[9px] sm:text-[10px] text-stone-600 tracking-widest">ISO --</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-stone-600" aria-hidden="true">stars</span>
+                    <span class="font-headline text-[9px] sm:text-[10px] text-stone-600 tracking-widest">曝光 / EXP --</span>
                 </div>
             </div>
-        </div>
+        </footer>
 
-        <!-- 菜单面板 -->
-        <div class="menu-panel" id="menu-panel">
-            <button class="menu-close" id="menu-close">×</button>
-            <div class="menu-item">
-                <span>单位切换</span>
-                <span>公制 ›</span>
-            </div>
-            <div class="menu-item">
-                <span>语言</span>
-                <span>简体中文 ›</span>
-            </div>
-            <div class="menu-item">
-                <span>亮度调节</span>
-                <span>自动 ›</span>
-            </div>
-            <div class="menu-item">
-                <span>设备参数</span>
-                <span>›</span>
-            </div>
-            <div class="menu-item">
-                <span>网络设置</span>
-                <span>›</span>
-            </div>
-            <div class="menu-item">
-                <span>关于</span>
-                <span>›</span>
-            </div>
+        <!-- 景深遮罩（低于顶栏/侧栏，避免挡交互）/ Vignette below chrome -->
+        <div class="pointer-events-none fixed inset-0 z-[15] bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.5)_100%)]"></div>
+
+        <!-- 保留旧版菜单与快门 DOM id，供后续接线 / Legacy menu & shutter hooks -->
+        <button type="button" class="menu-button hidden fixed w-px h-px overflow-hidden opacity-0" id="menu-button" tabindex="-1" aria-hidden="true">☰</button>
+        <div class="menu-panel hidden fixed w-px h-px overflow-hidden opacity-0 pointer-events-none" id="menu-panel" aria-hidden="true">
+            <button type="button" id="menu-close" tabindex="-1">×</button>
         </div>
+        <div class="hidden fixed w-px h-px overflow-hidden opacity-0 pointer-events-none" id="shutter-tools" aria-hidden="true">
+            <button type="button" class="shutter-mode" data-mode="single"></button>
+            <button type="button" id="shutter-button"></button>
+            <div id="shutter-timer"></div>
+        </div>
+        <button type="button" class="hidden" id="shutter-toggle" tabindex="-1" aria-hidden="true"></button>
+        <button type="button" class="advanced-button hidden fixed w-px h-px overflow-hidden opacity-0" tabindex="-1" aria-hidden="true">高级</button>
     </div>
 
-    <!-- 模块化JavaScript文件 -->
     <script src="/static/js/shared/utils.js"></script>
     <script src="/static/js/shared/constants.js"></script>
     <script src="/static/js/shared/api.js"></script>
@@ -222,5 +303,41 @@
     <script src="/static/js/core/camera.js"></script>
     <script src="/static/js/core/alignment.js"></script>
     <script src="/static/js/app.js"></script>
+    <script>
+      (function () {
+        var toggle = document.getElementById("mode-rail-toggle");
+        var panel = document.getElementById("mode-rail-panel");
+        var chevron = document.getElementById("mode-rail-chevron");
+        function positionModeFlyout() {
+          if (!toggle || !panel || panel.classList.contains("hidden")) return;
+          var br = toggle.getBoundingClientRect();
+          panel.style.top = br.top + "px";
+          panel.style.right = Math.max(0, window.innerWidth - br.left + 6) + "px";
+          panel.style.left = "auto";
+          panel.style.maxHeight =
+            Math.min(window.innerHeight - br.top - 8, window.innerHeight * 0.65) + "px";
+        }
+        if (toggle && panel) {
+          toggle.addEventListener("click", function () {
+            panel.classList.toggle("hidden");
+            var open = !panel.classList.contains("hidden");
+            toggle.setAttribute("aria-expanded", open ? "true" : "false");
+            if (chevron) chevron.style.transform = open ? "rotate(180deg)" : "";
+            if (open) requestAnimationFrame(positionModeFlyout);
+          });
+          window.addEventListener("resize", positionModeFlyout);
+          window.addEventListener("orientationchange", function () {
+            setTimeout(positionModeFlyout, 100);
+          });
+          panel.querySelectorAll(".mode-button").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              panel.classList.add("hidden");
+              toggle.setAttribute("aria-expanded", "false");
+              if (chevron) chevron.style.transform = "";
+            });
+          });
+        }
+      })();
+    </script>
 </body>
 </html>

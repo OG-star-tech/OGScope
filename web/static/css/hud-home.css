@@ -1,0 +1,223 @@
+/* OGScope HUD 主页辅助样式 / HUD home supplemental styles (used with Tailwind) */
+
+/* 禁止整页滚动，保证 HUD 铺满视口 / Lock viewport, no page scroll */
+html,
+body {
+    height: 100%;
+    max-height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+/* 布局标尺：左缩放栏、右工具+模式栏、顶栏、底栏 / Layout tokens */
+#app {
+    --hud-left-rail: 5rem;
+    --hud-right-rail: 5rem;
+    /* 顶栏内容区高度（不含安全区）/ Header content height excluding safe area */
+    --hud-header-h: 2.625rem;
+    --hud-footer-h: 3.25rem;
+}
+
+@media (min-width: 640px) {
+    #app {
+        --hud-right-rail: 6rem;
+    }
+}
+
+/* 兼容旧变量名 / Back-compat aliases */
+#app {
+    --hud-rail: var(--hud-left-rail);
+    --hud-right: var(--hud-right-rail);
+}
+
+/* 顶栏品牌：OGScope 与版本号同一行垂直居中 / Brand title: name + version vertically centered on one line */
+.hud-brand-title {
+    line-height: 1;
+}
+
+/* 版本号相对主标题微调纵向位置（略上移，避免偏低）/ Fine-tune version vertical offset vs OGScope */
+.hud-brand-title .hud-brand-version {
+    position: relative;
+    top: -0.05rem;
+}
+
+@media (min-width: 640px) {
+    .hud-brand-title .hud-brand-version {
+        top: -0.0625rem;
+    }
+}
+
+/* 顶栏遥测：可横向滚动但不显示滚动条 / Telemetry strip scrolls without visible scrollbar */
+.hud-telemetry-strip {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.hud-telemetry-strip::-webkit-scrollbar {
+    display: none;
+}
+
+.material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* 电量与百分比同一行对齐 / Align battery icon with percentage */
+.hud-battery-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1875rem;
+}
+
+/* 横向电池图标（battery_horiz_*），与数字垂直居中、避免占位 tofu / Horizontal battery, centered with label */
+.hud-battery-wrap .hud-battery-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 1.375rem;
+    height: 0.875rem;
+    font-size: 1.125rem;
+    line-height: 1;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+    vertical-align: middle;
+}
+
+.hud-scanline {
+    background: linear-gradient(to bottom, transparent 50%, rgba(255, 85, 64, 0.05) 50%);
+    background-size: 100% 4px;
+}
+
+.glow-red {
+    text-shadow: 0 0 8px rgba(255, 85, 64, 0.6);
+}
+
+/* 已弃用竖排「模式」标题，改横排；保留类名以免外部引用 / Legacy vertical label unused */
+.hud-vertical-label {
+    writing-mode: horizontal-tb;
+    transform: none;
+}
+
+/* 中央视口：在 main 内竖向占满 / Viewport fills main height */
+.hud-viewport-host {
+    display: flex;
+    flex: 1 1 0%;
+    min-height: 0;
+    flex-direction: column;
+    width: 100%;
+}
+
+.hud-viewport-center {
+    display: flex;
+    flex: 1 1 0%;
+    min-height: 0;
+    width: 100%;
+    /* 全屏铺满时沿交叉轴拉满 / Stretch to full width for full-bleed */
+    align-items: stretch;
+    overflow: hidden;
+}
+
+.hud-viewport-frame {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-height: 0;
+    /* 铺满物理视口（顶底栏悬浮，不挤压主画面）/ Full-bleed under floating chrome */
+    height: 100%;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: auto;
+}
+
+/* 模式列表：沿右侧栏向画面内侧飞出；fixed + JS 定位以叠于底栏之上 / Flyout uses fixed + JS to sit above footer */
+.hud-mode-flyout {
+    position: fixed;
+    width: max(var(--hud-right-rail), 5rem);
+    z-index: 55;
+    max-height: min(65vh, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 3rem));
+}
+
+/* 加载屏与主应用显隐 / Loading screen & app visibility (replaces core/layout + components for this page) */
+#loading-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1b0b0a 0%, #0e0e0e 100%);
+    transition: opacity 0.5s ease-out;
+}
+
+#loading-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#app {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    transition: opacity 0.5s ease-in;
+}
+
+#app.loaded {
+    opacity: 1;
+}
+
+/* 视频填满 16:9 容器 / Video fills aspect-ratio container */
+#video-stream {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform-origin: center center;
+}
+
+/* 目标引导线（与 app.js updateGuideLine 配合）/ Guide line for JS rotation */
+.guide-line {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2px;
+    height: 80px;
+    background: linear-gradient(
+        180deg,
+        rgba(255, 180, 168, 0) 0%,
+        rgba(255, 180, 168, 0.85) 100%
+    );
+    transform-origin: top center;
+    transform: translate(-50%, 0) rotate(45deg);
+    pointer-events: none;
+    animation: guidePulse 2s ease-in-out infinite;
+}
+
+@keyframes guidePulse {
+    0%,
+    100% {
+        opacity: 0.7;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+/* 右侧模式栏高亮：左边框 / Mode rail on right: active strip on inner (left) edge */
+.mode-button {
+    border-left: 2px solid transparent;
+    border-right: none;
+}
+
+.mode-button.active {
+    background-color: rgba(127, 29, 29, 0.4);
+    color: rgb(248 113 113);
+    border-left-color: rgb(220 38 38);
+}
