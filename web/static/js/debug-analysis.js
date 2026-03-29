@@ -1,6 +1,8 @@
 (function () {
   const state = {
     uploadedFileName: null,
+    uploadedFileSignature: null,
+    uploadList: [],
     lastJobId: null,
     pollTimer: null,
     previewObjectUrl: null,
@@ -33,6 +35,22 @@
     return data;
   }
 
+  function fileSignature(file) {
+    if (!file) return null;
+    return `${file.name}:${file.size}:${file.lastModified}`;
+  }
+
+  function formatBytes(n) {
+    if (n == null || Number.isNaN(n)) return "—";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function isImageFilename(name) {
+    return /\.(jpe?g|png|webp|bmp|gif|fits?)$/i.test(name);
+  }
+
   function readSolverQueryParams() {
     const fov = parseFloat($("fov-estimate").value);
     const fovMax = $("fov-max-error").value.trim();
@@ -63,15 +81,84 @@
     return body;
   }
 
+  function readCentroidParamsForBody() {
+    const o = {};
+    const sigma = parseFloat($("centroid-sigma").value);
+    if (!Number.isNaN(sigma)) o.sigma = sigma;
+    const maxArea = parseInt($("centroid-max-area").value, 10);
+    if (!Number.isNaN(maxArea)) o.max_area = maxArea;
+    const minArea = parseInt($("centroid-min-area").value, 10);
+    if (!Number.isNaN(minArea)) o.min_area = minArea;
+    const filtsize = parseInt($("centroid-filtsize").value, 10);
+    if (!Number.isNaN(filtsize)) {
+      if (filtsize % 2 === 0) {
+        throw new Error("filtsize 须为奇数 / filtsize must be odd");
+      }
+      o.filtsize = filtsize;
+    }
+    const binOpen = $("centroid-binary-open");
+    if (binOpen) o.binary_open = binOpen.checked;
+    const mar = $("centroid-max-axis-ratio").value.trim();
+    if (mar !== "") {
+      const v = parseFloat(mar);
+      if (Number.isNaN(v)) {
+        throw new Error("max_axis_ratio 无效 / invalid max_axis_ratio");
+      }
+      o.max_axis_ratio = v;
+    }
+    return o;
+  }
+
+  function readMaxImageSide() {
+    const v = parseInt($("centroid-max-image-side").value, 10);
+    if (Number.isNaN(v) || v < 256) return undefined;
+    return v;
+  }
+
+  function buildSolveImageBody() {
+    if (!state.uploadedFileName) {
+      throw new Error(
+        "请先上传或选择服务器上的图片 / Upload or pick a server file first"
+      );
+    }
+    const body = {
+      input_name: state.uploadedFileName,
+      ...readSolverBody(),
+    };
+    const centroid = readCentroidParamsForBody();
+    if (Object.keys(centroid).length > 0) body.centroid = centroid;
+    const mis = readMaxImageSide();
+    if (mis !== undefined) body.max_image_side = mis;
+    return body;
+  }
+
+  function resetCentroidDefaults() {
+    document.querySelectorAll(".card-centroid [data-default]").forEach((el) => {
+      if (el.type === "checkbox") {
+        el.checked = el.getAttribute("data-default-checked") === "true";
+      } else {
+        el.value = el.getAttribute("data-default") || "";
+      }
+    });
+  }
+
+  function clearServerUploadSelect() {
+    const sel = $("server-upload-select");
+    if (sel) sel.value = "";
+  }
+
   function formatNum(v, digits) {
     if (v === undefined || v === null || Number.isNaN(v)) return "—";
     return Number(v).toFixed(digits);
   }
 
-  /**
-   * 将解算摘要写入左上角浮层 / Fill summary panel from solve result.
-   * 与视频/实时流可复用同一 payload 形状 / Same shape for video/live later.
-   */
+  function formatMsLine(ms) {
+    if (ms == null || Number.isNaN(ms)) return "—";
+    const m = Number(ms);
+    const sec = (m / 1000).toFixed(1);
+    return `${m.toFixed(0)} ms（约 ${sec} s）`;
+  }
+
   function renderSolveOverlayPanel(result) {
     const panel = $("solve-overlay-panel");
     if (!panel) return;
@@ -84,6 +171,8 @@
       ["Dec°", formatNum(result.dec_deg, 4)],
       ["FOV°", formatNum(result.fov_deg, 3)],
       ["Roll°", formatNum(result.roll_deg, 2)],
+      ["T_extract", formatMsLine(result.t_extract_ms)],
+      ["T_solve", formatMsLine(result.t_solve_ms)],
       ["Matches", result.matches != null ? String(result.matches) : "—"],
       ["RMSE″", formatNum(result.rmse_arcsec, 2)],
       ["Prob", formatNum(result.prob, 4)],
@@ -97,9 +186,6 @@
     panel.innerHTML = parts.join("");
   }
 
-  /**
-   * 在 canvas 上绘制叠加（与图像像素坐标一致）/ Draw overlay in image pixel coords.
-   */
   function drawSolveOverlay(canvas, img, overlay, layers) {
     if (!canvas || !img || !overlay) return;
     const w = img.naturalWidth || 1;
@@ -180,6 +266,7 @@
   }
 
   function showPreviewFromFile(file) {
+    clearServerUploadSelect();
     const wrap = $("solve-preview-wrap");
     const img = $("solve-preview-img");
     if (!wrap || !img) return;
@@ -195,6 +282,57 @@
     img.src = state.previewObjectUrl;
   }
 
+  function showPreviewFromServer(filename) {
+    const wrap = $("solve-preview-wrap");
+    const imgEl = $("solve-preview-img");
+    if (!wrap || !imgEl) return;
+    if (state.previewObjectUrl) {
+      URL.revokeObjectURL(state.previewObjectUrl);
+      state.previewObjectUrl = null;
+    }
+    if (!isImageFilename(filename)) {
+      wrap.hidden = true;
+      return;
+    }
+    const url = `/api/analysis/uploads/file?filename=${encodeURIComponent(filename)}`;
+    imgEl.onload = () => {
+      wrap.hidden = false;
+      refreshOverlayDraw();
+    };
+    imgEl.src = url;
+  }
+
+  async function refreshUploadList(selectFilename) {
+    const data = await request("/api/analysis/uploads");
+    state.uploadList = data.files || [];
+    const sel = $("server-upload-select");
+    if (!sel) return;
+    const keep = selectFilename || sel.value || "";
+    sel.innerHTML =
+      '<option value="">（选择已上传文件，无需重复上传）</option>';
+    for (const f of state.uploadList) {
+      const opt = document.createElement("option");
+      opt.value = f.filename;
+      opt.textContent = `${f.filename} (${formatBytes(f.size)})`;
+      sel.appendChild(opt);
+    }
+    if (keep && [...sel.options].some((o) => o.value === keep)) {
+      sel.value = keep;
+    }
+  }
+
+  function onServerUploadSelect() {
+    const sel = $("server-upload-select");
+    if (!sel) return;
+    const name = sel.value;
+    if (!name) return;
+    state.uploadedFileName = name;
+    state.uploadedFileSignature = `__server__:${name}`;
+    const fileInput = $("analysis-file");
+    if (fileInput) fileInput.value = "";
+    showPreviewFromServer(name);
+  }
+
   function applySolveResultToPreview(result) {
     state.lastSolveResult = result;
     state.lastSolveOverlay = result && result.solve_overlay ? result.solve_overlay : null;
@@ -208,12 +346,21 @@
     }
   }
 
-  async function onUpload() {
-    const fileInput = $("analysis-file");
-    if (!fileInput.files || fileInput.files.length === 0) {
-      throw new Error("请先选择文件 / Please choose a file");
-    }
-    const file = fileInput.files[0];
+  function setUploadProgressVisible(visible) {
+    const el = $("upload-progress-wrap");
+    if (el) el.hidden = !visible;
+    const btn = $("upload-btn");
+    if (btn) btn.setAttribute("aria-busy", visible ? "true" : "false");
+  }
+
+  function setSolveProgressVisible(visible) {
+    const el = $("solve-progress-wrap");
+    if (el) el.hidden = !visible;
+    const btn = $("solve-image-btn");
+    if (btn) btn.setAttribute("aria-busy", visible ? "true" : "false");
+  }
+
+  async function uploadFileInternal(file) {
     const fd = new FormData();
     fd.append("file", file);
     const data = await request("/api/analysis/upload", {
@@ -221,24 +368,102 @@
       body: fd,
     });
     state.uploadedFileName = data.filename;
+    state.uploadedFileSignature = fileSignature(file);
     setOutput("analysis-output", data);
     if (file.type.startsWith("image/")) {
       showPreviewFromFile(file);
     }
+    refreshUploadList(data.filename).catch(() => null);
+    return data;
+  }
+
+  async function onUpload() {
+    const fileInput = $("analysis-file");
+    if (!fileInput.files || fileInput.files.length === 0) {
+      throw new Error("请先选择文件 / Please choose a file");
+    }
+    const file = fileInput.files[0];
+    setUploadProgressVisible(true);
+    try {
+      await uploadFileInternal(file);
+    } finally {
+      setUploadProgressVisible(false);
+    }
   }
 
   async function onSolveImage() {
-    if (!state.uploadedFileName) {
-      throw new Error("请先上传图片 / Please upload an image first");
+    const fileInput = $("analysis-file");
+    const file =
+      fileInput && fileInput.files && fileInput.files.length > 0
+        ? fileInput.files[0]
+        : null;
+
+    if (file) {
+      const sig = fileSignature(file);
+      const needUpload =
+        !state.uploadedFileName ||
+        sig !== state.uploadedFileSignature ||
+        sig === null;
+      if (needUpload) {
+        setUploadProgressVisible(true);
+        try {
+          await uploadFileInternal(file);
+        } finally {
+          setUploadProgressVisible(false);
+        }
+      }
+    } else if (!state.uploadedFileName) {
+      throw new Error(
+        "请先选择图片并上传，或使用「直接解算」前在本地选好文件。"
+      );
     }
-    const params = readSolverQueryParams();
-    params.set("input_name", state.uploadedFileName);
-    const data = await request(`/api/analysis/solve/image?${params.toString()}`, {
-      method: "POST",
-    });
-    setOutput("analysis-output", data);
-    if (data && data.result) {
-      applySolveResultToPreview(data.result);
+
+    setSolveProgressVisible(true);
+    try {
+      const data = await request("/api/analysis/solve/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildSolveImageBody()),
+      });
+      setOutput("analysis-output", data);
+      if (data && data.result) {
+        applySolveResultToPreview(data.result);
+      }
+    } finally {
+      setSolveProgressVisible(false);
+    }
+  }
+
+  async function onCentroidPreview() {
+    if (!state.uploadedFileName) {
+      throw new Error(
+        "请先上传或选择服务器上的图片 / Upload or pick a server file first"
+      );
+    }
+    const body = {
+      input_name: state.uploadedFileName,
+      centroid: readCentroidParamsForBody(),
+      max_image_side: readMaxImageSide(),
+    };
+    if (Object.keys(body.centroid).length === 0) delete body.centroid;
+    setSolveProgressVisible(true);
+    try {
+      const data = await request("/api/analysis/extract/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setOutput("analysis-output", data);
+      const wrap = $("centroid-preview-wrap");
+      const img = $("centroid-mask-img");
+      if (data && data.binary_mask_png_base64 && img) {
+        img.src = "data:image/png;base64," + data.binary_mask_png_base64;
+        if (wrap) wrap.hidden = false;
+      } else if (wrap) {
+        wrap.hidden = true;
+      }
+    } finally {
+      setSolveProgressVisible(false);
     }
   }
 
@@ -299,7 +524,12 @@
 
   function bindClick(id, handler) {
     const node = $(id);
-    if (!node) return;
+    if (!node) {
+      console.warn(
+        `[debug-analysis] 缺少 DOM #${id}，按钮未绑定 / Missing #${id}, click not bound`
+      );
+      return;
+    }
     node.addEventListener("click", async () => {
       try {
         await handler();
@@ -354,6 +584,7 @@
     const fileInput = $("analysis-file");
     if (!fileInput) return;
     fileInput.addEventListener("change", () => {
+      clearServerUploadSelect();
       if (fileInput.files && fileInput.files.length > 0) {
         const f = fileInput.files[0];
         if (f.type.startsWith("image/")) {
@@ -363,8 +594,25 @@
     });
   }
 
+  function setupServerUploadControls() {
+    const sel = $("server-upload-select");
+    const btn = $("refresh-uploads-btn");
+    if (sel) sel.addEventListener("change", onServerUploadSelect);
+    if (btn) {
+      btn.addEventListener("click", async () => {
+        try {
+          await refreshUploadList();
+        } catch (error) {
+          setOutput("analysis-output", String(error));
+        }
+      });
+    }
+  }
+
   bindClick("upload-btn", onUpload);
   bindClick("solve-image-btn", onSolveImage);
+  bindClick("centroid-reset-btn", resetCentroidDefaults);
+  bindClick("centroid-preview-btn", onCentroidPreview);
   bindClick("create-video-job-btn", onCreateVideoJob);
   bindClick("query-job-btn", onQueryJob);
   bindClick("realtime-start-btn", onRealtimeStart);
@@ -374,5 +622,7 @@
   setupStreamEmbed();
   setupLayerToggles();
   setupFileInputPreview();
+  setupServerUploadControls();
   setupResizeSync();
+  refreshUploadList().catch(() => null);
 })();

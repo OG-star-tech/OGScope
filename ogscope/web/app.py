@@ -139,12 +139,18 @@ async def debug_console(request: Request):
 @app.get("/debug/analysis", response_class=HTMLResponse)
 async def debug_analysis_console(request: Request):
     """星图解算调试页面 / Plate solve debug page"""
+    # 使用静态文件 mtime 作为查询参数，避免浏览器长期缓存旧 JS/CSS 导致按钮无响应
+    # Use static file mtimes as query params so browsers do not keep stale JS/CSS forever
+    da_js = settings.static_dir / "js" / "debug-analysis.js"
+    da_css = settings.static_dir / "css" / "debug-analysis.css"
+    debug_analysis_assets_version = f"{_asset_stamp(da_js)}-{_asset_stamp(da_css)}"
     return templates.TemplateResponse(
         "debug_analysis.html",
         {
             "request": request,
             "version": __version__,
             "app_name": "OGScope Plate Solve Debug Console",
+            "debug_analysis_assets_version": debug_analysis_assets_version,
         },
     )
 

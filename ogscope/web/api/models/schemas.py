@@ -1,8 +1,9 @@
 """
 API 数据模型定义
 """
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CameraSettings(BaseModel):
@@ -81,6 +82,58 @@ class AlignmentStatus(BaseModel):
     progress: int
 
 
+class CentroidParamsPayload(BaseModel):
+    """Tetra3 提星参数覆盖（未填则用环境默认）/ Optional centroid extraction overrides."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sigma: Optional[float] = None
+    max_area: Optional[int] = None
+    min_area: Optional[int] = None
+    filtsize: Optional[int] = None
+    binary_open: Optional[bool] = None
+    bg_sub_mode: Optional[str] = None
+    sigma_mode: Optional[str] = None
+    max_axis_ratio: Optional[float] = None
+
+    @field_validator("filtsize")
+    @classmethod
+    def filtsize_must_be_odd(cls, v: Optional[int]) -> Optional[int]:
+        """滤波边长须为奇数 / Filter size must be odd (Tetra3)."""
+        if v is None:
+            return None
+        if v < 1:
+            raise ValueError("filtsize must be >= 1")
+        if v % 2 == 0:
+            raise ValueError("filtsize must be odd")
+        return v
+
+
+class AnalysisSolveImageRequest(BaseModel):
+    """单图解算请求（JSON body）/ Single-image plate solve request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_name: str
+    hint_ra_deg: Optional[float] = None
+    hint_dec_deg: Optional[float] = None
+    fov_estimate: Optional[float] = None
+    fov_max_error: Optional[float] = None
+    solve_timeout_ms: Optional[int] = None
+    centroid: Optional[CentroidParamsPayload] = None
+    max_image_side: Optional[int] = None
+
+
+class AnalysisExtractPreviewRequest(BaseModel):
+    """提星掩膜预览请求 / Centroid extraction preview (binary mask)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_name: str
+    centroid: Optional[CentroidParamsPayload] = None
+    max_image_side: Optional[int] = None
+
+
 class AnalysisJobCreateRequest(BaseModel):
     """分析任务创建请求 / Analysis job create request"""
 
@@ -93,6 +146,8 @@ class AnalysisJobCreateRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    centroid: Optional[CentroidParamsPayload] = None
+    max_image_side: Optional[int] = None
 
 
 class SolveFrameResult(BaseModel):

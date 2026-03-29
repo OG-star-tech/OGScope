@@ -14,9 +14,19 @@ from typing import Any
 
 import cv2
 
-from ogscope.algorithms.plate_solve import PlateSolver
+from ogscope.algorithms.plate_solve import (
+    CentroidExtractionParams,
+    PlateSolver,
+    centroid_extraction_preview,
+    merge_centroid_params,
+)
 from ogscope.algorithms.star_extract import StarExtractor
 from ogscope.config import get_settings
+from ogscope.web.api.models.schemas import (
+    AnalysisExtractPreviewRequest,
+    AnalysisSolveImageRequest,
+    CentroidParamsPayload,
+)
 
 
 @dataclass(slots=True)
@@ -69,6 +79,53 @@ class AnalysisService:
         self.default_hint_dec = settings.solver_hint_dec_deg
         self._jobs: dict[str, AnalysisJob] = {}
 
+    def _centroid_params_from_payload(
+        self, payload: CentroidParamsPayload | None
+    ) -> CentroidExtractionParams | None:
+        """合并请求中的提星覆盖项与默认配置 / Merge API overrides with Settings defaults."""
+        if payload is None:
+            return None
+        base = CentroidExtractionParams.from_settings(get_settings())
+        return merge_centroid_params(base, payload.model_dump(exclude_none=True))
+
+    def resolve_upload_path(self, filename: str) -> Path:
+        """解析上传目录内安全路径（仅单层文件名）/ Safe path under upload_root (basename only)."""
+        clean = filename.strip()
+        name = Path(clean).name
+        if not name or name != clean:
+            raise ValueError("文件名无效 / Invalid filename")
+        path = (self.upload_root / name).resolve()
+        root = self.upload_root.resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("路径非法 / Invalid path") from exc
+        return path
+
+    def list_uploads(self) -> dict[str, Any]:
+        """列出已持久化上传的文件 / List persisted uploads (flat, no recursion)."""
+        root = self.upload_root
+        files: list[dict[str, Any]] = []
+        if not root.is_dir():
+            return {"upload_dir": str(root.resolve()), "files": []}
+        for p in root.iterdir():
+            if not p.is_file():
+                continue
+            if p.name.startswith("."):
+                continue
+            st = p.stat()
+            files.append(
+                {
+                    "filename": p.name,
+                    "size": st.st_size,
+                    "modified_at": datetime.fromtimestamp(
+                        st.st_mtime, tz=timezone.utc
+                    ).isoformat(),
+                }
+            )
+        files.sort(key=lambda x: x["modified_at"], reverse=True)
+        return {"upload_dir": str(root.resolve()), "files": files}
+
     async def save_upload(self, filename: str, payload: bytes) -> dict[str, Any]:
         """保存上传文件 / Save uploaded file"""
         safe_name = Path(filename).name
@@ -94,6 +151,8 @@ class AnalysisService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        centroid: CentroidParamsPayload | None = None,
+        max_image_side: int | None = None,
     ) -> dict[str, Any]:
         """创建并执行任务 / Create and execute job"""
         if input_type not in {"image", "video"}:
@@ -106,6 +165,7 @@ class AnalysisService:
         job = AnalysisJob(job_id=str(uuid.uuid4()), input_name=source.name, input_type=input_type)
         self._jobs[job.job_id] = job
         self._persist_job(job)
+        centroid_params = self._centroid_params_from_payload(centroid)
 
         try:
             job.status = "running"
@@ -120,6 +180,8 @@ class AnalysisService:
                     fov_estimate=fov_estimate,
                     fov_max_error=fov_max_error,
                     solve_timeout_ms=solve_timeout_ms,
+                    centroid_params=centroid_params,
+                    max_image_side=max_image_side,
                 )
             else:
                 results = await asyncio.to_thread(
@@ -157,33 +219,56 @@ class AnalysisService:
             raise
         return job.to_dict()
 
-    async def solve_single_image(
-        self,
-        input_name: str,
-        hint_ra_deg: float | None = None,
-        hint_dec_deg: float | None = None,
-        fov_estimate: float | None = None,
-        fov_max_error: float | None = None,
-        solve_timeout_ms: int | None = None,
-    ) -> dict[str, Any]:
-        """直接解算单图 / Solve a single image directly"""
-        source = self.upload_root / Path(input_name).name
+    async def solve_single_image(self, body: AnalysisSolveImageRequest) -> dict[str, Any]:
+        """直接解算单图（JSON body）/ Solve a single image via JSON body."""
+        source = self.upload_root / Path(body.input_name).name
         if not source.exists():
             raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+        centroid_params = self._centroid_params_from_payload(body.centroid)
         rows = await asyncio.to_thread(
             self._analyze_image,
             source=source,
-            hint_ra_deg=hint_ra_deg,
-            hint_dec_deg=hint_dec_deg,
-            fov_estimate=fov_estimate,
-            fov_max_error=fov_max_error,
-            solve_timeout_ms=solve_timeout_ms,
+            hint_ra_deg=body.hint_ra_deg,
+            hint_dec_deg=body.hint_dec_deg,
+            fov_estimate=body.fov_estimate,
+            fov_max_error=body.fov_max_error,
+            solve_timeout_ms=body.solve_timeout_ms,
+            centroid_params=centroid_params,
+            max_image_side=body.max_image_side,
         )
         return {
             "success": True,
             "input_name": source.name,
             "result": rows[0] if rows else None,
         }
+
+    async def extract_preview(self, body: AnalysisExtractPreviewRequest) -> dict[str, Any]:
+        """提星二值掩膜预览（不调 Tetra3 解算）/ Preview binary mask without plate solve."""
+        source = self.upload_root / Path(body.input_name).name
+        if not source.exists():
+            raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+        centroid_params = self._centroid_params_from_payload(body.centroid)
+        settings = get_settings()
+        max_side = (
+            body.max_image_side
+            if body.max_image_side is not None
+            else settings.solver_max_image_side
+        )
+        if centroid_params is None:
+            centroid_params = CentroidExtractionParams.from_settings(settings)
+
+        def _run() -> dict[str, Any]:
+            frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
+            if frame is None:
+                raise ValueError("无法读取图片 / Unable to read image")
+            return centroid_extraction_preview(
+                frame,
+                max_stars=self._solver_max_stars,
+                centroid_params=centroid_params,
+                max_image_side=int(max_side),
+            )
+
+        return await asyncio.to_thread(_run)
 
     async def get_job_status(self, job_id: str) -> dict[str, Any]:
         """获取任务状态 / Get job status"""
@@ -222,6 +307,8 @@ class AnalysisService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        centroid_params: CentroidExtractionParams | None = None,
+        max_image_side: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
@@ -237,6 +324,8 @@ class AnalysisService:
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
+            centroid_params=centroid_params,
+            max_image_side=max_image_side,
         )
         row = {"frame_index": 0, **solved.to_dict()}
         return [row]

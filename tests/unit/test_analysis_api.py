@@ -49,9 +49,28 @@ def test_analysis_upload_and_single_image_solve(
     assert upload_resp.status_code == 200
     assert upload_resp.json()["filename"] == "stars.jpg"
 
+    list_resp = client.get("/api/analysis/uploads")
+    assert list_resp.status_code == 200
+    payload = list_resp.json()
+    assert "upload_dir" in payload
+    assert "files" in payload
+    names = [f["filename"] for f in payload["files"]]
+    assert "stars.jpg" in names
+
+    file_resp = client.get(
+        "/api/analysis/uploads/file", params={"filename": "stars.jpg"}
+    )
+    assert file_resp.status_code == 200
+    assert len(file_resp.content) > 0
+
     solve_resp = client.post(
         "/api/analysis/solve/image",
-        params={"input_name": "stars.jpg", "hint_ra_deg": 45.0, "hint_dec_deg": 70.0},
+        json={
+            "input_name": "stars.jpg",
+            "hint_ra_deg": 45.0,
+            "hint_dec_deg": 70.0,
+            "centroid": {"sigma": 2.5, "max_area": 400},
+        },
     )
     assert solve_resp.status_code == 200
     solve_data = solve_resp.json()
@@ -60,6 +79,48 @@ def test_analysis_upload_and_single_image_solve(
     assert "ra_deg" in result
     assert "dec_deg" in result
     assert "status" in result
+
+
+@pytest.mark.unit
+def test_analysis_extract_preview(
+    client, temp_analysis_dir, monkeypatch, tmp_path: Path
+):
+    """提星掩膜预览接口 / Extract preview endpoint smoke test."""
+    image_path = tmp_path / "stars2.jpg"
+    _build_star_image(image_path)
+    with image_path.open("rb") as f:
+        upload_resp = client.post(
+            "/api/analysis/upload",
+            files={"file": ("stars2.jpg", f, "image/jpeg")},
+        )
+    assert upload_resp.status_code == 200
+
+    def _fake_preview(*_a: object, **_kw: object) -> dict:
+        return {
+            "success": True,
+            "detected_stars": 5,
+            "t_extract_ms": 10.0,
+            "binary_mask_png_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            "solve_width": 320,
+            "solve_height": 480,
+            "original_width": 320,
+            "original_height": 480,
+        }
+
+    monkeypatch.setattr(
+        "ogscope.web.api.analysis.services.centroid_extraction_preview",
+        _fake_preview,
+    )
+    prev_resp = client.post(
+        "/api/analysis/extract/preview",
+        json={"input_name": "stars2.jpg", "max_image_side": 2048},
+    )
+    assert prev_resp.status_code == 200
+    data = prev_resp.json()
+    assert data.get("success") is True
+    assert data.get("detected_stars") == 5
+    assert data.get("t_extract_ms") == 10.0
+    assert data.get("binary_mask_png_base64")
 
 
 @pytest.mark.unit

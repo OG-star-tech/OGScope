@@ -11,20 +11,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """应用配置 / Application configuration"""
-    
+
     # 基础配置 / Basic configuration
     environment: str = Field(default="development", description="运行环境")
     debug: bool = Field(default=True, description="调试模式")
-    
+
     # Web 服务配置 / Web service configuration
     host: str = Field(default="0.0.0.0", description="Web 服务地址")
     port: int = Field(default=8000, description="Web 服务端口")
     reload: bool = Field(default=True, description="代码变更时自动重载")
-    
+
     # 日志配置 / Log configuration
     log_level: str = Field(default="INFO", description="日志级别")
     log_file: Optional[Path] = Field(default=None, description="日志文件路径")
-    
+
     # 相机配置 / Camera configuration
     camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
     camera_width: int = Field(default=640, description="图像宽度")
@@ -35,24 +35,24 @@ class Settings(BaseSettings):
     )
     camera_exposure: int = Field(default=10000, description="曝光时间(us)")
     camera_gain: float = Field(default=1.0, description="增益")
-    
+
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")
     display_type: str = Field(default="st7789", description="显示屏类型")
     display_width: int = Field(default=240, description="屏幕宽度")
     display_height: int = Field(default=320, description="屏幕高度")
     display_rotation: int = Field(default=0, description="屏幕旋转角度")
-    
+
     # 极轴校准配置 / Polar calibration configuration
     polar_align_timeout: int = Field(default=300, description="校准超时时间(秒)")
     polar_align_precision: float = Field(default=1.0, description="校准精度(角分)")
-    
+
     # 数据库配置 / Database configuration
     database_url: str = Field(
         default="sqlite:///./ogscope.db",
         description="数据库连接字符串"
     )
-    
+
     # 文件路径配置 / File path configuration
     data_dir: Path = Field(default=Path("./data"), description="数据目录")
     upload_dir: Path = Field(default=Path("./uploads"), description="上传目录")
@@ -86,14 +86,51 @@ class Settings(BaseSettings):
     solver_fullsolve_interval_frames: int = Field(
         default=10, description="实时模式全量解算间隔帧数"
     )
-    
+    # Tetra3 get_centroids_from_image 默认（可环境覆盖）/ Defaults for centroid extraction
+    solver_centroid_sigma: float = Field(
+        default=2.5,
+        description="σ 阈值倍数；略高可减少假星 / Sigma multiplier for thresholding",
+    )
+    solver_centroid_max_area: int = Field(
+        default=400,
+        description="连通域最大像素面积；过小会丢掉亮星光晕 / Max spot area in pixels",
+    )
+    solver_centroid_min_area: int = Field(
+        default=5,
+        description="连通域最小像素面积 / Min spot area in pixels",
+    )
+    solver_centroid_filtsize: int = Field(
+        default=25,
+        description="局部背景/噪声滤波边长，须为奇数 / Local filter size (odd)",
+    )
+    solver_centroid_binary_open: bool = Field(
+        default=True,
+        description="二值开运算去噪 / Binary opening on threshold mask",
+    )
+    solver_centroid_bg_sub_mode: str = Field(
+        default="local_mean",
+        description="背景扣除模式 / Background subtraction mode (Tetra3)",
+    )
+    solver_centroid_sigma_mode: str = Field(
+        default="global_root_square",
+        description="噪声 σ 估计模式 / Noise sigma mode (Tetra3)",
+    )
+    solver_centroid_max_axis_ratio: Optional[float] = Field(
+        default=None,
+        description="长细比上限；None 为不限制 / Max major/minor axis ratio, None to disable",
+    )
+    solver_max_image_side: int = Field(
+        default=2048,
+        description="提星前长边上限（像素），降低可加速 / Max long side before extraction",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         env_prefix="OGSCOPE_",
         case_sensitive=False,
     )
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # 创建必要的目录 / Create necessary directories
@@ -103,7 +140,7 @@ class Settings(BaseSettings):
         self.plate_solve_dir.mkdir(parents=True, exist_ok=True)
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """获取配置单例 / Get configuration singleton"""
     return Settings()

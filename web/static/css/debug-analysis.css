@@ -6,9 +6,10 @@ body {
 }
 
 .page {
-  max-width: 1200px;
+  max-width: min(1680px, calc(100% - 32px));
   margin: 0 auto;
   padding: 16px;
+  box-sizing: border-box;
 }
 
 .topbar {
@@ -31,8 +32,26 @@ body {
 
 .main-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
+  align-items: start;
+}
+
+.layout-workflow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 1100px) {
+  .layout-workflow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card-upload {
+    grid-column: 1 / -1;
+  }
 }
 
 .card {
@@ -71,6 +90,22 @@ select {
   flex-wrap: wrap;
   gap: 8px;
   margin: 10px 0 12px;
+}
+
+/* 保证操作区在预览/叠加层之上可点 / Keep action buttons above preview overlay hit-testing */
+.card-upload {
+  position: relative;
+  z-index: 1;
+}
+
+.card-upload .actions {
+  position: relative;
+  z-index: 2;
+}
+
+.card-upload .request-progress {
+  position: relative;
+  z-index: 2;
 }
 
 .btn {
@@ -156,6 +191,7 @@ select {
 
 .solve-preview-wrap {
   position: relative;
+  z-index: 0;
   display: inline-block;
   max-width: 100%;
   margin-bottom: 12px;
@@ -212,4 +248,131 @@ select {
 .solve-overlay-panel dd {
   margin: 0;
   word-break: break-word;
+}
+
+.card-realtime {
+  grid-column: 1 / -1;
+}
+
+.server-upload-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  grid-column: 2;
+}
+
+.server-upload-select {
+  width: auto;
+  min-width: 200px;
+  flex: 1 1 200px;
+}
+
+.upload-dir-hint {
+  font-size: 0.82rem;
+  color: #9ca3af;
+  margin-top: 4px;
+}
+
+.solve-hint-inline {
+  margin: 8px 0 0;
+}
+
+.request-progress {
+  margin: 10px 0;
+}
+
+.request-progress-label {
+  display: block;
+  font-size: 0.82rem;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+.request-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #374151;
+  overflow: hidden;
+}
+
+.request-progress-indeterminate {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #2563eb, #93c5fd, #2563eb);
+  animation: analysis-progress-slide 1s linear infinite;
+}
+
+@keyframes analysis-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.json-details {
+  margin-top: 12px;
+}
+
+.json-details summary {
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+.json-details .output--json {
+  margin-top: 8px;
+}
+
+/* Tetra3 提星调参 / Centroid tuning */
+.centroid-scope-hint {
+  margin-top: 0;
+}
+
+.centroid-details summary {
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.centroid-grid {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+@media (min-width: 700px) {
+  .centroid-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.centroid-grid .row-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.centroid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.centroid-preview-wrap {
+  margin-top: 8px;
+}
+
+.centroid-mask-img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  background: #1f2937;
 }

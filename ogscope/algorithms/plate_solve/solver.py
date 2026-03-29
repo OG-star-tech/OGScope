@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import base64
+import dataclasses
 import threading
 import time
 from dataclasses import dataclass, field
@@ -79,6 +81,131 @@ def reset_tetra3_singleton_for_tests() -> None:
     with _tetra_lock:
         _tetra_instance = None
         _tetra_load_key = None
+
+
+@dataclass(slots=True)
+class CentroidExtractionParams:
+    """Tetra3 提星参数 / Parameters for get_centroids_from_image."""
+
+    sigma: float = 2.5
+    max_area: int = 400
+    min_area: int = 5
+    filtsize: int = 25
+    binary_open: bool = True
+    bg_sub_mode: str = "local_mean"
+    sigma_mode: str = "global_root_square"
+    max_axis_ratio: float | None = None
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> CentroidExtractionParams:
+        """从应用配置构造 / Build from application settings."""
+        return cls(
+            sigma=settings.solver_centroid_sigma,
+            max_area=settings.solver_centroid_max_area,
+            min_area=settings.solver_centroid_min_area,
+            filtsize=settings.solver_centroid_filtsize,
+            binary_open=settings.solver_centroid_binary_open,
+            bg_sub_mode=settings.solver_centroid_bg_sub_mode,
+            sigma_mode=settings.solver_centroid_sigma_mode,
+            max_axis_ratio=settings.solver_centroid_max_axis_ratio,
+        )
+
+    def to_get_centroids_kwargs(self) -> dict[str, Any]:
+        """传给 get_centroids_from_image 的关键字 / Keyword args for Tetra3 centroiding."""
+        kwargs: dict[str, Any] = {
+            "filtsize": self.filtsize,
+            "bg_sub_mode": self.bg_sub_mode,
+            "sigma_mode": self.sigma_mode,
+            "sigma": self.sigma,
+            "binary_open": self.binary_open,
+            "max_area": self.max_area,
+            "min_area": self.min_area,
+        }
+        if self.max_axis_ratio is not None:
+            kwargs["max_axis_ratio"] = self.max_axis_ratio
+        return kwargs
+
+
+def merge_centroid_params(
+    base: CentroidExtractionParams,
+    overrides: dict[str, Any],
+) -> CentroidExtractionParams:
+    """用非 None 字段覆盖 base / Overlay non-None keys onto base."""
+    allowed = {f.name for f in dataclasses.fields(CentroidExtractionParams)}
+    filtered = {k: v for k, v in overrides.items() if k in allowed and v is not None}
+    return dataclasses.replace(base, **filtered)
+
+
+def resize_bgr_for_extraction(
+    frame_bgr: np.ndarray, max_image_side: int
+) -> tuple[np.ndarray, tuple[int, int]]:
+    """与解算相同的缩放，返回 (BGR, 原始高宽) / Same resize as solve; returns BGR and original shape."""
+    h0, w0 = int(frame_bgr.shape[0]), int(frame_bgr.shape[1])
+    img = frame_bgr
+    if max(h0, w0) > max_image_side:
+        sc = max_image_side / float(max(h0, w0))
+        img = cv2.resize(
+            frame_bgr,
+            (max(1, int(w0 * sc)), max(1, int(h0 * sc))),
+            interpolation=cv2.INTER_AREA,
+        )
+    return img, (h0, w0)
+
+
+def centroid_extraction_preview(
+    frame_bgr: np.ndarray,
+    *,
+    max_stars: int,
+    centroid_params: CentroidExtractionParams,
+    max_image_side: int,
+) -> dict[str, Any]:
+    """提星预览：二值掩膜 PNG（base64），不解算 Tetra3 / Preview extraction mask without plate solve."""
+    from tetra3 import get_centroids_from_image  # noqa: PLC0415
+
+    img, (h0, w0) = resize_bgr_for_extraction(frame_bgr, max_image_side)
+    height, width = int(img.shape[0]), int(img.shape[1])
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb)
+    kwargs = centroid_params.to_get_centroids_kwargs()
+    t0 = time.perf_counter()
+    try:
+        centroids, images_dict = get_centroids_from_image(
+            pil_image,
+            max_returned=max_stars,
+            return_images=True,
+            **kwargs,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "detected_stars": 0,
+            "t_extract_ms": None,
+            "binary_mask_png_base64": None,
+            "solve_width": width,
+            "solve_height": height,
+            "original_width": w0,
+            "original_height": h0,
+        }
+    t_extract_ms = (time.perf_counter() - t0) * 1000.0
+    detected = int(len(centroids))
+    mask = images_dict.get("binary_mask")
+    b64: str | None = None
+    if mask is not None:
+        mask_u8 = (np.asarray(mask, dtype=np.uint8) * 255).astype(np.uint8)
+        ok, buf = cv2.imencode(".png", mask_u8)
+        if ok:
+            b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+    return {
+        "success": True,
+        "detected_stars": detected,
+        "t_extract_ms": round(t_extract_ms, 3),
+        "binary_mask_png_base64": b64,
+        "solve_width": width,
+        "solve_height": height,
+        "original_width": w0,
+        "original_height": h0,
+    }
 
 
 @dataclass(slots=True)
@@ -241,7 +368,8 @@ class PlateSolver:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
-        max_image_side: int = 2048,
+        max_image_side: int | None = None,
+        centroid_params: CentroidExtractionParams | None = None,
     ) -> SolveResult:
         """与 Tetra3 ``solve_from_image`` 等价：内置 ``get_centroids_from_image`` + ``solve_from_centroids``.
 
@@ -251,15 +379,18 @@ class PlateSolver:
         del hint_ra_deg, hint_dec_deg
         from tetra3 import get_centroids_from_image  # noqa: PLC0415 — vendor path
 
-        h0, w0 = frame_bgr.shape[:2]
-        img = frame_bgr
-        if max(h0, w0) > max_image_side:
-            sc = max_image_side / float(max(h0, w0))
-            img = cv2.resize(
-                img,
-                (max(1, int(w0 * sc)), max(1, int(h0 * sc))),
-                interpolation=cv2.INTER_AREA,
-            )
+        settings = get_settings()
+        side_cap = (
+            int(max_image_side)
+            if max_image_side is not None
+            else int(settings.solver_max_image_side)
+        )
+        params = (
+            centroid_params
+            if centroid_params is not None
+            else CentroidExtractionParams.from_settings(settings)
+        )
+        img, (h0, w0) = resize_bgr_for_extraction(frame_bgr, side_cap)
         height, width = int(img.shape[0]), int(img.shape[1])
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(rgb)
@@ -270,18 +401,13 @@ class PlateSolver:
             solve_timeout_ms if solve_timeout_ms is not None else self.solve_timeout_ms
         )
 
+        centroid_kw = params.to_get_centroids_kwargs()
         t0 = time.perf_counter()
         try:
             centroids = get_centroids_from_image(
                 pil_image,
                 max_returned=max_stars,
-                filtsize=25,
-                bg_sub_mode="local_mean",
-                sigma_mode="global_root_square",
-                sigma=2.0,
-                binary_open=True,
-                max_area=100,
-                min_area=5,
+                **centroid_kw,
             )
         except (OSError, ValueError, RuntimeError) as exc:
             return SolveResult(

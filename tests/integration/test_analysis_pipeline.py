@@ -33,7 +33,11 @@ def test_end_to_end_image_analysis(
 
     resp_solve = client.post(
         "/api/analysis/solve/image",
-        params={"input_name": "integration_stars.jpg", "hint_ra_deg": 31.0, "hint_dec_deg": 88.0},
+        json={
+            "input_name": "integration_stars.jpg",
+            "hint_ra_deg": 31.0,
+            "hint_dec_deg": 88.0,
+        },
     )
     assert resp_solve.status_code == 200
     payload = resp_solve.json()
