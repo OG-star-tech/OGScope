@@ -1,6 +1,7 @@
 """
 调试预设 API 的最小回归测试。
 """
+
 import pytest
 
 
@@ -74,4 +75,3 @@ def test_debug_presets_delete(client, temp_debug_dir):
     get_resp = client.get("/api/debug/camera/presets")
     assert get_resp.status_code == 200
     assert get_resp.json()["presets"] == []
-

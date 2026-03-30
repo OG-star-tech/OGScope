@@ -237,7 +237,6 @@ class AnalysisExperimentCreate(BaseModel):
     save_asset_snapshot: bool = True
 
 
-
 class AnalysisSolveVideoFrameRequest(BaseModel):
     """单帧解算：相机 BGR 或素材池视频 seek / Solve one frame from camera or pool video."""
 

@@ -56,7 +56,10 @@ class RealtimeSolveService:
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
         if self.state.running:
-            return {"success": True, "message": "实时解算已在运行 / Realtime solver already running"}
+            return {
+                "success": True,
+                "message": "实时解算已在运行 / Realtime solver already running",
+            }
         if hint_ra_deg is not None:
             self._hint_ra = hint_ra_deg
         if hint_dec_deg is not None:

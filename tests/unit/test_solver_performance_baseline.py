@@ -13,7 +13,9 @@ import pytest
 from ogscope.algorithms.star_extract import StarExtractor
 
 
-def _synthetic_frame(width: int = 640, height: int = 360, stars: int = 60) -> np.ndarray:
+def _synthetic_frame(
+    width: int = 640, height: int = 360, stars: int = 60
+) -> np.ndarray:
     """生成合成星空帧 / Generate synthetic star field frame."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     rng = np.random.default_rng(42)

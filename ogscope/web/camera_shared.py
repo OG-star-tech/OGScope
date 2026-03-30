@@ -10,7 +10,7 @@ import os
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 
 @dataclass(slots=True)
@@ -117,7 +117,9 @@ class CameraManager:
         """停止相机采集 / Stop camera capture."""
         async with self._control_lock:
             await self._stop_grabber_locked()
-            if self._camera is not None and getattr(self._camera, "is_capturing", False):
+            if self._camera is not None and getattr(
+                self._camera, "is_capturing", False
+            ):
                 await asyncio.to_thread(self._camera.stop_capture)
 
     async def pause_grabber(self) -> None:
@@ -128,7 +130,9 @@ class CameraManager:
     async def resume_grabber(self) -> None:
         """恢复共享抓帧任务 / Resume shared frame grabber."""
         async with self._control_lock:
-            if self._camera is not None and getattr(self._camera, "is_capturing", False):
+            if self._camera is not None and getattr(
+                self._camera, "is_capturing", False
+            ):
                 await self._ensure_grabber_locked()
 
     def _call_with_read_lock(self, fn: Callable[[], Any]) -> Any:
@@ -154,7 +158,9 @@ class CameraManager:
                 )
                 return result
             finally:
-                if self._camera is not None and getattr(self._camera, "is_capturing", False):
+                if self._camera is not None and getattr(
+                    self._camera, "is_capturing", False
+                ):
                     await self._ensure_grabber_locked()
                 self._logger.info(
                     "camera_reconfigure_done op=%s cost_ms=%.2f",
@@ -288,7 +294,9 @@ class CameraManager:
             )
 
     @staticmethod
-    def encode_frame(raw_frame: Any, image_format: str = "jpeg", quality: int = 75) -> bytes | None:
+    def encode_frame(
+        raw_frame: Any, image_format: str = "jpeg", quality: int = 75
+    ) -> bytes | None:
         """将原始帧编码为图像字节 / Encode raw frame to image bytes."""
         try:
             import cv2

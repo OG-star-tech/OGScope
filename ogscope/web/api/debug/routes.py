@@ -1,23 +1,25 @@
 """
 调试控制台API路由
 """
+
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
-from fastapi.responses import StreamingResponse
-from ogscope.web.api.models.schemas import CameraSettings, CameraPreset
-from ogscope.web.api.debug.services import (
-    DebugCameraService, 
-    DebugPresetService, 
-    DebugFileService
-)
+from fastapi.responses import FileResponse, StreamingResponse
+
 from ogscope.core.realtime import realtime_solve_service
+from ogscope.web.api.debug.services import (
+    DebugCameraService,
+    DebugFileService,
+    DebugPresetService,
+)
+from ogscope.web.api.models.schemas import CameraPreset, CameraSettings
 
 router = APIRouter()
 
 
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
+
 
 @router.get("/debug/camera/status")
 async def get_debug_camera_status():
@@ -86,10 +88,17 @@ async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n"
+                    b"Content-Length: "
+                    + str(len(data)).encode()
+                    + b"\r\n\r\n"
+                    + data
+                    + b"\r\n"
                 )
 
-        return StreamingResponse(frame_generator(), media_type=f"multipart/x-mixed-replace; boundary={boundary}")
+        return StreamingResponse(
+            frame_generator(),
+            media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -118,10 +127,17 @@ async def stream_debug_camera_lossless():
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/png\r\n"
-                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n"
+                    b"Content-Length: "
+                    + str(len(data)).encode()
+                    + b"\r\n\r\n"
+                    + data
+                    + b"\r\n"
                 )
 
-        return StreamingResponse(frame_generator(), media_type=f"multipart/x-mixed-replace; boundary={boundary}")
+        return StreamingResponse(
+            frame_generator(),
+            media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -142,6 +158,7 @@ async def set_camera_rotation(rotation: int):
     """设置相机旋转角度 / Set camera rotation angle"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
+
         result = await DebugCameraService.set_rotation(rotation)
         return result
     except Exception as e:
@@ -185,10 +202,13 @@ async def stop_debug_recording():
 
 
 @router.post("/debug/camera/size")
-async def set_camera_size(width: int = Query(..., gt=0), height: int = Query(..., gt=0)):
+async def set_camera_size(
+    width: int = Query(..., gt=0), height: int = Query(..., gt=0)
+):
     """仅切换分辨率（宽高），不影响当前帧率；必要时重启预览 / Only switches the resolution (width and height) and does not affect the current frame rate; restart the preview if necessary"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
+
         result = await DebugCameraService.set_size(width, height)
         return result
     except Exception as e:
@@ -196,10 +216,13 @@ async def set_camera_size(width: int = Query(..., gt=0), height: int = Query(...
 
 
 @router.post("/debug/camera/sampling")
-async def set_camera_sampling_mode(mode: str = Query(..., pattern="^(supersample|native|crop)$")):
+async def set_camera_sampling_mode(
+    mode: str = Query(..., pattern="^(supersample|native|crop)$")
+):
     """设置采样模式：supersample | native | crop"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
+
         return await DebugCameraService.set_sampling_mode(mode)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -210,9 +233,11 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
     """仅设置帧率，尽量不影响当前预览 / Only set the frame rate and try not to affect the current preview"""
     try:
         from ogscope.web.api.debug.services import DebugCameraService
+
         return await DebugCameraService.set_fps(fps)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/debug/camera/settings")
 async def update_debug_camera_settings(settings: CameraSettings):
@@ -308,9 +333,8 @@ async def set_camera_white_balance(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
 # ==================== 预设管理 ==================== / ==================== Default Management ====================
+
 
 @router.get("/debug/camera/presets")
 async def get_camera_presets():
@@ -350,6 +374,7 @@ async def delete_camera_preset(preset_name: str):
 
 # ==================== 文件管理 ==================== / ==================== File Management ====================
 
+
 @router.get("/debug/files")
 async def get_capture_files():
     """获取拍摄文件列表 / Get shooting file list"""
@@ -363,16 +388,15 @@ async def get_capture_files():
 async def download_capture_file(filename: str):
     """下载拍摄文件 / Download shooting files"""
     from pathlib import Path
+
     DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
     file_path = DEBUG_CAPTURES_DIR / filename
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
-    
+
     return FileResponse(
-        path=str(file_path),
-        filename=filename,
-        media_type="application/octet-stream"
+        path=str(file_path), filename=filename, media_type="application/octet-stream"
     )
 
 

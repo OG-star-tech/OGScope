@@ -1,7 +1,9 @@
 """
 系统相关API路由
 """
+
 from fastapi import APIRouter
+
 from ogscope.web.api.models.schemas import SystemInfo
 from ogscope.web.api.system.services import system_info_service
 

@@ -1,6 +1,7 @@
 """
 调试文件 API 的最小回归测试。
 """
+
 import json
 
 import pytest
@@ -54,4 +55,3 @@ def test_debug_files_delete_removes_image_and_info(client, temp_debug_dir):
     assert "message_key" in delete_resp.json()
     assert not image_path.exists()
     assert not info_path.exists()
-

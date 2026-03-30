@@ -1,6 +1,7 @@
 """
 调试相机 API 的第二层最小测试网（无真实硬件依赖）。
 """
+
 import pytest
 
 
@@ -117,13 +118,17 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
 
     monkeypatch.setattr(debug_services, "get_camera_instance", _get_camera_instance)
     monkeypatch.setattr(
-        debug_services.DebugCameraService, "_ensure_preview_grabber", staticmethod(_noop)
+        debug_services.DebugCameraService,
+        "_ensure_preview_grabber",
+        staticmethod(_noop),
     )
     monkeypatch.setattr(
         debug_services.DebugCameraService, "_stop_preview_grabber", staticmethod(_noop)
     )
     monkeypatch.setattr(
-        debug_services.DebugCameraService, "_restart_preview_grabber", staticmethod(_noop)
+        debug_services.DebugCameraService,
+        "_restart_preview_grabber",
+        staticmethod(_noop),
     )
     return camera
 
@@ -237,4 +242,3 @@ def test_debug_camera_white_balance_switch_success(client, fake_camera_env):
     body = response.json()
     assert body["success"] is True
     assert fake_camera_env.white_balance_mode == "night"
-

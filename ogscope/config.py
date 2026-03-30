@@ -1,6 +1,7 @@
 """
 配置管理模块
 """
+
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -27,9 +28,15 @@ class Settings(BaseSettings):
 
     # 相机配置 / Camera configuration
     camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
-    camera_width: int = Field(default=1600, description="图像宽度 / Default capture width")
-    camera_height: int = Field(default=900, description="图像高度 / Default capture height")
-    camera_fps: int = Field(default=5, description="预览与调试默认帧率 / Default preview FPS")
+    camera_width: int = Field(
+        default=1600, description="图像宽度 / Default capture width"
+    )
+    camera_height: int = Field(
+        default=900, description="图像高度 / Default capture height"
+    )
+    camera_fps: int = Field(
+        default=5, description="预览与调试默认帧率 / Default preview FPS"
+    )
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
     )
@@ -49,8 +56,7 @@ class Settings(BaseSettings):
 
     # 数据库配置 / Database configuration
     database_url: str = Field(
-        default="sqlite:///./ogscope.db",
-        description="数据库连接字符串"
+        default="sqlite:///./ogscope.db", description="数据库连接字符串"
     )
 
     # 文件路径配置 / File path configuration
@@ -81,7 +87,9 @@ class Settings(BaseSettings):
     # 星图解算配置 / Plate solving configuration
     solver_hint_ra_deg: float = Field(default=0.0, description="默认解算RA提示(度)")
     solver_hint_dec_deg: float = Field(default=90.0, description="默认解算Dec提示(度)")
-    solver_fov_deg: float = Field(default=11.0, description="视场角(度) / Default FOV estimate (deg)")
+    solver_fov_deg: float = Field(
+        default=11.0, description="视场角(度) / Default FOV estimate (deg)"
+    )
     solver_max_stars: int = Field(default=80, description="用于解算的最大星点数量")
     solver_fullsolve_interval_frames: int = Field(
         default=10, description="实时模式全量解算间隔帧数"
@@ -154,4 +162,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """获取配置单例 / Get configuration singleton"""
     return Settings()
-

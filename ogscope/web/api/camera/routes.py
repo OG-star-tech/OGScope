@@ -2,12 +2,15 @@
 相机相关API路由 / Camera-related API routes
 支持真实相机和模拟模式 / Supports real camera and simulation mode
 """
+
+import io
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from ogscope.utils.environment import should_use_simulation_mode, get_simulation_config
+
+from ogscope.utils.environment import get_simulation_config, should_use_simulation_mode
 from ogscope.utils.virtual_stream import get_virtual_stream
-import logging
-import io
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,7 +35,7 @@ async def get_camera_status():
             "resolution": [1920, 1080],
             "fps": 30,
             "mode": "simulation",
-            "simulation_config": get_simulation_config()
+            "simulation_config": get_simulation_config(),
         }
     else:
         try:
@@ -65,22 +68,24 @@ async def get_camera_preview(since_frame_id: int | None = Query(default=None)):
         if not _is_streaming:
             # 返回静态占位符图像 / Return static placeholder image
             placeholder_image = io.BytesIO()
-            placeholder_image.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x90\x00\x00\x00\xf0\x08\x02\x00\x00\x00')
+            placeholder_image.write(
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x90\x00\x00\x00\xf0\x08\x02\x00\x00\x00"
+            )
             placeholder_image.seek(0)
-            
+
             return StreamingResponse(
                 placeholder_image,
                 media_type="image/png",
-                headers={"Cache-Control": "no-cache"}
+                headers={"Cache-Control": "no-cache"},
             )
-        
+
         # 生成虚拟视频帧 / Generate virtual video frames
         try:
             frame_data = _virtual_stream.generate_frame()
             return StreamingResponse(
                 io.BytesIO(frame_data),
                 media_type="image/jpeg",
-                headers={"Cache-Control": "no-cache"}
+                headers={"Cache-Control": "no-cache"},
             )
         except Exception as e:
             logger.error(f"生成虚拟视频帧失败: {e}")
@@ -97,4 +102,3 @@ async def get_camera_preview(since_frame_id: int | None = Query(default=None)):
         except Exception as e:
             logger.error(f"获取真实相机预览失败: {e}")
             raise HTTPException(status_code=500, detail="获取预览失败")
-

@@ -15,4 +15,3 @@ if _vendor_root.is_dir() and str(_vendor_root) not in sys.path:
 from ogscope.__version__ import __version__
 
 __all__ = ["__version__"]
-

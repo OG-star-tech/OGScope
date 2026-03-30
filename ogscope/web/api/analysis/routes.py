@@ -31,7 +31,6 @@ async def list_analysis_uploads():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-
 @router.get("/analysis/uploads/{filename}/experiment_count")
 async def upload_experiment_count(filename: str):
     """引用该素材的实验记录条数 / Count experiments for upload."""
@@ -40,16 +39,20 @@ async def upload_experiment_count(filename: str):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
 @router.delete("/analysis/uploads/{filename}")
 async def delete_analysis_upload(
     filename: str,
     delete_experiments: bool = Query(
-        False, description="同时删除引用该素材的实验记录 / Also delete linked experiments"
+        False,
+        description="同时删除引用该素材的实验记录 / Also delete linked experiments",
     ),
 ):
     """从素材池删除文件及侧车 / Delete file from pool and sidecar."""
     try:
-        return analysis_service.delete_upload(filename, delete_experiments=delete_experiments)
+        return analysis_service.delete_upload(
+            filename, delete_experiments=delete_experiments
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -245,8 +248,6 @@ async def export_analysis_experiments(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-
-
 @router.get("/analysis/settings")
 async def analysis_lab_settings():
     """分析台公开默认配置 / Public defaults for analysis lab."""
@@ -280,6 +281,7 @@ async def get_experiment_asset_file(experiment_id: str):
         return FileResponse(path, media_type=media or "application/octet-stream")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.post("/analysis/extract/preview")
 async def extract_centroid_preview(body: AnalysisExtractPreviewRequest):

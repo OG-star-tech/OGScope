@@ -36,7 +36,9 @@ class StarExtractor:
     _min_side_for_downscale: int = 400
     # 几何过滤：与噪点体积区分，减轻 Tetra3 假星导致的 TIMEOUT / Reject noise blobs vs point-like stars
     _min_star_area: float = 2.0
-    _max_star_area_frac: float = 0.0035  # 单连通域面积不超过画幅比例 / Max contour area vs frame
+    _max_star_area_frac: float = (
+        0.0035  # 单连通域面积不超过画幅比例 / Max contour area vs frame
+    )
     _min_circularity: float = 0.12  # 4πA/P²；细长热噪、条纹偏低 / Elongated junk is low
 
     def __init__(self, max_stars: int = 80) -> None:
@@ -63,9 +65,7 @@ class StarExtractor:
     def _extract_gray_scaled(self, gray: np.ndarray, scale: float) -> list[StarPoint]:
         """在灰度图上提星；scale 为相对原图的坐标倍率 / Extract on gray; scale maps coords to original frame."""
         blur = cv2.GaussianBlur(gray, (3, 3), 0)
-        _, binary = cv2.threshold(
-            blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
+        _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         # 去掉孤立椒盐点，减少伪轮廓 / Morph open removes salt noise, fewer false contours
         _k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, _k)

@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-import platform
 import os
+import platform
 import time
 from pathlib import Path
 from threading import Lock
@@ -169,7 +169,11 @@ class SystemInfoService:
                 link_quality = float(values[0].rstrip("."))
                 signal_level = float(values[1].rstrip("."))
                 quality_percent = max(0.0, min(100.0, (link_quality / 70.0) * 100.0))
-                return round(quality_percent, 2), round(signal_level, 2), interface.strip()
+                return (
+                    round(quality_percent, 2),
+                    round(signal_level, 2),
+                    interface.strip(),
+                )
             except ValueError:
                 continue
         return None, None, None

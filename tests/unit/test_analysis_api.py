@@ -249,7 +249,9 @@ def test_analysis_upload_file_info_sidecar(client, temp_analysis_dir, tmp_path: 
 
 
 @pytest.mark.unit
-def test_analysis_delete_upload_and_experiment(client, temp_analysis_dir, tmp_path: Path):
+def test_analysis_delete_upload_and_experiment(
+    client, temp_analysis_dir, tmp_path: Path
+):
     """删除素材与实验记录 / Delete upload and experiment."""
     image_path = tmp_path / "del.jpg"
     _build_star_image(image_path)

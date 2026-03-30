@@ -33,15 +33,19 @@ class TrackResult:
 class FastTracker:
     """基于质心偏移的轻量跟踪 / Lightweight tracking based on centroid shift"""
 
-    def track(
-        self, previous: list[StarPoint], current: list[StarPoint]
-    ) -> TrackResult:
+    def track(self, previous: list[StarPoint], current: list[StarPoint]) -> TrackResult:
         """估计帧间位移 / Estimate inter-frame shift"""
         if not previous or not current:
-            return TrackResult(delta_x=0.0, delta_y=0.0, matched_points=0, confidence=0.0)
+            return TrackResult(
+                delta_x=0.0, delta_y=0.0, matched_points=0, confidence=0.0
+            )
 
-        prev = np.array([[p.x, p.y, max(p.flux, 1e-6)] for p in previous], dtype=np.float64)
-        cur = np.array([[p.x, p.y, max(p.flux, 1e-6)] for p in current], dtype=np.float64)
+        prev = np.array(
+            [[p.x, p.y, max(p.flux, 1e-6)] for p in previous], dtype=np.float64
+        )
+        cur = np.array(
+            [[p.x, p.y, max(p.flux, 1e-6)] for p in current], dtype=np.float64
+        )
         prev_cx = float(np.average(prev[:, 0], weights=prev[:, 2]))
         prev_cy = float(np.average(prev[:, 1], weights=prev[:, 2]))
         cur_cx = float(np.average(cur[:, 0], weights=cur[:, 2]))

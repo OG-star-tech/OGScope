@@ -423,7 +423,9 @@ class AnalysisService:
             """平衡档位使用 speed→robust 两段策略 / Balanced profile: speed then robust fallback."""
             # 第 1 段：speed 档快速尝试 / Stage 1: quick speed attempt
             speed_centroid, speed_max_stars, speed_timeout_ms, _ = (
-                self._resolve_solve_profile("speed", body.centroid, body.solve_timeout_ms)
+                self._resolve_solve_profile(
+                    "speed", body.centroid, body.solve_timeout_ms
+                )
             )
             first = self._analyze_image(
                 source=source,
@@ -445,7 +447,9 @@ class AnalysisService:
             # 噪点图动态 max_stars 收紧 / Heuristic: tighten max_stars for noisy frames
             detected = int(row0.get("detected_stars") or 0) if row0 else 0
             robust_centroid, robust_max_stars, robust_timeout_ms, _ = (
-                self._resolve_solve_profile("robust", body.centroid, body.solve_timeout_ms)
+                self._resolve_solve_profile(
+                    "robust", body.centroid, body.solve_timeout_ms
+                )
             )
             if detected > 0 and detected > robust_max_stars:
                 robust_max_stars = max(20, int(robust_max_stars * 0.7))
@@ -470,7 +474,9 @@ class AnalysisService:
         if requested_profile == "balanced":
             rows = await loop.run_in_executor(self._solver_executor, _run_two_stage)
             effective_profile = (
-                rows[0].get("solve_profile") if rows and rows[0].get("solve_profile") else "balanced"
+                rows[0].get("solve_profile")
+                if rows and rows[0].get("solve_profile")
+                else "balanced"
             )
         else:
             rows = await loop.run_in_executor(self._solver_executor, _run_single)
@@ -802,7 +808,9 @@ class AnalysisService:
         cap.release()
         return results
 
-    async def solve_video_frame(self, body: AnalysisSolveVideoFrameRequest) -> dict[str, Any]:
+    async def solve_video_frame(
+        self, body: AnalysisSolveVideoFrameRequest
+    ) -> dict[str, Any]:
         """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
         t_total = time.perf_counter()
         t_open_decode_ms = None
@@ -817,7 +825,9 @@ class AnalysisService:
             t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
         else:
             if not body.input_name:
-                raise ValueError("需要 input_name / input_name required for file source")
+                raise ValueError(
+                    "需要 input_name / input_name required for file source"
+                )
             path = self.resolve_upload_path(body.input_name)
             if not path.is_file():
                 raise FileNotFoundError("上传文件不存在 / Uploaded file not found")

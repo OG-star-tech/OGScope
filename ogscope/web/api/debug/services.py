@@ -1,15 +1,17 @@
 """
 调试控制台服务层
 """
-import os
-import json
+
 import asyncio
+import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Optional
+
 from ogscope.web.camera_shared import get_camera_manager
 
 # 调试控制台相关 / Debug console related
@@ -50,8 +52,10 @@ _CAMERA_ENV_KEY_MAP = {
 _camera_ensure_lock = asyncio.Lock()
 
 
-def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+def i18n_payload(
+    message_key: str, message: str, message_params: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "message_key": message_key,
         "message": message,
     }
@@ -60,7 +64,7 @@ def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[s
     return payload
 
 
-def _persist_env_updates(updates: Dict[str, Any]) -> Path:
+def _persist_env_updates(updates: dict[str, Any]) -> Path:
     """将键值写入项目 .env（存在则覆盖，不存在则追加）/ Persist key-values into project .env."""
     env_path = Path.cwd() / ".env"
     if env_path.exists():
@@ -69,7 +73,7 @@ def _persist_env_updates(updates: Dict[str, Any]) -> Path:
         lines = []
 
     pending = {str(k): str(v) for k, v in updates.items()}
-    new_lines: List[str] = []
+    new_lines: list[str] = []
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in line:
@@ -117,11 +121,11 @@ def _to_json_safe(value: Any) -> Any:
     return str(value)
 
 
-def build_param_slug(camera_info: Dict[str, Any]) -> str:
+def build_param_slug(camera_info: dict[str, Any]) -> str:
     """从相机信息生成简短、文件名安全的参数片段 / Short filesystem-safe param slug from camera info"""
     if not camera_info:
         return ""
-    parts: List[str] = []
+    parts: list[str] = []
     exp = camera_info.get("exposure_us")
     if exp is not None:
         try:
@@ -163,7 +167,7 @@ def build_param_slug(camera_info: Dict[str, Any]) -> str:
     return slug[:120]
 
 
-def generate_capture_stem(prefix: str, camera_info: Dict[str, Any]) -> str:
+def generate_capture_stem(prefix: str, camera_info: dict[str, Any]) -> str:
     """生成带参数摘要的文件名主干（无扩展名）/ File stem (no extension) with param summary"""
     ts = _capture_timestamp_for_stem()
     slug = build_param_slug(camera_info)
@@ -174,16 +178,16 @@ def generate_capture_stem(prefix: str, camera_info: Dict[str, Any]) -> str:
 
 def save_capture_sidecar(
     stem: str,
-    camera_params: Dict[str, Any],
+    camera_params: dict[str, Any],
     *,
     kind: str,
     media_filename: str,
     file_size: int,
-    extra: Optional[Dict[str, Any]] = None,
+    extra: Optional[dict[str, Any]] = None,
 ) -> None:
     """将完整拍摄/录制参数写入同名 .txt 侧车 / Write full capture params to sidecar .txt file"""
     info_file = DEBUG_CAPTURES_DIR / f"{stem}.txt"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "kind": kind,
         "media_file": media_filename,
         "sidecar_version": 2,
@@ -199,12 +203,12 @@ def save_capture_sidecar(
 
 class DebugCameraService:
     """调试相机服务 / Debug camera service"""
-    
+
     @staticmethod
     def get_camera_instance():
         """提供给路由的获取实例入口（兼容 routes 中的调用） / Obtain instance entry provided for routing (compatible with calls in routes)"""
         return globals()["get_camera_instance"]()
-    
+
     @staticmethod
     async def get_camera_status():
         """获取调试相机状态 / Get debug camera status"""
@@ -260,8 +264,8 @@ class DebugCameraService:
                     "当前没有待确认的运行时参数",
                 ),
             }
-        applied: Dict[str, Any] = {}
-        skipped: Dict[str, Any] = {}
+        applied: dict[str, Any] = {}
+        skipped: dict[str, Any] = {}
         for key, value in overrides.items():
             env_key = _CAMERA_ENV_KEY_MAP.get(key)
             if env_key:
@@ -281,7 +285,7 @@ class DebugCameraService:
                 "运行时参数已写入系统默认配置",
             ),
         }
-    
+
     @staticmethod
     async def start_camera():
         """启动调试相机 / Start the debug camera"""
@@ -296,7 +300,7 @@ class DebugCameraService:
         camera = await asyncio.to_thread(get_camera_instance)
         _attach_manager_camera_if_needed(camera)
         await get_camera_manager().ensure_started()
-    
+
     @staticmethod
     async def stop_camera():
         """停止调试相机 / Stop debugging camera"""
@@ -304,7 +308,7 @@ class DebugCameraService:
         _attach_manager_camera_if_needed(camera)
         await get_camera_manager().stop()
         return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
-    
+
     @staticmethod
     async def get_preview(since_frame_id: int | None = None):
         """获取调试相机预览 / Get debug camera preview"""
@@ -362,31 +366,37 @@ class DebugCameraService:
         if encoded is None:
             return 500, None, snap.frame_id
         return 200, encoded, snap.frame_id
-    
+
     @staticmethod
     async def capture_image():
         """拍摄单张图片 / Take a single picture"""
         camera = get_camera_instance()
         if not camera or not camera.is_capturing:
             raise Exception("相机未运行")
-        
+
         try:
             import cv2
-            
+
             # 捕获图像 / capture image
             image = camera.capture_image()
             if image is None:
                 raise Exception("图像捕获失败")
 
             camera_info = camera.get_camera_info()
-            expected_w = int(camera_info.get("output_width", camera_info.get("width", 0)) or 0)
-            expected_h = int(camera_info.get("output_height", camera_info.get("height", 0)) or 0)
+            expected_w = int(
+                camera_info.get("output_width", camera_info.get("width", 0)) or 0
+            )
+            expected_h = int(
+                camera_info.get("output_height", camera_info.get("height", 0)) or 0
+            )
             actual_h, actual_w = image.shape[:2]
             rotation = int(camera_info.get("rotation", 0) or 0)
             if rotation in (90, 270):
                 expected_w, expected_h = expected_h, expected_w
-            if expected_w > 0 and expected_h > 0 and (
-                int(actual_w) != expected_w or int(actual_h) != expected_h
+            if (
+                expected_w > 0
+                and expected_h > 0
+                and (int(actual_w) != expected_w or int(actual_h) != expected_h)
             ):
                 raise Exception(
                     f"拍照分辨率与当前设置不一致: expected={expected_w}x{expected_h}, actual={actual_w}x{actual_h}"
@@ -395,12 +405,12 @@ class DebugCameraService:
             # 生成文件名（含参数摘要）/ File name with param summary in stem
             stem = generate_capture_stem("IMG", camera_info)
             image_path = DEBUG_CAPTURES_DIR / f"{stem}.jpg"
-            
+
             # 保存图像 / save image
             success = cv2.imwrite(str(image_path), image)
             if not success:
                 raise Exception("图像保存失败")
-            
+
             # 保存拍摄信息侧车 / Save capture sidecar (.txt)
             file_size = image_path.stat().st_size
             save_capture_sidecar(
@@ -416,7 +426,7 @@ class DebugCameraService:
                     "expected_output_height": int(expected_h),
                 },
             )
-            
+
             return {
                 "success": True,
                 "filename": f"{stem}.jpg",
@@ -427,19 +437,19 @@ class DebugCameraService:
                 "expected_output_width": int(expected_w),
                 "expected_output_height": int(expected_h),
             }
-            
+
         except ImportError:
             raise Exception("OpenCV未安装")
         except Exception as e:
             raise Exception(f"拍摄失败: {str(e)}")
-    
+
     @staticmethod
     async def set_rotation(rotation: int):
         """设置图像旋转角度 / Set image rotation angle"""
         camera = get_camera_instance()
         if not camera:
             raise Exception("相机未初始化")
-        
+
         if camera.set_rotation(rotation):
             get_camera_manager().update_runtime_overrides({"rotation": int(rotation)})
             return {
@@ -447,30 +457,30 @@ class DebugCameraService:
                 **i18n_payload(
                     "server.rotationSet",
                     f"旋转角度设置为: {rotation}度",
-                    {"rotation": rotation}
-                )
+                    {"rotation": rotation},
+                ),
             }
         else:
             raise Exception("设置旋转角度失败")
-    
+
     @staticmethod
     async def start_recording():
         """开始录制视频 / Start recording video"""
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
-        
+
         if is_recording:
             raise Exception("已在录制中")
-        
+
         camera = get_camera_instance()
         if not camera or not camera.is_capturing:
             raise Exception("相机未运行")
-        
+
         try:
             import time
 
             import cv2
-            
+
             camera_info = camera.get_camera_info()
             stem = generate_capture_stem("VID", camera_info)
             video_path = DEBUG_CAPTURES_DIR / f"{stem}.mp4"
@@ -484,8 +494,10 @@ class DebugCameraService:
                 ("mp4v", "MP4"),
             ]
             width = int(camera_info.get("output_width", camera_info.get("width", 1920)))
-            height = int(camera_info.get("output_height", camera_info.get("height", 1080)))
-            fps = float(camera_info.get('fps', 15))
+            height = int(
+                camera_info.get("output_height", camera_info.get("height", 1080))
+            )
+            fps = float(camera_info.get("fps", 15))
             recording_fps_value = fps
 
             video_writer = None
@@ -509,14 +521,14 @@ class DebugCameraService:
                 logging.getLogger(__name__).warning(
                     "录制回退到 mp4v，某些浏览器可能无法预览该 MP4 文件"
                 )
-            
+
             recording_stem = stem
             recording_t0_mono = time.monotonic()
             recording_media_filename = f"{stem}.mp4"
             recording_codec_fourcc = str(chosen_codec or "mp4v")
             recording_container = str(chosen_container or "MP4")
             is_recording = True
-            
+
             # 启动录制任务 / Start recording task
             async def record_video():
                 nonlocal video_writer
@@ -528,36 +540,33 @@ class DebugCameraService:
                             # OpenCV 期望 BGR / OpenCV expects BGR
                             try:
                                 import cv2
+
                                 bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
                             except Exception:
                                 bgr = image
                             video_writer.write(bgr)
-                        await asyncio.sleep(1/max(fps,1))
+                        await asyncio.sleep(1 / max(fps, 1))
                 finally:
                     video_writer.release()
-            
+
             recording_task = asyncio.create_task(record_video())
-            
-            return {
-                "success": True,
-                "filename": f"{stem}.mp4",
-                "path": str(video_path)
-            }
-            
+
+            return {"success": True, "filename": f"{stem}.mp4", "path": str(video_path)}
+
         except ImportError:
             raise Exception("OpenCV未安装")
         except Exception as e:
             raise Exception(f"录制启动失败: {str(e)}")
-    
+
     @staticmethod
     async def stop_recording():
         """停止录制视频 / Stop recording video"""
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
-        
+
         if not is_recording:
             raise Exception("未在录制中")
-        
+
         import time
 
         stem = recording_stem
@@ -566,9 +575,9 @@ class DebugCameraService:
         media_filename = recording_media_filename
         codec_fourcc = recording_codec_fourcc
         container = recording_container
-        
+
         is_recording = False
-        
+
         if recording_task:
             try:
                 # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop to avoid long stop-recording stalls.
@@ -587,7 +596,7 @@ class DebugCameraService:
             except asyncio.CancelledError:
                 pass
             recording_task = None
-        
+
         # 写入录制参数侧车（与视频同名 .txt）/ Write recording sidecar (.txt) next to video file
         if stem:
             media_filename = media_filename or f"{stem}.mp4"
@@ -616,8 +625,11 @@ class DebugCameraService:
         recording_media_filename = None
         recording_codec_fourcc = "mp4v"
         recording_container = "MP4"
-        
-        return {"success": True, **i18n_payload("server.recordingStopped", "录制已停止")}
+
+        return {
+            "success": True,
+            **i18n_payload("server.recordingStopped", "录制已停止"),
+        }
 
     @staticmethod
     async def set_size(width: int, height: int):
@@ -625,18 +637,22 @@ class DebugCameraService:
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         # 验证输入参数 / Validate input parameters
         if width <= 0 or height <= 0:
             raise Exception("分辨率参数无效")
-        
+
         # 检查当前分辨率是否相同 / Check if the current resolutions are the same
         info = camera.get_camera_info()
-        current_width = info.get('output_width', info.get('width', 0))
-        current_height = info.get('output_height', info.get('height', 0))
-        
+        current_width = info.get("output_width", info.get("width", 0))
+        current_height = info.get("output_height", info.get("height", 0))
+
         if current_width == width and current_height == height:
-            return {"success": True, "info": info, **i18n_payload("server.resolutionUnchanged", "分辨率未变化")}
+            return {
+                "success": True,
+                "info": info,
+                **i18n_payload("server.resolutionUnchanged", "分辨率未变化"),
+            }
 
         try:
             success = await get_camera_manager().reconfigure_camera(
@@ -654,22 +670,34 @@ class DebugCameraService:
         # 校验是否已生效（以相机报告的尺寸为准） / Verify whether the verification has taken effect (subject to the size reported by the camera)
         info = camera.get_camera_info()
         # 在supersample模式下，检查output_width和output_height / In supersample mode, check output_width and output_height
-        if info.get('sampling_mode') == 'supersample':
-            applied = (int(info.get('output_width', 0)) == int(width) and int(info.get('output_height', 0)) == int(height))
+        if info.get("sampling_mode") == "supersample":
+            applied = int(info.get("output_width", 0)) == int(width) and int(
+                info.get("output_height", 0)
+            ) == int(height)
         else:
-            applied = (int(info.get('width', 0)) == int(width) and int(info.get('height', 0)) == int(height))
-        
+            applied = int(info.get("width", 0)) == int(width) and int(
+                info.get("height", 0)
+            ) == int(height)
+
         if not applied:
             # 如果设置未生效，记录警告但不抛出异常 / If the setting does not take effect, log a warning but do not throw an exception
             current_res = f"{info.get('width', 0)}x{info.get('height', 0)}"
-            if info.get('sampling_mode') == 'supersample':
-                current_res = f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
+            if info.get("sampling_mode") == "supersample":
+                current_res = (
+                    f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
+                )
             logging.getLogger(__name__).warning(
                 f"分辨率设置可能未完全生效，当前分辨率: {current_res}"
             )
 
-        get_camera_manager().update_runtime_overrides({"width": int(width), "height": int(height)})
-        return {"success": True, "info": info, **i18n_payload("server.resolutionUpdated", "分辨率已更新")}
+        get_camera_manager().update_runtime_overrides(
+            {"width": int(width), "height": int(height)}
+        )
+        return {
+            "success": True,
+            "info": info,
+            **i18n_payload("server.resolutionUpdated", "分辨率已更新"),
+        }
 
     @staticmethod
     async def set_sampling_mode(mode: str):
@@ -677,11 +705,11 @@ class DebugCameraService:
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         # 验证输入参数 / Validate input parameters
-        if mode not in ['supersample', 'native', 'crop']:
+        if mode not in ["supersample", "native", "crop"]:
             raise Exception(f"不支持的采样模式: {mode}")
-        
+
         try:
             ok = await get_camera_manager().reconfigure_camera(
                 "set_sampling_mode",
@@ -692,17 +720,17 @@ class DebugCameraService:
                 raise Exception("相机设置采样模式失败")
         except Exception as e:
             raise Exception(f"设置采样模式失败: {str(e)}")
-        
+
         # 验证设置是否生效 / Verify whether the settings take effect
         info = camera.get_camera_info()
-        current_mode = info.get('sampling_mode', 'unknown')
+        current_mode = info.get("sampling_mode", "unknown")
         requested_mode = mode
         if requested_mode == "supersample" and current_mode == "native":
             # 在高分辨率场景下会自动降级为 native，这是预期行为 / In high-resolution scenarios, it is expected to automatically downgrade to native.
             pass
         elif current_mode != requested_mode:
             raise Exception(f"采样模式设置未生效，当前模式: {current_mode}")
-        
+
         get_camera_manager().update_runtime_overrides({"sampling_mode": mode})
         return {
             "success": True,
@@ -713,7 +741,7 @@ class DebugCameraService:
                 "server.samplingModeSet",
                 f"采样模式请求为 {requested_mode}，实际生效为 {current_mode}",
                 {"requested_mode": requested_mode, "effective_mode": current_mode},
-            )
+            ),
         }
 
     @staticmethod
@@ -722,14 +750,14 @@ class DebugCameraService:
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         # 验证输入参数 / Validate input parameters
         if fps <= 0 or fps > 60:
             raise Exception(f"帧率参数无效: {fps} (应在1-60之间)")
-        
+
         try:
             ok = False
-            if hasattr(camera, 'set_fps'):
+            if hasattr(camera, "set_fps"):
                 ok = await get_camera_manager().reconfigure_camera(
                     "set_fps",
                     lambda: camera.set_fps(int(fps)),
@@ -740,21 +768,21 @@ class DebugCameraService:
                 ok = await get_camera_manager().reconfigure_camera(
                     "set_fps_by_set_resolution",
                     lambda: camera.set_resolution(
-                        info.get('width', 640), info.get('height', 360), int(fps)
+                        info.get("width", 640), info.get("height", 360), int(fps)
                     ),
                     timeout_sec=10.0,
                 )
 
             if not ok:
                 raise Exception("相机设置帧率失败")
-            
+
             # 验证设置是否生效 / Verify whether the settings take effect
             info = camera.get_camera_info()
-            current_fps = info.get('fps', 0)
+            current_fps = info.get("fps", 0)
             if current_fps != int(fps):
                 # 如果设置未生效，尝试重新设置一次 / If the setting does not take effect, try setting it again
                 try:
-                    if hasattr(camera, 'set_fps'):
+                    if hasattr(camera, "set_fps"):
                         ok = await get_camera_manager().reconfigure_camera(
                             "retry_set_fps",
                             lambda: camera.set_fps(int(fps)),
@@ -764,26 +792,28 @@ class DebugCameraService:
                         ok = await get_camera_manager().reconfigure_camera(
                             "retry_set_fps_by_set_resolution",
                             lambda: camera.set_resolution(
-                                info.get('width', 640),
-                                info.get('height', 360),
+                                info.get("width", 640),
+                                info.get("height", 360),
                                 int(fps),
                             ),
                             timeout_sec=10.0,
                         )
                     if ok:
                         info = camera.get_camera_info()
-                        current_fps = info.get('fps', 0)
+                        current_fps = info.get("fps", 0)
                 except Exception:
                     pass
-                
+
                 if current_fps != int(fps):
                     raise Exception(f"帧率设置未生效，当前帧率: {current_fps}")
-            
+
             get_camera_manager().update_runtime_overrides({"fps": int(fps)})
             return {
                 "success": True,
                 "info": info,
-                **i18n_payload("server.fpsSet", f"帧率设置为 {int(fps)}", {"fps": int(fps)})
+                **i18n_payload(
+                    "server.fpsSet", f"帧率设置为 {int(fps)}", {"fps": int(fps)}
+                ),
             }
         except Exception as e:
             raise Exception(f"设置帧率失败: {str(e)}")
@@ -816,7 +846,9 @@ class DebugCameraService:
         try:
             import cv2
 
-            ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+            ok, buf = cv2.imencode(
+                ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(quality)]
+            )
             if not ok:
                 return None
             return buf.tobytes()
@@ -830,7 +862,7 @@ class DebugCameraService:
         camera = get_camera_instance()
         if not camera or not camera.is_capturing:
             return
-        target_fps = max(1, int(camera.get_camera_info().get('fps', 5)))
+        target_fps = max(1, int(camera.get_camera_info().get("fps", 5)))
         interval = 1.0 / target_fps
         loop = asyncio.get_running_loop()
         # 使用双工人流水线：一个抓帧，一个编码，提升 Zero2W 下实时预览稳定性 / Use a two-worker pipeline: one captures frames and one encodes, improving preview stability on Zero2W.
@@ -878,7 +910,7 @@ class DebugCameraService:
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
 
-        if not hasattr(camera, 'set_auto_exposure'):
+        if not hasattr(camera, "set_auto_exposure"):
             raise Exception("当前相机不支持自动曝光切换")
 
         if not camera.set_auto_exposure(bool(enabled)):
@@ -892,61 +924,68 @@ class DebugCameraService:
         }
 
     @staticmethod
-    async def update_settings(settings: Dict[str, Any]):
+    async def update_settings(settings: dict[str, Any]):
         """更新调试相机设置 / Update debug camera settings"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         try:
             # 优先处理自动曝光开关，避免自动 / Prioritize the automatic exposure switch to avoid automatic
-            auto_exposure = settings.get("autoExposure", getattr(camera, "auto_exposure", False))
-            if hasattr(camera, 'set_auto_exposure'):
+            auto_exposure = settings.get(
+                "autoExposure", getattr(camera, "auto_exposure", False)
+            )
+            if hasattr(camera, "set_auto_exposure"):
                 camera.set_auto_exposure(bool(auto_exposure))
 
             # 更新基础相机参数 / Update basic camera parameters
             if not auto_exposure and "exposure" in settings:
                 camera.set_exposure(settings["exposure"])
-            
+
             if not auto_exposure and "gain" in settings and "digitalGain" in settings:
                 camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
             elif not auto_exposure and "gain" in settings:
                 camera.set_gain(settings["gain"])
-            
+
             # 更新图像增强参数 / Update image enhancement parameters
-            if any(key in settings for key in ["contrast", "brightness", "saturation", "sharpness"]):
+            if any(
+                key in settings
+                for key in ["contrast", "brightness", "saturation", "sharpness"]
+            ):
                 contrast = settings.get("contrast", 1.0)
                 brightness = settings.get("brightness", 0.0)
                 saturation = settings.get("saturation", 1.0)
                 sharpness = settings.get("sharpness", 1.0)
-                
-                if hasattr(camera, 'set_image_enhancement'):
-                    camera.set_image_enhancement(contrast, brightness, saturation, sharpness)
-            
+
+                if hasattr(camera, "set_image_enhancement"):
+                    camera.set_image_enhancement(
+                        contrast, brightness, saturation, sharpness
+                    )
+
             # 更新降噪设置 / Update noise reduction settings
             if "noiseReduction" in settings:
-                if hasattr(camera, 'set_noise_reduction'):
+                if hasattr(camera, "set_noise_reduction"):
                     camera.set_noise_reduction(settings["noiseReduction"])
-            
+
             # 更新白平衡设置 / Update white balance settings
             if "whiteBalanceMode" in settings:
                 mode = settings["whiteBalanceMode"]
                 gain_r = settings.get("whiteBalanceGainR", 1.0)
                 gain_b = settings.get("whiteBalanceGainB", 1.0)
-                
-                if hasattr(camera, 'set_white_balance'):
+
+                if hasattr(camera, "set_white_balance"):
                     camera.set_white_balance(mode, gain_r, gain_b)
-            
+
             # 更新颜色模式设置 / Update color mode settings
             if "colorMode" in settings:
-                if hasattr(camera, 'set_color_mode'):
+                if hasattr(camera, "set_color_mode"):
                     await get_camera_manager().reconfigure_camera(
                         "update_color_mode",
                         lambda: camera.set_color_mode(settings["colorMode"]),
                         timeout_sec=10.0,
                     )
 
-            overrides: Dict[str, Any] = {}
+            overrides: dict[str, Any] = {}
             if "exposure" in settings:
                 overrides["exposure_us"] = settings["exposure"]
             if "gain" in settings:
@@ -959,32 +998,32 @@ class DebugCameraService:
                 overrides["color_mode"] = settings["colorMode"]
             if overrides:
                 get_camera_manager().update_runtime_overrides(overrides)
-            
+
             return {
                 "success": True,
                 **i18n_payload("server.cameraSettingsUpdated", "相机设置已更新"),
-                "settings": settings
+                "settings": settings,
             }
         except Exception as e:
             raise Exception(f"更新设置失败: {str(e)}")
-    
+
     @staticmethod
     async def reset_camera():
         """重置相机到默认设置 / Reset camera to default settings"""
         from ogscope.config import get_settings
-        
+
         settings = get_settings()
         camera = get_camera_instance()
-        
+
         if camera and camera.is_initialized:
             camera.set_exposure(settings.camera_exposure)
             camera.set_gain(settings.camera_gain)
-        
+
         return {
             "success": True,
-            **i18n_payload("server.cameraReset", "相机已重置到默认设置")
+            **i18n_payload("server.cameraReset", "相机已重置到默认设置"),
         }
-    
+
     @staticmethod
     async def get_image_quality():
         """获取图像质量指标 / Get image quality metrics"""
@@ -999,85 +1038,105 @@ class DebugCameraService:
                 _attach_manager_camera_if_needed(camera)
             except Exception:
                 camera = None
-        if (
-            not camera
-            or not getattr(camera, "is_initialized", False)
-        ):
+        if not camera or not getattr(camera, "is_initialized", False):
             return {
                 "success": False,
                 "available": False,
-                "quality": {"noise_level": 0.0, "exposure_adequacy": 0.0, "gain_level": 0.0},
+                "quality": {
+                    "noise_level": 0.0,
+                    "exposure_adequacy": 0.0,
+                    "gain_level": 0.0,
+                },
                 **i18n_payload("server.cameraNotRunning", "相机未运行"),
             }
         quality_metrics = camera.get_image_quality_metrics()
         return {"success": True, "available": True, "quality": quality_metrics}
-    
+
     @staticmethod
     async def set_noise_reduction(level: int):
         """设置降噪级别 / Set noise reduction level"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         if camera.set_noise_reduction(level):
             return {
                 "success": True,
-                **i18n_payload("server.noiseReductionSet", f"降噪级别设置为: {level}", {"level": level})
+                **i18n_payload(
+                    "server.noiseReductionSet",
+                    f"降噪级别设置为: {level}",
+                    {"level": level},
+                ),
             }
         else:
             raise Exception("设置降噪级别失败")
-    
+
     @staticmethod
     async def set_white_balance(mode: str, gain_r: float = 1.0, gain_b: float = 1.0):
         """设置白平衡 / Set white balance"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         if camera.set_white_balance(mode, gain_r, gain_b):
             return {
                 "success": True,
-                **i18n_payload("server.whiteBalanceSet", f"白平衡模式设置为: {mode}", {"mode": mode})
+                **i18n_payload(
+                    "server.whiteBalanceSet",
+                    f"白平衡模式设置为: {mode}",
+                    {"mode": mode},
+                ),
             }
         else:
             raise Exception("设置白平衡失败")
-    
+
     @staticmethod
-    async def set_image_enhancement(contrast: float = 1.0, brightness: float = 0.0, 
-                                  saturation: float = 1.0, sharpness: float = 1.0):
+    async def set_image_enhancement(
+        contrast: float = 1.0,
+        brightness: float = 0.0,
+        saturation: float = 1.0,
+        sharpness: float = 1.0,
+    ):
         """设置图像增强参数 / Set image enhancement parameters"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         if camera.set_image_enhancement(contrast, brightness, saturation, sharpness):
-            return {"success": True, **i18n_payload("server.imageEnhancementSet", "图像增强参数已设置")}
+            return {
+                "success": True,
+                **i18n_payload("server.imageEnhancementSet", "图像增强参数已设置"),
+            }
         else:
             raise Exception("设置图像增强参数失败")
-    
+
     @staticmethod
     async def set_night_mode(enabled: bool):
         """设置夜间模式 / Set night mode"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         if camera.set_night_mode(enabled):
             mode_text = "启用" if enabled else "关闭"
             return {
                 "success": True,
-                **i18n_payload("server.nightModeSet", f"夜间模式已{mode_text}", {"state": mode_text})
+                **i18n_payload(
+                    "server.nightModeSet",
+                    f"夜间模式已{mode_text}",
+                    {"state": mode_text},
+                ),
             }
         else:
             raise Exception("设置夜间模式失败")
-    
+
     @staticmethod
     async def apply_night_mode_preset():
         """应用夜间模式预设 / Apply night mode preset"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         try:
             # 夜间模式预设参数 / Night mode preset parameters
             night_preset = {
@@ -1090,9 +1149,9 @@ class DebugCameraService:
                 "brightness": 0.1,
                 "saturation": 0.8,
                 "sharpness": 1.1,
-                "night_mode": True
+                "night_mode": True,
             }
-            
+
             # 应用预设 / Apply preset
             camera.set_exposure(night_preset["exposure_us"])
             camera.set_gain(night_preset["analogue_gain"], night_preset["digital_gain"])
@@ -1102,60 +1161,60 @@ class DebugCameraService:
                 night_preset["contrast"],
                 night_preset["brightness"],
                 night_preset["saturation"],
-                night_preset["sharpness"]
+                night_preset["sharpness"],
             )
             camera.set_night_mode(night_preset["night_mode"])
-            
+
             return {
                 "success": True,
                 "preset": night_preset,
-                **i18n_payload("server.nightPresetApplied", "夜间模式预设已应用")
+                **i18n_payload("server.nightPresetApplied", "夜间模式预设已应用"),
             }
         except Exception as e:
             raise Exception(f"应用夜间模式预设失败: {str(e)}")
-    
+
     @staticmethod
     async def save_current_settings_backup():
         """保存当前设置作为备份 / Save current settings as backup"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         try:
             backup_data = {
                 "timestamp": datetime.now().isoformat(),
-                "settings": camera.get_camera_info()
+                "settings": camera.get_camera_info(),
             }
-            
+
             backup_file = DEBUG_CAPTURES_DIR / "settings_backup.json"
-            with open(backup_file, 'w', encoding='utf-8') as f:
+            with open(backup_file, "w", encoding="utf-8") as f:
                 json.dump(backup_data, f, indent=2, ensure_ascii=False)
-            
+
             return {
                 "success": True,
                 "backup_file": str(backup_file),
-                **i18n_payload("server.settingsBackedUp", "当前设置已备份")
+                **i18n_payload("server.settingsBackedUp", "当前设置已备份"),
             }
         except Exception as e:
             raise Exception(f"保存设置备份失败: {str(e)}")
-    
+
     @staticmethod
     async def restore_settings_backup():
         """从备份恢复设置 / Restore settings from backup"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
+
         try:
             backup_file = DEBUG_CAPTURES_DIR / "settings_backup.json"
             if not backup_file.exists():
                 raise Exception("未找到设置备份文件")
-            
-            with open(backup_file, 'r', encoding='utf-8') as f:
+
+            with open(backup_file, encoding="utf-8") as f:
                 backup_data = json.load(f)
-            
+
             settings = backup_data.get("settings", {})
-            
+
             # 恢复设置 / Restore settings
             if "exposure_us" in settings:
                 camera.set_exposure(settings["exposure_us"])
@@ -1170,43 +1229,48 @@ class DebugCameraService:
                     settings.get("contrast", 1.0),
                     settings.get("brightness", 0.0),
                     settings.get("saturation", 1.0),
-                    settings.get("sharpness", 1.0)
+                    settings.get("sharpness", 1.0),
                 )
             if "night_mode" in settings:
                 camera.set_night_mode(settings["night_mode"])
-            
-            return {"success": True, **i18n_payload("server.settingsRestored", "设置已从备份恢复")}
+
+            return {
+                "success": True,
+                **i18n_payload("server.settingsRestored", "设置已从备份恢复"),
+            }
         except Exception as e:
             raise Exception(f"恢复设置备份失败: {str(e)}")
-    
+
     @staticmethod
     async def set_color_mode(color_mode: str):
         """设置颜色模式 / Set color mode"""
         camera = get_camera_instance()
         if not camera or not camera.is_initialized:
             raise Exception("相机未初始化")
-        
-        if color_mode not in ['color', 'mono']:
+
+        if color_mode not in ["color", "mono"]:
             raise Exception("不支持的颜色模式，只支持 'color' 或 'mono'")
-        
+
         try:
-            if hasattr(camera, 'set_color_mode'):
+            if hasattr(camera, "set_color_mode"):
                 success = await get_camera_manager().reconfigure_camera(
                     "set_color_mode",
                     lambda: camera.set_color_mode(color_mode),
                     timeout_sec=10.0,
                 )
                 if success:
-                    get_camera_manager().update_runtime_overrides({"color_mode": color_mode})
+                    get_camera_manager().update_runtime_overrides(
+                        {"color_mode": color_mode}
+                    )
                     mode_name = "彩色" if color_mode == "color" else "黑白"
                     return {
-                        "success": True, 
+                        "success": True,
                         **i18n_payload(
                             "server.colorModeSwitched",
                             f"颜色模式已切换为{mode_name}模式",
-                            {"mode": mode_name}
+                            {"mode": mode_name},
                         ),
-                        "color_mode": color_mode
+                        "color_mode": color_mode,
                     }
                 else:
                     raise Exception("相机不支持颜色模式切换")
@@ -1218,37 +1282,37 @@ class DebugCameraService:
 
 class DebugPresetService:
     """调试预设服务 / Debug default service"""
-    
+
     @staticmethod
     async def get_presets():
         """获取相机预设列表 / Get a list of camera presets"""
         presets_file = DEBUG_CAPTURES_DIR / "presets.json"
-        
+
         if not presets_file.exists():
             return {"presets": []}
-        
+
         try:
-            with open(presets_file, 'r', encoding='utf-8') as f:
+            with open(presets_file, encoding="utf-8") as f:
                 data = json.load(f)
             return {"presets": data.get("presets", [])}
         except Exception as e:
             raise Exception(f"读取预设失败: {str(e)}")
-    
+
     @staticmethod
-    async def save_preset(preset_data: Dict[str, Any]):
+    async def save_preset(preset_data: dict[str, Any]):
         """保存相机预设 / Save camera presets"""
         presets_file = DEBUG_CAPTURES_DIR / "presets.json"
-        
+
         # 读取现有预设 / Read existing preset
         presets = []
         if presets_file.exists():
             try:
-                with open(presets_file, 'r', encoding='utf-8') as f:
+                with open(presets_file, encoding="utf-8") as f:
                     data = json.load(f)
                     presets = data.get("presets", [])
-            except:
+            except Exception:
                 presets = []
-        
+
         # 检查是否已存在同名预设 / Check if a preset with the same name already exists
         for i, existing_preset in enumerate(presets):
             if existing_preset["name"] == preset_data["name"]:
@@ -1259,186 +1323,238 @@ class DebugPresetService:
             if len(presets) >= 10:
                 raise Exception("预设数量已达上限(10个)")
             presets.append(preset_data)
-        
+
         # 保存预设 / save preset
         try:
-            with open(presets_file, 'w', encoding='utf-8') as f:
+            with open(presets_file, "w", encoding="utf-8") as f:
                 json.dump({"presets": presets}, f, indent=2, ensure_ascii=False)
-            
-            return {"success": True, **i18n_payload("server.presetSaved", "预设保存成功")}
+
+            return {
+                "success": True,
+                **i18n_payload("server.presetSaved", "预设保存成功"),
+            }
         except Exception as e:
             raise Exception(f"保存预设失败: {str(e)}")
-    
+
     @staticmethod
     async def apply_preset(preset_name: str):
         """应用相机预设 / Apply camera presets"""
         presets_file = DEBUG_CAPTURES_DIR / "presets.json"
-        
+
         if not presets_file.exists():
             raise Exception("预设文件不存在")
-        
+
         try:
-            with open(presets_file, 'r', encoding='utf-8') as f:
+            with open(presets_file, encoding="utf-8") as f:
                 data = json.load(f)
                 presets = data.get("presets", [])
-            
+
             # 查找预设 / Find a preset
             preset = None
             for p in presets:
                 if p["name"] == preset_name:
                     preset = p
                     break
-            
+
             if not preset:
                 raise Exception("预设不存在")
-            
+
             # 应用预设到相机 / Apply preset to camera
             camera = get_camera_instance()
             if camera and camera.is_initialized:
                 # 自动曝光优先，避免手动参数与AE冲突 / Automatic exposure priority to avoid conflicts between manual parameters and AE
                 auto_exposure = preset.get("auto_exposure", False)
-                if hasattr(camera, 'set_auto_exposure'):
+                if hasattr(camera, "set_auto_exposure"):
                     camera.set_auto_exposure(auto_exposure)
 
                 # 基础参数 / Basic parameters
                 if not auto_exposure:
                     camera.set_exposure(preset["exposure_us"])
-                    camera.set_gain(preset["analogue_gain"], preset.get("digital_gain", 1.0))
-                
+                    camera.set_gain(
+                        preset["analogue_gain"], preset.get("digital_gain", 1.0)
+                    )
+
                 # 图像增强参数 / Image enhancement parameters
-                if any(key in preset for key in ["contrast", "brightness", "saturation", "sharpness"]):
+                if any(
+                    key in preset
+                    for key in ["contrast", "brightness", "saturation", "sharpness"]
+                ):
                     contrast = preset.get("contrast", 1.0)
                     brightness = preset.get("brightness", 0.0)
                     saturation = preset.get("saturation", 1.0)
                     sharpness = preset.get("sharpness", 1.0)
-                    
-                    if hasattr(camera, 'set_image_enhancement'):
-                        camera.set_image_enhancement(contrast, brightness, saturation, sharpness)
-                
+
+                    if hasattr(camera, "set_image_enhancement"):
+                        camera.set_image_enhancement(
+                            contrast, brightness, saturation, sharpness
+                        )
+
                 # 高级参数 / Advanced parameters
                 if "noise_reduction" in preset:
-                    if hasattr(camera, 'set_noise_reduction'):
+                    if hasattr(camera, "set_noise_reduction"):
                         camera.set_noise_reduction(preset["noise_reduction"])
-                
+
                 # 白平衡设置 / White balance settings
                 if "white_balance_mode" in preset:
                     mode = preset["white_balance_mode"]
                     gain_r = preset.get("white_balance_gain_r", 1.0)
                     gain_b = preset.get("white_balance_gain_b", 1.0)
-                    
-                    if hasattr(camera, 'set_white_balance'):
+
+                    if hasattr(camera, "set_white_balance"):
                         camera.set_white_balance(mode, gain_r, gain_b)
-                
+
                 # 旋转角度 / rotation angle
                 if "rotation" in preset:
-                    if hasattr(camera, 'set_rotation'):
+                    if hasattr(camera, "set_rotation"):
                         camera.set_rotation(preset["rotation"])
-                
+
                 # 颜色模式 / color mode
                 if "color_mode" in preset:
-                    if hasattr(camera, 'set_color_mode'):
+                    if hasattr(camera, "set_color_mode"):
                         camera.set_color_mode(preset["color_mode"])
-            
+
             return {
                 "success": True,
                 "preset": preset,
-                **i18n_payload("server.presetApplied", f"预设 '{preset_name}' 已应用", {"name": preset_name})
+                **i18n_payload(
+                    "server.presetApplied",
+                    f"预设 '{preset_name}' 已应用",
+                    {"name": preset_name},
+                ),
             }
-            
+
         except Exception as e:
             raise Exception(f"应用预设失败: {str(e)}")
-    
+
     @staticmethod
     async def delete_preset(preset_name: str):
         """删除相机预设 / Delete camera preset"""
         presets_file = DEBUG_CAPTURES_DIR / "presets.json"
-        
+
         if not presets_file.exists():
             raise Exception("预设文件不存在")
-        
+
         try:
-            with open(presets_file, 'r', encoding='utf-8') as f:
+            with open(presets_file, encoding="utf-8") as f:
                 data = json.load(f)
                 presets = data.get("presets", [])
-            
+
             # 删除预设 / Delete preset
             original_count = len(presets)
             presets = [p for p in presets if p["name"] != preset_name]
-            
+
             if len(presets) == original_count:
                 raise Exception("预设不存在")
-            
+
             # 保存更新后的预设 / Save updated preset
-            with open(presets_file, 'w', encoding='utf-8') as f:
+            with open(presets_file, "w", encoding="utf-8") as f:
                 json.dump({"presets": presets}, f, indent=2, ensure_ascii=False)
-            
-            return {"success": True, **i18n_payload("server.presetDeleted", f"预设 '{preset_name}' 已删除", {"name": preset_name})}
-            
+
+            return {
+                "success": True,
+                **i18n_payload(
+                    "server.presetDeleted",
+                    f"预设 '{preset_name}' 已删除",
+                    {"name": preset_name},
+                ),
+            }
+
         except Exception as e:
             raise Exception(f"删除预设失败: {str(e)}")
-    
 
 
 class DebugFileService:
     """调试文件服务 / Debug file service"""
-    
+
     @staticmethod
     async def get_files():
         """获取拍摄文件列表 / Get shooting file list"""
         try:
             # 支持的图片格式 / Supported image formats
-            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+            image_extensions = {
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".bmp",
+                ".tiff",
+                ".tif",
+                ".webp",
+            }
             # 支持的视频格式 / Supported video formats
-            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
-            
+            video_extensions = {
+                ".mp4",
+                ".avi",
+                ".mov",
+                ".mkv",
+                ".wmv",
+                ".flv",
+                ".webm",
+                ".m4v",
+            }
+
             files = []
             for file_path in DEBUG_CAPTURES_DIR.iterdir():
                 if file_path.is_file():
                     suffix = file_path.suffix.lower()
                     if suffix in image_extensions or suffix in video_extensions:
-                        files.append({
-                            "name": file_path.name,
-                            "size": file_path.stat().st_size,
-                            "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                            "type": "image" if suffix in image_extensions else "video"
-                        })
-            
+                        files.append(
+                            {
+                                "name": file_path.name,
+                                "size": file_path.stat().st_size,
+                                "modified": datetime.fromtimestamp(
+                                    file_path.stat().st_mtime
+                                ).isoformat(),
+                                "type": (
+                                    "image" if suffix in image_extensions else "video"
+                                ),
+                            }
+                        )
+
             # 按修改时间排序（最新的在前） / Sort by modification time (newest first)
             files.sort(key=lambda x: x["modified"], reverse=True)
-            
+
             return {"files": files}
-            
+
         except Exception as e:
             raise Exception(f"获取文件列表失败: {str(e)}")
-    
+
     @staticmethod
     async def get_file_info(filename: str):
         """获取文件信息 / Get file information"""
         file_path = DEBUG_CAPTURES_DIR / filename
         info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
-        
+
         if not file_path.exists():
             raise Exception("文件不存在")
-        
+
         try:
             # 支持的图片格式 / Supported image formats
-            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+            image_extensions = {
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".bmp",
+                ".tiff",
+                ".tif",
+                ".webp",
+            }
             # 支持的视频格式 / Supported video formats
-            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v'}
-            
+
             suffix = file_path.suffix.lower()
             file_type = "image" if suffix in image_extensions else "video"
-            
+
             info = {
                 "filename": filename,
                 "size": file_path.stat().st_size,
-                "modified": datetime.fromtimestamp(file_path.stat().st_mtime).isoformat(),
-                "type": file_type
+                "modified": datetime.fromtimestamp(
+                    file_path.stat().st_mtime
+                ).isoformat(),
+                "type": file_type,
             }
-            
+
             # 读取拍摄信息；将 camera 内字段展开到顶层以兼容前端详情 / Read sidecar; flatten camera for UI
             if info_path.exists():
-                with open(info_path, 'r', encoding='utf-8') as f:
+                with open(info_path, encoding="utf-8") as f:
                     capture_info = json.load(f)
                     if isinstance(capture_info, dict):
                         cam = capture_info.get("camera")
@@ -1468,31 +1584,34 @@ class DebugFileService:
                                 if k not in capture_info:
                                     capture_info[k] = v
                     info.update(capture_info)
-            
+
             return info
-            
+
         except Exception as e:
             raise Exception(f"获取文件信息失败: {str(e)}")
-    
+
     @staticmethod
     async def delete_file(filename: str):
         """删除文件 / Delete files"""
         try:
             file_path = DEBUG_CAPTURES_DIR / filename
             info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
-            
+
             if not file_path.exists():
                 raise Exception("文件不存在")
-            
+
             # 删除主文件 / Delete master file
             file_path.unlink()
-            
+
             # 删除对应的参数文件（如果存在） / Delete the corresponding parameter file (if it exists)
             if info_path.exists():
                 info_path.unlink()
-            
-            return i18n_payload("server.fileDeleted", f"文件 {filename} 删除成功", {"filename": filename})
-            
+
+            return i18n_payload(
+                "server.fileDeleted",
+                f"文件 {filename} 删除成功",
+                {"filename": filename},
+            )
+
         except Exception as e:
             raise Exception(f"删除文件失败: {str(e)}")
-    

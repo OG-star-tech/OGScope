@@ -1,6 +1,7 @@
 """
 极轴校准相关API路由 / Polar alignment API routes
 """
+
 from fastapi import APIRouter
 
 router = APIRouter()
@@ -29,7 +30,5 @@ async def get_alignment_status():
         "azimuth_error": 2.5,
         "altitude_error": 1.8,
         "precision": "good",
-        "progress": 75
+        "progress": 75,
     }
-
-

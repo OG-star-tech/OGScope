@@ -166,11 +166,7 @@ class AnalysisLabStore:
         asset_digest: str | None = None
         src = (self.upload_root / Path(input_name).name).resolve()
         root = self.upload_root.resolve()
-        if (
-            save_asset_snapshot
-            and src.is_file()
-            and str(src).startswith(str(root))
-        ):
+        if save_asset_snapshot and src.is_file() and str(src).startswith(str(root)):
             try:
                 data = src.read_bytes()
                 asset_digest = hashlib.sha256(data).hexdigest()

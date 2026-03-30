@@ -1,17 +1,18 @@
 """
 FastAPI Web 应用
 """
+
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 
 from ogscope.__version__ import __version__
@@ -124,10 +125,13 @@ def _asset_stamp(path: Path) -> int:
     except Exception:
         return 0
 
+
 # 配置 CORS (允许跨域请求) / Configure CORS (allow cross-origin requests)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名 / Production environments should restrict specific domain names
+    allow_origins=[
+        "*"
+    ],  # 生产环境应该限制具体域名 / Production environments should restrict specific domain names
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -140,7 +144,10 @@ if settings.static_dir.exists():
 # 挂载Web模板和manifest / Mount web templates and manifests
 if settings.template_dir.exists():
     from fastapi.staticfiles import StaticFiles
-    app.mount("/web", StaticFiles(directory=str(settings.template_dir.parent)), name="web")
+
+    app.mount(
+        "/web", StaticFiles(directory=str(settings.template_dir.parent)), name="web"
+    )
 
 # 注册路由 / Register route
 app.include_router(api_router, prefix="/api")
@@ -150,12 +157,8 @@ app.include_router(api_router, prefix="/api")
 async def root(request: Request):
     """根路径 - 返回主页面 / Root path - return to main page"""
     return templates.TemplateResponse(
-        "index.html", 
-        {
-            "request": request,
-            "version": __version__,
-            "app_name": "OGScope"
-        }
+        "index.html",
+        {"request": request, "version": __version__, "app_name": "OGScope"},
     )
 
 
@@ -164,13 +167,13 @@ async def debug_console(request: Request):
     """调试控制台页面 / Debug console page"""
     debug_js_path = settings.static_dir / "js" / "debug.js"
     return templates.TemplateResponse(
-        "debug.html", 
+        "debug.html",
         {
             "request": request,
             "version": __version__,
             "app_name": "OGScope Debug Console",
             "debug_assets_version": _asset_stamp(debug_js_path),
-        }
+        },
     )
 
 
@@ -193,6 +196,7 @@ async def debug_analysis_console(request: Request):
         },
     )
 
+
 @app.get("/api")
 async def api_root():
     """API根路径 / API root path"""
@@ -206,7 +210,7 @@ async def api_root():
             "alignment": "/api/alignment/",
             "system": "/api/system/",
             "analysis": "/api/analysis/",
-        }
+        },
     }
 
 
@@ -227,4 +231,3 @@ async def health_check():
         "status": "healthy",
         "version": __version__,
     }
-
