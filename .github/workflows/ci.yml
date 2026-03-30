@@ -44,7 +44,7 @@ jobs:
         cache: "npm"
         cache-dependency-path: web/analysis-ui/package-lock.json
 
-    - name: 构建星图解算实验室前端
+    - name: 构建星空解算控制台前端
       run: |
         cd web/analysis-ui
         npm ci

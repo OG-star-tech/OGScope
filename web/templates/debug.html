@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title data-i18n="page.title">OGScope 调试控制台</title>
+    <title data-i18n="page.title">OGScope 相机调试控制台</title>
     
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#ff6b35">
@@ -29,7 +29,7 @@
         <!-- 头部 -->
         <header class="debug-header">
             <div class="header-content">
-                <h1 data-i18n="header.title">🔧 OGScope 调试控制台</h1>
+                <h1 data-i18n="header.title">🔧 OGScope 相机调试控制台</h1>
                 <div class="header-actions">
                     <div class="lang-switch">
                         <label for="language-select" data-i18n="language.label">语言</label>
@@ -39,7 +39,7 @@
                             <option value="bilingual" data-i18n="language.bilingual">中英双语</option>
                         </select>
                     </div>
-                    <button class="btn btn-secondary" onclick="window.location.href='/debug/analysis'">星图解算工作台</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/debug/analysis'" data-i18n="header.linkAnalysis">星空解算控制台</button>
                     <button class="btn btn-secondary" onclick="window.location.href='/'" data-i18n="header.backToHome">← 返回主界面</button>
                     <div class="status-indicator" id="camera-status">
                         <span class="status-dot offline"></span>

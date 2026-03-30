@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import io
 import json
 import uuid
@@ -79,6 +80,14 @@ class AnalysisLabStore:
         ent["last_solve"] = {**metrics, "at": _utc_now()}
         self.save_manifest(m)
 
+    def remove_manifest_entry(self, filename: str) -> None:
+        """从清单移除条目（删除文件后调用）/ Remove manifest row after file delete."""
+        m = self.load_manifest()
+        entries: dict[str, Any] = m.setdefault("entries", {})
+        if filename in entries:
+            del entries[filename]
+            self.save_manifest(m)
+
     def merge_list_entry(self, filename: str, base: dict[str, Any]) -> dict[str, Any]:
         """合并清单元数据到列表项 / Merge manifest into upload list row."""
         m = self.load_manifest()
@@ -139,6 +148,8 @@ class AnalysisLabStore:
         result_json: dict[str, Any],
         metrics: dict[str, Any],
         thumbnail_png_base64: str | None,
+        replay: dict[str, Any] | None = None,
+        save_asset_snapshot: bool = True,
     ) -> dict[str, Any]:
         """写入实验记录 / Persist experiment record."""
         eid = str(uuid.uuid4())
@@ -151,6 +162,24 @@ class AnalysisLabStore:
             )
             thumb_path = str(self.experiments_root / f"{eid}.png")
             Path(thumb_path).write_bytes(raw)
+        asset_snapshot_relpath: str | None = None
+        asset_digest: str | None = None
+        src = (self.upload_root / Path(input_name).name).resolve()
+        root = self.upload_root.resolve()
+        if (
+            save_asset_snapshot
+            and src.is_file()
+            and str(src).startswith(str(root))
+        ):
+            try:
+                data = src.read_bytes()
+                asset_digest = hashlib.sha256(data).hexdigest()
+                ext = src.suffix if src.suffix else ".bin"
+                asset_snapshot_relpath = f"{eid}_asset{ext}"
+                (self.experiments_root / asset_snapshot_relpath).write_bytes(data)
+            except OSError:
+                asset_snapshot_relpath = None
+                asset_digest = None
         rec = {
             "id": eid,
             "input_name": input_name,
@@ -159,11 +188,77 @@ class AnalysisLabStore:
             "metrics": metrics,
             "result_json": result_json,
             "thumbnail_relpath": Path(thumb_path).name if thumb_path else None,
+            "replay": replay,
+            "asset_snapshot_relpath": asset_snapshot_relpath,
+            "asset_digest": asset_digest,
         }
         (self.experiments_root / f"{eid}.json").write_text(
             json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         return rec
+
+    def delete_experiment(self, experiment_id: str) -> None:
+        """删除一条实验记录 JSON、缩略图与素材快照 / Delete experiment artifacts."""
+        clean = Path(experiment_id).name
+        if not clean or clean != experiment_id.strip():
+            raise ValueError("实验 ID 无效 / Invalid experiment id")
+        jpath = self.experiments_root / f"{clean}.json"
+        if not jpath.is_file():
+            raise FileNotFoundError("实验记录不存在 / Experiment not found")
+        try:
+            data = json.loads(jpath.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        snap = data.get("asset_snapshot_relpath")
+        jpath.unlink()
+        thumb = self.experiments_root / f"{clean}.png"
+        if thumb.is_file():
+            thumb.unlink()
+        if isinstance(snap, str) and snap:
+            sp = (self.experiments_root / Path(snap).name).resolve()
+            er = self.experiments_root.resolve()
+            if str(sp).startswith(str(er)) and sp.is_file():
+                sp.unlink()
+
+    def count_experiments_for_input(self, input_name: str) -> int:
+        """统计引用某素材文件名的实验条数 / Count experiments for an upload basename."""
+        base = Path(input_name).name
+        n = 0
+        for r in self._all_experiment_records():
+            if (r.get("input_name") or "") == base:
+                n += 1
+        return n
+
+    def delete_experiments_for_input(self, input_name: str) -> int:
+        """删除所有引用该素材的实验记录 / Cascade-delete experiments by input filename."""
+        base = Path(input_name).name
+        ids = [
+            str(r.get("id"))
+            for r in self._all_experiment_records()
+            if (r.get("input_name") or "") == base and r.get("id")
+        ]
+        for eid in ids:
+            try:
+                self.delete_experiment(eid)
+            except (FileNotFoundError, ValueError):
+                continue
+        return len(ids)
+
+    def experiment_asset_path(self, experiment_id: str) -> Path:
+        """实验素材快照文件路径 / Path to snapshot copy for replay."""
+        clean = Path(experiment_id).name
+        jpath = self.experiments_root / f"{clean}.json"
+        if not jpath.is_file():
+            raise FileNotFoundError("实验记录不存在 / Experiment not found")
+        data = json.loads(jpath.read_text(encoding="utf-8"))
+        rel = data.get("asset_snapshot_relpath")
+        if not rel:
+            raise FileNotFoundError("无素材快照 / No asset snapshot for this record")
+        p = (self.experiments_root / Path(str(rel)).name).resolve()
+        er = self.experiments_root.resolve()
+        if not str(p).startswith(str(er)) or not p.is_file():
+            raise FileNotFoundError("快照文件不存在 / Snapshot missing")
+        return p
 
     def _all_experiment_records(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []

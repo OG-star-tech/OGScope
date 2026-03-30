@@ -16,11 +16,11 @@ def test_root(client):
 
 @pytest.mark.unit
 def test_debug_analysis_page(client):
-    """测试星图解算调试页面。 / Test plate solve debug page."""
+    """测试星空解算控制台页面。 / Test plate solve console page."""
     response = client.get("/debug/analysis")
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
-    assert "星图解算" in response.text
+    assert "星空解算" in response.text
 
 
 @pytest.mark.unit

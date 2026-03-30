@@ -223,3 +223,59 @@ def test_analysis_list_presets_and_batch(
 
     dl = client.delete(f"/api/analysis/presets/{pid}")
     assert dl.status_code == 200
+
+
+@pytest.mark.unit
+def test_analysis_upload_file_info_sidecar(client, temp_analysis_dir, tmp_path: Path):
+    """上传素材 info 接口合并 stem.txt / Upload info merges sidecar JSON."""
+    image_path = tmp_path / "cap.jpg"
+    _build_star_image(image_path)
+    with image_path.open("rb") as f:
+        up = client.post(
+            "/api/analysis/upload",
+            files={"file": ("cap.jpg", f, "image/jpeg")},
+        )
+    assert up.status_code == 200
+    side = temp_analysis_dir / "uploads" / "cap.txt"
+    side.write_text(
+        '{"camera": {"exposure_us": 5000, "output_width": 640, "output_height": 480}}',
+        encoding="utf-8",
+    )
+    info_resp = client.get("/api/analysis/uploads/cap.jpg/info")
+    assert info_resp.status_code == 200
+    data = info_resp.json()
+    assert data.get("exposure_us") == 5000
+    assert "640x480" in str(data.get("resolution", ""))
+
+
+@pytest.mark.unit
+def test_analysis_delete_upload_and_experiment(client, temp_analysis_dir, tmp_path: Path):
+    """删除素材与实验记录 / Delete upload and experiment."""
+    image_path = tmp_path / "del.jpg"
+    _build_star_image(image_path)
+    with image_path.open("rb") as f:
+        up = client.post(
+            "/api/analysis/upload",
+            files={"file": ("del.jpg", f, "image/jpeg")},
+        )
+    assert up.status_code == 200
+    assert (temp_analysis_dir / "uploads" / "del.jpg").is_file()
+
+    dr = client.delete("/api/analysis/uploads/del.jpg")
+    assert dr.status_code == 200
+    assert not (temp_analysis_dir / "uploads" / "del.jpg").is_file()
+
+    exp = client.post(
+        "/api/analysis/experiments",
+        json={
+            "input_name": "x.jpg",
+            "preset_label": "t",
+            "result_json": {"ok": True},
+            "metrics": {"matches": 0},
+        },
+    )
+    assert exp.status_code == 200
+    eid = exp.json()["id"]
+    er = client.delete(f"/api/analysis/experiments/{eid}")
+    assert er.status_code == 200
+    assert not (temp_analysis_dir / "experiments" / f"{eid}.json").is_file()

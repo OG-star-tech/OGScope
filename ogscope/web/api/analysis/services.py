@@ -30,8 +30,42 @@ from ogscope.web.api.models.schemas import (
     AnalysisExtractPreviewRequest,
     AnalysisPresetCreate,
     AnalysisSolveImageRequest,
+    AnalysisSolveVideoFrameRequest,
     CentroidParamsPayload,
 )
+
+
+def _merge_debug_style_sidecar_into_info(
+    info: dict[str, Any], capture_info: dict[str, Any]
+) -> None:
+    """将侧车 JSON 的 camera/extra 展开到顶层，与调试页 info 一致 / Match debug file info shape."""
+    cam = capture_info.get("camera")
+    if isinstance(cam, dict):
+        for k in (
+            "exposure_us",
+            "analogue_gain",
+            "digital_gain",
+            "fps",
+            "auto_exposure",
+            "rotation",
+            "sampling_mode",
+            "color_mode",
+            "sensor",
+            "resolution",
+        ):
+            if k not in capture_info and k in cam:
+                capture_info[k] = cam[k]
+        if capture_info.get("resolution") is None:
+            ow = cam.get("output_width") or cam.get("width")
+            oh = cam.get("output_height") or cam.get("height")
+            if ow and oh:
+                capture_info["resolution"] = f"{ow}x{oh}"
+    extra = capture_info.get("extra")
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            if k not in capture_info:
+                capture_info[k] = v
+    info.update(capture_info)
 
 
 @dataclass(slots=True)
@@ -108,6 +142,47 @@ class AnalysisService:
             raise ValueError("路径非法 / Invalid path") from exc
         return path
 
+    def get_upload_file_info(self, filename: str) -> dict[str, Any]:
+        """从上传目录读取文件与 stem.txt 侧车 / File + optional sidecar from upload pool."""
+        path = self.resolve_upload_path(filename)
+        if not path.is_file():
+            raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+        st = path.stat()
+        image_ext = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+        video_ext = {
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".wmv",
+            ".flv",
+            ".webm",
+            ".m4v",
+        }
+        suffix = path.suffix.lower()
+        file_type = (
+            "image"
+            if suffix in image_ext
+            else "video" if suffix in video_ext else "file"
+        )
+        info: dict[str, Any] = {
+            "filename": path.name,
+            "size": st.st_size,
+            "modified": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc
+            ).isoformat(),
+            "type": file_type,
+        }
+        sidecar = self.upload_root / f"{path.stem}.txt"
+        if sidecar.is_file():
+            try:
+                raw = json.loads(sidecar.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    _merge_debug_style_sidecar_into_info(info, raw)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return info
+
     def list_uploads(self) -> dict[str, Any]:
         """列出已持久化上传的文件 / List persisted uploads (flat, no recursion)."""
         root = self.upload_root
@@ -120,6 +195,9 @@ class AnalysisService:
             if p.name.startswith("."):
                 continue
             if p.name == "manifest.json":
+                continue
+            # 侧车 .txt 不单独列入素材池 / Hide sidecar metadata from pool list
+            if p.suffix.lower() == ".txt":
                 continue
             st = p.stat()
             base = {
@@ -280,9 +358,8 @@ class AnalysisService:
         results: list[dict[str, Any]] = []
         for run in body.runs:
             params = run.params.model_dump(exclude_none=True)
-            req = AnalysisSolveImageRequest(
-                input_name=body.input_name,
-                **params,
+            req = AnalysisSolveImageRequest.model_validate(
+                {"input_name": body.input_name, **params}
             )
             try:
                 out = await self.solve_single_image(req)
@@ -313,6 +390,9 @@ class AnalysisService:
             )
         dst = self.upload_root / src.name
         shutil.copy2(src, dst)
+        side_txt = Path.home() / "dev_captures" / f"{src.stem}.txt"
+        if side_txt.is_file():
+            shutil.copy2(side_txt, self.upload_root / side_txt.name)
         self._lab.set_file_source(dst.name, "debug_console")
         return {
             "success": True,
@@ -345,6 +425,8 @@ class AnalysisService:
             result_json=body.result_json,
             metrics=body.metrics,
             thumbnail_png_base64=body.thumbnail_png_base64,
+            replay=body.replay,
+            save_asset_snapshot=body.save_asset_snapshot,
         )
 
     def list_experiments(
@@ -352,6 +434,29 @@ class AnalysisService:
     ) -> dict[str, Any]:
         """分页实验列表 / Paginated experiments."""
         return self._lab.list_experiments(q, page, page_size)
+
+    def delete_upload(
+        self, filename: str, delete_experiments: bool = False
+    ) -> dict[str, Any]:
+        """删除素材池文件及 stem.txt 侧车；可选级联实验记录 / Delete pool file and sidecar; optional cascade."""
+        path = self.resolve_upload_path(filename)
+        if path.name == "manifest.json":
+            raise ValueError("不可删除清单文件 / Cannot delete manifest")
+        if not path.is_file():
+            raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+        n_exp = 0
+        if delete_experiments:
+            n_exp = self._lab.delete_experiments_for_input(path.name)
+        path.unlink()
+        side = self.upload_root / f"{path.stem}.txt"
+        if side.is_file():
+            side.unlink()
+        self._lab.remove_manifest_entry(path.name)
+        return {"success": True, "filename": path.name, "deleted_experiments": n_exp}
+
+    def delete_experiment(self, experiment_id: str) -> None:
+        """删除一条实验记录 / Delete one experiment record."""
+        self._lab.delete_experiment(experiment_id)
 
     def export_experiments(self, fmt: str) -> str:
         """导出实验记录 / Export experiments."""
@@ -420,6 +525,36 @@ class AnalysisService:
             json.dumps(job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    def _solve_bgr_to_row(
+        self,
+        frame_bgr: Any,
+        hint_ra_deg: float | None,
+        hint_dec_deg: float | None,
+        fov_estimate: float | None = None,
+        fov_max_error: float | None = None,
+        solve_timeout_ms: int | None = None,
+        centroid_params: CentroidExtractionParams | None = None,
+        max_image_side: int | None = None,
+    ) -> dict[str, Any]:
+        """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
+        solved = self.solver.solve_from_bgr_frame(
+            frame_bgr=frame_bgr,
+            max_stars=self._solver_max_stars,
+            hint_ra_deg=(
+                hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra
+            ),
+            hint_dec_deg=(
+                hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec
+            ),
+            solve_source="full",
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
+            centroid_params=centroid_params,
+            max_image_side=max_image_side,
+        )
+        return {"frame_index": 0, **solved.to_dict()}
+
     def _analyze_image(
         self,
         source: Path,
@@ -435,24 +570,16 @@ class AnalysisService:
         frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError("无法读取图片 / Unable to read image")
-        # 与 Tetra3 solve_from_image 一致：内置提星（背景减除+σ 阈值），非自研 OTSU / Match Cedar-Solve extraction
-        solved = self.solver.solve_from_bgr_frame(
-            frame_bgr=frame,
-            max_stars=self._solver_max_stars,
-            hint_ra_deg=(
-                hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra
-            ),
-            hint_dec_deg=(
-                hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec
-            ),
-            solve_source="full",
+        row = self._solve_bgr_to_row(
+            frame,
+            hint_ra_deg,
+            hint_dec_deg,
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
             centroid_params=centroid_params,
             max_image_side=max_image_side,
         )
-        row = {"frame_index": 0, **solved.to_dict()}
         return [row]
 
     def _analyze_video(
@@ -506,6 +633,72 @@ class AnalysisService:
 
         cap.release()
         return results
+
+    async def solve_video_frame(self, body: AnalysisSolveVideoFrameRequest) -> dict[str, Any]:
+        """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
+        frame = None
+        if body.source == "camera":
+            from ogscope.web.api.debug.services import get_camera_instance
+
+            cam = get_camera_instance()
+            if not cam or not getattr(cam, "is_capturing", False):
+                raise RuntimeError("相机未运行 / Camera not capturing")
+            frame = cam.get_video_frame()
+            if frame is None:
+                raise RuntimeError("无视频帧 / No frame from camera")
+        else:
+            if not body.input_name:
+                raise ValueError("需要 input_name / input_name required for file source")
+            path = self.resolve_upload_path(body.input_name)
+            if not path.is_file():
+                raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                raise ValueError("无法打开视频 / Cannot open video")
+            try:
+                if body.time_sec is not None:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, float(body.time_sec) * 1000.0)
+                else:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, float(body.frame_index))
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    raise ValueError("无法读取视频帧 / Cannot read video frame")
+            finally:
+                cap.release()
+        centroid_params = self._centroid_params_from_payload(body.centroid)
+        row = await asyncio.to_thread(
+            self._solve_bgr_to_row,
+            frame,
+            body.hint_ra_deg,
+            body.hint_dec_deg,
+            body.fov_estimate,
+            body.fov_max_error,
+            body.solve_timeout_ms,
+            centroid_params,
+            body.max_image_side,
+        )
+        return {"success": True, "input_name": body.input_name or "", "result": row}
+
+    def lab_public_settings(self) -> dict[str, Any]:
+        """分析台默认参数（供前端）/ Public defaults for analysis UI."""
+        s = get_settings()
+        return {
+            "solver_timeout_ms": s.solver_timeout_ms,
+            "star_analysis_target_fps": s.star_analysis_target_fps,
+            "camera_width": s.camera_width,
+            "camera_height": s.camera_height,
+            "camera_fps": s.camera_fps,
+            "solver_fov_deg": s.solver_fov_deg,
+            "solver_max_image_side": s.solver_max_image_side,
+        }
+
+    def upload_experiment_count(self, filename: str) -> dict[str, Any]:
+        """引用该素材的实验条数 / Number of experiments referencing upload."""
+        return {"count": self._lab.count_experiments_for_input(filename)}
+
+    def get_experiment_asset_path(self, experiment_id: str) -> Path:
+        """实验快照路径 / Snapshot path for replay."""
+        return self._lab.experiment_asset_path(experiment_id)
 
 
 analysis_service = AnalysisService()

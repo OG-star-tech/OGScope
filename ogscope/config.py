@@ -27,9 +27,9 @@ class Settings(BaseSettings):
 
     # 相机配置 / Camera configuration
     camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
-    camera_width: int = Field(default=640, description="图像宽度")
-    camera_height: int = Field(default=360, description="图像高度")
-    camera_fps: int = Field(default=15, description="帧率")
+    camera_width: int = Field(default=1600, description="图像宽度 / Default capture width")
+    camera_height: int = Field(default=900, description="图像高度 / Default capture height")
+    camera_fps: int = Field(default=5, description="预览与调试默认帧率 / Default preview FPS")
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
     )
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         description="FOV 估计允许误差(度)；None 为库默认 / Max FOV estimate error in degrees",
     )
     solver_timeout_ms: int = Field(
-        default=8000,
+        default=3000,
         description="Tetra3 单次解算超时毫秒 / Tetra3 solve timeout in ms",
     )
     static_dir: Path = Field(default=Path("./web/static"), description="静态文件目录")
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # 星图解算配置 / Plate solving configuration
     solver_hint_ra_deg: float = Field(default=0.0, description="默认解算RA提示(度)")
     solver_hint_dec_deg: float = Field(default=90.0, description="默认解算Dec提示(度)")
-    solver_fov_deg: float = Field(default=16.0, description="视场角(度)")
+    solver_fov_deg: float = Field(default=11.0, description="视场角(度) / Default FOV estimate (deg)")
     solver_max_stars: int = Field(default=80, description="用于解算的最大星点数量")
     solver_fullsolve_interval_frames: int = Field(
         default=10, description="实时模式全量解算间隔帧数"
@@ -120,8 +120,12 @@ class Settings(BaseSettings):
         description="长细比上限；None 为不限制 / Max major/minor axis ratio, None to disable",
     )
     solver_max_image_side: int = Field(
-        default=2048,
-        description="提星前长边上限（像素），降低可加速 / Max long side before extraction",
+        default=1600,
+        description="提星前长边上限（像素），与默认采集长边对齐 / Max long side before extraction",
+    )
+    star_analysis_target_fps: float = Field(
+        default=1.5,
+        description="星空分析目标帧率（1–2），仅用于前端节流 / Target star-analysis FPS for UI throttle",
     )
 
     model_config = SettingsConfigDict(

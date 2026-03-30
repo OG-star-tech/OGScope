@@ -2,7 +2,7 @@
 API 数据模型定义
 """
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -224,6 +224,27 @@ class AnalysisExperimentCreate(BaseModel):
     result_json: dict[str, Any]
     metrics: dict[str, Any] = Field(default_factory=dict)
     thumbnail_png_base64: Optional[str] = None
+    replay: Optional[dict[str, Any]] = None
+    save_asset_snapshot: bool = True
+
+
+
+class AnalysisSolveVideoFrameRequest(BaseModel):
+    """单帧解算：相机 BGR 或素材池视频 seek / Solve one frame from camera or pool video."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["camera", "file"]
+    input_name: Optional[str] = None
+    frame_index: int = 0
+    time_sec: Optional[float] = None
+    hint_ra_deg: Optional[float] = None
+    hint_dec_deg: Optional[float] = None
+    fov_estimate: Optional[float] = None
+    fov_max_error: Optional[float] = None
+    solve_timeout_ms: Optional[int] = None
+    centroid: Optional[CentroidParamsPayload] = None
+    max_image_side: Optional[int] = None
 
 
 class ImportFromDebugRequest(BaseModel):

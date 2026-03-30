@@ -1,10 +1,11 @@
 {
-  "page.title": "OGScope 调试控制台",
+  "page.title": "OGScope 相机调试控制台",
   "language.label": "语言",
   "language.zh": "中文",
   "language.en": "English",
   "language.bilingual": "中英双语",
-  "header.title": "🔧 OGScope 调试控制台",
+  "header.title": "🔧 OGScope 相机调试控制台",
+  "header.linkAnalysis": "星空解算控制台",
   "header.backToHome": "← 返回主界面",
   "common.status": "状态:",
   "common.close": "✕ 关闭",

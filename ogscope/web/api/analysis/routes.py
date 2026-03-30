@@ -15,6 +15,7 @@ from ogscope.web.api.models.schemas import (
     AnalysisJobCreateRequest,
     AnalysisPresetCreate,
     AnalysisSolveImageRequest,
+    AnalysisSolveVideoFrameRequest,
     ImportFromDebugRequest,
 )
 
@@ -27,6 +28,42 @@ async def list_analysis_uploads():
     try:
         return analysis_service.list_uploads()
     except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@router.get("/analysis/uploads/{filename}/experiment_count")
+async def upload_experiment_count(filename: str):
+    """引用该素材的实验记录条数 / Count experiments for upload."""
+    try:
+        return analysis_service.upload_experiment_count(filename)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.delete("/analysis/uploads/{filename}")
+async def delete_analysis_upload(
+    filename: str,
+    delete_experiments: bool = Query(
+        False, description="同时删除引用该素材的实验记录 / Also delete linked experiments"
+    ),
+):
+    """从素材池删除文件及侧车 / Delete file from pool and sidecar."""
+    try:
+        return analysis_service.delete_upload(filename, delete_experiments=delete_experiments)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/analysis/uploads/{filename}/info")
+async def get_analysis_upload_file_info(filename: str):
+    """上传素材侧车合并信息（与调试 info 形状对齐）/ Upload file + sidecar merged info."""
+    try:
+        return analysis_service.get_upload_file_info(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -155,6 +192,18 @@ async def create_analysis_experiment(body: AnalysisExperimentCreate):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.delete("/analysis/experiments/{experiment_id}")
+async def delete_analysis_experiment(experiment_id: str):
+    """删除一条实验记录 / Delete one experiment record."""
+    try:
+        analysis_service.delete_experiment(experiment_id)
+        return {"success": True}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/analysis/experiments")
 async def list_analysis_experiments(
     q: str | None = Query(None, description="搜索文件名或预设名 / Search"),
@@ -184,6 +233,42 @@ async def export_analysis_experiments(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+
+
+@router.get("/analysis/settings")
+async def analysis_lab_settings():
+    """分析台公开默认配置 / Public defaults for analysis lab."""
+    try:
+        return analysis_service.lab_public_settings()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/analysis/solve/frame")
+async def solve_analysis_frame(body: AnalysisSolveVideoFrameRequest):
+    """相机或视频单帧解算 / Solve one frame from camera or pool video."""
+    try:
+        return await analysis_service.solve_video_frame(body)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/analysis/experiments/{experiment_id}/asset")
+async def get_experiment_asset_file(experiment_id: str):
+    """实验素材快照（用于回放）/ Experiment asset snapshot for replay."""
+    try:
+        path = analysis_service.get_experiment_asset_path(experiment_id)
+        media, _ = mimetypes.guess_type(path.name)
+        return FileResponse(path, media_type=media or "application/octet-stream")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @router.post("/analysis/extract/preview")
 async def extract_centroid_preview(body: AnalysisExtractPreviewRequest):

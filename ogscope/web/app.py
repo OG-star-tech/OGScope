@@ -138,7 +138,7 @@ async def debug_console(request: Request):
 
 @app.get("/debug/analysis", response_class=HTMLResponse)
 async def debug_analysis_console(request: Request):
-    """星图解算实验室（Vite 构建 SPA）或回退旧模板 / Analysis lab SPA or legacy template."""
+    """星空解算控制台（Vite 构建 SPA）或回退旧模板 / Plate solve console SPA or legacy template."""
     lab_index = settings.static_dir / "analysis-lab" / "index.html"
     if lab_index.is_file():
         return FileResponse(lab_index)

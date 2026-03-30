@@ -1,10 +1,11 @@
-# 星图解算实验室前端 / Analysis Lab UI
+# 星空解算控制台前端 / Plate Solve Console UI
 
 ## 用途 / Purpose
 
 - 技术栈：**Vite 5 + React 18 + TypeScript + Tailwind CSS**。
 - 入口页面由 FastAPI 在 **`GET /debug/analysis`** 提供：若存在 `web/static/analysis-lab/index.html` 则返回 SPA，否则回退旧版 Jinja 模板。
 - 静态资源由 FastAPI 挂载 **`/static`**，本应用 `base` 为 **`/static/analysis-lab/`**。
+- 文案 i18n：**`web/static/i18n/analysis.zh.json`**、**`analysis.en.json`**；开发时 Vite 将 **`/static`** 代理到 FastAPI 以便加载上述 JSON。
 
 ## 常用命令 / Commands
 
@@ -22,7 +23,7 @@ npm run build        # 生产构建，输出到 ../static/analysis-lab/
 
 ## 本地联调 / Local API
 
-- `vite.config.ts` 中配置了 **`/api` → `http://127.0.0.1:8000`** 的代理；需同时启动 OGScope 后端（默认 8000 端口）。
+- `vite.config.ts` 中配置了 **`/api`** 与 **`/static`** → `http://127.0.0.1:8000` 的代理；需同时启动 OGScope 后端（默认 8000 端口）。
 - 开发时访问地址形如：`http://127.0.0.1:5173/static/analysis-lab/`（以终端输出为准）。
 
 ## 同步开发板 / Sync to board

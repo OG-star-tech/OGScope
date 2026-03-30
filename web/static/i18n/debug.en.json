@@ -1,10 +1,11 @@
 {
-  "page.title": "OGScope Debug Console",
+  "page.title": "OGScope Camera Debug Console",
   "language.label": "Language",
   "language.zh": "Chinese",
   "language.en": "English",
   "language.bilingual": "Bilingual",
-  "header.title": "🔧 OGScope Debug Console",
+  "header.title": "🔧 OGScope Camera Debug Console",
+  "header.linkAnalysis": "Plate Solve Console",
   "header.backToHome": "← Back to Home",
   "common.status": "Status:",
   "common.close": "✕ Close",
