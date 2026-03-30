@@ -148,6 +148,8 @@ export default function App() {
   const [videoPreviewMode, setVideoPreviewMode] = useState<"file" | "camera">("file");
   /** 设备相机预览图 blob URL（与 X-Frame-Id 去重）/ Camera preview blob URL, deduped by frame id */
   const [cameraPreviewUrl, setCameraPreviewUrl] = useState<string | null>(null);
+  const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
+  const [cameraSolveRunning, setCameraSolveRunning] = useState(false);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [batchRawOpen, setBatchRawOpen] = useState<Record<number, boolean>>({});
@@ -161,6 +163,8 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
   const lastCameraFrameIdRef = useRef<string | null>(null);
+  const cameraSolveTimerRef = useRef<number | null>(null);
+  const cameraSolveInFlightRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
 
@@ -240,6 +244,7 @@ export default function App() {
     setLastRoundTripMs(null);
     setLastSolveSource(null);
     setVideoPreviewMode("file");
+    setVideoPreviewError(null);
   }, [selected]);
 
   const overlay = useMemo(() => {
@@ -435,8 +440,10 @@ export default function App() {
 
   /** 设备相机当前帧解算（与素材池视频无关）/ Live camera frame solve */
   const onCameraSolve = async () => {
+    if (cameraSolveInFlightRef.current) return;
     setErr(null);
     setBusy(true);
+    cameraSolveInFlightRef.current = true;
     const t0 = performance.now();
     try {
       const out = await solveVideoFrame({
@@ -452,7 +459,50 @@ export default function App() {
       setErr(String(e));
       setLastRoundTripMs(null);
     } finally {
+      cameraSolveInFlightRef.current = false;
       setBusy(false);
+    }
+  };
+
+  const onVideoFileSolve = async () => {
+    if (!selected) return;
+    setErr(null);
+    setBusy(true);
+    const t0 = performance.now();
+    try {
+      const vd = videoRef.current;
+      const out = await solveVideoFrame({
+        source: "file",
+        input_name: selected,
+        time_sec: vd?.currentTime ?? 0,
+        ...params,
+      });
+      setLastResult(out as Record<string, unknown>);
+      setBatchPack(null);
+      setLastSolveSource("file");
+      setLastRoundTripMs(performance.now() - t0);
+    } catch (e) {
+      setErr(String(e));
+      setLastRoundTripMs(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startCameraSolveLoop = () => {
+    if (cameraSolveRunning) return;
+    setCameraSolveRunning(true);
+    void onCameraSolve();
+    cameraSolveTimerRef.current = window.setInterval(() => {
+      void onCameraSolve();
+    }, 1200);
+  };
+
+  const stopCameraSolveLoop = () => {
+    setCameraSolveRunning(false);
+    if (cameraSolveTimerRef.current != null) {
+      window.clearInterval(cameraSolveTimerRef.current);
+      cameraSolveTimerRef.current = null;
     }
   };
 
@@ -579,6 +629,18 @@ export default function App() {
       if (id) clearInterval(id);
     };
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "lab_video" || videoPreviewMode !== "camera") {
+      stopCameraSolveLoop();
+    }
+  }, [view, videoPreviewMode]);
+
+  useEffect(() => {
+    return () => {
+      stopCameraSolveLoop();
+    };
+  }, []);
 
 
   return (
@@ -889,14 +951,6 @@ export default function App() {
                         className="pointer-events-none absolute left-0 top-0"
                       />
                     </div>
-                    <button
-                      type="button"
-                      className="rounded bg-primary px-3 py-1.5 text-[11px] font-medium text-on-primary-container disabled:opacity-40"
-                      disabled={busy}
-                      onClick={() => void onCameraSolve()}
-                    >
-                      {t("lab.solveCameraFrame")}
-                    </button>
                   </div>
                 ) : selected ? (
                   <div className="relative h-full min-h-[200px] overflow-auto">
@@ -966,8 +1020,19 @@ export default function App() {
                                 src={previewUrl}
                                 loop
                                 playsInline
+                                autoPlay
+                                muted
+                                preload="metadata"
                                 controls
                                 className="max-h-[70vh] w-full max-w-full object-contain"
+                                onError={() => setVideoPreviewError(t("lab.videoPreviewFailed"))}
+                                onLoadedData={() => {
+                                  setVideoPreviewError(null);
+                                  const v = videoRef.current;
+                                  if (v) {
+                                    void v.play().catch(() => {});
+                                  }
+                                }}
                               />
                               <canvas
                                 ref={cvRef}
@@ -975,37 +1040,11 @@ export default function App() {
                               />
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="rounded bg-secondary px-3 py-1.5 text-[11px] font-medium text-on-secondary-container"
-                            disabled={busy}
-                            onClick={async () => {
-                              if (!selected) return;
-                              setErr(null);
-                              setBusy(true);
-                              const t0 = performance.now();
-                              try {
-                                const vd = videoRef.current;
-                                const out = await solveVideoFrame({
-                                  source: "file",
-                                  input_name: selected,
-                                  time_sec: vd?.currentTime ?? 0,
-                                  ...params,
-                                });
-                                setLastResult(out as Record<string, unknown>);
-                                setBatchPack(null);
-                                setLastSolveSource("file");
-                                setLastRoundTripMs(performance.now() - t0);
-                              } catch (e) {
-                                setErr(String(e));
-                                setLastRoundTripMs(null);
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                          >
-                            {t("lab.solveCurrentFrame")}
-                          </button>
+                          {videoPreviewError && (
+                            <div className="rounded border border-error/40 bg-error-container/20 px-3 py-1.5 text-[11px] text-error">
+                              {videoPreviewError}
+                            </div>
+                          )}
                         </div>
                       </>
                     ) : (
@@ -1477,6 +1516,47 @@ export default function App() {
                   >
                     {t("btn.solveBatch")}
                   </button>
+                </div>
+              )}
+              {view === "lab_video" && (
+                <div className="shrink-0 space-y-2 border-b border-outline-variant/20 p-4 pb-3">
+                  {videoPreviewMode === "file" ? (
+                    <button
+                      type="button"
+                      className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary disabled:opacity-40"
+                      onClick={() => void onVideoFileSolve()}
+                      disabled={busy || !selected}
+                    >
+                      {t("lab.solveCurrentFrame")}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-primary py-2.5 font-semibold text-on-primary-container disabled:opacity-40"
+                        onClick={() => startCameraSolveLoop()}
+                        disabled={busy || cameraSolveRunning}
+                      >
+                        {t("lab.solveCameraStart")}
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-error/80 py-2.5 font-semibold text-on-error disabled:opacity-40"
+                        onClick={() => stopCameraSolveLoop()}
+                        disabled={!cameraSolveRunning}
+                      >
+                        {t("lab.solveCameraStop")}
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary disabled:opacity-40"
+                        onClick={() => void onCameraSolve()}
+                        disabled={busy}
+                      >
+                        {t("lab.solveCameraFrame")}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
               {view === "lab_video" && sysOverview && (
