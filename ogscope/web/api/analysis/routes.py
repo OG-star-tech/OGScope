@@ -78,7 +78,17 @@ async def get_analysis_upload_file(
             raise HTTPException(status_code=404, detail="文件不存在 / File not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    media, _ = mimetypes.guess_type(path.name)
+    suffix = path.suffix.lower()
+    media_map = {
+        ".mp4": "video/mp4",
+        ".m4v": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo",
+    }
+    media = media_map.get(suffix)
+    if not media:
+        media, _ = mimetypes.guess_type(path.name)
     return FileResponse(
         path,
         media_type=media or "application/octet-stream",

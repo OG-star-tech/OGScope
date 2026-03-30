@@ -24,6 +24,9 @@ recording_task = None
 recording_stem: Optional[str] = None
 recording_t0_mono: Optional[float] = None
 recording_fps_value: float = 15.0
+recording_media_filename: Optional[str] = None
+recording_codec_fourcc: str = "mp4v"
+recording_container: str = "MP4"
 
 # 预览帧缓存与抓取任务 / Preview frame buffering and grabbing tasks
 latest_preview_jpeg: Optional[bytes] = None
@@ -374,9 +377,22 @@ class DebugCameraService:
             image = camera.capture_image()
             if image is None:
                 raise Exception("图像捕获失败")
-            
-            # 生成文件名（含参数摘要）/ File name with param summary in stem
+
             camera_info = camera.get_camera_info()
+            expected_w = int(camera_info.get("output_width", camera_info.get("width", 0)) or 0)
+            expected_h = int(camera_info.get("output_height", camera_info.get("height", 0)) or 0)
+            actual_h, actual_w = image.shape[:2]
+            rotation = int(camera_info.get("rotation", 0) or 0)
+            if rotation in (90, 270):
+                expected_w, expected_h = expected_h, expected_w
+            if expected_w > 0 and expected_h > 0 and (
+                int(actual_w) != expected_w or int(actual_h) != expected_h
+            ):
+                raise Exception(
+                    f"拍照分辨率与当前设置不一致: expected={expected_w}x{expected_h}, actual={actual_w}x{actual_h}"
+                )
+
+            # 生成文件名（含参数摘要）/ File name with param summary in stem
             stem = generate_capture_stem("IMG", camera_info)
             image_path = DEBUG_CAPTURES_DIR / f"{stem}.jpg"
             
@@ -393,13 +409,23 @@ class DebugCameraService:
                 kind="photo",
                 media_filename=f"{stem}.jpg",
                 file_size=file_size,
+                extra={
+                    "actual_saved_width": int(actual_w),
+                    "actual_saved_height": int(actual_h),
+                    "expected_output_width": int(expected_w),
+                    "expected_output_height": int(expected_h),
+                },
             )
             
             return {
                 "success": True,
                 "filename": f"{stem}.jpg",
                 "path": str(image_path),
-                "size": file_size
+                "size": file_size,
+                "actual_saved_width": int(actual_w),
+                "actual_saved_height": int(actual_h),
+                "expected_output_width": int(expected_w),
+                "expected_output_height": int(expected_h),
             }
             
         except ImportError:
@@ -431,6 +457,7 @@ class DebugCameraService:
     async def start_recording():
         """开始录制视频 / Start recording video"""
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_media_filename, recording_codec_fourcc, recording_container
         
         if is_recording:
             raise Exception("已在录制中")
@@ -446,22 +473,48 @@ class DebugCameraService:
             
             camera_info = camera.get_camera_info()
             stem = generate_capture_stem("VID", camera_info)
-            video_path = DEBUG_CAPTURES_DIR / f"{stem}.avi"
-            
-            # 创建视频写入器（MJPG / Create video writer (MJPG
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            width = camera_info.get('width', 1920)
-            height = camera_info.get('height', 1080)
+            video_path = DEBUG_CAPTURES_DIR / f"{stem}.mp4"
+
+            # 优先使用 MP4 编码，按候选顺序探测可用编码器 / Prefer MP4 codecs and probe available codecs in order.
+            # 浏览器兼容优先级：H264/avc1 通常优于 mp4v
+            # Browser compatibility priority: H264/avc1 are generally more compatible than mp4v.
+            codec_candidates = [
+                ("avc1", "MP4"),
+                ("H264", "MP4"),
+                ("mp4v", "MP4"),
+            ]
+            width = int(camera_info.get("output_width", camera_info.get("width", 1920)))
+            height = int(camera_info.get("output_height", camera_info.get("height", 1080)))
             fps = float(camera_info.get('fps', 15))
             recording_fps_value = fps
-            
-            video_writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
-            
-            if not video_writer.isOpened():
-                raise Exception("视频写入器创建失败")
+
+            video_writer = None
+            chosen_codec = None
+            chosen_container = None
+            for codec_tag, container in codec_candidates:
+                fourcc = cv2.VideoWriter_fourcc(*codec_tag)
+                candidate_writer = cv2.VideoWriter(
+                    str(video_path), fourcc, fps, (width, height)
+                )
+                if candidate_writer.isOpened():
+                    video_writer = candidate_writer
+                    chosen_codec = codec_tag
+                    chosen_container = container
+                    break
+                candidate_writer.release()
+
+            if video_writer is None or not video_writer.isOpened():
+                raise Exception("视频写入器创建失败（MP4编码器不可用）")
+            if str(chosen_codec or "").lower() == "mp4v":
+                logging.getLogger(__name__).warning(
+                    "录制回退到 mp4v，某些浏览器可能无法预览该 MP4 文件"
+                )
             
             recording_stem = stem
             recording_t0_mono = time.monotonic()
+            recording_media_filename = f"{stem}.mp4"
+            recording_codec_fourcc = str(chosen_codec or "mp4v")
+            recording_container = str(chosen_container or "MP4")
             is_recording = True
             
             # 启动录制任务 / Start recording task
@@ -469,7 +522,8 @@ class DebugCameraService:
                 nonlocal video_writer
                 try:
                     while is_recording:
-                        image = camera.capture_image()
+                        # 采集单帧放到线程，避免阻塞事件循环影响“停止录制”响应 / Offload frame capture to a thread to keep stop-recording responsive.
+                        image = await asyncio.to_thread(camera.capture_image)
                         if image is not None:
                             # OpenCV 期望 BGR / OpenCV expects BGR
                             try:
@@ -486,7 +540,7 @@ class DebugCameraService:
             
             return {
                 "success": True,
-                "filename": f"{stem}.avi",
+                "filename": f"{stem}.mp4",
                 "path": str(video_path)
             }
             
@@ -499,6 +553,7 @@ class DebugCameraService:
     async def stop_recording():
         """停止录制视频 / Stop recording video"""
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_media_filename, recording_codec_fourcc, recording_container
         
         if not is_recording:
             raise Exception("未在录制中")
@@ -508,16 +563,35 @@ class DebugCameraService:
         stem = recording_stem
         t0 = recording_t0_mono
         nominal_fps = recording_fps_value
+        media_filename = recording_media_filename
+        codec_fourcc = recording_codec_fourcc
+        container = recording_container
         
         is_recording = False
         
         if recording_task:
-            await recording_task
+            try:
+                # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop to avoid long stop-recording stalls.
+                await asyncio.wait_for(recording_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                # 超时后主动取消任务，确保接口快速返回 / Cancel on timeout so API can return quickly.
+                recording_task.cancel()
+                try:
+                    await asyncio.wait_for(recording_task, timeout=1.0)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logging.getLogger(__name__).warning(
+                        "停止录制时等待录制任务取消异常: %s", e
+                    )
+            except asyncio.CancelledError:
+                pass
             recording_task = None
         
         # 写入录制参数侧车（与视频同名 .txt）/ Write recording sidecar (.txt) next to video file
         if stem:
-            video_path = DEBUG_CAPTURES_DIR / f"{stem}.avi"
+            media_filename = media_filename or f"{stem}.mp4"
+            video_path = DEBUG_CAPTURES_DIR / media_filename
             duration_s = 0.0
             if t0 is not None:
                 duration_s = max(0.0, time.monotonic() - t0)
@@ -528,17 +602,20 @@ class DebugCameraService:
                 stem,
                 camera_info,
                 kind="video",
-                media_filename=f"{stem}.avi",
+                media_filename=media_filename,
                 file_size=file_size,
                 extra={
                     "duration_s": round(duration_s, 3),
                     "nominal_fps": nominal_fps,
-                    "codec_fourcc": "MJPG",
-                    "container": "AVI",
+                    "codec_fourcc": codec_fourcc,
+                    "container": container,
                 },
             )
         recording_stem = None
         recording_t0_mono = None
+        recording_media_filename = None
+        recording_codec_fourcc = "mp4v"
+        recording_container = "MP4"
         
         return {"success": True, **i18n_payload("server.recordingStopped", "录制已停止")}
 
