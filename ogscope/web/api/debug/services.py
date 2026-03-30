@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from ogscope.web.camera_shared import get_camera_manager
 
 # 调试控制台相关 / Debug console related
 DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
@@ -32,6 +33,19 @@ preview_grabber_task = None
 PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
 PREVIEW_PIPELINE_WORKERS = 2
 
+_CAMERA_ENV_KEY_MAP = {
+    "width": "OGSCOPE_CAMERA_WIDTH",
+    "height": "OGSCOPE_CAMERA_HEIGHT",
+    "fps": "OGSCOPE_CAMERA_FPS",
+    "sampling_mode": "OGSCOPE_CAMERA_SAMPLING_MODE",
+    "exposure_us": "OGSCOPE_CAMERA_EXPOSURE",
+    "analogue_gain": "OGSCOPE_CAMERA_GAIN",
+}
+
+# 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
+# Serialize ensure/start; offload blocking camera calls from asyncio event loop.
+_camera_ensure_lock = asyncio.Lock()
+
 
 def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
@@ -43,42 +57,44 @@ def i18n_payload(message_key: str, message: str, message_params: Optional[Dict[s
     return payload
 
 
+def _persist_env_updates(updates: Dict[str, Any]) -> Path:
+    """将键值写入项目 .env（存在则覆盖，不存在则追加）/ Persist key-values into project .env."""
+    env_path = Path.cwd() / ".env"
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = []
+
+    pending = {str(k): str(v) for k, v in updates.items()}
+    new_lines: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            new_lines.append(line)
+            continue
+        key, _, _ = line.partition("=")
+        key = key.strip()
+        if key in pending:
+            new_lines.append(f"{key}={pending.pop(key)}")
+        else:
+            new_lines.append(line)
+    for key, value in pending.items():
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    return env_path
+
+
 def get_camera_instance():
     """获取相机实例 / Get camera instance"""
-    global camera_instance
-    if camera_instance is None:
-        from ogscope.hardware.camera import create_camera
-        from ogscope.config import get_settings
-        
-        settings = get_settings()
-        config = {
-            "type": "imx327_mipi",
-            "width": settings.camera_width,
-            "height": settings.camera_height,
-            "fps": 5,  # 调试控制台默认使用 5fps（用户未指定时） / The debug console uses 5fps by default (when not specified by the user)
-            "exposure_us": settings.camera_exposure,
-            "analogue_gain": settings.camera_gain,
-            "auto_exposure": True,  # 调试控制台默认自动曝光优先 / The debugging console defaults to automatic exposure priority.
-            "rotation": 180,  # 默认180度旋转 / Default 180 degree rotation
-            "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
-            # 新增参数 / New parameters
-            "noise_reduction": 0,
-            "white_balance_mode": "auto",
-            "white_balance_gain_r": 1.0,
-            "white_balance_gain_b": 1.0,
-            "contrast": 1.0,
-            "brightness": 0.0,
-            "saturation": 1.0,
-            "sharpness": 1.0,
-            "night_mode": False,
-            "color_mode": "color",  # 默认彩色模式 / Default color mode
-        }
-        
-        camera_instance = create_camera(config)
-        if camera_instance and not camera_instance.initialize():
-            camera_instance = None
-    
-    return camera_instance
+    manager = get_camera_manager()
+    return manager.get_camera_instance()
+
+
+def _attach_manager_camera_if_needed(camera: Any) -> None:
+    """将兼容层返回的相机实例挂到共享管理器（测试与旧代码兼容）/ Attach compat camera to shared manager."""
+    manager = get_camera_manager()
+    if camera is not None and manager.get_camera_instance() is None:
+        manager.attach_camera_instance(camera)
 
 
 def _capture_timestamp_for_stem() -> str:
@@ -189,81 +205,160 @@ class DebugCameraService:
     @staticmethod
     async def get_camera_status():
         """获取调试相机状态 / Get debug camera status"""
-        camera = get_camera_instance()
-        if not camera:
+        camera = await asyncio.to_thread(get_camera_instance)
+        _attach_manager_camera_if_needed(camera)
+        status = await get_camera_manager().status()
+        if not status.get("connected"):
             return {
                 "connected": False,
                 "streaming": False,
                 "recording": is_recording,
-                "error": "相机未初始化"
+                "error": "相机未初始化",
             }
-        
         return {
-            "connected": camera.is_initialized,
-            "streaming": camera.is_capturing,
+            "connected": bool(status.get("connected")),
+            "streaming": bool(status.get("streaming")),
             "recording": is_recording,
-            "info": camera.get_camera_info()
+            "info": status.get("info", {}),
+            "runtime_overrides": status.get("runtime_overrides", {}),
+        }
+
+    @staticmethod
+    async def get_runtime_overrides():
+        """获取运行时预览覆盖参数 / Get runtime preview overrides."""
+        manager = get_camera_manager()
+        return {"runtime_overrides": manager.get_runtime_overrides()}
+
+    @staticmethod
+    async def clear_runtime_overrides():
+        """清空运行时预览覆盖参数 / Clear runtime preview overrides."""
+        manager = get_camera_manager()
+        manager.clear_runtime_overrides()
+        return {
+            "success": True,
+            **i18n_payload(
+                "server.runtimeOverridesCleared",
+                "运行时预览参数已清空",
+            ),
+        }
+
+    @staticmethod
+    async def apply_runtime_overrides_as_defaults():
+        """将运行时覆盖参数确认写入系统默认 .env / Persist runtime overrides to .env defaults."""
+        manager = get_camera_manager()
+        overrides = manager.get_runtime_overrides()
+        if not overrides:
+            return {
+                "success": True,
+                "applied": {},
+                "skipped": {},
+                **i18n_payload(
+                    "server.runtimeOverridesEmpty",
+                    "当前没有待确认的运行时参数",
+                ),
+            }
+        applied: Dict[str, Any] = {}
+        skipped: Dict[str, Any] = {}
+        for key, value in overrides.items():
+            env_key = _CAMERA_ENV_KEY_MAP.get(key)
+            if env_key:
+                applied[env_key] = value
+            else:
+                skipped[key] = value
+        env_path = None
+        if applied:
+            env_path = _persist_env_updates(applied)
+        return {
+            "success": True,
+            "applied": applied,
+            "skipped": skipped,
+            "env_path": str(env_path) if env_path else None,
+            **i18n_payload(
+                "server.runtimeOverridesAppliedAsDefaults",
+                "运行时参数已写入系统默认配置",
+            ),
         }
     
     @staticmethod
     async def start_camera():
         """启动调试相机 / Start the debug camera"""
-        camera = get_camera_instance()
-        if not camera:
-            raise Exception("相机初始化失败")
-        
-        if camera.start_capture():
-            # 启动后台抓取任务 / Start background crawling task
-            await DebugCameraService._ensure_preview_grabber()
-            return {"success": True, **i18n_payload("server.cameraStarted", "相机启动成功")}
-        else:
-            raise Exception("相机启动失败")
+        camera = await asyncio.to_thread(get_camera_instance)
+        _attach_manager_camera_if_needed(camera)
+        await get_camera_manager().ensure_started()
+        return {"success": True, **i18n_payload("server.cameraStarted", "相机启动成功")}
+
+    @staticmethod
+    async def ensure_camera_streaming():
+        """确保相机已采集并刷新预览（分析台与 /api/camera 共用单例，避免重复打开设备）/ Ensure capture + preview; shared singleton for lab and /api/camera."""
+        camera = await asyncio.to_thread(get_camera_instance)
+        _attach_manager_camera_if_needed(camera)
+        await get_camera_manager().ensure_started()
     
     @staticmethod
     async def stop_camera():
         """停止调试相机 / Stop debugging camera"""
-        camera = get_camera_instance()
-        if not camera:
-            return {"success": True, **i18n_payload("server.cameraNotRunning", "相机未运行")}
-        
-        if camera.stop_capture():
-            await DebugCameraService._stop_preview_grabber()
-            return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
-        else:
-            raise Exception("相机停止失败")
+        camera = await asyncio.to_thread(get_camera_instance)
+        _attach_manager_camera_if_needed(camera)
+        await get_camera_manager().stop()
+        return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
     
     @staticmethod
-    async def get_preview():
+    async def get_preview(since_frame_id: int | None = None):
         """获取调试相机预览 / Get debug camera preview"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_capturing:
-            raise Exception("相机未运行")
-        
-        try:
-            # 若后台抓取未运行，尝试启动一次 / If background crawling is not running, try to start it once
-            await DebugCameraService._ensure_preview_grabber()
-            
-            # 等待最多500ms 以获取缓存帧 / Wait up to 500ms for cached frames
-            import time
-            deadline = time.time() + 0.5
-            global latest_preview_jpeg, latest_preview_id, last_preview_time
-            while latest_preview_jpeg is None and time.time() < deadline:
-                await asyncio.sleep(0.01)
-            if latest_preview_jpeg is None:
+        from fastapi.responses import Response
+
+        manager = get_camera_manager()
+        code, frame = await manager.get_preview_frame(since_frame_id)
+        if code == 304:
+            return Response(status_code=304)
+        if code != 200 or frame is None or frame.jpeg_frame is None:
+            # 首帧兜底：直接抓一帧并编码，避免前端启动后长时间黑屏
+            # First-frame fallback: grab one frame immediately to avoid prolonged black screen.
+            raw, frame_id, frame_ts = await manager.get_raw_frame()
+            jpeg = await asyncio.to_thread(manager.encode_frame, raw, "jpeg", 75)
+            if jpeg is None:
                 raise Exception("暂无预览帧")
-            from fastapi.responses import Response
             return Response(
-                content=latest_preview_jpeg,
+                content=jpeg,
                 media_type="image/jpeg",
                 headers={
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     "Pragma": "no-cache",
-                    "X-Frame-Id": str(latest_preview_id),
-                    "X-Frame-Ts": str(last_preview_time or 0.0),
+                    "X-Frame-Id": str(frame_id),
+                    "X-Frame-Ts": str(frame_ts),
                 },
             )
-        except Exception as e:
-            raise Exception(f"预览失败: {str(e)}")
+        return Response(
+            content=frame.jpeg_frame,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "X-Frame-Id": str(frame.frame_id),
+                "X-Frame-Ts": str(frame.timestamp),
+                "X-Frame-Width": str(frame.width),
+                "X-Frame-Height": str(frame.height),
+            },
+        )
+
+    @staticmethod
+    async def get_stream_frame_bytes(
+        image_format: str = "jpeg", quality: int = 75
+    ) -> tuple[int, bytes | None, int]:
+        """读取共享流帧并编码 / Read shared frame and encode."""
+        manager = get_camera_manager()
+        await manager.ensure_started()
+        snap = await manager.get_cached_frame_snapshot()
+        if snap is None or snap.raw_frame is None:
+            return 503, None, 0
+        if image_format.lower() == "jpeg" and snap.jpeg_frame is not None:
+            return 200, snap.jpeg_frame, snap.frame_id
+        encoded = await asyncio.to_thread(
+            manager.encode_frame, snap.raw_frame, image_format, int(quality)
+        )
+        if encoded is None:
+            return 500, None, snap.frame_id
+        return 200, encoded, snap.frame_id
     
     @staticmethod
     async def capture_image():
@@ -320,6 +415,7 @@ class DebugCameraService:
             raise Exception("相机未初始化")
         
         if camera.set_rotation(rotation):
+            get_camera_manager().update_runtime_overrides({"rotation": int(rotation)})
             return {
                 "success": True,
                 **i18n_payload(
@@ -464,31 +560,18 @@ class DebugCameraService:
         
         if current_width == width and current_height == height:
             return {"success": True, "info": info, **i18n_payload("server.resolutionUnchanged", "分辨率未变化")}
-        
-        # 为避免在预览抓取进行中重配导致底层冲突：先停抓取，再设置，最后重启抓取 / To avoid underlying conflicts caused by reconfiguration while preview crawling is in progress: stop crawling first, then set up, and finally restart crawling.
+
         try:
-            await DebugCameraService._stop_preview_grabber()
-            
-            # 设置超时，避免卡死 / Set timeout to avoid stuck
-            import asyncio
-            success = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(
-                    None, camera.set_resolution, int(width), int(height)
-                ),
-                timeout=10.0  # 10秒超时 / 10 seconds timeout
+            success = await get_camera_manager().reconfigure_camera(
+                "set_resolution",
+                lambda: camera.set_resolution(int(width), int(height)),
+                timeout_sec=10.0,
             )
-            
             if not success:
                 raise Exception("相机设置分辨率失败")
-                
         except asyncio.TimeoutError:
             raise Exception("设置分辨率超时，请重试")
         except Exception as e:
-            # 出错也尽量恢复抓取器 / Try to restore the crawler if something goes wrong.
-            try:
-                await DebugCameraService._ensure_preview_grabber()
-            except Exception:
-                pass
             raise Exception(f"设置分辨率失败: {str(e)}")
 
         # 校验是否已生效（以相机报告的尺寸为准） / Verify whether the verification has taken effect (subject to the size reported by the camera)
@@ -504,13 +587,11 @@ class DebugCameraService:
             current_res = f"{info.get('width', 0)}x{info.get('height', 0)}"
             if info.get('sampling_mode') == 'supersample':
                 current_res = f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
-            print(f"警告: 分辨率设置可能未完全生效，当前分辨率: {current_res}")
+            logging.getLogger(__name__).warning(
+                f"分辨率设置可能未完全生效，当前分辨率: {current_res}"
+            )
 
-        # 分辨率调整后尝试重启抓取器（失败不影响返回） / Try to restart the crawler after adjusting the resolution (failure does not affect return)
-        try:
-            await DebugCameraService._restart_preview_grabber()
-        except Exception:
-            pass
+        get_camera_manager().update_runtime_overrides({"width": int(width), "height": int(height)})
         return {"success": True, "info": info, **i18n_payload("server.resolutionUpdated", "分辨率已更新")}
 
     @staticmethod
@@ -524,17 +605,15 @@ class DebugCameraService:
         if mode not in ['supersample', 'native', 'crop']:
             raise Exception(f"不支持的采样模式: {mode}")
         
-        # 避免与预览抓取竞争：先停抓取 / Avoid competing with preview crawling: stop crawling first
         try:
-            await DebugCameraService._stop_preview_grabber()
-            ok = camera.set_sampling_mode(mode)
+            ok = await get_camera_manager().reconfigure_camera(
+                "set_sampling_mode",
+                lambda: camera.set_sampling_mode(mode),
+                timeout_sec=10.0,
+            )
             if not ok:
                 raise Exception("相机设置采样模式失败")
         except Exception as e:
-            try:
-                await DebugCameraService._ensure_preview_grabber()
-            except Exception:
-                pass
             raise Exception(f"设置采样模式失败: {str(e)}")
         
         # 验证设置是否生效 / Verify whether the settings take effect
@@ -547,7 +626,7 @@ class DebugCameraService:
         elif current_mode != requested_mode:
             raise Exception(f"采样模式设置未生效，当前模式: {current_mode}")
         
-        await DebugCameraService._restart_preview_grabber()
+        get_camera_manager().update_runtime_overrides({"sampling_mode": mode})
         return {
             "success": True,
             "info": info,
@@ -573,15 +652,21 @@ class DebugCameraService:
         
         try:
             ok = False
-            # 优先热更新帧率（同步调用，避免执行器上下文问题） / Prioritize hot update frame rate (synchronous call to avoid executor context issues)
             if hasattr(camera, 'set_fps'):
-                ok = camera.set_fps(int(fps))
+                ok = await get_camera_manager().reconfigure_camera(
+                    "set_fps",
+                    lambda: camera.set_fps(int(fps)),
+                    timeout_sec=10.0,
+                )
             else:
-                # 兼容旧实现：通过 set_resolution 传入 fps / Compatible with old implementation: pass in fps through set_resolution
                 info = camera.get_camera_info()
-                # 为避免竞争，切换前停抓取 / To avoid competition, stop crawling before switching
-                await DebugCameraService._stop_preview_grabber()
-                ok = camera.set_resolution(info.get('width', 640), info.get('height', 360), int(fps))
+                ok = await get_camera_manager().reconfigure_camera(
+                    "set_fps_by_set_resolution",
+                    lambda: camera.set_resolution(
+                        info.get('width', 640), info.get('height', 360), int(fps)
+                    ),
+                    timeout_sec=10.0,
+                )
 
             if not ok:
                 raise Exception("相机设置帧率失败")
@@ -593,9 +678,21 @@ class DebugCameraService:
                 # 如果设置未生效，尝试重新设置一次 / If the setting does not take effect, try setting it again
                 try:
                     if hasattr(camera, 'set_fps'):
-                        ok = camera.set_fps(int(fps))
+                        ok = await get_camera_manager().reconfigure_camera(
+                            "retry_set_fps",
+                            lambda: camera.set_fps(int(fps)),
+                            timeout_sec=10.0,
+                        )
                     else:
-                        ok = camera.set_resolution(info.get('width', 640), info.get('height', 360), int(fps))
+                        ok = await get_camera_manager().reconfigure_camera(
+                            "retry_set_fps_by_set_resolution",
+                            lambda: camera.set_resolution(
+                                info.get('width', 640),
+                                info.get('height', 360),
+                                int(fps),
+                            ),
+                            timeout_sec=10.0,
+                        )
                     if ok:
                         info = camera.get_camera_info()
                         current_fps = info.get('fps', 0)
@@ -605,8 +702,7 @@ class DebugCameraService:
                 if current_fps != int(fps):
                     raise Exception(f"帧率设置未生效，当前帧率: {current_fps}")
             
-            # 帧率变化后，预览抓取节流需要同步 / After the frame rate changes, preview capture throttling needs to be synchronized
-            await DebugCameraService._restart_preview_grabber()
+            get_camera_manager().update_runtime_overrides({"fps": int(fps)})
             return {
                 "success": True,
                 "info": info,
@@ -618,33 +714,16 @@ class DebugCameraService:
     # ==================== 内部：预览抓取器 ==================== / ==================== Internal: Preview Grabber ====================
     @staticmethod
     async def _ensure_preview_grabber():
-        global preview_grabber_task
-        if preview_grabber_task and not preview_grabber_task.done():
-            return
-        preview_grabber_task = asyncio.create_task(DebugCameraService._preview_grabber_loop())
+        await get_camera_manager().resume_grabber()
 
     @staticmethod
     async def _stop_preview_grabber():
-        global preview_grabber_task
-        if preview_grabber_task:
-            preview_grabber_task.cancel()
-            try:
-                # 添加超时机制，避免无限等待 / Add a timeout mechanism to avoid infinite waiting
-                await asyncio.wait_for(preview_grabber_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                # 超时后强制取消 / Forced cancellation after timeout
-                preview_grabber_task.cancel()
-            except asyncio.CancelledError:
-                # 任务被取消是正常的，不需要处理 / It is normal for the task to be canceled and does not need to be processed.
-                pass
-            except Exception:
-                pass
-            preview_grabber_task = None
+        await get_camera_manager().pause_grabber()
 
     @staticmethod
     async def _restart_preview_grabber():
-        await DebugCameraService._stop_preview_grabber()
-        await DebugCameraService._ensure_preview_grabber()
+        await get_camera_manager().pause_grabber()
+        await get_camera_manager().resume_grabber()
 
     @staticmethod
     def _capture_preview_frame(camera):
@@ -728,6 +807,7 @@ class DebugCameraService:
         if not camera.set_auto_exposure(bool(enabled)):
             raise Exception("设置自动曝光模式失败")
 
+        get_camera_manager().update_runtime_overrides({"auto_exposure": bool(enabled)})
         return {
             "success": True,
             **i18n_payload("server.autoExposureUpdated", "曝光模式已更新"),
@@ -783,7 +863,25 @@ class DebugCameraService:
             # 更新颜色模式设置 / Update color mode settings
             if "colorMode" in settings:
                 if hasattr(camera, 'set_color_mode'):
-                    camera.set_color_mode(settings["colorMode"])
+                    await get_camera_manager().reconfigure_camera(
+                        "update_color_mode",
+                        lambda: camera.set_color_mode(settings["colorMode"]),
+                        timeout_sec=10.0,
+                    )
+
+            overrides: Dict[str, Any] = {}
+            if "exposure" in settings:
+                overrides["exposure_us"] = settings["exposure"]
+            if "gain" in settings:
+                overrides["analogue_gain"] = settings["gain"]
+            if "digitalGain" in settings:
+                overrides["digital_gain"] = settings["digitalGain"]
+            if "autoExposure" in settings:
+                overrides["auto_exposure"] = bool(settings["autoExposure"])
+            if "colorMode" in settings:
+                overrides["color_mode"] = settings["colorMode"]
+            if overrides:
+                get_camera_manager().update_runtime_overrides(overrides)
             
             return {
                 "success": True,
@@ -813,12 +911,29 @@ class DebugCameraService:
     @staticmethod
     async def get_image_quality():
         """获取图像质量指标 / Get image quality metrics"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-        
+        # 仅使用当前已存在实例，不触发懒初始化，避免后台轮询造成反复 acquire 冲突
+        # Use existing instance only; avoid lazy init from background polling.
+        camera = get_camera_manager().get_camera_instance()
+        if camera is None:
+            # 测试环境兼容：允许使用 monkeypatch 注入的相机实例
+            # Test compatibility: allow monkeypatched injected camera instance.
+            try:
+                camera = get_camera_instance()
+                _attach_manager_camera_if_needed(camera)
+            except Exception:
+                camera = None
+        if (
+            not camera
+            or not getattr(camera, "is_initialized", False)
+        ):
+            return {
+                "success": False,
+                "available": False,
+                "quality": {"noise_level": 0.0, "exposure_adequacy": 0.0, "gain_level": 0.0},
+                **i18n_payload("server.cameraNotRunning", "相机未运行"),
+            }
         quality_metrics = camera.get_image_quality_metrics()
-        return {"success": True, "quality": quality_metrics}
+        return {"success": True, "available": True, "quality": quality_metrics}
     
     @staticmethod
     async def set_noise_reduction(level: int):
@@ -999,8 +1114,13 @@ class DebugCameraService:
         
         try:
             if hasattr(camera, 'set_color_mode'):
-                success = camera.set_color_mode(color_mode)
+                success = await get_camera_manager().reconfigure_camera(
+                    "set_color_mode",
+                    lambda: camera.set_color_mode(color_mode),
+                    timeout_sec=10.0,
+                )
                 if success:
+                    get_camera_manager().update_runtime_overrides({"color_mode": color_mode})
                     mode_name = "彩色" if color_mode == "color" else "黑白"
                     return {
                         "success": True, 

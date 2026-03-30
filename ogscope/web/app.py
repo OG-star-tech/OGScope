@@ -1,6 +1,7 @@
 """
 FastAPI Web 应用
 """
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -23,17 +24,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     """应用生命周期管理 / Application life cycle management"""
     # 启动时执行 / Execute at startup
     logger.info("初始化 Web 应用...")
-    
-    # TODO: 初始化数据库连接 / TODO: Initialize database connection
-    # TODO: 初始化相机 / TODO: Initialize camera
-    # TODO: 初始化其他资源 / TODO: Initialize other resources
-    
+
+    # 真实硬件下后台预热相机：不阻塞 Uvicorn 就绪；首次请求仍可在锁内完成初始化
+    # Background warm-up on real hardware: do not block server readiness; first request can still init under lock.
+    async def _warm_camera() -> None:
+        try:
+            from ogscope.utils.environment import should_use_simulation_mode
+
+            if not should_use_simulation_mode():
+                from ogscope.web.camera_shared import get_camera_manager
+
+                await get_camera_manager().ensure_started()
+                logger.info(
+                    "相机已启动并进入共享预览缓存 / Camera streaming (shared preview cache)"
+                )
+        except Exception as e:
+            logger.warning(
+                f"启动时相机预热失败，将在首次请求时重试 / Camera warm-up failed, retry on demand: {e}"
+            )
+
+    asyncio.create_task(_warm_camera())
+
     yield
-    
+
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
-    # TODO: 关闭数据库连接 / TODO: Close database connection
-    # TODO: 释放相机资源 / TODO: Release camera resources
+    try:
+        from ogscope.utils.environment import should_use_simulation_mode
+
+        if not should_use_simulation_mode():
+            from ogscope.web.camera_shared import get_camera_manager
+
+            await get_camera_manager().stop()
+    except Exception as e:
+        logger.warning(f"关闭相机失败 / Failed to stop camera on shutdown: {e}")
 
 
 # API 文档分组标签 / API documentation group tags

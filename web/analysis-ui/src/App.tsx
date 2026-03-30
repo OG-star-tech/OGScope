@@ -41,7 +41,11 @@ import {
   type SolveParams,
   type UploadFileRow,
 } from "./api";
-import { drawSolveOverlay, type SolveOverlay } from "./drawOverlay";
+import {
+  drawSolveOverlay,
+  drawSolveOverlayVideo,
+  type SolveOverlay,
+} from "./drawOverlay";
 import { useI18n } from "./i18n/I18nProvider";
 import { buildMetaCaptionRows } from "./utils/metaCaption";
 import { formatDateTime, formatFileSize } from "./utils/format";
@@ -136,13 +140,27 @@ export default function App() {
   const [gridOn, setGridOn] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 });
+  /** 视频文件素材的像素尺寸 / Video file intrinsic size */
+  const [videoNatural, setVideoNatural] = useState({ w: 0, h: 0 });
+  /** 相机预览 JPEG 尺寸 / Live camera preview image size */
+  const [cameraPreviewNatural, setCameraPreviewNatural] = useState({ w: 0, h: 0 });
+  /** 视频台：文件预览或设备相机 / Video lab: pool file vs device camera */
+  const [videoPreviewMode, setVideoPreviewMode] = useState<"file" | "camera">("file");
+  /** 设备相机预览图 blob URL（与 X-Frame-Id 去重）/ Camera preview blob URL, deduped by frame id */
+  const [cameraPreviewUrl, setCameraPreviewUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [batchRawOpen, setBatchRawOpen] = useState<Record<number, boolean>>({});
   const [singleFooterRawOpen, setSingleFooterRawOpen] = useState(false);
+  /** 最近一次请求全链路耗时（含网络与渲染）/ Last request round-trip (network + render) */
+  const [lastRoundTripMs, setLastRoundTripMs] = useState<number | null>(null);
+  /** 最近一次解算输入来源 / Last solve input source */
+  const [lastSolveSource, setLastSolveSource] = useState<"file" | "camera" | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
+  const lastCameraFrameIdRef = useRef<string | null>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
 
@@ -219,6 +237,9 @@ export default function App() {
     setBatchPack(null);
     setBatchRawOpen({});
     setSingleFooterRawOpen(false);
+    setLastRoundTripMs(null);
+    setLastSolveSource(null);
+    setVideoPreviewMode("file");
   }, [selected]);
 
   const overlay = useMemo(() => {
@@ -233,6 +254,15 @@ export default function App() {
 
   const starCount = useMemo(() => countStarsFromOverlay(resultRow), [resultRow]);
 
+  /** 主预览区像素尺寸（图片 / 视频文件 / 相机 JPEG）/ Pixel size for metrics panel */
+  const previewPixelDims = useMemo(() => {
+    if (view === "lab_image") return imgNatural;
+    if (view === "lab_video") {
+      return videoPreviewMode === "file" ? videoNatural : cameraPreviewNatural;
+    }
+    return { w: 0, h: 0 };
+  }, [view, videoPreviewMode, imgNatural, videoNatural, cameraPreviewNatural]);
+
   const previewUrl = selected ? uploadFileUrl(selected) : "";
 
   useEffect(() => {
@@ -245,6 +275,71 @@ export default function App() {
     else img.onload = draw;
   }, [overlay, selected, lastResult, layers, view]);
 
+  /** 视频文件：解算叠加 / Video file: solve overlay on current frame */
+  useEffect(() => {
+    if (view !== "lab_video" || videoPreviewMode !== "file") return;
+    const v = videoRef.current;
+    const cv = cvRef.current;
+    if (!v || !cv || !overlay || !selected) return;
+    const draw = () => drawSolveOverlayVideo(cv, v, overlay, layers);
+    v.addEventListener("loadeddata", draw);
+    v.addEventListener("seeked", draw);
+    if (v.readyState >= 2) draw();
+    return () => {
+      v.removeEventListener("loadeddata", draw);
+      v.removeEventListener("seeked", draw);
+    };
+  }, [overlay, layers, view, videoPreviewMode, selected, lastResult]);
+
+  /** 设备相机预览：解算叠加在 JPEG 上 / Live camera JPEG + overlay */
+  useEffect(() => {
+    if (view !== "lab_video" || videoPreviewMode !== "camera") return;
+    const img = cameraPreviewImgRef.current;
+    const cv = cvRef.current;
+    if (!img || !cv || !overlay) return;
+    const draw = () => drawSolveOverlay(cv, img, overlay, layers);
+    if (img.complete) draw();
+    else img.onload = draw;
+  }, [overlay, layers, view, videoPreviewMode, lastResult, cameraPreviewUrl]);
+
+  /** 共享预览缓存轮询：仅当 X-Frame-Id 变化时更新图像，减少解码与重绘 / Poll shared cache; update img only on new frame id */
+  useEffect(() => {
+    if (view !== "lab_video" || videoPreviewMode !== "camera") return;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const qs = lastCameraFrameIdRef.current
+          ? `?since_frame_id=${encodeURIComponent(lastCameraFrameIdRef.current)}`
+          : "";
+        const r = await fetch(`/api/camera/preview${qs}`, { cache: "no-store" });
+        if (r.status === 304) return;
+        if (!r.ok) return;
+        const fid = r.headers.get("X-Frame-Id");
+        if (fid != null) lastCameraFrameIdRef.current = fid;
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        setCameraPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+      } catch {
+        /* 忽略单次失败 / Ignore transient errors */
+      }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 180);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      setCameraPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      lastCameraFrameIdRef.current = null;
+    };
+  }, [view, videoPreviewMode]);
+
   useEffect(() => {
     const img = imgRef.current;
     if (!img) return;
@@ -254,6 +349,20 @@ export default function App() {
     img.addEventListener("load", upd);
     return () => img.removeEventListener("load", upd);
   }, [selected, previewUrl]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const upd = () =>
+      setVideoNatural({ w: v.videoWidth || 0, h: v.videoHeight || 0 });
+    v.addEventListener("loadedmetadata", upd);
+    v.addEventListener("loadeddata", upd);
+    upd();
+    return () => {
+      v.removeEventListener("loadedmetadata", upd);
+      v.removeEventListener("loadeddata", upd);
+    };
+  }, [selected, previewUrl, view]);
 
   const applyPreset = (p: SolveParams) => {
     setParams({
@@ -270,12 +379,16 @@ export default function App() {
     }
     setErr(null);
     setBusy(true);
+    const t0 = performance.now();
     try {
       const out = (await solveImage(selected, params)) as { result?: Record<string, unknown> };
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
+      setLastSolveSource("file");
+      setLastRoundTripMs(performance.now() - t0);
     } catch (e) {
       setErr(String(e));
+      setLastRoundTripMs(null);
     } finally {
       setBusy(false);
     }
@@ -302,6 +415,7 @@ export default function App() {
     }
     setErr(null);
     setBusy(true);
+    const t0 = performance.now();
     try {
       const pack = (await solveBatch(selected, runs)) as { results: unknown[] };
       setBatchPack({
@@ -309,8 +423,34 @@ export default function App() {
       });
       setLastResult(null);
       setBatchRawOpen({});
+      setLastSolveSource("file");
+      setLastRoundTripMs(performance.now() - t0);
     } catch (e) {
       setErr(String(e));
+      setLastRoundTripMs(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 设备相机当前帧解算（与素材池视频无关）/ Live camera frame solve */
+  const onCameraSolve = async () => {
+    setErr(null);
+    setBusy(true);
+    const t0 = performance.now();
+    try {
+      const out = await solveVideoFrame({
+        source: "camera",
+        ...params,
+      });
+      setLastResult(out as Record<string, unknown>);
+      setBatchPack(null);
+      setLastSolveSource("camera");
+      setVideoPreviewMode("camera");
+      setLastRoundTripMs(performance.now() - t0);
+    } catch (e) {
+      setErr(String(e));
+      setLastRoundTripMs(null);
     } finally {
       setBusy(false);
     }
@@ -377,15 +517,39 @@ export default function App() {
     Math.ceil((historyData?.total ?? 0) / HISTORY_PAGE_SIZE),
   );
 
-  const debugTotalPages = Math.max(1, Math.ceil(debugFiles.length / DEBUG_PAGE_SIZE));
+  /** 按当前页面只列出对应类型调试素材 / Filter debug captures by lab view */
+  const debugFilesForView = useMemo(() => {
+    if (view === "lab_image") {
+      return debugFiles.filter((f) => f.type === "image" || isImageAsset(f.name));
+    }
+    if (view === "lab_video") {
+      return debugFiles.filter((f) => f.type === "video" || isVideoAsset(f.name));
+    }
+    return debugFiles;
+  }, [debugFiles, view]);
+
+  const debugTotalPages = Math.max(
+    1,
+    Math.ceil(debugFilesForView.length / DEBUG_PAGE_SIZE),
+  );
   const debugPagedFiles = useMemo(() => {
     const start = (debugPage - 1) * DEBUG_PAGE_SIZE;
-    return debugFiles.slice(start, start + DEBUG_PAGE_SIZE);
-  }, [debugFiles, debugPage]);
+    return debugFilesForView.slice(start, start + DEBUG_PAGE_SIZE);
+  }, [debugFilesForView, debugPage]);
+
+  useEffect(() => {
+    setDebugPage(1);
+  }, [view]);
 
   useEffect(() => {
     setDebugPage((p) => Math.min(p, debugTotalPages));
   }, [debugTotalPages]);
+
+  useEffect(() => {
+    if (debugPick && !debugFilesForView.some((f) => f.name === debugPick)) {
+      setDebugPick(null);
+    }
+  }, [debugFilesForView, debugPick]);
 
   const metaCaptionRows = useMemo(
     () => buildMetaCaptionRows(meta, locale),
@@ -542,10 +706,13 @@ export default function App() {
                   title={u.filename}
                   onClick={() => {
                     setSelected(u.filename);
-                    setView("lab_image");
+                    setView(isVideoAsset(u.filename) ? "lab_video" : "lab_image");
                   }}
                 >
-                  {u.filename}
+                  <span className="block truncate">{u.filename}</span>
+                  <span className="block text-[9px] text-on-surface-variant/90">
+                    {isVideoAsset(u.filename) ? t("sidebar.assetTypeVideo") : t("sidebar.assetTypeImage")}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -579,7 +746,7 @@ export default function App() {
                     const r = await importFromDebug(debugPick);
                     await loadLists();
                     setSelected(r.filename);
-                    setView("lab_image");
+                    setView(isVideoAsset(r.filename) ? "lab_video" : "lab_image");
                   } catch (e) {
                     setErr(String(e));
                   } finally {
@@ -590,7 +757,7 @@ export default function App() {
                 {t("sidebar.importToPool")}
               </button>
             </div>
-            {debugFiles.length === 0 ? (
+            {debugFilesForView.length === 0 ? (
               <p className="text-[10px] text-on-surface-variant">{t("sidebar.debugEmpty")}</p>
             ) : (
               <>
@@ -622,7 +789,10 @@ export default function App() {
                           {f.name}
                         </div>
                         <div className="text-[9px] text-on-surface-variant">
-                          {formatDateTime(f.modified, locale)} · {formatFileSize(f.size)}
+                          {f.type === "video" || isVideoAsset(f.name)
+                            ? t("sidebar.assetTypeVideo")
+                            : t("sidebar.assetTypeImage")}{" "}
+                          · {formatDateTime(f.modified, locale)} · {formatFileSize(f.size)}
                         </div>
                       </div>
                     </button>
@@ -662,47 +832,182 @@ export default function App() {
                   {err}
                 </div>
               )}
+              {view === "lab_video" && (
+                <div className="mb-3 max-w-5xl rounded-lg border border-outline-variant/25 bg-surface-container-low/80 p-3 text-[11px] leading-relaxed text-on-surface">
+                  <p className="text-[10px] text-on-surface-variant">{t("lab.videoLiveIntro")}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`rounded px-3 py-1.5 text-[11px] font-medium ${
+                        videoPreviewMode === "file"
+                          ? "bg-primary text-on-primary-container"
+                          : "border border-outline-variant/40 bg-surface-container text-on-surface"
+                      }`}
+                      onClick={() => setVideoPreviewMode("file")}
+                    >
+                      {t("lab.previewModeFile")}
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded px-3 py-1.5 text-[11px] font-medium ${
+                        videoPreviewMode === "camera"
+                          ? "bg-primary text-on-primary-container"
+                          : "border border-outline-variant/40 bg-surface-container text-on-surface"
+                      }`}
+                      onClick={() => setVideoPreviewMode("camera")}
+                    >
+                      {t("lab.previewModeCamera")}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
-                {selected ? (
+                {view === "lab_video" && videoPreviewMode === "camera" ? (
+                  <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
+                    <div className="relative inline-block max-h-[70vh] max-w-full">
+                      {cameraPreviewUrl ? (
+                        <img
+                          ref={cameraPreviewImgRef}
+                          src={cameraPreviewUrl}
+                          alt=""
+                          className="max-h-[70vh] w-full min-h-[120px] object-contain"
+                          onLoad={(e) =>
+                            setCameraPreviewNatural({
+                              w: e.currentTarget.naturalWidth,
+                              h: e.currentTarget.naturalHeight,
+                            })
+                          }
+                        />
+                      ) : (
+                        <div className="flex min-h-[200px] w-full min-w-[280px] flex-col items-center justify-center gap-2 text-[11px] text-on-surface-variant">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          <span>{t("lab.cameraPreviewLoading")}</span>
+                        </div>
+                      )}
+                      <canvas
+                        ref={cvRef}
+                        className="pointer-events-none absolute left-0 top-0"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded bg-primary px-3 py-1.5 text-[11px] font-medium text-on-primary-container disabled:opacity-40"
+                      disabled={busy}
+                      onClick={() => void onCameraSolve()}
+                    >
+                      {t("lab.solveCameraFrame")}
+                    </button>
+                  </div>
+                ) : selected ? (
                   <div className="relative h-full min-h-[200px] overflow-auto">
                     {view === "lab_video" ? (
-                      <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-2 bg-black">
-                        <video
-                          ref={videoRef}
-                          src={previewUrl}
-                          loop
-                          playsInline
-                          controls
-                          className="max-h-[70vh] w-full object-contain"
-                        />
-                        <button
-                          type="button"
-                          className="rounded bg-primary px-3 py-1.5 text-[11px] font-medium text-on-primary-container"
-                          disabled={busy}
-                          onClick={async () => {
-                            if (!selected) return;
-                            setErr(null);
-                            setBusy(true);
-                            try {
-                              const vd = videoRef.current;
-                              const out = await solveVideoFrame({
-                                source: "file",
-                                input_name: selected,
-                                time_sec: vd?.currentTime ?? 0,
-                                ...params,
-                              });
-                              setLastResult(out as Record<string, unknown>);
-                              setBatchPack(null);
-                            } catch (e) {
-                              setErr(String(e));
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
+                      <>
+                        <div className="absolute left-2 top-2 z-20 flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            title={t("lab.grid")}
+                            className={`rounded border px-2 py-1 text-[10px] ${
+                              gridOn
+                                ? "border-primary bg-primary/20"
+                                : "border-white/30 bg-black/40"
+                            } text-white`}
+                            onClick={() => setGridOn((g) => !g)}
+                          >
+                            <Grid3x3 className="mr-1 inline h-3 w-3" />
+                            {t("lab.grid")}
+                          </button>
+                          <button
+                            type="button"
+                            title={t("lab.zoomOut")}
+                            className="rounded border border-white/30 bg-black/40 px-2 py-1 text-[10px] text-white"
+                            onClick={() => setZoomClamped(zoom - 0.25)}
+                          >
+                            <ZoomOut className="inline h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title={t("lab.zoomIn")}
+                            className="rounded border border-white/30 bg-black/40 px-2 py-1 text-[10px] text-white"
+                            onClick={() => setZoomClamped(zoom + 0.25)}
+                          >
+                            <ZoomIn className="inline h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title={t("lab.zoomReset")}
+                            className="rounded border border-white/30 bg-black/40 px-2 py-1 text-[10px] text-white"
+                            onClick={() => setZoom(1)}
+                          >
+                            <RotateCcw className="inline h-3 w-3" />
+                          </button>
+                        </div>
+                        <div
+                          className="flex min-h-[200px] flex-col items-center justify-center gap-2 bg-black py-2"
                         >
-                          {t("lab.solveCurrentFrame")}
-                        </button>
-                      </div>
+                          <div
+                            className="inline-block origin-top-left transition-transform"
+                            style={{ transform: `scale(${zoom})` }}
+                          >
+                            <div className="relative inline-block">
+                              {gridOn && (
+                                <div
+                                  className="pointer-events-none absolute inset-0 z-[1]"
+                                  style={{
+                                    backgroundImage: [
+                                      "linear-gradient(to right, rgba(255,255,255,0.12) 1px, transparent 1px)",
+                                      "linear-gradient(to bottom, rgba(255,255,255,0.12) 1px, transparent 1px)",
+                                    ].join(","),
+                                    backgroundSize: "48px 48px",
+                                  }}
+                                />
+                              )}
+                              <video
+                                ref={videoRef}
+                                src={previewUrl}
+                                loop
+                                playsInline
+                                controls
+                                className="max-h-[70vh] w-full max-w-full object-contain"
+                              />
+                              <canvas
+                                ref={cvRef}
+                                className="pointer-events-none absolute left-0 top-0"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded bg-secondary px-3 py-1.5 text-[11px] font-medium text-on-secondary-container"
+                            disabled={busy}
+                            onClick={async () => {
+                              if (!selected) return;
+                              setErr(null);
+                              setBusy(true);
+                              const t0 = performance.now();
+                              try {
+                                const vd = videoRef.current;
+                                const out = await solveVideoFrame({
+                                  source: "file",
+                                  input_name: selected,
+                                  time_sec: vd?.currentTime ?? 0,
+                                  ...params,
+                                });
+                                setLastResult(out as Record<string, unknown>);
+                                setBatchPack(null);
+                                setLastSolveSource("file");
+                                setLastRoundTripMs(performance.now() - t0);
+                              } catch (e) {
+                                setErr(String(e));
+                                setLastRoundTripMs(null);
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            {t("lab.solveCurrentFrame")}
+                          </button>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div className="absolute left-2 top-2 z-20 flex flex-wrap gap-1">
@@ -777,8 +1082,8 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  <div className="flex h-full items-center justify-center text-on-surface-variant">
-                    {t("lab.selectOrUpload")}
+                  <div className="flex h-full items-center justify-center px-4 text-center text-on-surface-variant">
+                    {view === "lab_video" ? t("lab.selectOrUploadVideo") : t("lab.selectOrUpload")}
                   </div>
                 )}
                 {busy && (
@@ -787,34 +1092,38 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {selected && (
-                <>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90 px-3 py-2 text-xs text-on-surface">
-                    <span className="shrink-0 font-medium text-on-surface-variant">
-                      {t("lab.layers")}
-                    </span>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1">
-                      {(["matched", "pattern", "all"] as const).map((k) => (
-                        <label key={k} className="flex cursor-pointer items-center gap-1">
-                          <input
-                            type="checkbox"
-                            className="accent-primary"
-                            checked={layers[k]}
-                            onChange={(e) =>
-                              setLayers((L) => ({ ...L, [k]: e.target.checked }))
-                            }
-                          />
-                          <span>
-                            {k === "matched"
-                              ? t("lab.layer.matched")
-                              : k === "pattern"
-                                ? t("lab.layer.pattern")
-                                : t("lab.layer.all")}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+              {((selected && view === "lab_image") ||
+                (view === "lab_video" &&
+                  ((videoPreviewMode === "file" && selected) || videoPreviewMode === "camera"))) && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90 px-3 py-2 text-xs text-on-surface">
+                  <span className="shrink-0 font-medium text-on-surface-variant">
+                    {t("lab.layers")}
+                  </span>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {(["matched", "pattern", "all"] as const).map((k) => (
+                      <label key={k} className="flex cursor-pointer items-center gap-1">
+                        <input
+                          type="checkbox"
+                          className="accent-primary"
+                          checked={layers[k]}
+                          onChange={(e) =>
+                            setLayers((L) => ({ ...L, [k]: e.target.checked }))
+                          }
+                        />
+                        <span>
+                          {k === "matched"
+                            ? t("lab.layer.matched")
+                            : k === "pattern"
+                              ? t("lab.layer.pattern")
+                              : t("lab.layer.all")}
+                        </span>
+                      </label>
+                    ))}
                   </div>
+                </div>
+              )}
+              {(selected || (view === "lab_video" && videoPreviewMode === "camera")) && (
+                <>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     <details
                       open
@@ -828,13 +1137,33 @@ export default function App() {
                         {resultRow ? (
                           <div className="space-y-1 text-on-surface">
                             {solveHud.tSolveMs != null && (
-                              <div className="flex justify-between gap-2">
-                                <span className="text-on-surface-variant">
-                                  {t("lab.metric.solveMs")}
-                                </span>
-                                <span className="font-mono tabular-nums">
-                                  {solveHud.tSolveMs.toFixed(0)} ms
-                                </span>
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-on-surface-variant">
+                                    {t("lab.metric.solveComputeMs")}
+                                  </span>
+                                  <span className="font-mono tabular-nums">
+                                    {solveHud.tSolveMs.toFixed(0)} ms
+                                  </span>
+                                </div>
+                                <p className="text-[8px] leading-snug text-on-surface-variant/90">
+                                  {t("lab.metric.solveComputeHelp")}
+                                </p>
+                              </div>
+                            )}
+                            {lastRoundTripMs != null && (
+                              <div className="space-y-0.5 border-t border-outline-variant/10 pt-1">
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-on-surface-variant">
+                                    {t("lab.metric.solveRoundTripMs")}
+                                  </span>
+                                  <span className="font-mono tabular-nums">
+                                    {lastRoundTripMs.toFixed(0)} ms
+                                  </span>
+                                </div>
+                                <p className="text-[8px] leading-snug text-on-surface-variant/90">
+                                  {t("lab.metric.solveRoundTripHelp")}
+                                </p>
                               </div>
                             )}
                             {(solveHud.raDeg != null || solveHud.decDeg != null) && (
@@ -868,7 +1197,7 @@ export default function App() {
                                 </span>
                               )}
                               {solveHud.prob != null && (
-                                <span className="inline-flex flex-col gap-0.5">
+                                <span className="inline-flex max-w-full flex-col gap-0.5">
                                   <span>
                                     <span className="text-on-surface-variant">
                                       {t("lab.metric.prob")}
@@ -877,14 +1206,22 @@ export default function App() {
                                       {formatProbLine(solveHud.prob, resultRow ?? undefined).line}
                                     </span>
                                   </span>
+                                  <span className="text-[8px] leading-snug text-on-surface-variant/90">
+                                    {t("lab.metric.probHelp")}
+                                  </span>
                                   {formatProbLine(solveHud.prob, resultRow ?? undefined).rawLine && (
-                                    <span className="text-[8px] text-on-surface-variant">
-                                      {t("lab.metric.probRaw")}:{" "}
-                                      {
-                                        formatProbLine(solveHud.prob, resultRow ?? undefined)
-                                          .rawLine
-                                      }
-                                    </span>
+                                    <>
+                                      <span className="text-[8px] text-on-surface-variant">
+                                        {t("lab.metric.probRaw")}:{" "}
+                                        {
+                                          formatProbLine(solveHud.prob, resultRow ?? undefined)
+                                            .rawLine
+                                        }
+                                      </span>
+                                      <span className="text-[8px] leading-snug text-on-surface-variant/90">
+                                        {t("lab.metric.probRawHelp")}
+                                      </span>
+                                    </>
                                   )}
                                 </span>
                               )}
@@ -915,8 +1252,8 @@ export default function App() {
                         <div className="flex justify-between gap-2">
                           <span className="text-on-surface-variant">{t("lab.resolution")}</span>
                           <span className="font-mono tabular-nums">
-                            {imgNatural.w > 0
-                              ? `${imgNatural.w}×${imgNatural.h}`
+                            {previewPixelDims.w > 0
+                              ? `${previewPixelDims.w}×${previewPixelDims.h}`
                               : t("common.placeholder")}
                           </span>
                         </div>
@@ -933,52 +1270,58 @@ export default function App() {
                       </div>
                     </details>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-4 text-xs text-on-surface-variant">
-                    <span>
-                      {t("lab.file")}: <span className="font-mono text-on-surface">{selected}</span>
-                    </span>
-                    {uploads.find((u) => u.filename === selected)?.source && (
-                      <span className="rounded bg-surface-container-high px-2 py-0.5">
-                        {t("lab.source")}:{" "}
-                        {uploads.find((u) => u.filename === selected)?.source}
-                      </span>
-                    )}
-                  </div>
-                  <details
-                    open
-                    className="mt-2 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90 text-xs shadow-sm"
-                  >
-                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-semibold text-on-surface [&::-webkit-details-marker]:hidden">
-                      {t("lab.meta.title")}
-                      {metaLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-on-surface-variant" />
-                    </summary>
-                    <div className="border-t border-outline-variant/15 p-3 pt-2">
-                      {metaCaptionRows.length > 0 ? (
-                        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-                          {metaCaptionRows.map((row) => (
-                            <div key={`${row.key}-${row.value}`}>
-                              <dt className="text-[10px] text-on-surface-variant">{t(row.key)}</dt>
-                              <dd className="text-[11px] font-medium text-on-surface">
-                                {row.value}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      ) : meta && !metaLoading ? (
-                        <p className="text-[10px] leading-relaxed text-on-surface-variant">
-                          {t("lab.meta.partial")}
-                        </p>
-                      ) : !metaLoading ? (
-                        <p className="text-[10px] text-on-surface-variant">
-                          {t("lab.meta.noSidecar")}
-                        </p>
-                      ) : null}
-                    </div>
-                  </details>
+                  {selected && (
+                    <>
+                      <div className="mt-2 flex flex-wrap gap-4 text-xs text-on-surface-variant">
+                        <span>
+                          {t("lab.file")}:{" "}
+                          <span className="font-mono text-on-surface">{selected}</span>
+                        </span>
+                        {uploads.find((u) => u.filename === selected)?.source && (
+                          <span className="rounded bg-surface-container-high px-2 py-0.5">
+                            {t("lab.source")}:{" "}
+                            {uploads.find((u) => u.filename === selected)?.source}
+                          </span>
+                        )}
+                      </div>
+                      <details
+                        open
+                        className="mt-2 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90 text-xs shadow-sm"
+                      >
+                        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-semibold text-on-surface [&::-webkit-details-marker]:hidden">
+                          {t("lab.meta.title")}
+                          {metaLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-on-surface-variant" />
+                        </summary>
+                        <div className="border-t border-outline-variant/15 p-3 pt-2">
+                          {metaCaptionRows.length > 0 ? (
+                            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                              {metaCaptionRows.map((row) => (
+                                <div key={`${row.key}-${row.value}`}>
+                                  <dt className="text-[10px] text-on-surface-variant">{t(row.key)}</dt>
+                                  <dd className="text-[11px] font-medium text-on-surface">
+                                    {row.value}
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          ) : meta && !metaLoading ? (
+                            <p className="text-[10px] leading-relaxed text-on-surface-variant">
+                              {t("lab.meta.partial")}
+                            </p>
+                          ) : !metaLoading ? (
+                            <p className="text-[10px] text-on-surface-variant">
+                              {t("lab.meta.noSidecar")}
+                            </p>
+                          ) : null}
+                        </div>
+                      </details>
+                    </>
+                  )}
                 </>
               )}
-              {selected && (lastResult || batchPack) && (
+              {(selected || (view === "lab_video" && videoPreviewMode === "camera")) &&
+                (lastResult || batchPack) && (
                 <section className="mt-3 max-h-[min(50vh,28rem)] rounded-lg border border-outline-variant/25 bg-surface-container-lowest/95">
                   <div className="flex h-9 shrink-0 items-center justify-between border-b border-outline-variant/15 px-3 text-[10px] uppercase text-on-surface-variant">
                     <span>{t("results.title")}</span>
@@ -1011,10 +1354,10 @@ export default function App() {
                           type="button"
                           className="rounded bg-surface-container px-2 py-0.5 normal-case"
                           onClick={async () => {
-                            if (!selected) return;
+                            if (!selected && lastSolveSource !== "camera") return;
                             const res = lastResult.result as Record<string, unknown> | undefined;
                             await saveExperiment({
-                              input_name: selected,
+                              input_name: selected ?? t("lab.cameraSnapshotName"),
                               preset_label: "manual",
                               result_json: lastResult,
                               metrics: metricsFromResult(res ?? null),
@@ -1043,7 +1386,7 @@ export default function App() {
                             </div>
                             {r.success ? (
                               <>
-                                <SolveFooterSummary result={row} t={t} />
+                                <SolveFooterSummary result={row} t={t} roundTripMs={null} />
                                 <button
                                   type="button"
                                   className="mt-2 text-[10px] text-primary hover:underline"
@@ -1093,6 +1436,7 @@ export default function App() {
                           <SolveFooterSummary
                             result={lastResult.result as Record<string, unknown> | undefined}
                             t={t}
+                            roundTripMs={lastRoundTripMs}
                           />
                           <button
                             type="button"
@@ -1115,24 +1459,26 @@ export default function App() {
             </main>
 
             <aside className="flex w-80 shrink-0 flex-col border-l border-outline-variant/15 bg-surface-container-low text-xs min-h-0">
-              <div className="shrink-0 space-y-2 border-b border-outline-variant/20 p-4 pb-3">
-                <button
-                  type="button"
-                  className="w-full rounded bg-primary py-2.5 font-semibold text-on-primary-container"
-                  onClick={onSingleSolve}
-                  disabled={busy || view === "lab_video"}
-                >
-                  {t("btn.solveOne")}
-                </button>
-                <button
-                  type="button"
-                  className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary"
-                  onClick={onBatch}
-                  disabled={busy || view === "lab_video"}
-                >
-                  {t("btn.solveBatch")}
-                </button>
-              </div>
+              {view !== "lab_video" && (
+                <div className="shrink-0 space-y-2 border-b border-outline-variant/20 p-4 pb-3">
+                  <button
+                    type="button"
+                    className="w-full rounded bg-primary py-2.5 font-semibold text-on-primary-container"
+                    onClick={onSingleSolve}
+                    disabled={busy}
+                  >
+                    {t("btn.solveOne")}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary"
+                    onClick={onBatch}
+                    disabled={busy}
+                  >
+                    {t("btn.solveBatch")}
+                  </button>
+                </div>
+              )}
               {view === "lab_video" && sysOverview && (
                 <div className="shrink-0 border-b border-outline-variant/20 px-4 py-2 text-[10px] text-on-surface-variant">
                   <div className="font-medium text-on-surface">{t("lab.systemLoad")}</div>
@@ -1514,9 +1860,11 @@ export default function App() {
 function SolveFooterSummary({
   result,
   t,
+  roundTripMs,
 }: {
   result: Record<string, unknown> | null | undefined;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  roundTripMs: number | null;
 }) {
   const s = parseSolveResult(result ?? undefined);
   if (!result) {
@@ -1527,9 +1875,17 @@ function SolveFooterSummary({
       <div className="grid grid-cols-2 gap-2">
         {s.tSolveMs != null && (
           <div>
-            <div className="text-on-surface-variant">{t("lab.metric.solveMs")}</div>
+            <div className="text-on-surface-variant">{t("lab.metric.solveComputeMs")}</div>
             <div className="font-semibold tabular-nums text-on-surface">
               {s.tSolveMs.toFixed(0)} ms
+            </div>
+          </div>
+        )}
+        {roundTripMs != null && (
+          <div>
+            <div className="text-on-surface-variant">{t("lab.metric.solveRoundTripMs")}</div>
+            <div className="font-semibold tabular-nums text-on-surface">
+              {roundTripMs.toFixed(0)} ms
             </div>
           </div>
         )}
@@ -1548,14 +1904,20 @@ function SolveFooterSummary({
           </div>
         )}
         {s.prob != null && (
-          <div>
+          <div className="col-span-2">
             <div className="text-on-surface-variant">{t("lab.metric.prob")}</div>
             <div className="font-semibold text-on-surface">
               {formatProbLine(s.prob, result).line}
             </div>
+            <p className="mt-0.5 text-[9px] leading-snug text-on-surface-variant/90">
+              {t("lab.metric.probHelp")}
+            </p>
             {formatProbLine(s.prob, result).rawLine && (
-              <div className="text-[9px] text-on-surface-variant">
+              <div className="mt-1 text-[9px] text-on-surface-variant">
                 {t("lab.metric.probRaw")}: {formatProbLine(s.prob, result).rawLine}
+                <p className="mt-0.5 text-[8px] leading-snug opacity-90">
+                  {t("lab.metric.probRawHelp")}
+                </p>
               </div>
             )}
           </div>

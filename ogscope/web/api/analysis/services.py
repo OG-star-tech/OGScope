@@ -637,15 +637,12 @@ class AnalysisService:
     async def solve_video_frame(self, body: AnalysisSolveVideoFrameRequest) -> dict[str, Any]:
         """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
         frame = None
+        frame_id = None
+        frame_ts = None
         if body.source == "camera":
-            from ogscope.web.api.debug.services import get_camera_instance
+            from ogscope.web.camera_shared import get_camera_manager
 
-            cam = get_camera_instance()
-            if not cam or not getattr(cam, "is_capturing", False):
-                raise RuntimeError("相机未运行 / Camera not capturing")
-            frame = cam.get_video_frame()
-            if frame is None:
-                raise RuntimeError("无视频帧 / No frame from camera")
+            frame, frame_id, frame_ts = await get_camera_manager().get_raw_frame()
         else:
             if not body.input_name:
                 raise ValueError("需要 input_name / input_name required for file source")
@@ -677,7 +674,13 @@ class AnalysisService:
             centroid_params,
             body.max_image_side,
         )
-        return {"success": True, "input_name": body.input_name or "", "result": row}
+        return {
+            "success": True,
+            "input_name": body.input_name or "",
+            "result": row,
+            "frame_id": frame_id,
+            "frame_ts": frame_ts,
+        }
 
     def lab_public_settings(self) -> dict[str, Any]:
         """分析台默认参数（供前端）/ Public defaults for analysis UI."""

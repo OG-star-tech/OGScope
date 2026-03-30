@@ -39,6 +39,8 @@ class DebugConsole {
         this.systemInfoInterval = null;
         this.previewObjectUrl = null;
         this.systemInfo = null;
+        this.statusErrorCount = 0;
+        this.statusLastNotifyTs = 0;
         
         // 智能头部隐藏 / Intelligent head hiding
         this.lastScrollY = 0;
@@ -966,6 +968,19 @@ class DebugConsole {
         document.getElementById('stop-preview')?.addEventListener('click', () => {
             this.stopPreview();
         });
+
+        // 预览遮罩文案提示“点击启动”，这里补上实际点击行为
+        // Overlay says "click to start", so bind the click action.
+        document.getElementById('preview-overlay')?.addEventListener('click', () => {
+            if (this.cameraStatus.streaming && !this.previewActive) {
+                this.startPreviewUpdate();
+                this.updateButtonStates();
+                return;
+            }
+            if (!this.cameraStatus.streaming) {
+                this.startPreview();
+            }
+        });
         
         // 拍摄控制 / Shooting control
         document.getElementById('capture-image')?.addEventListener('click', () => {
@@ -1377,10 +1392,16 @@ class DebugConsole {
                 this.updateRecordingButtons(false);
                 this.setRecOverlay(false);
             }
+            this.statusErrorCount = 0;
             
         } catch (error) {
             console.error('[DebugConsole] 获取相机状态失败:', error);
-            this.showNotification('获取相机状态失败', 'error');
+            this.statusErrorCount += 1;
+            const now = Date.now();
+            if (this.statusErrorCount >= 3 && now - this.statusLastNotifyTs > 10000) {
+                this.showNotification('获取相机状态失败', 'error');
+                this.statusLastNotifyTs = now;
+            }
         }
     }
     
@@ -1453,6 +1474,13 @@ class DebugConsole {
      */
     async startPreview() {
         try {
+            if (this.cameraStatus.streaming) {
+                this.startPreviewUpdate();
+                this.updateButtonStates();
+                this.showNotification('相机预览已启动', 'success');
+                return;
+            }
+
             // 显示启动状态 / Show startup status
             this.showNotification('正在启动相机预览...', 'info');
             
@@ -1481,13 +1509,10 @@ class DebugConsole {
      */
     async stopPreview() {
         try {
-            await fetch('/api/debug/camera/stop', {
-                method: 'POST'
-            });
-            
+            // 仅停止前端预览，不影响全局共享相机状态
+            // Stop local UI preview only; do not stop shared camera globally.
             this.stopPreviewUpdate();
             this.updateButtonStates();
-            await this.updateCameraStatus();
             this.showNotification('相机预览已停止', 'info');
             this.endStatusPolling();
             
@@ -1808,7 +1833,9 @@ class DebugConsole {
         const stopBtn = document.getElementById('stop-preview');
         
         if (startBtn) {
-            startBtn.disabled = this.cameraStatus.streaming;
+            // 后端已 streaming 但前端预览循环没激活时，允许重连预览
+            // Allow reconnecting UI preview loop when backend is already streaming.
+            startBtn.disabled = this.cameraStatus.streaming && this.previewActive;
         }
         
         if (stopBtn) {
@@ -2581,6 +2608,11 @@ class DebugConsole {
         
         this.qualityMonitoringInterval = setInterval(async () => {
             try {
+                // 仅在相机采集中请求质量指标，避免空闲时触发无意义请求
+                // Query quality metrics only while camera is streaming.
+                if (!this.cameraStatus?.streaming) {
+                    return;
+                }
                 const response = await fetch('/api/debug/camera/image-quality');
                 if (response.ok) {
                     const data = await response.json();

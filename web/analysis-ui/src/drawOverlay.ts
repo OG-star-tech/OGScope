@@ -12,21 +12,14 @@ export type SolveOverlay = {
   stars_matched?: Array<{ x: number; y: number; mag?: number }>;
 };
 
-export function drawSolveOverlay(
-  canvas: HTMLCanvasElement,
-  img: HTMLImageElement,
+function drawOverlayCore(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
   overlay: SolveOverlay | null | undefined,
-  layers: LayerToggles
+  layers: LayerToggles,
 ): void {
   if (!overlay) return;
-  const w = img.naturalWidth || 1;
-  const h = img.naturalHeight || 1;
-  canvas.width = w;
-  canvas.height = h;
-  canvas.style.width = `${img.clientWidth}px`;
-  canvas.style.height = `${img.clientHeight}px`;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
   ctx.clearRect(0, 0, w, h);
 
   if (layers.all && Array.isArray(overlay.stars_all_centroids)) {
@@ -60,4 +53,42 @@ export function drawSolveOverlay(
       }
     }
   }
+}
+
+export function drawSolveOverlay(
+  canvas: HTMLCanvasElement,
+  img: HTMLImageElement,
+  overlay: SolveOverlay | null | undefined,
+  layers: LayerToggles,
+): void {
+  if (!overlay) return;
+  const w = img.naturalWidth || 1;
+  const h = img.naturalHeight || 1;
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.width = `${img.clientWidth}px`;
+  canvas.style.height = `${img.clientHeight}px`;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  drawOverlayCore(ctx, w, h, overlay, layers);
+}
+
+/** 视频当前帧上的叠加（坐标与 videoWidth/Height 一致）/ Overlay on video frame pixels */
+export function drawSolveOverlayVideo(
+  canvas: HTMLCanvasElement,
+  video: HTMLVideoElement,
+  overlay: SolveOverlay | null | undefined,
+  layers: LayerToggles,
+): void {
+  if (!overlay) return;
+  const w = video.videoWidth || 1;
+  const h = video.videoHeight || 1;
+  if (w < 2 || h < 2) return;
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.width = `${video.clientWidth}px`;
+  canvas.style.height = `${video.clientHeight}px`;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  drawOverlayCore(ctx, w, h, overlay, layers);
 }

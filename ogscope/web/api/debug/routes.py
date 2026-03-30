@@ -1,6 +1,8 @@
 """
 调试控制台API路由
 """
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
@@ -26,6 +28,33 @@ async def get_debug_camera_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/debug/camera/runtime-overrides")
+async def get_debug_camera_runtime_overrides():
+    """获取运行时预览参数覆盖 / Get runtime preview overrides"""
+    try:
+        return await DebugCameraService.get_runtime_overrides()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/runtime-overrides/reset")
+async def reset_debug_camera_runtime_overrides():
+    """重置运行时预览参数覆盖 / Reset runtime preview overrides"""
+    try:
+        return await DebugCameraService.clear_runtime_overrides()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/runtime-overrides/apply-defaults")
+async def apply_debug_camera_runtime_overrides_as_defaults():
+    """确认将运行时预览参数写为系统默认 / Apply runtime overrides as system defaults"""
+    try:
+        return await DebugCameraService.apply_runtime_overrides_as_defaults()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/debug/camera/start")
 async def start_debug_camera():
     """启动调试相机 / Start the debug camera"""
@@ -39,25 +68,21 @@ async def start_debug_camera():
 async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
     """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-        camera = DebugCameraService.get_camera_instance()
-        if not camera or not camera.is_capturing:
-            raise HTTPException(status_code=503, detail="相机未运行")
-
-        import cv2
-        import numpy as np
-
         boundary = "frame"
 
         async def frame_generator():
+            last_frame_id = -1
             while True:
-                frame = camera.get_video_frame()
-                if frame is None:
-                    break
-                ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                if not ok:
+                code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
+                    "jpeg", quality
+                )
+                if code != 200 or data is None:
+                    await asyncio.sleep(0.05)
                     continue
-                data = buf.tobytes()
+                if frame_id == last_frame_id:
+                    await asyncio.sleep(0.03)
+                    continue
+                last_frame_id = frame_id
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/jpeg\r\n"
@@ -75,25 +100,21 @@ async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
 async def stream_debug_camera_lossless():
     """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-        camera = DebugCameraService.get_camera_instance()
-        if not camera or not camera.is_capturing:
-            raise HTTPException(status_code=503, detail="相机未运行")
-
-        import cv2
-        import numpy as np
-
         boundary = "frame"
 
         async def frame_generator():
+            last_frame_id = -1
             while True:
-                frame = camera.get_video_frame()
-                if frame is None:
-                    break
-                ok, buf = cv2.imencode('.png', frame)
-                if not ok:
+                code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
+                    "png", 100
+                )
+                if code != 200 or data is None:
+                    await asyncio.sleep(0.05)
                     continue
-                data = buf.tobytes()
+                if frame_id == last_frame_id:
+                    await asyncio.sleep(0.03)
+                    continue
+                last_frame_id = frame_id
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/png\r\n"
@@ -128,10 +149,10 @@ async def set_camera_rotation(rotation: int):
 
 
 @router.get("/debug/camera/preview")
-async def get_debug_camera_preview():
+async def get_debug_camera_preview(since_frame_id: int | None = Query(default=None)):
     """获取调试相机预览 / Get debug camera preview"""
     try:
-        return await DebugCameraService.get_preview()
+        return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
