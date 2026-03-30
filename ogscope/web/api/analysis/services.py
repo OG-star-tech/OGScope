@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,8 +23,12 @@ from ogscope.algorithms.plate_solve import (
 )
 from ogscope.algorithms.star_extract import StarExtractor
 from ogscope.config import get_settings
+from ogscope.web.api.analysis.lab_store import AnalysisLabStore
 from ogscope.web.api.models.schemas import (
+    AnalysisBatchSolveRequest,
+    AnalysisExperimentCreate,
     AnalysisExtractPreviewRequest,
+    AnalysisPresetCreate,
     AnalysisSolveImageRequest,
     CentroidParamsPayload,
 )
@@ -78,6 +83,7 @@ class AnalysisService:
         self.default_hint_ra = settings.solver_hint_ra_deg
         self.default_hint_dec = settings.solver_hint_dec_deg
         self._jobs: dict[str, AnalysisJob] = {}
+        self._lab = AnalysisLabStore(settings)
 
     def _centroid_params_from_payload(
         self, payload: CentroidParamsPayload | None
@@ -113,26 +119,30 @@ class AnalysisService:
                 continue
             if p.name.startswith("."):
                 continue
+            if p.name == "manifest.json":
+                continue
             st = p.stat()
-            files.append(
-                {
-                    "filename": p.name,
-                    "size": st.st_size,
-                    "modified_at": datetime.fromtimestamp(
-                        st.st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                }
-            )
+            base = {
+                "filename": p.name,
+                "size": st.st_size,
+                "modified_at": datetime.fromtimestamp(
+                    st.st_mtime, tz=timezone.utc
+                ).isoformat(),
+            }
+            files.append(self._lab.merge_list_entry(p.name, base))
         files.sort(key=lambda x: x["modified_at"], reverse=True)
         return {"upload_dir": str(root.resolve()), "files": files}
 
-    async def save_upload(self, filename: str, payload: bytes) -> dict[str, Any]:
+    async def save_upload(
+        self, filename: str, payload: bytes, source: str = "analysis_upload"
+    ) -> dict[str, Any]:
         """保存上传文件 / Save uploaded file"""
         safe_name = Path(filename).name
         if not safe_name:
             raise ValueError("文件名无效 / Invalid filename")
         target = self.upload_root / safe_name
         target.write_bytes(payload)
+        self._lab.set_file_source(safe_name, source)
         return {
             "success": True,
             "filename": safe_name,
@@ -156,13 +166,17 @@ class AnalysisService:
     ) -> dict[str, Any]:
         """创建并执行任务 / Create and execute job"""
         if input_type not in {"image", "video"}:
-            raise ValueError("input_type 仅支持 image 或 video / input_type must be image or video")
+            raise ValueError(
+                "input_type 仅支持 image 或 video / input_type must be image or video"
+            )
 
         source = self.upload_root / Path(input_name).name
         if not source.exists():
             raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
 
-        job = AnalysisJob(job_id=str(uuid.uuid4()), input_name=source.name, input_type=input_type)
+        job = AnalysisJob(
+            job_id=str(uuid.uuid4()), input_name=source.name, input_type=input_type
+        )
         self._jobs[job.job_id] = job
         self._persist_job(job)
         centroid_params = self._centroid_params_from_payload(centroid)
@@ -219,7 +233,9 @@ class AnalysisService:
             raise
         return job.to_dict()
 
-    async def solve_single_image(self, body: AnalysisSolveImageRequest) -> dict[str, Any]:
+    async def solve_single_image(
+        self, body: AnalysisSolveImageRequest
+    ) -> dict[str, Any]:
         """直接解算单图（JSON body）/ Solve a single image via JSON body."""
         source = self.upload_root / Path(body.input_name).name
         if not source.exists():
@@ -236,13 +252,118 @@ class AnalysisService:
             centroid_params=centroid_params,
             max_image_side=body.max_image_side,
         )
+        row = rows[0] if rows else None
+        if row:
+            self._lab.update_last_solve(
+                source.name,
+                self._metrics_from_solve_row(row),
+            )
         return {
             "success": True,
             "input_name": source.name,
-            "result": rows[0] if rows else None,
+            "result": row,
         }
 
-    async def extract_preview(self, body: AnalysisExtractPreviewRequest) -> dict[str, Any]:
+    @staticmethod
+    def _metrics_from_solve_row(row: dict[str, Any]) -> dict[str, Any]:
+        """提取列表与实验用指标 / Metrics for manifest and experiments."""
+        return {
+            "matches": row.get("matches"),
+            "rmse_arcsec": row.get("rmse_arcsec"),
+            "status": row.get("status"),
+            "prob": row.get("prob"),
+            "t_solve_ms": row.get("t_solve_ms"),
+        }
+
+    async def batch_solve(self, body: AnalysisBatchSolveRequest) -> dict[str, Any]:
+        """多组参数顺序解算同一文件 / Batch solve same file with multiple param sets."""
+        results: list[dict[str, Any]] = []
+        for run in body.runs:
+            params = run.params.model_dump(exclude_none=True)
+            req = AnalysisSolveImageRequest(
+                input_name=body.input_name,
+                **params,
+            )
+            try:
+                out = await self.solve_single_image(req)
+                results.append(
+                    {
+                        "label": run.label,
+                        "success": True,
+                        "result": out.get("result"),
+                        "input_name": out.get("input_name"),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                results.append(
+                    {
+                        "label": run.label,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                )
+        return {"input_name": body.input_name, "results": results}
+
+    def import_from_debug_capture(self, filename: str) -> dict[str, Any]:
+        """从 ~/dev_captures 复制到分析素材池并标记来源 / Copy debug capture into pool."""
+        src = Path.home() / "dev_captures" / Path(filename).name
+        if not src.is_file():
+            raise FileNotFoundError(
+                "调试采集文件不存在 / Debug capture file not found in dev_captures"
+            )
+        dst = self.upload_root / src.name
+        shutil.copy2(src, dst)
+        self._lab.set_file_source(dst.name, "debug_console")
+        return {
+            "success": True,
+            "filename": dst.name,
+            "size": dst.stat().st_size,
+        }
+
+    def list_presets(self, scope: str) -> dict[str, Any]:
+        """列出官方或用户预设 / List official or user presets."""
+        if scope not in {"official", "user"}:
+            raise ValueError(
+                "scope 须为 official 或 user / scope must be official or user"
+            )
+        return {"scope": scope, "presets": self._lab.list_presets(scope)}
+
+    def create_user_preset(self, body: AnalysisPresetCreate) -> dict[str, Any]:
+        """创建用户预设 / Create user preset."""
+        params = body.params.model_dump(exclude_none=True)
+        return self._lab.save_user_preset(body.name, params)
+
+    def delete_user_preset(self, preset_id: str) -> None:
+        """删除用户预设 / Delete user preset."""
+        self._lab.delete_user_preset(preset_id)
+
+    def create_experiment(self, body: AnalysisExperimentCreate) -> dict[str, Any]:
+        """保存实验记录 / Save experiment record."""
+        return self._lab.create_experiment(
+            input_name=body.input_name,
+            preset_label=body.preset_label,
+            result_json=body.result_json,
+            metrics=body.metrics,
+            thumbnail_png_base64=body.thumbnail_png_base64,
+        )
+
+    def list_experiments(
+        self, q: str | None, page: int, page_size: int
+    ) -> dict[str, Any]:
+        """分页实验列表 / Paginated experiments."""
+        return self._lab.list_experiments(q, page, page_size)
+
+    def export_experiments(self, fmt: str) -> str:
+        """导出实验记录 / Export experiments."""
+        if fmt == "json":
+            return self._lab.export_experiments_json()
+        if fmt == "csv":
+            return self._lab.export_experiments_csv()
+        raise ValueError("format 须为 json 或 csv / format must be json or csv")
+
+    async def extract_preview(
+        self, body: AnalysisExtractPreviewRequest
+    ) -> dict[str, Any]:
         """提星二值掩膜预览（不调 Tetra3 解算）/ Preview binary mask without plate solve."""
         source = self.upload_root / Path(body.input_name).name
         if not source.exists():
@@ -318,8 +439,12 @@ class AnalysisService:
         solved = self.solver.solve_from_bgr_frame(
             frame_bgr=frame,
             max_stars=self._solver_max_stars,
-            hint_ra_deg=hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra,
-            hint_dec_deg=hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec,
+            hint_ra_deg=(
+                hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra
+            ),
+            hint_dec_deg=(
+                hint_dec_deg if hint_dec_deg is not None else self.default_hint_dec
+            ),
             solve_source="full",
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,

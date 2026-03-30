@@ -124,7 +124,9 @@ def test_analysis_extract_preview(
 
 
 @pytest.mark.unit
-def test_analysis_video_job(client, temp_analysis_dir, mock_plate_solve, tmp_path: Path):
+def test_analysis_video_job(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
     """测试视频任务分析 / Test video job analysis."""
     video_path = tmp_path / "stars.mp4"
     _build_test_video(video_path)
@@ -159,3 +161,65 @@ def test_analysis_video_job(client, temp_analysis_dir, mock_plate_solve, tmp_pat
     result_data = result_resp.json()
     assert result_data["job_id"] == job_data["job_id"]
     assert len(result_data["results"]) > 0
+
+
+@pytest.mark.unit
+def test_analysis_list_presets_and_batch(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
+    """预设列表与批量解算 / Presets list and batch solve."""
+    image_path = tmp_path / "batch.jpg"
+    _build_star_image(image_path)
+    with image_path.open("rb") as f:
+        up = client.post(
+            "/api/analysis/upload",
+            files={"file": ("batch.jpg", f, "image/jpeg")},
+        )
+    assert up.status_code == 200
+
+    pr = client.get("/api/analysis/presets", params={"scope": "user"})
+    assert pr.status_code == 200
+    assert "presets" in pr.json()
+
+    create = client.post(
+        "/api/analysis/presets",
+        json={
+            "name": "test-preset",
+            "params": {"fov_estimate": 16.0, "solve_timeout_ms": 8000},
+        },
+    )
+    assert create.status_code == 200
+    pid = create.json()["id"]
+
+    batch = client.post(
+        "/api/analysis/solve/batch",
+        json={
+            "input_name": "batch.jpg",
+            "runs": [
+                {"label": "A", "params": {"fov_estimate": 16.0}},
+                {"label": "B", "params": {"fov_estimate": 15.0}},
+            ],
+        },
+    )
+    assert batch.status_code == 200
+    bj = batch.json()
+    assert bj["input_name"] == "batch.jpg"
+    assert len(bj["results"]) == 2
+
+    exp = client.post(
+        "/api/analysis/experiments",
+        json={
+            "input_name": "batch.jpg",
+            "preset_label": "A",
+            "result_json": {"ok": True},
+            "metrics": {"matches": 1},
+        },
+    )
+    assert exp.status_code == 200
+
+    el = client.get("/api/analysis/experiments", params={"page": 1, "page_size": 10})
+    assert el.status_code == 200
+    assert el.json()["total"] >= 1
+
+    dl = client.delete(f"/api/analysis/presets/{pid}")
+    assert dl.status_code == 200

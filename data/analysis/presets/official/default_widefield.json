@@ -1,0 +1,13 @@
+{
+  "id": "default_widefield",
+  "name": "默认广角 / Default widefield",
+  "scope": "official",
+  "params": {
+    "fov_estimate": 16.0,
+    "fov_max_error": 5.0,
+    "solve_timeout_ms": 8000,
+    "hint_ra_deg": 45.0,
+    "hint_dec_deg": 80.0
+  },
+  "created_at": "2026-01-01T00:00:00+00:00"
+}

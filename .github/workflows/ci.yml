@@ -37,6 +37,19 @@ jobs:
     - name: 安装依赖
       run: poetry install --no-interaction --no-root
 
+    - name: 设置 Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: "npm"
+        cache-dependency-path: web/analysis-ui/package-lock.json
+
+    - name: 构建星图解算实验室前端
+      run: |
+        cd web/analysis-ui
+        npm ci
+        npm run build
+
     - name: 代码格式检查 (Black)
       run: poetry run black --check ogscope tests
 

@@ -1,30 +1,33 @@
 """
 API 数据模型定义
 """
-from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CameraSettings(BaseModel):
     """相机设置 / camera settings"""
+
     exposure: int  # 曝光时间 (微秒) / Exposure time (microseconds)
-    gain: float    # 增益 / Gain
+    gain: float  # 增益 / Gain
     autoExposure: Optional[bool] = True  # 自动曝光开关 / automatic exposure switch
     digitalGain: Optional[float] = 1.0  # 数字增益 / digital gain
-    contrast: Optional[float] = 1.0     # 对比度 / Contrast
-    brightness: Optional[float] = 0.0   # 亮度 / brightness
-    saturation: Optional[float] = 1.0   # 饱和度 / saturation
-    sharpness: Optional[float] = 1.0    # 锐度 / sharpness
-    noiseReduction: Optional[int] = 0   # 降噪级别 (0-4) / Noise reduction level (0-4)
-    whiteBalanceMode: Optional[str] = 'auto'  # 白平衡模式 / white balance mode
+    contrast: Optional[float] = 1.0  # 对比度 / Contrast
+    brightness: Optional[float] = 0.0  # 亮度 / brightness
+    saturation: Optional[float] = 1.0  # 饱和度 / saturation
+    sharpness: Optional[float] = 1.0  # 锐度 / sharpness
+    noiseReduction: Optional[int] = 0  # 降噪级别 (0-4) / Noise reduction level (0-4)
+    whiteBalanceMode: Optional[str] = "auto"  # 白平衡模式 / white balance mode
     whiteBalanceGainR: Optional[float] = 1.0  # 白平衡红色增益 / white balance red gain
     whiteBalanceGainB: Optional[float] = 1.0  # 白平衡蓝色增益 / white balance blue gain
-    colorMode: Optional[str] = 'color'  # 颜色模式: 'color' | 'mono'
+    colorMode: Optional[str] = "color"  # 颜色模式: 'color' | 'mono'
 
 
 class CameraPreset(BaseModel):
     """相机预设 / camera presets"""
+
     name: str
     description: str = ""
     exposure_us: int
@@ -39,16 +42,17 @@ class CameraPreset(BaseModel):
     sharpness: Optional[float] = 1.0
     # 高级参数 / Advanced parameters
     noise_reduction: Optional[int] = 0
-    white_balance_mode: Optional[str] = 'auto'
+    white_balance_mode: Optional[str] = "auto"
     white_balance_gain_r: Optional[float] = 1.0
     white_balance_gain_b: Optional[float] = 1.0
     # 其他参数 / Other parameters
     rotation: Optional[int] = 180
-    color_mode: Optional[str] = 'color'  # 颜色模式: 'color' | 'mono'
+    color_mode: Optional[str] = "color"  # 颜色模式: 'color' | 'mono'
 
 
 class CaptureInfo(BaseModel):
     """拍摄信息 / Shooting information"""
+
     filename: str
     timestamp: str
     exposure_us: int
@@ -75,6 +79,7 @@ class SystemInfo(BaseModel):
 
 class AlignmentStatus(BaseModel):
     """校准状态 / calibration status"""
+
     status: str
     azimuth_error: float
     altitude_error: float
@@ -168,3 +173,62 @@ class AnalysisJobStatusResponse(BaseModel):
     progress: float
     message: str = ""
     result_path: Optional[str] = None
+
+
+class AnalysisSolveParamsOnly(BaseModel):
+    """解算参数（不含文件名，用于预设与批量）/ Solve params without input filename."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hint_ra_deg: Optional[float] = None
+    hint_dec_deg: Optional[float] = None
+    fov_estimate: Optional[float] = None
+    fov_max_error: Optional[float] = None
+    solve_timeout_ms: Optional[int] = None
+    centroid: Optional[CentroidParamsPayload] = None
+    max_image_side: Optional[int] = None
+
+
+class BatchSolveRunItem(BaseModel):
+    """批量解算单轮 / One batch solve run."""
+
+    label: str
+    params: AnalysisSolveParamsOnly
+
+
+class AnalysisBatchSolveRequest(BaseModel):
+    """批量解算请求 / Batch plate solve request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_name: str
+    runs: list[BatchSolveRunItem]
+
+
+class AnalysisPresetCreate(BaseModel):
+    """用户预设创建 / User preset create."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    params: AnalysisSolveParamsOnly
+
+
+class AnalysisExperimentCreate(BaseModel):
+    """实验记录保存 / Save experiment record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_name: str
+    preset_label: str
+    result_json: dict[str, Any]
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    thumbnail_png_base64: Optional[str] = None
+
+
+class ImportFromDebugRequest(BaseModel):
+    """从调试采集目录导入到分析素材池 / Import capture into analysis pool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str

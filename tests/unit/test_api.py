@@ -1,6 +1,7 @@
 """
 Web API 单元测试
 """
+
 import pytest
 
 
@@ -19,7 +20,7 @@ def test_debug_analysis_page(client):
     response = client.get("/debug/analysis")
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
-    assert "星图解算工作台" in response.text
+    assert "星图解算" in response.text
 
 
 @pytest.mark.unit
@@ -40,7 +41,6 @@ def test_app_api_root(client):
     data = response.json()
     assert data["status"] == "running"
     assert data["docs"] == "/docs"
-
 
 
 @pytest.mark.unit
@@ -70,4 +70,3 @@ def test_system_info(client):
     assert "wifi_interface" in data
     assert "uptime_seconds" in data
     assert "load_average_1m" in data
-

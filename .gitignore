@@ -38,6 +38,11 @@ venv.bak/
 .python-version
 
 # ====================
+# Node (星图解算实验室前端 / Analysis lab UI)
+# ====================
+web/analysis-ui/node_modules/
+
+# ====================
 # Poetry
 # ====================
 poetry.lock  # 在开发机和 Orange Pi 上可能不一致，建议忽略

@@ -138,4 +138,12 @@ def temp_analysis_dir(tmp_path: Path):
     analysis_service.jobs_root = jobs_root
     analysis_service.results_root = results_root
     analysis_service._jobs = {}
+    # 与实验室清单/实验记录目录一致 / Align lab manifest & experiments with temp dirs
+    lab = analysis_service._lab
+    lab.upload_root = upload_root
+    lab.experiments_root = analysis_root / "experiments"
+    lab.presets_official = analysis_root / "presets" / "official"
+    lab.presets_user = analysis_root / "presets" / "user"
+    for p in (lab.experiments_root, lab.presets_official, lab.presets_user):
+        p.mkdir(parents=True, exist_ok=True)
     return analysis_root

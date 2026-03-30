@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 
 from ogscope.__version__ import __version__
@@ -138,9 +138,10 @@ async def debug_console(request: Request):
 
 @app.get("/debug/analysis", response_class=HTMLResponse)
 async def debug_analysis_console(request: Request):
-    """星图解算调试页面 / Plate solve debug page"""
-    # 使用静态文件 mtime 作为查询参数，避免浏览器长期缓存旧 JS/CSS 导致按钮无响应
-    # Use static file mtimes as query params so browsers do not keep stale JS/CSS forever
+    """星图解算实验室（Vite 构建 SPA）或回退旧模板 / Analysis lab SPA or legacy template."""
+    lab_index = settings.static_dir / "analysis-lab" / "index.html"
+    if lab_index.is_file():
+        return FileResponse(lab_index)
     da_js = settings.static_dir / "js" / "debug-analysis.js"
     da_css = settings.static_dir / "css" / "debug-analysis.css"
     debug_analysis_assets_version = f"{_asset_stamp(da_js)}-{_asset_stamp(da_css)}"
