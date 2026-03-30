@@ -9,8 +9,8 @@ import json
 import shutil
 import time
 import uuid
-from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -312,6 +312,7 @@ class AnalysisService:
         solve_timeout_ms: int | None = None,
         centroid: CentroidParamsPayload | None = None,
         max_image_side: int | None = None,
+        large_scale_bg_subtract: bool = False,
     ) -> dict[str, Any]:
         """创建并执行任务 / Create and execute job"""
         if input_type not in {"image", "video"}:
@@ -348,6 +349,7 @@ class AnalysisService:
                     centroid_params,
                     max_image_side,
                     None,
+                    large_scale_bg_subtract,
                 )
             else:
                 results = await loop.run_in_executor(
@@ -401,6 +403,8 @@ class AnalysisService:
             )
         )
 
+        ls_bg = bool(body.large_scale_bg_subtract)
+
         def _run_single() -> list[dict[str, Any]]:
             return self._analyze_image(
                 source=source,
@@ -412,6 +416,7 @@ class AnalysisService:
                 centroid_params=centroid_params,
                 max_image_side=body.max_image_side,
                 max_stars=max_stars,
+                large_scale_bg_subtract=ls_bg,
             )
 
         def _run_two_stage() -> list[dict[str, Any]]:
@@ -430,6 +435,7 @@ class AnalysisService:
                 centroid_params=speed_centroid,
                 max_image_side=body.max_image_side,
                 max_stars=speed_max_stars,
+                large_scale_bg_subtract=ls_bg,
             )
             row0 = first[0] if first else None
             if row0 and row0.get("status") == "MATCH_FOUND":
@@ -454,6 +460,7 @@ class AnalysisService:
                 centroid_params=robust_centroid,
                 max_image_side=body.max_image_side,
                 max_stars=robust_max_stars,
+                large_scale_bg_subtract=ls_bg,
             )
             if second:
                 second[0]["solve_profile"] = "robust"
@@ -637,6 +644,8 @@ class AnalysisService:
                 max_stars=self._solver_max_stars,
                 centroid_params=centroid_params,
                 max_image_side=int(max_side),
+                large_scale_bg_subtract=bool(body.large_scale_bg_subtract),
+                downsample_max_side=int(settings.solver_large_scale_bg_downsample),
             )
 
         return await asyncio.to_thread(_run)
@@ -681,6 +690,7 @@ class AnalysisService:
         centroid_params: CentroidExtractionParams | None = None,
         max_image_side: int | None = None,
         max_stars: int | None = None,
+        large_scale_bg_subtract: bool = False,
     ) -> dict[str, Any]:
         """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
         solved = self.solver.solve_from_bgr_frame(
@@ -700,6 +710,7 @@ class AnalysisService:
             solve_timeout_ms=solve_timeout_ms,
             centroid_params=centroid_params,
             max_image_side=max_image_side,
+            large_scale_bg_subtract=large_scale_bg_subtract,
         )
         return {"frame_index": 0, **solved.to_dict()}
 
@@ -714,6 +725,7 @@ class AnalysisService:
         centroid_params: CentroidExtractionParams | None = None,
         max_image_side: int | None = None,
         max_stars: int | None = None,
+        large_scale_bg_subtract: bool = False,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         t_total = time.perf_counter()
@@ -732,6 +744,7 @@ class AnalysisService:
             centroid_params=centroid_params,
             max_image_side=max_image_side,
             max_stars=max_stars,
+            large_scale_bg_subtract=large_scale_bg_subtract,
         )
         row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
         row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
@@ -841,6 +854,7 @@ class AnalysisService:
                 centroid_params,
                 body.max_image_side,
                 max_stars,
+                bool(body.large_scale_bg_subtract),
             )
 
         row = await loop.run_in_executor(self._solver_executor, _run)
@@ -871,6 +885,7 @@ class AnalysisService:
             "camera_fps": s.camera_fps,
             "solver_fov_deg": s.solver_fov_deg,
             "solver_max_image_side": s.solver_max_image_side,
+            "solver_large_scale_bg_downsample": s.solver_large_scale_bg_downsample,
             "solve_profile_default": _SOLVE_PROFILE_DEFAULT,
             "solve_profiles": list(_SOLVE_PROFILE_OVERRIDES.keys()),
         }

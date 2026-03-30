@@ -89,6 +89,8 @@
   "params.maxSide": "提星前长边上界 (px)",
   "params.maxSideHelp": "降采样长边上限，大图可加速提星。",
   "params.detailLevelFull": "包含完整 Tetra3 原始结果（体积略大，仅调试时开启）",
+  "params.largeScaleBg": "大尺度背景减除",
+  "params.largeScaleBgHelp": "在提星前用低分辨率平滑估计并校正大尺度亮度不均，可减轻角部光晕导致的假星；默认关闭以保持与过往行为一致。",
   "params.sigma": "σ（阈值倍数）",
   "params.sigmaHelp": "高于背景噪声倍数的区域视为星点候选。",
   "params.maxArea": "max_area",

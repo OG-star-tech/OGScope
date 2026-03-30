@@ -128,6 +128,7 @@ class AnalysisSolveImageRequest(BaseModel):
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    large_scale_bg_subtract: Optional[bool] = False
     # 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level
     detail_level: Optional[Literal["summary", "full"]] = "summary"
 
@@ -140,6 +141,7 @@ class AnalysisExtractPreviewRequest(BaseModel):
     input_name: str
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    large_scale_bg_subtract: Optional[bool] = False
 
 
 class AnalysisJobCreateRequest(BaseModel):
@@ -156,6 +158,7 @@ class AnalysisJobCreateRequest(BaseModel):
     solve_timeout_ms: Optional[int] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    large_scale_bg_subtract: Optional[bool] = False
 
 
 class SolveFrameResult(BaseModel):
@@ -191,6 +194,7 @@ class AnalysisSolveParamsOnly(BaseModel):
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    large_scale_bg_subtract: Optional[bool] = False
     detail_level: Optional[Literal["summary", "full"]] = "summary"
 
 
@@ -251,6 +255,7 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    large_scale_bg_subtract: Optional[bool] = False
     detail_level: Optional[Literal["summary", "full"]] = "summary"
 
 

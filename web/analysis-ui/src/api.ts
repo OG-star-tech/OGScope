@@ -28,6 +28,8 @@ export type SolveParams = {
   solve_profile?: "speed" | "balanced" | "robust" | null;
   centroid?: CentroidParams | null;
   max_image_side?: number | null;
+  /** 提星前大尺度背景减除（角部光晕等）/ Large-scale BG flatten before centroiding */
+  large_scale_bg_subtract?: boolean | null;
   /** 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level */
   detail_level?: "summary" | "full" | null;
 };
@@ -255,6 +257,7 @@ export type LabPublicSettings = {
   camera_fps: number;
   solver_fov_deg: number;
   solver_max_image_side: number;
+  solver_large_scale_bg_downsample?: number;
 };
 
 export async function fetchLabSettings(): Promise<LabPublicSettings> {

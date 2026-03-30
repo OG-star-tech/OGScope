@@ -123,6 +123,12 @@ class Settings(BaseSettings):
         default=1600,
         description="提星前长边上限（像素），与默认采集长边对齐 / Max long side before extraction",
     )
+    solver_large_scale_bg_downsample: int = Field(
+        default=256,
+        ge=32,
+        le=2048,
+        description="大尺度背景减除：小图长边上限（像素），越小越快 / Large-scale BG downsample max side",
+    )
     star_analysis_target_fps: float = Field(
         default=1.5,
         description="星空分析目标帧率（1–2），仅用于前端节流 / Target star-analysis FPS for UI throttle",

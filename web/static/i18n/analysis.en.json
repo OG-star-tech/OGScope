@@ -103,6 +103,8 @@
   "params.maxSide": "Max long side before extract (px)",
   "params.maxSideHelp": "Downscale long edge for faster centroid extraction.",
   "params.detailLevelFull": "Include full Tetra3 raw block (larger payload, for debugging only).",
+  "params.largeScaleBg": "Large-scale background flattening",
+  "params.largeScaleBgHelp": "Before centroiding, estimate a low-frequency background on a downscaled image and correct uneven illumination (e.g. corner glow). Off by default to match legacy behavior.",
   "params.sigma": "σ threshold",
   "params.sigmaHelp": "Multiplier over background noise for star candidates.",
   "params.maxArea": "max_area",

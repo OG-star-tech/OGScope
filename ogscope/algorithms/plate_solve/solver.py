@@ -152,17 +152,54 @@ def resize_bgr_for_extraction(
     return img, (h0, w0)
 
 
+def subtract_large_scale_background_bgr(
+    frame_bgr: np.ndarray,
+    *,
+    downsample_max_side: int,
+) -> np.ndarray:
+    """低分辨率估计大尺度背景并做亮度校正，减轻角部光晕等渐变 / Fast large-scale flat removal.
+
+    在小图上高斯平滑得到低频背景，上采样后与灰度相减，再按比例映射回 BGR，便于 Tetra3 提星。
+    Estimates low-frequency background on a downscaled image, subtracts in luminance, scales RGB.
+    """
+    if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
+        return frame_bgr
+    h, w = int(frame_bgr.shape[0]), int(frame_bgr.shape[1])
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    side = max(h, w)
+    sc = min(1.0, float(downsample_max_side) / float(side))
+    sw = max(1, int(round(w * sc)))
+    sh = max(1, int(round(h * sc)))
+    small = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA)
+    sigma_s = max(2.0, float(min(sw, sh)) / 32.0)
+    bg_small = cv2.GaussianBlur(small, (0, 0), sigmaX=sigma_s, sigmaY=sigma_s)
+    bg = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+    mean_gray = float(np.mean(gray))
+    corr = gray - bg + mean_gray
+    corr = np.clip(corr, 1e-3, 255.0)
+    ratio = corr / np.maximum(gray, 1e-3)
+    ratio = np.clip(ratio, 0.0, 4.0)
+    out = frame_bgr.astype(np.float32) * ratio[..., np.newaxis]
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
 def centroid_extraction_preview(
     frame_bgr: np.ndarray,
     *,
     max_stars: int,
     centroid_params: CentroidExtractionParams,
     max_image_side: int,
+    large_scale_bg_subtract: bool = False,
+    downsample_max_side: int = 256,
 ) -> dict[str, Any]:
     """提星预览：二值掩膜 PNG（base64），不解算 Tetra3 / Preview extraction mask without plate solve."""
     from tetra3 import get_centroids_from_image  # noqa: PLC0415
 
     img, (h0, w0) = resize_bgr_for_extraction(frame_bgr, max_image_side)
+    if large_scale_bg_subtract:
+        img = subtract_large_scale_background_bgr(
+            img, downsample_max_side=downsample_max_side
+        )
     height, width = int(img.shape[0]), int(img.shape[1])
     rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb)
@@ -226,6 +263,7 @@ class SolveResult:
     t_solve_ms: float | None
     t_extract_ms: float | None
     t_preprocess_ms: float | None
+    large_scale_bg_subtract: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
     # 原图像素系下的叠加数据（与 Canvas x,y 一致）/ Overlay in original image pixels (Canvas x,y)
     solve_overlay: dict[str, Any] | None = None
@@ -246,6 +284,7 @@ class SolveResult:
             "t_solve_ms": self.t_solve_ms,
             "t_extract_ms": self.t_extract_ms,
             "t_preprocess_ms": self.t_preprocess_ms,
+            "large_scale_bg_subtract": self.large_scale_bg_subtract,
         }
         if self.solve_overlay is not None:
             base["solve_overlay"] = _json_safe(self.solve_overlay)
@@ -317,6 +356,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=None,
                 t_preprocess_ms=None,
+                large_scale_bg_subtract=False,
                 raw={"reason": "need_at_least_4_stars"},
                 solve_overlay=overlay,
             )
@@ -350,6 +390,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=None,
                 t_preprocess_ms=None,
+                large_scale_bg_subtract=False,
                 raw={"error": str(exc)},
             )
 
@@ -374,11 +415,13 @@ class PlateSolver:
         solve_timeout_ms: int | None = None,
         max_image_side: int | None = None,
         centroid_params: CentroidExtractionParams | None = None,
+        large_scale_bg_subtract: bool = False,
     ) -> SolveResult:
         """与 Tetra3 ``solve_from_image`` 等价：内置 ``get_centroids_from_image`` + ``solve_from_centroids``.
 
         Cedar-Solve / 官方示例走此提星链（局部背景减除、σ 阈值、连通域矩心），非 OpenCV OTSU。
         Same pipeline as Tetra3 ``solve_from_image`` (local bg, sigma threshold, scipy labeling).
+        可选在提星前做大尺度背景减除（角部光晕等）/ Optional large-scale BG flattening before centroiding.
         """
         del hint_ra_deg, hint_dec_deg
         from tetra3 import get_centroids_from_image  # noqa: PLC0415 — vendor path
@@ -396,6 +439,11 @@ class PlateSolver:
         )
         t0_preprocess = time.perf_counter()
         img, (h0, w0) = resize_bgr_for_extraction(frame_bgr, side_cap)
+        if large_scale_bg_subtract:
+            img = subtract_large_scale_background_bgr(
+                img,
+                downsample_max_side=int(settings.solver_large_scale_bg_downsample),
+            )
         height, width = int(img.shape[0]), int(img.shape[1])
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(rgb)
@@ -431,6 +479,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=None,
                 t_preprocess_ms=t_preprocess_ms,
+                large_scale_bg_subtract=large_scale_bg_subtract,
                 raw={"error": str(exc)},
             )
         t_extract_ms = (time.perf_counter() - t0) * 1000.0
@@ -458,6 +507,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=t_extract_ms,
                 t_preprocess_ms=t_preprocess_ms,
+                large_scale_bg_subtract=large_scale_bg_subtract,
                 raw={"reason": "need_at_least_4_stars"},
                 solve_overlay=overlay,
             )
@@ -488,6 +538,7 @@ class PlateSolver:
                 t_solve_ms=None,
                 t_extract_ms=t_extract_ms,
                 t_preprocess_ms=t_preprocess_ms,
+                large_scale_bg_subtract=large_scale_bg_subtract,
                 raw={"error": str(exc)},
             )
 
@@ -500,6 +551,7 @@ class PlateSolver:
             centroids_yx=np.asarray(centroids, dtype=np.float64),
             frame_shape_original=(h0, w0),
             solve_shape=(height, width),
+            large_scale_bg_subtract=large_scale_bg_subtract,
         )
 
 
@@ -565,6 +617,7 @@ def _tetra_dict_to_result(
     centroids_yx: np.ndarray | None = None,
     frame_shape_original: tuple[int, int] | None = None,
     solve_shape: tuple[int, int] | None = None,
+    large_scale_bg_subtract: bool = False,
 ) -> SolveResult:
     """Tetra 返回 dict → SolveResult / Map Tetra output dict to SolveResult."""
     st = out.get("status")
@@ -603,6 +656,7 @@ def _tetra_dict_to_result(
         t_solve_ms=_maybe_float(out.get("T_solve")),
         t_extract_ms=_maybe_float(out.get("T_extract")),
         t_preprocess_ms=_maybe_float(out.get("T_preprocess")),
+        large_scale_bg_subtract=large_scale_bg_subtract,
         raw=raw,
         solve_overlay=overlay,
     )

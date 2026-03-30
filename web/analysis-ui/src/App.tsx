@@ -65,6 +65,7 @@ const defaultParams = (): SolveParams => ({
   solve_timeout_ms: 1500,
   solve_profile: "balanced",
   max_image_side: 1600,
+  large_scale_bg_subtract: false,
   detail_level: "summary",
   centroid: {
     sigma: 2.5,
@@ -1703,6 +1704,27 @@ export default function App() {
                         />
                         <span className="text-[10px] text-on-surface-variant">
                           {t("params.detailLevelFull")}
+                        </span>
+                      </label>
+                      <label className="mt-1.5 flex cursor-pointer items-start gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-primary mt-0.5"
+                          checked={!!params.large_scale_bg_subtract}
+                          onChange={(e) =>
+                            setParams((p) => ({
+                              ...p,
+                              large_scale_bg_subtract: e.target.checked,
+                            }))
+                          }
+                        />
+                        <span>
+                          <span className="text-[10px] text-on-surface-variant">
+                            {t("params.largeScaleBg")}
+                          </span>
+                          <p className="mt-0.5 text-[9px] leading-snug text-on-surface-variant/85">
+                            {t("params.largeScaleBgHelp")}
+                          </p>
                         </span>
                       </label>
                     </div>
