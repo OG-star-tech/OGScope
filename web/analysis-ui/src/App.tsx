@@ -62,8 +62,10 @@ const defaultParams = (): SolveParams => ({
   hint_dec_deg: 80,
   fov_estimate: 11,
   fov_max_error: undefined,
-  solve_timeout_ms: 3000,
+  solve_timeout_ms: 1500,
+  solve_profile: "balanced",
   max_image_side: 1600,
+  detail_level: "summary",
   centroid: {
     sigma: 2.5,
     max_area: 400,
@@ -1205,6 +1207,50 @@ export default function App() {
                                 </p>
                               </div>
                             )}
+                            {(solveHud.tBackendTotalMs != null ||
+                              solveHud.tOpenDecodeMs != null ||
+                              solveHud.tPreprocessMs != null ||
+                              solveHud.tExtractMs != null ||
+                              solveHud.tSolveMs != null) && (
+                              <div className="space-y-0.5 border-t border-outline-variant/10 pt-1">
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-on-surface-variant">
+                                    {t("lab.metric.backendTotalMs")}
+                                  </span>
+                                  <span className="font-mono tabular-nums">
+                                    {solveHud.tBackendTotalMs != null
+                                      ? `${solveHud.tBackendTotalMs.toFixed(0)} ms`
+                                      : t("common.placeholder")}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[8px] text-on-surface-variant/90">
+                                  <span>
+                                    {t("lab.metric.openDecodeMs")}:{" "}
+                                    {solveHud.tOpenDecodeMs != null
+                                      ? `${solveHud.tOpenDecodeMs.toFixed(0)} ms`
+                                      : t("common.placeholder")}
+                                  </span>
+                                  <span>
+                                    {t("lab.metric.preprocessMs")}:{" "}
+                                    {solveHud.tPreprocessMs != null
+                                      ? `${solveHud.tPreprocessMs.toFixed(0)} ms`
+                                      : t("common.placeholder")}
+                                  </span>
+                                  <span>
+                                    {t("lab.metric.extractMs")}:{" "}
+                                    {solveHud.tExtractMs != null
+                                      ? `${solveHud.tExtractMs.toFixed(0)} ms`
+                                      : t("common.placeholder")}
+                                  </span>
+                                  <span>
+                                    {t("lab.metric.solveOnlyMs")}:{" "}
+                                    {solveHud.tSolveMs != null
+                                      ? `${solveHud.tSolveMs.toFixed(0)} ms`
+                                      : t("common.placeholder")}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                             {(solveHud.raDeg != null || solveHud.decDeg != null) && (
                               <div className="leading-tight">
                                 <span className="text-on-surface-variant">
@@ -1582,6 +1628,31 @@ export default function App() {
                       {t("params.blockSolveIntro")}
                     </p>
                     <div className="space-y-2">
+                      <label className="block">
+                        <span className="text-[10px] font-medium text-on-surface-variant">
+                          {t("params.solveProfile")}
+                        </span>
+                        <p className="mb-1 mt-0.5 text-[9px] leading-snug text-on-surface-variant/85">
+                          {t("params.solveProfileHelp")}
+                        </p>
+                        <select
+                          className="w-full rounded bg-surface-container-highest px-2 py-1"
+                          value={params.solve_profile ?? "balanced"}
+                          onChange={(e) =>
+                            setParams((p) => ({
+                              ...p,
+                              solve_profile: e.target.value as
+                                | "speed"
+                                | "balanced"
+                                | "robust",
+                            }))
+                          }
+                        >
+                          <option value="speed">{t("params.solveProfileSpeed")}</option>
+                          <option value="balanced">{t("params.solveProfileBalanced")}</option>
+                          <option value="robust">{t("params.solveProfileRobust")}</option>
+                        </select>
+                      </label>
                       <Field
                         label={t("params.fov")}
                         helpKey="params.fovHelp"
@@ -1618,6 +1689,22 @@ export default function App() {
                         value={params.max_image_side ?? ""}
                         onChange={(v) => setParams((p) => ({ ...p, max_image_side: v }))}
                       />
+                      <label className="mt-1.5 flex cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-primary"
+                          checked={params.detail_level === "full"}
+                          onChange={(e) =>
+                            setParams((p) => ({
+                              ...p,
+                              detail_level: e.target.checked ? "full" : "summary",
+                            }))
+                          }
+                        />
+                        <span className="text-[10px] text-on-surface-variant">
+                          {t("params.detailLevelFull")}
+                        </span>
+                      </label>
                     </div>
                   </div>
                 </details>
@@ -1953,11 +2040,43 @@ function SolveFooterSummary({
   return (
     <div className="mt-2 space-y-2 text-[10px]">
       <div className="grid grid-cols-2 gap-2">
+        {s.tBackendTotalMs != null && (
+          <div>
+            <div className="text-on-surface-variant">{t("lab.metric.backendTotalMs")}</div>
+            <div className="font-semibold tabular-nums text-on-surface">
+              {s.tBackendTotalMs.toFixed(0)} ms
+            </div>
+          </div>
+        )}
         {s.tSolveMs != null && (
           <div>
             <div className="text-on-surface-variant">{t("lab.metric.solveComputeMs")}</div>
             <div className="font-semibold tabular-nums text-on-surface">
               {s.tSolveMs.toFixed(0)} ms
+            </div>
+          </div>
+        )}
+        {s.tOpenDecodeMs != null && (
+          <div>
+            <div className="text-on-surface-variant">{t("lab.metric.openDecodeMs")}</div>
+            <div className="font-semibold tabular-nums text-on-surface">
+              {s.tOpenDecodeMs.toFixed(0)} ms
+            </div>
+          </div>
+        )}
+        {s.tPreprocessMs != null && (
+          <div>
+            <div className="text-on-surface-variant">{t("lab.metric.preprocessMs")}</div>
+            <div className="font-semibold tabular-nums text-on-surface">
+              {s.tPreprocessMs.toFixed(0)} ms
+            </div>
+          </div>
+        )}
+        {s.tExtractMs != null && (
+          <div>
+            <div className="text-on-surface-variant">{t("lab.metric.extractMs")}</div>
+            <div className="font-semibold tabular-nums text-on-surface">
+              {s.tExtractMs.toFixed(0)} ms
             </div>
           </div>
         )}

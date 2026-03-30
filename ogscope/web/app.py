@@ -43,7 +43,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 f"启动时相机预热失败，将在首次请求时重试 / Camera warm-up failed, retry on demand: {e}"
             )
 
+    async def _warm_solver() -> None:
+        try:
+            from ogscope.algorithms.plate_solve.solver import warmup_tetra3
+
+            await asyncio.to_thread(warmup_tetra3)
+            logger.info("解算器已预热 / Plate solver warmed up")
+        except Exception as e:
+            logger.warning(
+                f"启动时解算器预热失败，将在首次解算时重试 / Solver warm-up failed, retry on first solve: {e}"
+            )
+
     asyncio.create_task(_warm_camera())
+    # 解算器预热改为启动阶段阻塞完成，避免首个解算请求与后台预热竞态导致“第一次明显变慢”
+    # Warm the solver synchronously during startup to avoid first-request cold-start race.
+    await _warm_solver()
 
     yield
 

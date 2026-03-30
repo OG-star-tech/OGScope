@@ -125,8 +125,11 @@ class AnalysisSolveImageRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    # 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level
+    detail_level: Optional[Literal["summary", "full"]] = "summary"
 
 
 class AnalysisExtractPreviewRequest(BaseModel):
@@ -185,8 +188,10 @@ class AnalysisSolveParamsOnly(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    detail_level: Optional[Literal["summary", "full"]] = "summary"
 
 
 class BatchSolveRunItem(BaseModel):
@@ -243,8 +248,10 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
+    detail_level: Optional[Literal["summary", "full"]] = "summary"
 
 
 class ImportFromDebugRequest(BaseModel):

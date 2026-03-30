@@ -2,6 +2,10 @@
 
 export type SolveSummary = {
   tSolveMs: number | null;
+  tExtractMs: number | null;
+  tPreprocessMs: number | null;
+  tOpenDecodeMs: number | null;
+  tBackendTotalMs: number | null;
   raDeg: number | null;
   decDeg: number | null;
   matches: number | null;
@@ -18,6 +22,10 @@ export function parseSolveResult(
   if (!r) {
     return {
       tSolveMs: null,
+      tExtractMs: null,
+      tPreprocessMs: null,
+      tOpenDecodeMs: null,
+      tBackendTotalMs: null,
       raDeg: null,
       decDeg: null,
       matches: null,
@@ -28,6 +36,10 @@ export function parseSolveResult(
   }
   return {
     tSolveMs: num(r.t_solve_ms),
+    tExtractMs: num(r.t_extract_ms),
+    tPreprocessMs: num(r.t_preprocess_ms),
+    tOpenDecodeMs: num(r.t_open_decode_ms),
+    tBackendTotalMs: num(r.t_backend_total_ms),
     raDeg: num(r.ra_deg),
     decDeg: num(r.dec_deg),
     matches: num(r.matches),

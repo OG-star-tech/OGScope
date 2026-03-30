@@ -7,8 +7,10 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,43 @@ from ogscope.web.api.models.schemas import (
     AnalysisSolveVideoFrameRequest,
     CentroidParamsPayload,
 )
+
+_SOLVE_PROFILE_DEFAULT = "balanced"
+_SOLVE_PROFILE_OVERRIDES: dict[str, dict[str, Any]] = {
+    "speed": {
+        "timeout_ms": 1000,
+        "max_stars": 40,
+        "centroid": {
+            "sigma": 3.4,
+            "min_area": 8,
+            "max_area": 280,
+            "binary_open": True,
+            "max_axis_ratio": 2.2,
+        },
+    },
+    "balanced": {
+        "timeout_ms": 1500,
+        "max_stars": 60,
+        "centroid": {
+            "sigma": 3.0,
+            "min_area": 6,
+            "max_area": 360,
+            "binary_open": True,
+            "max_axis_ratio": 2.8,
+        },
+    },
+    "robust": {
+        "timeout_ms": 3000,
+        "max_stars": 90,
+        "centroid": {
+            "sigma": 2.5,
+            "min_area": 4,
+            "max_area": 500,
+            "binary_open": True,
+            "max_axis_ratio": None,
+        },
+    },
+}
 
 
 def _merge_debug_style_sidecar_into_info(
@@ -107,6 +146,10 @@ class AnalysisService:
         self.upload_root.mkdir(parents=True, exist_ok=True)
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
+        # 解算专用线程池（避免与相机预览等争用默认线程池）/ Dedicated executor for solving tasks
+        self._solver_executor = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="solver"
+        )
         self._solver_max_stars = settings.solver_max_stars
         self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
         self.solver = PlateSolver(
@@ -127,6 +170,34 @@ class AnalysisService:
             return None
         base = CentroidExtractionParams.from_settings(get_settings())
         return merge_centroid_params(base, payload.model_dump(exclude_none=True))
+
+    def _resolve_solve_profile(
+        self,
+        profile_name: str | None,
+        payload: CentroidParamsPayload | None,
+        solve_timeout_ms: int | None,
+    ) -> tuple[CentroidExtractionParams, int, int, str]:
+        """解析解算分档并返回参数 / Resolve solve profile into concrete params."""
+        settings = get_settings()
+        effective = str(profile_name or _SOLVE_PROFILE_DEFAULT).lower()
+        if effective not in _SOLVE_PROFILE_OVERRIDES:
+            effective = _SOLVE_PROFILE_DEFAULT
+
+        profile_cfg = _SOLVE_PROFILE_OVERRIDES[effective]
+        base = CentroidExtractionParams.from_settings(settings)
+        centroid = merge_centroid_params(base, profile_cfg.get("centroid", {}))
+        if payload is not None:
+            centroid = merge_centroid_params(
+                centroid, payload.model_dump(exclude_none=True)
+            )
+
+        max_stars = int(profile_cfg.get("max_stars", self._solver_max_stars))
+        timeout_ms = int(
+            solve_timeout_ms
+            if solve_timeout_ms is not None
+            else profile_cfg.get("timeout_ms", settings.solver_timeout_ms)
+        )
+        return centroid, max(4, max_stars), max(200, timeout_ms), effective
 
     def resolve_upload_path(self, filename: str) -> Path:
         """解析上传目录内安全路径（仅单层文件名）/ Safe path under upload_root (basename only)."""
@@ -263,30 +334,34 @@ class AnalysisService:
             job.status = "running"
             job.message = "开始分析 / Analysis started"
             self._persist_job(job)
+            loop = asyncio.get_running_loop()
             if input_type == "image":
-                results = await asyncio.to_thread(
+                results = await loop.run_in_executor(
+                    self._solver_executor,
                     self._analyze_image,
-                    source=source,
-                    hint_ra_deg=hint_ra_deg,
-                    hint_dec_deg=hint_dec_deg,
-                    fov_estimate=fov_estimate,
-                    fov_max_error=fov_max_error,
-                    solve_timeout_ms=solve_timeout_ms,
-                    centroid_params=centroid_params,
-                    max_image_side=max_image_side,
+                    source,
+                    hint_ra_deg,
+                    hint_dec_deg,
+                    fov_estimate,
+                    fov_max_error,
+                    solve_timeout_ms,
+                    centroid_params,
+                    max_image_side,
+                    None,
                 )
             else:
-                results = await asyncio.to_thread(
+                results = await loop.run_in_executor(
+                    self._solver_executor,
                     self._analyze_video,
-                    source=source,
-                    hint_ra_deg=hint_ra_deg,
-                    hint_dec_deg=hint_dec_deg,
-                    frame_step=frame_step,
-                    max_frames=max_frames,
-                    job=job,
-                    fov_estimate=fov_estimate,
-                    fov_max_error=fov_max_error,
-                    solve_timeout_ms=solve_timeout_ms,
+                    source,
+                    hint_ra_deg,
+                    hint_dec_deg,
+                    frame_step,
+                    max_frames,
+                    job,
+                    fov_estimate,
+                    fov_max_error,
+                    solve_timeout_ms,
                 )
             result_path = self.results_root / f"{job.job_id}.json"
             result_payload = {
@@ -318,19 +393,89 @@ class AnalysisService:
         source = self.upload_root / Path(body.input_name).name
         if not source.exists():
             raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
-        centroid_params = self._centroid_params_from_payload(body.centroid)
-        rows = await asyncio.to_thread(
-            self._analyze_image,
-            source=source,
-            hint_ra_deg=body.hint_ra_deg,
-            hint_dec_deg=body.hint_dec_deg,
-            fov_estimate=body.fov_estimate,
-            fov_max_error=body.fov_max_error,
-            solve_timeout_ms=body.solve_timeout_ms,
-            centroid_params=centroid_params,
-            max_image_side=body.max_image_side,
+        loop = asyncio.get_running_loop()
+        # 档位与两段策略解析 / Resolve profile and two-stage strategy
+        centroid_params, max_stars, timeout_ms, requested_profile = (
+            self._resolve_solve_profile(
+                body.solve_profile, body.centroid, body.solve_timeout_ms
+            )
         )
+
+        def _run_single() -> list[dict[str, Any]]:
+            return self._analyze_image(
+                source=source,
+                hint_ra_deg=body.hint_ra_deg,
+                hint_dec_deg=body.hint_dec_deg,
+                fov_estimate=body.fov_estimate,
+                fov_max_error=body.fov_max_error,
+                solve_timeout_ms=timeout_ms,
+                centroid_params=centroid_params,
+                max_image_side=body.max_image_side,
+                max_stars=max_stars,
+            )
+
+        def _run_two_stage() -> list[dict[str, Any]]:
+            """平衡档位使用 speed→robust 两段策略 / Balanced profile: speed then robust fallback."""
+            # 第 1 段：speed 档快速尝试 / Stage 1: quick speed attempt
+            speed_centroid, speed_max_stars, speed_timeout_ms, _ = (
+                self._resolve_solve_profile("speed", body.centroid, body.solve_timeout_ms)
+            )
+            first = self._analyze_image(
+                source=source,
+                hint_ra_deg=body.hint_ra_deg,
+                hint_dec_deg=body.hint_dec_deg,
+                fov_estimate=body.fov_estimate,
+                fov_max_error=body.fov_max_error,
+                solve_timeout_ms=speed_timeout_ms,
+                centroid_params=speed_centroid,
+                max_image_side=body.max_image_side,
+                max_stars=speed_max_stars,
+            )
+            row0 = first[0] if first else None
+            if row0 and row0.get("status") == "MATCH_FOUND":
+                row0["solve_profile"] = "speed"
+                return [row0]
+
+            # 噪点图动态 max_stars 收紧 / Heuristic: tighten max_stars for noisy frames
+            detected = int(row0.get("detected_stars") or 0) if row0 else 0
+            robust_centroid, robust_max_stars, robust_timeout_ms, _ = (
+                self._resolve_solve_profile("robust", body.centroid, body.solve_timeout_ms)
+            )
+            if detected > 0 and detected > robust_max_stars:
+                robust_max_stars = max(20, int(robust_max_stars * 0.7))
+
+            second = self._analyze_image(
+                source=source,
+                hint_ra_deg=body.hint_ra_deg,
+                hint_dec_deg=body.hint_dec_deg,
+                fov_estimate=body.fov_estimate,
+                fov_max_error=body.fov_max_error,
+                solve_timeout_ms=robust_timeout_ms,
+                centroid_params=robust_centroid,
+                max_image_side=body.max_image_side,
+                max_stars=robust_max_stars,
+            )
+            if second:
+                second[0]["solve_profile"] = "robust"
+            return second
+
+        # balanced 档默认启用两段策略，其他档位单次解算 / Balanced uses two-stage, others single-pass
+        if requested_profile == "balanced":
+            rows = await loop.run_in_executor(self._solver_executor, _run_two_stage)
+            effective_profile = (
+                rows[0].get("solve_profile") if rows and rows[0].get("solve_profile") else "balanced"
+            )
+        else:
+            rows = await loop.run_in_executor(self._solver_executor, _run_single)
+            effective_profile = requested_profile
+
         row = rows[0] if rows else None
+        if row and "solve_profile" not in row:
+            row["solve_profile"] = effective_profile
+        # 默认精简 raw，大字段仅在 detail_level==full 时返回 / Drop heavy raw unless client asks for full detail.
+        detail_level = getattr(body, "detail_level", None) or "summary"
+        if row and detail_level != "full":
+            row.pop("tetra", None)
         if row:
             self._lab.update_last_solve(
                 source.name,
@@ -535,11 +680,14 @@ class AnalysisService:
         solve_timeout_ms: int | None = None,
         centroid_params: CentroidExtractionParams | None = None,
         max_image_side: int | None = None,
+        max_stars: int | None = None,
     ) -> dict[str, Any]:
         """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
         solved = self.solver.solve_from_bgr_frame(
             frame_bgr=frame_bgr,
-            max_stars=self._solver_max_stars,
+            max_stars=int(
+                max_stars if max_stars is not None else self._solver_max_stars
+            ),
             hint_ra_deg=(
                 hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra
             ),
@@ -565,9 +713,13 @@ class AnalysisService:
         solve_timeout_ms: int | None = None,
         centroid_params: CentroidExtractionParams | None = None,
         max_image_side: int | None = None,
+        max_stars: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
+        t_total = time.perf_counter()
+        t_decode = time.perf_counter()
         frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
+        t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
         if frame is None:
             raise ValueError("无法读取图片 / Unable to read image")
         row = self._solve_bgr_to_row(
@@ -579,7 +731,10 @@ class AnalysisService:
             solve_timeout_ms=solve_timeout_ms,
             centroid_params=centroid_params,
             max_image_side=max_image_side,
+            max_stars=max_stars,
         )
+        row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
+        row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
         return [row]
 
     def _analyze_video(
@@ -636,19 +791,24 @@ class AnalysisService:
 
     async def solve_video_frame(self, body: AnalysisSolveVideoFrameRequest) -> dict[str, Any]:
         """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
+        t_total = time.perf_counter()
+        t_open_decode_ms = None
         frame = None
         frame_id = None
         frame_ts = None
         if body.source == "camera":
             from ogscope.web.camera_shared import get_camera_manager
 
+            t_decode = time.perf_counter()
             frame, frame_id, frame_ts = await get_camera_manager().get_raw_frame()
+            t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
         else:
             if not body.input_name:
                 raise ValueError("需要 input_name / input_name required for file source")
             path = self.resolve_upload_path(body.input_name)
             if not path.is_file():
                 raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
+            t_decode = time.perf_counter()
             cap = cv2.VideoCapture(str(path))
             if not cap.isOpened():
                 raise ValueError("无法打开视频 / Cannot open video")
@@ -662,18 +822,36 @@ class AnalysisService:
                     raise ValueError("无法读取视频帧 / Cannot read video frame")
             finally:
                 cap.release()
-        centroid_params = self._centroid_params_from_payload(body.centroid)
-        row = await asyncio.to_thread(
-            self._solve_bgr_to_row,
-            frame,
-            body.hint_ra_deg,
-            body.hint_dec_deg,
-            body.fov_estimate,
-            body.fov_max_error,
-            body.solve_timeout_ms,
-            centroid_params,
-            body.max_image_side,
+            t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
+        centroid_params, max_stars, timeout_ms, effective_profile = (
+            self._resolve_solve_profile(
+                body.solve_profile, body.centroid, body.solve_timeout_ms
+            )
         )
+        loop = asyncio.get_running_loop()
+
+        def _run() -> dict[str, Any]:
+            return self._solve_bgr_to_row(
+                frame,
+                body.hint_ra_deg,
+                body.hint_dec_deg,
+                body.fov_estimate,
+                body.fov_max_error,
+                timeout_ms,
+                centroid_params,
+                body.max_image_side,
+                max_stars,
+            )
+
+        row = await loop.run_in_executor(self._solver_executor, _run)
+        if t_open_decode_ms is not None:
+            row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
+        row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
+        row["solve_profile"] = effective_profile
+        # 默认精简 raw，大字段仅在 detail_level==full 时返回 / Drop heavy raw unless client asks for full detail.
+        detail_level = getattr(body, "detail_level", None) or "summary"
+        if detail_level != "full":
+            row.pop("tetra", None)
         return {
             "success": True,
             "input_name": body.input_name or "",
@@ -693,6 +871,8 @@ class AnalysisService:
             "camera_fps": s.camera_fps,
             "solver_fov_deg": s.solver_fov_deg,
             "solver_max_image_side": s.solver_max_image_side,
+            "solve_profile_default": _SOLVE_PROFILE_DEFAULT,
+            "solve_profiles": list(_SOLVE_PROFILE_OVERRIDES.keys()),
         }
 
     def upload_experiment_count(self, filename: str) -> dict[str, Any]:

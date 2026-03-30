@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         description="FOV 估计允许误差(度)；None 为库默认 / Max FOV estimate error in degrees",
     )
     solver_timeout_ms: int = Field(
-        default=3000,
+        default=1500,
         description="Tetra3 单次解算超时毫秒 / Tetra3 solve timeout in ms",
     )
     static_dir: Path = Field(default=Path("./web/static"), description="静态文件目录")

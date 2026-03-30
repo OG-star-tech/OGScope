@@ -63,6 +63,7 @@ def mock_plate_solve(monkeypatch):
             rmse_arcsec=10.0,
             t_solve_ms=5.0,
             t_extract_ms=None,
+            t_preprocess_ms=1.0,
             raw={},
             solve_overlay={
                 "frame_shape": [480, 640],
@@ -100,6 +101,7 @@ def mock_plate_solve(monkeypatch):
             rmse_arcsec=10.0,
             t_solve_ms=5.0,
             t_extract_ms=1.0,
+            t_preprocess_ms=1.0,
             raw={},
             solve_overlay={
                 "frame_shape": [480, 640],

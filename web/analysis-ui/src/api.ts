@@ -25,8 +25,11 @@ export type SolveParams = {
   fov_estimate?: number | null;
   fov_max_error?: number | null;
   solve_timeout_ms?: number | null;
+  solve_profile?: "speed" | "balanced" | "robust" | null;
   centroid?: CentroidParams | null;
   max_image_side?: number | null;
+  /** 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level */
+  detail_level?: "summary" | "full" | null;
 };
 
 async function parseJson(resp: Response): Promise<unknown> {

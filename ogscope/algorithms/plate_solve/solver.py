@@ -225,6 +225,7 @@ class SolveResult:
     rmse_arcsec: float | None
     t_solve_ms: float | None
     t_extract_ms: float | None
+    t_preprocess_ms: float | None
     raw: dict[str, Any] = field(default_factory=dict)
     # 原图像素系下的叠加数据（与 Canvas x,y 一致）/ Overlay in original image pixels (Canvas x,y)
     solve_overlay: dict[str, Any] | None = None
@@ -244,6 +245,7 @@ class SolveResult:
             "rmse_arcsec": self.rmse_arcsec,
             "t_solve_ms": self.t_solve_ms,
             "t_extract_ms": self.t_extract_ms,
+            "t_preprocess_ms": self.t_preprocess_ms,
         }
         if self.solve_overlay is not None:
             base["solve_overlay"] = _json_safe(self.solve_overlay)
@@ -314,6 +316,7 @@ class PlateSolver:
                 rmse_arcsec=None,
                 t_solve_ms=None,
                 t_extract_ms=None,
+                t_preprocess_ms=None,
                 raw={"reason": "need_at_least_4_stars"},
                 solve_overlay=overlay,
             )
@@ -346,6 +349,7 @@ class PlateSolver:
                 rmse_arcsec=None,
                 t_solve_ms=None,
                 t_extract_ms=None,
+                t_preprocess_ms=None,
                 raw={"error": str(exc)},
             )
 
@@ -390,10 +394,12 @@ class PlateSolver:
             if centroid_params is not None
             else CentroidExtractionParams.from_settings(settings)
         )
+        t0_preprocess = time.perf_counter()
         img, (h0, w0) = resize_bgr_for_extraction(frame_bgr, side_cap)
         height, width = int(img.shape[0]), int(img.shape[1])
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(rgb)
+        t_preprocess_ms = (time.perf_counter() - t0_preprocess) * 1000.0
 
         fov_est = float(fov_estimate if fov_estimate is not None else self.fov_deg)
         fov_err = fov_max_error if fov_max_error is not None else self.fov_max_error_deg
@@ -424,6 +430,7 @@ class PlateSolver:
                 rmse_arcsec=None,
                 t_solve_ms=None,
                 t_extract_ms=None,
+                t_preprocess_ms=t_preprocess_ms,
                 raw={"error": str(exc)},
             )
         t_extract_ms = (time.perf_counter() - t0) * 1000.0
@@ -450,6 +457,7 @@ class PlateSolver:
                 rmse_arcsec=None,
                 t_solve_ms=None,
                 t_extract_ms=t_extract_ms,
+                t_preprocess_ms=t_preprocess_ms,
                 raw={"reason": "need_at_least_4_stars"},
                 solve_overlay=overlay,
             )
@@ -479,10 +487,12 @@ class PlateSolver:
                 rmse_arcsec=None,
                 t_solve_ms=None,
                 t_extract_ms=t_extract_ms,
+                t_preprocess_ms=t_preprocess_ms,
                 raw={"error": str(exc)},
             )
 
         out["T_extract"] = t_extract_ms
+        out["T_preprocess"] = t_preprocess_ms
         return _tetra_dict_to_result(
             out,
             detected,
@@ -592,9 +602,15 @@ def _tetra_dict_to_result(
         rmse_arcsec=_maybe_float(out.get("RMSE")),
         t_solve_ms=_maybe_float(out.get("T_solve")),
         t_extract_ms=_maybe_float(out.get("T_extract")),
+        t_preprocess_ms=_maybe_float(out.get("T_preprocess")),
         raw=raw,
         solve_overlay=overlay,
     )
+
+
+def warmup_tetra3() -> None:
+    """预热 Tetra3 单例与数据库，降低首轮解算延迟 / Warm up Tetra3 singleton to reduce first-solve latency."""
+    _get_tetra3(get_settings())
 
 
 def _maybe_float(v: Any) -> float | None:
