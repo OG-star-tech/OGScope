@@ -242,10 +242,12 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # 基本输入来源 / Basic input source
     source: Literal["camera", "file"]
     input_name: Optional[str] = None
     frame_index: int = 0
     time_sec: Optional[float] = None
+    # 解算参数 / Solve parameters
     hint_ra_deg: Optional[float] = None
     hint_dec_deg: Optional[float] = None
     fov_estimate: Optional[float] = None
@@ -256,6 +258,16 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     max_image_side: Optional[int] = None
     large_scale_bg_subtract: Optional[bool] = False
     detail_level: Optional[Literal["summary", "full"]] = "summary"
+
+    # 叠加与引导选项（可选，未提供则使用后端默认）/ Optional overlay & guidance options
+    overlay_topn_count: Optional[int] = Field(
+        default=None,
+        description="自动标注的星点数量上限（Top-N），未填用服务器默认 / Max number of stars to label (Top-N); server default if omitted",
+    )
+    enable_polar_guide: Optional[bool] = Field(
+        default=None,
+        description="是否计算极轴引导信息；未填用服务器默认 / Whether to compute polar guide info; server default if omitted",
+    )
 
 
 class ImportFromDebugRequest(BaseModel):

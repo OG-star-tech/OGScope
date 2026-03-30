@@ -24,6 +24,7 @@ import {
   fetchDebugFileInfo,
   fetchDebugFiles,
   fetchExperiments,
+  fetchLabSettings,
   fetchPresets,
   fetchSystemInfo,
   fetchUploadExperimentCount,
@@ -33,11 +34,13 @@ import {
   saveExperiment,
   saveUserPreset,
   solveBatch,
+  solveFrameFromBlob,
   solveImage,
   solveVideoFrame,
   uploadFile,
   uploadFileUrl,
   type DebugFileRow,
+  type LabPublicSettings,
   type SolveParams,
   type UploadFileRow,
 } from "./api";
@@ -153,6 +156,11 @@ export default function App() {
   const [cameraPreviewUrl, setCameraPreviewUrl] = useState<string | null>(null);
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [cameraSolveRunning, setCameraSolveRunning] = useState(false);
+  const [fileSolveRunning, setFileSolveRunning] = useState(false);
+  const [autoHoldEnabled, setAutoHoldEnabled] = useState(true);
+  const [isFrozen, setIsFrozen] = useState(false);
+  const [frozenFrameId, setFrozenFrameId] = useState<string | null>(null);
+  const [frozenImageUrl, setFrozenImageUrl] = useState<string | null>(null);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [batchRawOpen, setBatchRawOpen] = useState<Record<number, boolean>>({});
@@ -167,9 +175,18 @@ export default function App() {
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
   const lastCameraFrameIdRef = useRef<string | null>(null);
   const cameraSolveTimerRef = useRef<number | null>(null);
+  const fileSolveTimerRef = useRef<number | null>(null);
   const cameraSolveInFlightRef = useRef(false);
+  const fileSolveInFlightRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
+  const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
+
+  const starAnalysisIntervalMs = useMemo(() => {
+    const fps = labSettings?.star_analysis_target_fps ?? 2 / 3;
+    const clampedFps = Math.min(Math.max(fps, 0.2), 5.0);
+    return Math.round(1000 / clampedFps);
+  }, [labSettings]);
 
   const loadLists = useCallback(async () => {
     const [u, o, usr] = await Promise.all([
@@ -186,6 +203,12 @@ export default function App() {
     fetchDebugFiles()
       .then((r) => setDebugFiles(r.files))
       .catch(() => setDebugFiles([]));
+  }, []);
+
+  useEffect(() => {
+    fetchLabSettings()
+      .then((s) => setLabSettings(s))
+      .catch(() => setLabSettings(null));
   }, []);
 
   useEffect(() => {
@@ -253,7 +276,10 @@ export default function App() {
   const overlay = useMemo(() => {
     const r = lastResult?.result as Record<string, unknown> | undefined;
     if (!r) return null;
-    return (r.solve_overlay || null) as SolveOverlay | null;
+    const base = (r.solve_overlay || null) as SolveOverlay | null;
+    if (!base) return null;
+    const ext = (r.overlay_ext || null) as SolveOverlay["overlay_ext"] | null;
+    return { ...base, overlay_ext: ext || undefined };
   }, [lastResult]);
 
   const resultRow = useMemo(() => {
@@ -315,7 +341,7 @@ export default function App() {
     if (view !== "lab_video" || videoPreviewMode !== "camera") return;
     let cancelled = false;
     const poll = async () => {
-      if (cancelled) return;
+      if (cancelled || isFrozen) return;
       try {
         const qs = lastCameraFrameIdRef.current
           ? `?since_frame_id=${encodeURIComponent(lastCameraFrameIdRef.current)}`
@@ -346,7 +372,7 @@ export default function App() {
       });
       lastCameraFrameIdRef.current = null;
     };
-  }, [view, videoPreviewMode]);
+  }, [view, videoPreviewMode, isFrozen]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -445,40 +471,71 @@ export default function App() {
   const onCameraSolve = async () => {
     if (cameraSolveInFlightRef.current) return;
     setErr(null);
-    setBusy(true);
     cameraSolveInFlightRef.current = true;
     const t0 = performance.now();
     try {
       const out = await solveVideoFrame({
         source: "camera",
+        overlay_topn_count: 3,
+        enable_polar_guide: true,
+        solve_timeout_ms: Math.min((labSettings?.solver_timeout_ms ?? 1500) * 0.6, 1200),
         ...params,
       });
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
       setLastSolveSource("camera");
       setVideoPreviewMode("camera");
+      const outResult = (out as { result?: Record<string, unknown> }).result;
+      const solveStatus =
+        typeof outResult?.status === "string" ? String(outResult.status) : "";
+      if (autoHoldEnabled && solveStatus === "MATCH_FOUND") {
+        setIsFrozen(true);
+        setFrozenFrameId(
+          (out as { frame_id?: number }).frame_id != null
+            ? String((out as { frame_id?: number }).frame_id)
+            : null,
+        );
+        setFrozenImageUrl(cameraPreviewUrl);
+        stopCameraSolveLoop();
+      }
       setLastRoundTripMs(performance.now() - t0);
     } catch (e) {
       setErr(String(e));
       setLastRoundTripMs(null);
     } finally {
       cameraSolveInFlightRef.current = false;
-      setBusy(false);
     }
   };
 
   const onVideoFileSolve = async () => {
+    if (fileSolveInFlightRef.current) return;
     if (!selected) return;
+    const vd = videoRef.current;
+    if (!vd || vd.videoWidth < 2 || vd.videoHeight < 2 || videoPreviewError) return;
     setErr(null);
-    setBusy(true);
+    fileSolveInFlightRef.current = true;
     const t0 = performance.now();
     try {
-      const vd = videoRef.current;
-      const out = await solveVideoFrame({
-        source: "file",
-        input_name: selected,
-        time_sec: vd?.currentTime ?? 0,
+      const canvas = document.createElement("canvas");
+      canvas.width = vd.videoWidth;
+      canvas.height = vd.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("无法创建画布上下文 / Cannot create canvas context");
+      }
+      ctx.drawImage(vd, 0, 0, canvas.width, canvas.height);
+      const frameBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("帧编码失败 / Frame encode failed"))),
+          "image/jpeg",
+          0.92,
+        );
+      });
+      const out = await solveFrameFromBlob(frameBlob, {
         ...params,
+        solve_timeout_ms: Math.min((labSettings?.solver_timeout_ms ?? 1500) * 0.6, 1200),
+        overlay_topn_count: 3,
+        enable_polar_guide: true,
       });
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
@@ -488,17 +545,42 @@ export default function App() {
       setErr(String(e));
       setLastRoundTripMs(null);
     } finally {
-      setBusy(false);
+      fileSolveInFlightRef.current = false;
+    }
+  };
+
+  const startFileSolveLoop = () => {
+    if (fileSolveRunning || !selected) return;
+    setFileSolveRunning(true);
+    void onVideoFileSolve();
+    fileSolveTimerRef.current = window.setInterval(() => {
+      void onVideoFileSolve();
+    }, starAnalysisIntervalMs);
+  };
+
+  const canSolveVideoFile = useMemo(() => {
+    if (view !== "lab_video" || videoPreviewMode !== "file") return false;
+    if (!selected) return false;
+    if (videoPreviewError) return false;
+    return videoNatural.w > 1 && videoNatural.h > 1;
+  }, [view, videoPreviewMode, selected, videoPreviewError, videoNatural.w, videoNatural.h]);
+
+  const stopFileSolveLoop = () => {
+    setFileSolveRunning(false);
+    if (fileSolveTimerRef.current != null) {
+      window.clearInterval(fileSolveTimerRef.current);
+      fileSolveTimerRef.current = null;
     }
   };
 
   const startCameraSolveLoop = () => {
     if (cameraSolveRunning) return;
+    if (isFrozen) return;
     setCameraSolveRunning(true);
     void onCameraSolve();
     cameraSolveTimerRef.current = window.setInterval(() => {
       void onCameraSolve();
-    }, 1200);
+    }, starAnalysisIntervalMs);
   };
 
   const stopCameraSolveLoop = () => {
@@ -507,6 +589,12 @@ export default function App() {
       window.clearInterval(cameraSolveTimerRef.current);
       cameraSolveTimerRef.current = null;
     }
+  };
+
+  const resumeLivePreview = () => {
+    setIsFrozen(false);
+    setFrozenFrameId(null);
+    setFrozenImageUrl(null);
   };
 
   const togglePreset = (id: string) => {
@@ -636,12 +724,25 @@ export default function App() {
   useEffect(() => {
     if (view !== "lab_video" || videoPreviewMode !== "camera") {
       stopCameraSolveLoop();
+      setIsFrozen(false);
+      setFrozenFrameId(null);
+      setFrozenImageUrl(null);
+    }
+    if (view !== "lab_video" || videoPreviewMode !== "file") {
+      stopFileSolveLoop();
     }
   }, [view, videoPreviewMode]);
 
   useEffect(() => {
+    if (!selected) {
+      stopFileSolveLoop();
+    }
+  }, [selected]);
+
+  useEffect(() => {
     return () => {
       stopCameraSolveLoop();
+      stopFileSolveLoop();
     };
   }, []);
 
@@ -930,10 +1031,10 @@ export default function App() {
                 {view === "lab_video" && videoPreviewMode === "camera" ? (
                   <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
                     <div className="relative inline-block max-h-[70vh] max-w-full">
-                      {cameraPreviewUrl ? (
+                      {((isFrozen && frozenImageUrl) || cameraPreviewUrl) ? (
                         <img
                           ref={cameraPreviewImgRef}
-                          src={cameraPreviewUrl}
+                          src={(isFrozen && frozenImageUrl) || cameraPreviewUrl || ""}
                           alt=""
                           className="max-h-[70vh] w-full min-h-[120px] object-contain"
                           onLoad={(e) =>
@@ -1026,7 +1127,6 @@ export default function App() {
                                 autoPlay
                                 muted
                                 preload="metadata"
-                                controls
                                 className="max-h-[70vh] w-full max-w-full object-contain"
                                 onError={() => setVideoPreviewError(t("lab.videoPreviewFailed"))}
                                 onLoadedData={() => {
@@ -1568,21 +1668,39 @@ export default function App() {
               {view === "lab_video" && (
                 <div className="shrink-0 space-y-2 border-b border-outline-variant/20 p-4 pb-3">
                   {videoPreviewMode === "file" ? (
-                    <button
-                      type="button"
-                      className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary disabled:opacity-40"
-                      onClick={() => void onVideoFileSolve()}
-                      disabled={busy || !selected}
-                    >
-                      {t("lab.solveCurrentFrame")}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-primary py-2.5 font-semibold text-on-primary-container disabled:opacity-40"
+                        onClick={() => startFileSolveLoop()}
+                        disabled={busy || !canSolveVideoFile || fileSolveRunning}
+                      >
+                        {t("lab.solveFileStart")}
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-error/80 py-2.5 font-semibold text-on-error disabled:opacity-40"
+                        onClick={() => stopFileSolveLoop()}
+                        disabled={!fileSolveRunning}
+                      >
+                        {t("lab.solveFileStop")}
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary disabled:opacity-40"
+                        onClick={() => void onVideoFileSolve()}
+                        disabled={busy || !canSolveVideoFile || fileSolveRunning}
+                      >
+                        {t("lab.solveCurrentFrame")}
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button
                         type="button"
                         className="w-full rounded bg-primary py-2.5 font-semibold text-on-primary-container disabled:opacity-40"
                         onClick={() => startCameraSolveLoop()}
-                        disabled={busy || cameraSolveRunning}
+                        disabled={busy || cameraSolveRunning || isFrozen}
                       >
                         {t("lab.solveCameraStart")}
                       </button>
@@ -1598,10 +1716,32 @@ export default function App() {
                         type="button"
                         className="w-full rounded bg-secondary/80 py-2.5 font-semibold text-on-secondary disabled:opacity-40"
                         onClick={() => void onCameraSolve()}
-                        disabled={busy}
+                        disabled={busy || isFrozen}
                       >
                         {t("lab.solveCameraFrame")}
                       </button>
+                      <label className="flex items-center gap-2 rounded border border-outline-variant/25 px-2 py-1.5 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={autoHoldEnabled}
+                          onChange={(e) => setAutoHoldEnabled(e.target.checked)}
+                        />
+                        <span>自动保持(解算成功后冻结) / Auto Hold</span>
+                      </label>
+                      {isFrozen && (
+                        <button
+                          type="button"
+                          className="w-full rounded bg-tertiary/80 py-2.5 font-semibold text-on-tertiary disabled:opacity-40"
+                          onClick={() => resumeLivePreview()}
+                        >
+                          继续实时 / Resume Live
+                        </button>
+                      )}
+                      {isFrozen && (
+                        <div className="text-[10px] text-on-surface-variant">
+                          已冻结帧 / Frozen frame {frozenFrameId ?? "-"}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>

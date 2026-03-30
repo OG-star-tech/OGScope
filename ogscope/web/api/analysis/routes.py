@@ -2,6 +2,7 @@
 素材分析路由 / Asset analysis routes
 """
 
+import json
 import mimetypes
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -268,6 +269,40 @@ async def solve_analysis_frame(body: AnalysisSolveVideoFrameRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/analysis/solve/frame_upload")
+async def solve_uploaded_frame(
+    file: UploadFile = File(...),
+    payload: str = Form(
+        ...,
+        description="JSON 字符串，字段与 AnalysisSolveImageRequest 对齐 / JSON payload aligned with AnalysisSolveImageRequest",
+    ),
+):
+    """上传单帧 JPEG/PNG 并解算 / Solve a single uploaded frame (multipart)."""
+    try:
+        raw = await file.read()
+        obj = json.loads(payload)
+        if not isinstance(obj, dict):
+            raise ValueError("payload 必须为 JSON 对象 / payload must be a JSON object")
+        topn = obj.get("overlay_topn_count")
+        enable_polar = obj.get("enable_polar_guide")
+        obj.pop("overlay_topn_count", None)
+        obj.pop("enable_polar_guide", None)
+        # 前端调试元数据，不参与 Pydantic 模型 / Client metadata not in schema
+        obj.pop("time_sec", None)
+        obj.pop("frame_width", None)
+        obj.pop("frame_height", None)
+        obj.setdefault("input_name", "__frame_upload__.jpg")
+        data = AnalysisSolveImageRequest.model_validate(obj)
+        return await analysis_service.solve_uploaded_frame(
+            image_bytes=raw,
+            solve_params=data,
+            overlay_topn_count=topn,
+            enable_polar_guide=enable_polar,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

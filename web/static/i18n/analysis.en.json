@@ -5,6 +5,8 @@
   "nav.labVideo": "Video solve",
   "delete.uploadCascade": "Delete {n} linked experiment record(s) as well?",
   "lab.solveCurrentFrame": "Solve current frame (file)",
+  "lab.solveFileStart": "Start continuous file solve",
+  "lab.solveFileStop": "Stop continuous file solve",
   "lab.cameraPreviewLoading": "Connecting to shared preview…",
   "lab.solveCameraFrame": "Solve live camera frame",
   "lab.solveCameraStart": "Start camera solve",

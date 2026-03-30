@@ -138,8 +138,8 @@ class Settings(BaseSettings):
         description="大尺度背景减除：小图长边上限（像素），越小越快 / Large-scale BG downsample max side",
     )
     star_analysis_target_fps: float = Field(
-        default=1.5,
-        description="星空分析目标帧率（1–2），仅用于前端节流 / Target star-analysis FPS for UI throttle",
+        default=2 / 3,
+        description="星空分析目标帧率（约 1.5 秒 1 帧），仅用于前端节流 / Target star-analysis FPS for UI throttle (~1.5s per frame)",
     )
 
     model_config = SettingsConfigDict(

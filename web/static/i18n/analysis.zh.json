@@ -138,6 +138,8 @@
   "common.placeholder": "—",
   "delete.uploadCascade": "该素材有 {n} 条实验记录，是否一并删除？",
   "lab.solveCurrentFrame": "解算当前帧（文件）",
+  "lab.solveFileStart": "开始文件连续解算",
+  "lab.solveFileStop": "停止文件连续解算",
   "lab.cameraPreviewLoading": "正在连接共享预览…",
   "lab.solveCameraFrame": "解算相机当前帧",
   "lab.solveCameraStart": "开始相机解算",

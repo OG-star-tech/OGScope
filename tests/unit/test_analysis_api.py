@@ -2,6 +2,7 @@
 分析 API 测试 / Analysis API tests
 """
 
+import json
 from pathlib import Path
 
 import cv2
@@ -281,3 +282,95 @@ def test_analysis_delete_upload_and_experiment(
     er = client.delete(f"/api/analysis/experiments/{eid}")
     assert er.status_code == 200
     assert not (temp_analysis_dir / "experiments" / f"{eid}.json").is_file()
+
+
+@pytest.mark.unit
+def test_analysis_solve_video_frame_overlay_ext(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
+    """单帧视频解算返回扩展叠加字段 / Frame solve returns overlay extension."""
+    video_path = tmp_path / "frame_ext.mp4"
+    _build_test_video(video_path)
+    with video_path.open("rb") as f:
+        up = client.post(
+            "/api/analysis/upload",
+            files={"file": ("frame_ext.mp4", f, "video/mp4")},
+        )
+    assert up.status_code == 200
+
+    resp = client.post(
+        "/api/analysis/solve/frame",
+        json={
+            "source": "file",
+            "input_name": "frame_ext.mp4",
+            "time_sec": 0.1,
+            "overlay_topn_count": 2,
+            "enable_polar_guide": True,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("success") is True
+    row = data.get("result") or {}
+    ext = row.get("overlay_ext") or {}
+    labels = ext.get("labels_topn") or []
+    assert isinstance(labels, list)
+    assert len(labels) >= 1
+    assert "name" in labels[0]
+    guide = ext.get("polar_guide")
+    assert isinstance(guide, dict)
+    assert "delta_px" in guide
+
+
+@pytest.mark.unit
+def test_analysis_solve_video_frame_from_debug_capture(
+    client, temp_analysis_dir, mock_plate_solve, monkeypatch, tmp_path: Path
+):
+    """调试录制目录的视频也可直接单帧解算 / Frame solve supports debug-capture videos."""
+    video_path = tmp_path / "dev_captures" / "debug_cam.mp4"
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    _build_test_video(video_path)
+    monkeypatch.setattr("ogscope.web.api.analysis.services.Path.home", lambda: tmp_path)
+
+    resp = client.post(
+        "/api/analysis/solve/frame",
+        json={
+            "source": "file",
+            "input_name": "debug_cam.mp4",
+            "time_sec": 0.0,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("success") is True
+    result = data.get("result") or {}
+    assert "status" in result
+
+
+@pytest.mark.unit
+def test_analysis_solve_frame_upload_endpoint(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
+    """浏览器提帧上传接口可解算 / Browser frame-upload endpoint solves frame."""
+    image_path = tmp_path / "frame_upload.jpg"
+    _build_star_image(image_path)
+    payload = {
+        "hint_ra_deg": 45.0,
+        "hint_dec_deg": 75.0,
+        "solve_profile": "balanced",
+        "overlay_topn_count": 2,
+        "enable_polar_guide": True,
+    }
+    with image_path.open("rb") as f:
+        resp = client.post(
+            "/api/analysis/solve/frame_upload",
+            files={"file": ("frame.jpg", f, "image/jpeg")},
+            data={"payload": json.dumps(payload)},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("success") is True
+    row = data.get("result") or {}
+    assert "status" in row
+    ext = row.get("overlay_ext") or {}
+    assert "labels_topn" in ext

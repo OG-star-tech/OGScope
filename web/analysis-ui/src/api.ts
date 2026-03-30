@@ -273,11 +273,34 @@ export async function solveVideoFrame(payload: {
   input_name?: string | null;
   frame_index?: number;
   time_sec?: number | null;
-} & SolveParams): Promise<{ success: boolean; result?: Record<string, unknown> }> {
+  /** 自动标注 Top-N 星点（省略则用后端默认） / Auto-label top-N stars (server default if omitted) */
+  overlay_topn_count?: number | null;
+  /** 是否启用极轴引导信息（省略则用后端默认） / Whether to enable polar guide info (server default if omitted) */
+  enable_polar_guide?: boolean | null;
+} & SolveParams): Promise<{ success: boolean; result?: Record<string, unknown>; frame_id?: number | null; frame_ts?: string | null }> {
   const r = await fetch(`${API}/analysis/solve/frame`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  const data = await parseJson(r);
+  if (!r.ok) throw new Error(String((data as { detail?: string }).detail || r.status));
+  return data as { success: boolean; result?: Record<string, unknown>; frame_id?: number | null; frame_ts?: string | null };
+}
+
+export async function solveFrameFromBlob(
+  frameBlob: Blob,
+  payload: SolveParams & {
+    overlay_topn_count?: number | null;
+    enable_polar_guide?: boolean | null;
+  },
+): Promise<{ success: boolean; result?: Record<string, unknown> }> {
+  const fd = new FormData();
+  fd.append("file", frameBlob, "frame.jpg");
+  fd.append("payload", JSON.stringify(payload));
+  const r = await fetch(`${API}/analysis/solve/frame_upload`, {
+    method: "POST",
+    body: fd,
   });
   const data = await parseJson(r);
   if (!r.ok) throw new Error(String((data as { detail?: string }).detail || r.status));

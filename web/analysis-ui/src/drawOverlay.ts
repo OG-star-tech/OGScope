@@ -10,6 +10,23 @@ export type SolveOverlay = {
   stars_all_centroids?: Array<{ x: number; y: number }>;
   stars_pattern?: Array<{ x: number; y: number }>;
   stars_matched?: Array<{ x: number; y: number; mag?: number }>;
+  overlay_ext?: {
+    labels_topn?: Array<{
+      x: number;
+      y: number;
+      name?: string;
+      mag?: number | null;
+      ra_deg?: number | null;
+      dec_deg?: number | null;
+    }>;
+    polar_guide?: {
+      target_kind?: string;
+      frame_center?: { x: number; y: number };
+      target?: { x: number; y: number };
+      delta_px?: { dx: number; dy: number };
+      angular_sep_deg?: number;
+    } | null;
+  };
 };
 
 function drawOverlayCore(
@@ -52,6 +69,43 @@ function drawOverlayCore(
         ctx.fillText(`m${Number(s.mag).toFixed(1)}`, s.x + 4, s.y - 4);
       }
     }
+  }
+  const ext = overlay.overlay_ext;
+  if (Array.isArray(ext?.labels_topn) && ext.labels_topn.length > 0) {
+    ctx.fillStyle = "rgba(96, 165, 250, 0.95)";
+    ctx.font = "12px system-ui, sans-serif";
+    for (const s of ext.labels_topn) {
+      if (typeof s?.x !== "number" || typeof s?.y !== "number") continue;
+      const magText = typeof s.mag === "number" ? ` m${s.mag.toFixed(1)}` : "";
+      const title = `${s.name ?? "Star"}${magText}`;
+      ctx.fillText(title, s.x + 8, s.y + 14);
+    }
+  }
+  const guide = ext?.polar_guide;
+  if (
+    guide &&
+    typeof guide.frame_center?.x === "number" &&
+    typeof guide.frame_center?.y === "number" &&
+    typeof guide.target?.x === "number" &&
+    typeof guide.target?.y === "number"
+  ) {
+    const cx = guide.frame_center.x;
+    const cy = guide.frame_center.y;
+    const tx = guide.target.x;
+    const ty = guide.target.y;
+    ctx.strokeStyle = "rgba(244, 63, 94, 0.95)";
+    ctx.fillStyle = "rgba(244, 63, 94, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+    ctx.stroke();
+    const ang = typeof guide.angular_sep_deg === "number" ? guide.angular_sep_deg.toFixed(2) : "-";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillText(`Polar ${ang}deg`, tx + 10, ty - 6);
   }
 }
 
