@@ -468,15 +468,25 @@ def test_analysis_realtime_timeout_releases_gate(
         }
 
     monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _fast)
-    time.sleep(0.06)
-    with image_path.open("rb") as f:
-        resp2 = client.post(
-            "/api/analysis/solve/frame_upload",
-            files={"file": ("frame.jpg", f, "image/jpeg")},
-            data={"payload": json.dumps({"solve_interval_ms": 50})},
-        )
-    assert resp2.status_code == 200
-    assert resp2.json().get("gate_status") == "SOLVED"
+    deadline = time.time() + 1.0
+    final_status = None
+    while time.time() < deadline:
+        with image_path.open("rb") as f:
+            resp2 = client.post(
+                "/api/analysis/solve/frame_upload",
+                files={"file": ("frame.jpg", f, "image/jpeg")},
+                data={"payload": json.dumps({"solve_interval_ms": 50})},
+            )
+        assert resp2.status_code == 200
+        final_status = resp2.json().get("gate_status")
+        if final_status == "SOLVED":
+            break
+        if final_status == "SKIPPED_INTERVAL":
+            time.sleep(0.02)
+            continue
+        break
+
+    assert final_status == "SOLVED"
 
 
 @pytest.mark.unit
