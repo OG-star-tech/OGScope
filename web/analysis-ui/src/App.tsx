@@ -31,6 +31,7 @@ import {
   fetchUploadFileInfo,
   fetchUploads,
   importFromDebug,
+  replaceTranscodedVideo,
   saveExperiment,
   saveUserPreset,
   solveBatch,
@@ -49,6 +50,7 @@ import {
   drawSolveOverlayVideo,
   type SolveOverlay,
 } from "./drawOverlay";
+import { transcodeAviToMp4 } from "./utils/transcode";
 import { useI18n } from "./i18n/I18nProvider";
 import { buildMetaCaptionRows } from "./utils/metaCaption";
 import { formatDateTime, formatFileSize } from "./utils/format";
@@ -113,6 +115,11 @@ function isVideoAsset(name: string): boolean {
   return /\.(mp4|mov|webm|mkv|avi)$/i.test(name);
 }
 
+function compactFilename(name: string, head = 16, tail = 14): string {
+  if (name.length <= head + tail + 1) return name;
+  return `${name.slice(0, head)}...${name.slice(-tail)}`;
+}
+
 export default function App() {
   const { t, locale, setLocale } = useI18n();
   const [view, setView] = useState<View>("lab_image");
@@ -169,6 +176,17 @@ export default function App() {
   const [lastRoundTripMs, setLastRoundTripMs] = useState<number | null>(null);
   /** 最近一次解算输入来源 / Last solve input source */
   const [lastSolveSource, setLastSolveSource] = useState<"file" | "camera" | null>(null);
+  /** 实时解算调度提示 / Realtime solve gate hint */
+  const [lastGateHint, setLastGateHint] = useState<string | null>(null);
+  /** 用户期望解算间隔（毫秒）/ User desired realtime solve interval in ms */
+  const [desiredSolveIntervalMs, setDesiredSolveIntervalMs] = useState<number | null>(null);
+  const [transcodeBusy, setTranscodeBusy] = useState(false);
+  const [transcodeProgress, setTranscodeProgress] = useState<number | null>(null);
+  const [transcodeHint, setTranscodeHint] = useState<string | null>(null);
+  const [debugImportBusy, setDebugImportBusy] = useState(false);
+  const [debugImportProgress, setDebugImportProgress] = useState<number | null>(null);
+  const [debugImportStep, setDebugImportStep] = useState<string | null>(null);
+  const [debugImportMessage, setDebugImportMessage] = useState<string | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -182,11 +200,17 @@ export default function App() {
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
   const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
 
-  const starAnalysisIntervalMs = useMemo(() => {
+  const intervalMinMs = labSettings?.star_analysis_min_interval_ms ?? 2000;
+  const intervalMaxMs = labSettings?.star_analysis_max_interval_ms ?? 12000;
+  const defaultIntervalMs = useMemo(() => {
     const fps = labSettings?.star_analysis_target_fps ?? 2 / 3;
     const clampedFps = Math.min(Math.max(fps, 0.2), 5.0);
     return Math.round(1000 / clampedFps);
   }, [labSettings]);
+  const starAnalysisIntervalMs = useMemo(() => {
+    const raw = desiredSolveIntervalMs ?? defaultIntervalMs;
+    return Math.min(Math.max(raw, intervalMinMs), intervalMaxMs);
+  }, [defaultIntervalMs, desiredSolveIntervalMs, intervalMaxMs, intervalMinMs]);
 
   const loadLists = useCallback(async () => {
     const [u, o, usr] = await Promise.all([
@@ -207,7 +231,15 @@ export default function App() {
 
   useEffect(() => {
     fetchLabSettings()
-      .then((s) => setLabSettings(s))
+      .then((s) => {
+        setLabSettings(s);
+        const initialMs = Math.round(1000 / Math.min(Math.max(s.star_analysis_target_fps, 0.2), 5.0));
+        const bounded = Math.min(
+          Math.max(initialMs, s.star_analysis_min_interval_ms),
+          s.star_analysis_max_interval_ms,
+        );
+        setDesiredSolveIntervalMs(bounded);
+      })
       .catch(() => setLabSettings(null));
   }, []);
 
@@ -478,9 +510,15 @@ export default function App() {
         source: "camera",
         overlay_topn_count: 3,
         enable_polar_guide: true,
+        solve_interval_ms: starAnalysisIntervalMs,
         solve_timeout_ms: Math.min((labSettings?.solver_timeout_ms ?? 1500) * 0.6, 1200),
         ...params,
       });
+      if (out.gate_status && out.gate_status !== "SOLVED") {
+        setLastGateHint(`${out.gate_status}${out.gate_reason ? `: ${out.gate_reason}` : ""}`);
+      } else {
+        setLastGateHint(null);
+      }
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
       setLastSolveSource("camera");
@@ -533,10 +571,18 @@ export default function App() {
       });
       const out = await solveFrameFromBlob(frameBlob, {
         ...params,
+        solve_interval_ms: starAnalysisIntervalMs,
         solve_timeout_ms: Math.min((labSettings?.solver_timeout_ms ?? 1500) * 0.6, 1200),
         overlay_topn_count: 3,
         enable_polar_guide: true,
       });
+      const gateStatus = (out as { gate_status?: string | null }).gate_status;
+      const gateReason = (out as { gate_reason?: string | null }).gate_reason;
+      if (gateStatus && gateStatus !== "SOLVED") {
+        setLastGateHint(`${gateStatus}${gateReason ? `: ${gateReason}` : ""}`);
+      } else {
+        setLastGateHint(null);
+      }
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
       setLastSolveSource("file");
@@ -561,9 +607,114 @@ export default function App() {
   const canSolveVideoFile = useMemo(() => {
     if (view !== "lab_video" || videoPreviewMode !== "file") return false;
     if (!selected) return false;
+    if (/\.avi$/i.test(selected)) return false;
     if (videoPreviewError) return false;
     return videoNatural.w > 1 && videoNatural.h > 1;
   }, [view, videoPreviewMode, selected, videoPreviewError, videoNatural.w, videoNatural.h]);
+
+  const isSelectedAvi = useMemo(() => !!selected && /\.avi$/i.test(selected), [selected]);
+
+  const onTranscodeAndUploadAvi = async () => {
+    if (!selected || !isSelectedAvi || transcodeBusy) return;
+    setErr(null);
+    setTranscodeBusy(true);
+    setTranscodeProgress(0);
+    setTranscodeHint(t("lab.transcode.loading"));
+    try {
+      const srcUrl = uploadFileUrl(selected);
+      const res = await fetch(srcUrl, { cache: "no-store" });
+      if (!res.ok) throw new Error(t("lab.transcode.fetchFailed"));
+      const blob = await res.blob();
+      const aviFile = new File([blob], selected, { type: "video/x-msvideo" });
+      const out = await transcodeAviToMp4(aviFile, (ratio, msg) => {
+        setTranscodeProgress(Math.max(0, Math.min(1, ratio)));
+        if (msg === "loading_ffmpeg") setTranscodeHint(t("lab.transcode.loading"));
+        else if (msg === "transcoding") setTranscodeHint(t("lab.transcode.running"));
+        else if (msg === "packing_output") setTranscodeHint(t("lab.transcode.packaging"));
+      });
+      setTranscodeHint(t("lab.transcode.uploading"));
+      const upload = await uploadFile(out.file, "analysis_transcoded");
+      await replaceTranscodedVideo({
+        old_filename: selected,
+        new_filename: upload.filename,
+        duration_s: out.duration_s,
+        nominal_fps: null,
+        codec_fourcc: "libx264",
+        container: "MP4",
+      });
+      await loadLists();
+      setSelected(upload.filename);
+      setTranscodeProgress(1);
+      setTranscodeHint(t("lab.transcode.done"));
+    } catch (e) {
+      setErr(String(e));
+      setTranscodeHint(t("lab.transcode.failed"));
+    } finally {
+      setTranscodeBusy(false);
+    }
+  };
+
+  const transcodePoolAviAndReplace = async (aviFilename: string) => {
+    const srcUrl = uploadFileUrl(aviFilename);
+    const res = await fetch(srcUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error(t("lab.transcode.fetchFailed"));
+    const blob = await res.blob();
+    const aviFile = new File([blob], aviFilename, { type: "video/x-msvideo" });
+    const out = await transcodeAviToMp4(aviFile, (ratio, msg) => {
+      const base = 0.2;
+      const span = 0.6;
+      setDebugImportProgress(base + Math.max(0, Math.min(1, ratio)) * span);
+      if (msg === "loading_ffmpeg") setDebugImportStep(t("sidebar.flowLoadingTranscoder"));
+      else if (msg === "transcoding") setDebugImportStep(t("sidebar.flowTranscoding"));
+      else if (msg === "packing_output") setDebugImportStep(t("sidebar.flowPackaging"));
+    });
+    setDebugImportStep(t("sidebar.flowUploadingMp4"));
+    setDebugImportProgress(0.86);
+    const upload = await uploadFile(out.file, "debug_console_transcoded");
+    setDebugImportStep(t("sidebar.flowReplacing"));
+    setDebugImportProgress(0.94);
+    await replaceTranscodedVideo({
+      old_filename: aviFilename,
+      new_filename: upload.filename,
+      duration_s: out.duration_s,
+      nominal_fps: null,
+      codec_fourcc: "libx264",
+      container: "MP4",
+    });
+    return upload.filename;
+  };
+
+  const runDebugImportFlow = async () => {
+    if (!debugPick || debugImportBusy) return;
+    const isAvi = /\.avi$/i.test(debugPick);
+    setErr(null);
+    setDebugImportBusy(true);
+    setDebugImportProgress(0.02);
+    setDebugImportMessage(null);
+    try {
+      setDebugImportStep(t("sidebar.flowImportingDebug"));
+      const imported = await importFromDebug(debugPick);
+      setDebugImportProgress(isAvi ? 0.18 : 1);
+      let target = imported.filename;
+      if (isAvi) {
+        target = await transcodePoolAviAndReplace(imported.filename);
+      } else {
+        setDebugImportStep(t("sidebar.flowNoTranscode"));
+      }
+      await loadLists();
+      setSelected(target);
+      setView(isVideoAsset(target) ? "lab_video" : "lab_image");
+      setDebugImportProgress(1);
+      setDebugImportStep(t("sidebar.flowDone"));
+      setDebugImportMessage(t("sidebar.flowDoneMsg", { name: compactFilename(target) }));
+    } catch (e) {
+      setErr(String(e));
+      setDebugImportStep(t("sidebar.flowFailed"));
+      setDebugImportMessage(String(e));
+    } finally {
+      setDebugImportBusy(false);
+    }
+  };
 
   const stopFileSolveLoop = () => {
     setFileSolveRunning(false);
@@ -875,7 +1026,7 @@ export default function App() {
                     setView(isVideoAsset(u.filename) ? "lab_video" : "lab_image");
                   }}
                 >
-                  <span className="block truncate">{u.filename}</span>
+                          <span className="block truncate">{compactFilename(u.filename)}</span>
                   <span className="block text-[9px] text-on-surface-variant/90">
                     {isVideoAsset(u.filename) ? t("sidebar.assetTypeVideo") : t("sidebar.assetTypeImage")}
                   </span>
@@ -903,26 +1054,38 @@ export default function App() {
               <button
                 type="button"
                 className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] font-medium text-on-primary disabled:opacity-40"
-                disabled={!debugPick}
+                disabled={!debugPick || debugImportBusy}
                 title={debugPick ?? undefined}
-                onClick={async () => {
-                  if (!debugPick) return;
-                  setBusy(true);
-                  try {
-                    const r = await importFromDebug(debugPick);
-                    await loadLists();
-                    setSelected(r.filename);
-                    setView(isVideoAsset(r.filename) ? "lab_video" : "lab_image");
-                  } catch (e) {
-                    setErr(String(e));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onClick={() => void runDebugImportFlow()}
               >
-                {t("sidebar.importToPool")}
+                {debugPick && /\.avi$/i.test(debugPick)
+                  ? t("sidebar.importToPoolWithTranscode")
+                  : t("sidebar.importToPoolDirect")}
               </button>
             </div>
+            {debugImportProgress != null && (
+              <div className="mb-2 rounded border border-outline-variant/25 bg-surface-container-low px-2 py-2">
+                <div className="flex items-center justify-between gap-2 text-[10px]">
+                  <span className="text-on-surface-variant">
+                    {debugImportStep || t("sidebar.flowPreparing")}
+                  </span>
+                  <span className="font-mono text-on-surface">
+                    {Math.round((debugImportProgress || 0) * 100)}%
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded bg-surface-container-highest">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.round((debugImportProgress || 0) * 100)}%` }}
+                  />
+                </div>
+                {debugImportMessage && (
+                  <div className="mt-1 text-[10px] text-on-surface-variant" title={debugImportMessage}>
+                    {debugImportMessage}
+                  </div>
+                )}
+              </div>
+            )}
             {debugFilesForView.length === 0 ? (
               <p className="text-[10px] text-on-surface-variant">{t("sidebar.debugEmpty")}</p>
             ) : (
@@ -952,7 +1115,7 @@ export default function App() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-mono text-[10px] text-on-surface" title={f.name}>
-                          {f.name}
+                          {compactFilename(f.name)}
                         </div>
                         <div className="text-[9px] text-on-surface-variant">
                           {f.type === "video" || isVideoAsset(f.name)
@@ -996,6 +1159,11 @@ export default function App() {
               {err && (
                 <div className="mb-2 rounded border border-error/40 bg-error-container/20 px-3 py-2 text-xs text-error">
                   {err}
+                </div>
+              )}
+              {lastGateHint && (
+                <div className="mb-2 rounded border border-outline-variant/35 bg-surface-container px-3 py-2 text-xs text-on-surface-variant">
+                  {lastGateHint}
                 </div>
               )}
               {view === "lab_video" && (
@@ -1146,6 +1314,35 @@ export default function App() {
                           {videoPreviewError && (
                             <div className="rounded border border-error/40 bg-error-container/20 px-3 py-1.5 text-[11px] text-error">
                               {videoPreviewError}
+                            </div>
+                          )}
+                          {isSelectedAvi && (
+                            <div className="max-w-3xl rounded border border-primary/40 bg-primary/10 px-3 py-2 text-[11px] text-on-surface">
+                              <div className="font-semibold text-primary">{t("lab.transcode.title")}</div>
+                              <div className="mt-1 text-on-surface-variant">{t("lab.transcode.desc")}</div>
+                              {transcodeProgress != null && (
+                                <div className="mt-2">
+                                  <div className="mb-1 text-[10px] text-on-surface-variant">
+                                    {transcodeHint || t("lab.transcode.running")}
+                                  </div>
+                                  <div className="h-1.5 w-full overflow-hidden rounded bg-surface-container-highest">
+                                    <div
+                                      className="h-full bg-primary transition-all"
+                                      style={{ width: `${Math.round(transcodeProgress * 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  className="rounded bg-primary px-3 py-1.5 text-[11px] font-medium text-on-primary disabled:opacity-50"
+                                  disabled={transcodeBusy}
+                                  onClick={() => void onTranscodeAndUploadAvi()}
+                                >
+                                  {t("lab.transcode.button")}
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1461,7 +1658,9 @@ export default function App() {
                       <div className="mt-2 flex flex-wrap gap-4 text-xs text-on-surface-variant">
                         <span>
                           {t("lab.file")}:{" "}
-                          <span className="font-mono text-on-surface">{selected}</span>
+                          <span className="font-mono text-on-surface" title={selected}>
+                            {compactFilename(selected, 22, 18)}
+                          </span>
                         </span>
                         {uploads.find((u) => u.filename === selected)?.source && (
                           <span className="rounded bg-surface-container-high px-2 py-0.5">
@@ -1812,6 +2011,23 @@ export default function App() {
                         value={params.solve_timeout_ms ?? ""}
                         onChange={(v) => setParams((p) => ({ ...p, solve_timeout_ms: v }))}
                       />
+                      <Field
+                        label={t("params.solveIntervalMs")}
+                        helpKey="params.solveIntervalMsHelp"
+                        value={desiredSolveIntervalMs ?? ""}
+                        onChange={(v) =>
+                          setDesiredSolveIntervalMs(
+                            v == null ? defaultIntervalMs : Math.round(v),
+                          )
+                        }
+                      />
+                      <p className="text-[9px] leading-snug text-on-surface-variant/80">
+                        {t("params.solveIntervalBound", {
+                          min: intervalMinMs,
+                          max: intervalMaxMs,
+                          effective: starAnalysisIntervalMs,
+                        })}
+                      </p>
                       <Field
                         label={t("params.ra")}
                         helpKey="params.raHelp"

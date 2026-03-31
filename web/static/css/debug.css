@@ -944,6 +944,9 @@ button:disabled:hover,
   transform: translateX(100%);
   transition: transform 0.3s ease;
   max-width: 300px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .notification.show {

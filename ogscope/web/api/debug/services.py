@@ -22,13 +22,14 @@ DEBUG_CAPTURES_DIR.mkdir(exist_ok=True)
 camera_instance = None
 is_recording = False
 recording_task = None
+recording_state_lock: Optional[asyncio.Lock] = None
 # 录制会话元数据（用于停止时写入侧车） / Recording session metadata (for sidecar on stop)
 recording_stem: Optional[str] = None
 recording_t0_mono: Optional[float] = None
 recording_fps_value: float = 15.0
 recording_media_filename: Optional[str] = None
-recording_codec_fourcc: str = "mp4v"
-recording_container: str = "MP4"
+recording_codec_fourcc: str = "MJPG"
+recording_container: str = "AVI"
 
 # 预览帧缓存与抓取任务 / Preview frame buffering and grabbing tasks
 latest_preview_jpeg: Optional[bytes] = None
@@ -50,6 +51,19 @@ _CAMERA_ENV_KEY_MAP = {
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
 # Serialize ensure/start; offload blocking camera calls from asyncio event loop.
 _camera_ensure_lock = asyncio.Lock()
+
+
+def _get_recording_state_lock() -> asyncio.Lock:
+    """懒加载录制状态锁 / Lazy-init lock for recording state."""
+    global recording_state_lock
+    if recording_state_lock is None:
+        recording_state_lock = asyncio.Lock()
+    return recording_state_lock
+
+
+def is_recording_active() -> bool:
+    """是否正在录制 / Whether recording is active."""
+    return bool(is_recording)
 
 
 def i18n_payload(
@@ -469,94 +483,91 @@ class DebugCameraService:
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
-        if is_recording:
-            raise Exception("已在录制中")
+        async with _get_recording_state_lock():
+            if is_recording:
+                raise Exception("已在录制中")
+            try:
+                from ogscope.web.api.analysis.services import analysis_service
 
-        camera = get_camera_instance()
-        if not camera or not camera.is_capturing:
-            raise Exception("相机未运行")
+                if analysis_service.is_realtime_source_busy("camera"):
+                    raise Exception("画面解析进行中，无法开始录制")
+            except ImportError:
+                pass
 
-        try:
-            import time
+            camera = get_camera_instance()
+            if not camera or not camera.is_capturing:
+                raise Exception("相机未运行")
 
-            import cv2
+            try:
+                import cv2
 
-            camera_info = camera.get_camera_info()
-            stem = generate_capture_stem("VID", camera_info)
-            video_path = DEBUG_CAPTURES_DIR / f"{stem}.mp4"
+                camera_info = camera.get_camera_info()
+                stem = generate_capture_stem("VID", camera_info)
+                video_path = DEBUG_CAPTURES_DIR / f"{stem}.avi"
 
-            # 优先使用 MP4 编码，按候选顺序探测可用编码器 / Prefer MP4 codecs and probe available codecs in order.
-            # 浏览器兼容优先级：H264/avc1 通常优于 mp4v
-            # Browser compatibility priority: H264/avc1 are generally more compatible than mp4v.
-            codec_candidates = [
-                ("avc1", "MP4"),
-                ("H264", "MP4"),
-                ("mp4v", "MP4"),
-            ]
-            width = int(camera_info.get("output_width", camera_info.get("width", 1920)))
-            height = int(
-                camera_info.get("output_height", camera_info.get("height", 1080))
-            )
-            fps = float(camera_info.get("fps", 15))
-            recording_fps_value = fps
-
-            video_writer = None
-            chosen_codec = None
-            chosen_container = None
-            for codec_tag, container in codec_candidates:
-                fourcc = cv2.VideoWriter_fourcc(*codec_tag)
-                candidate_writer = cv2.VideoWriter(
-                    str(video_path), fourcc, fps, (width, height)
+                # 优先使用 AVI 友好编码，按候选顺序探测可用编码器 / Prefer AVI-friendly codecs.
+                codec_candidates = [
+                    ("MJPG", "AVI"),
+                    ("XVID", "AVI"),
+                    ("DIVX", "AVI"),
+                ]
+                width = int(
+                    camera_info.get("output_width", camera_info.get("width", 1920))
                 )
-                if candidate_writer.isOpened():
-                    video_writer = candidate_writer
-                    chosen_codec = codec_tag
-                    chosen_container = container
-                    break
-                candidate_writer.release()
-
-            if video_writer is None or not video_writer.isOpened():
-                raise Exception("视频写入器创建失败（MP4编码器不可用）")
-            if str(chosen_codec or "").lower() == "mp4v":
-                logging.getLogger(__name__).warning(
-                    "录制回退到 mp4v，某些浏览器可能无法预览该 MP4 文件"
+                height = int(
+                    camera_info.get("output_height", camera_info.get("height", 1080))
                 )
+                # 将录制写盘帧率限制在 1-3 FPS，进一步降低开发板负载 / Clamp record-write FPS to 1-3.
+                source_fps = float(camera_info.get("fps", 15))
+                fps = max(1.0, min(3.0, source_fps))
+                recording_fps_value = fps
 
-            recording_stem = stem
-            recording_t0_mono = time.monotonic()
-            recording_media_filename = f"{stem}.mp4"
-            recording_codec_fourcc = str(chosen_codec or "mp4v")
-            recording_container = str(chosen_container or "MP4")
-            is_recording = True
+                video_writer = None
+                chosen_codec = None
+                chosen_container = None
+                for codec_tag, container in codec_candidates:
+                    fourcc = cv2.VideoWriter_fourcc(*codec_tag)
+                    candidate_writer = cv2.VideoWriter(
+                        str(video_path), fourcc, fps, (width, height)
+                    )
+                    if candidate_writer.isOpened():
+                        video_writer = candidate_writer
+                        chosen_codec = codec_tag
+                        chosen_container = container
+                        break
+                    candidate_writer.release()
 
-            # 启动录制任务 / Start recording task
-            async def record_video():
-                nonlocal video_writer
-                try:
-                    while is_recording:
-                        # 采集单帧放到线程，避免阻塞事件循环影响“停止录制”响应 / Offload frame capture to a thread to keep stop-recording responsive.
-                        image = await asyncio.to_thread(camera.capture_image)
-                        if image is not None:
-                            # OpenCV 期望 BGR / OpenCV expects BGR
-                            try:
-                                import cv2
+                if video_writer is None or not video_writer.isOpened():
+                    raise Exception("视频写入器创建失败（AVI编码器不可用）")
 
-                                bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                            except Exception:
-                                bgr = image
-                            video_writer.write(bgr)
-                        await asyncio.sleep(1 / max(fps, 1))
-                finally:
-                    video_writer.release()
+                recording_stem = stem
+                recording_t0_mono = time.monotonic()
+                recording_media_filename = f"{stem}.avi"
+                recording_codec_fourcc = str(chosen_codec or "MJPG")
+                recording_container = str(chosen_container or "AVI")
+                is_recording = True
 
-            recording_task = asyncio.create_task(record_video())
+                async def record_video():
+                    nonlocal video_writer
+                    try:
+                        while is_recording:
+                            image = await asyncio.to_thread(camera.capture_image)
+                            if image is not None:
+                                try:
+                                    bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                                except Exception:
+                                    bgr = image
+                                video_writer.write(bgr)
+                            await asyncio.sleep(1 / max(fps, 1))
+                    finally:
+                        video_writer.release()
 
-            return {"success": True, "filename": f"{stem}.mp4", "path": str(video_path)}
-
-        except ImportError:
-            raise Exception("OpenCV未安装")
-        except Exception as e:
-            raise Exception(f"录制启动失败: {str(e)}")
+                recording_task = asyncio.create_task(record_video())
+                return {"success": True, "filename": f"{stem}.avi", "path": str(video_path)}
+            except ImportError:
+                raise Exception("OpenCV未安装")
+            except Exception as e:
+                raise Exception(f"录制启动失败: {str(e)}")
 
     @staticmethod
     async def stop_recording():
@@ -564,67 +575,64 @@ class DebugCameraService:
         global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
-        if not is_recording:
-            raise Exception("未在录制中")
+        async with _get_recording_state_lock():
+            if not is_recording:
+                raise Exception("未在录制中")
 
-        import time
+            stem = recording_stem
+            t0 = recording_t0_mono
+            nominal_fps = recording_fps_value
+            media_filename = recording_media_filename
+            codec_fourcc = recording_codec_fourcc
+            container = recording_container
 
-        stem = recording_stem
-        t0 = recording_t0_mono
-        nominal_fps = recording_fps_value
-        media_filename = recording_media_filename
-        codec_fourcc = recording_codec_fourcc
-        container = recording_container
+            is_recording = False
 
-        is_recording = False
-
-        if recording_task:
-            try:
-                # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop to avoid long stop-recording stalls.
-                await asyncio.wait_for(recording_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                # 超时后主动取消任务，确保接口快速返回 / Cancel on timeout so API can return quickly.
-                recording_task.cancel()
+            if recording_task:
                 try:
-                    await asyncio.wait_for(recording_task, timeout=1.0)
+                    # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop.
+                    await asyncio.wait_for(recording_task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    recording_task.cancel()
+                    try:
+                        await asyncio.wait_for(recording_task, timeout=1.0)
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(
+                            "停止录制时等待录制任务取消异常: %s", e
+                        )
                 except asyncio.CancelledError:
                     pass
-                except Exception as e:
-                    logging.getLogger(__name__).warning(
-                        "停止录制时等待录制任务取消异常: %s", e
-                    )
-            except asyncio.CancelledError:
-                pass
-            recording_task = None
+                recording_task = None
 
-        # 写入录制参数侧车（与视频同名 .txt）/ Write recording sidecar (.txt) next to video file
-        if stem:
-            media_filename = media_filename or f"{stem}.mp4"
-            video_path = DEBUG_CAPTURES_DIR / media_filename
-            duration_s = 0.0
-            if t0 is not None:
-                duration_s = max(0.0, time.monotonic() - t0)
-            file_size = int(video_path.stat().st_size) if video_path.exists() else 0
-            camera = get_camera_instance()
-            camera_info = camera.get_camera_info() if camera else {}
-            save_capture_sidecar(
-                stem,
-                camera_info,
-                kind="video",
-                media_filename=media_filename,
-                file_size=file_size,
-                extra={
-                    "duration_s": round(duration_s, 3),
-                    "nominal_fps": nominal_fps,
-                    "codec_fourcc": codec_fourcc,
-                    "container": container,
-                },
-            )
-        recording_stem = None
-        recording_t0_mono = None
-        recording_media_filename = None
-        recording_codec_fourcc = "mp4v"
-        recording_container = "MP4"
+            if stem:
+                media_filename = media_filename or f"{stem}.avi"
+                video_path = DEBUG_CAPTURES_DIR / media_filename
+                duration_s = 0.0
+                if t0 is not None:
+                    duration_s = max(0.0, time.monotonic() - t0)
+                file_size = int(video_path.stat().st_size) if video_path.exists() else 0
+                camera = get_camera_instance()
+                camera_info = camera.get_camera_info() if camera else {}
+                save_capture_sidecar(
+                    stem,
+                    camera_info,
+                    kind="video",
+                    media_filename=media_filename,
+                    file_size=file_size,
+                    extra={
+                        "duration_s": round(duration_s, 3),
+                        "nominal_fps": nominal_fps,
+                        "codec_fourcc": codec_fourcc,
+                        "container": container,
+                    },
+                )
+            recording_stem = None
+            recording_t0_mono = None
+            recording_media_filename = None
+            recording_codec_fourcc = "MJPG"
+            recording_container = "AVI"
 
         return {
             "success": True,

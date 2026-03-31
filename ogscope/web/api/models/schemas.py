@@ -247,6 +247,12 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     input_name: Optional[str] = None
     frame_index: int = 0
     time_sec: Optional[float] = None
+    solve_interval_ms: Optional[int] = Field(
+        default=None,
+        ge=200,
+        le=60000,
+        description="期望解算间隔（毫秒）；后端会按系统上下限裁剪 / Desired solve interval in ms (server-clamped)",
+    )
     # 解算参数 / Solve parameters
     hint_ra_deg: Optional[float] = None
     hint_dec_deg: Optional[float] = None
@@ -276,3 +282,16 @@ class ImportFromDebugRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     filename: str
+
+
+class AnalysisReplaceVideoRequest(BaseModel):
+    """转码后替换素材视频 / Replace original video after client transcode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_filename: str
+    new_filename: str
+    duration_s: Optional[float] = None
+    nominal_fps: Optional[float] = None
+    codec_fourcc: Optional[str] = None
+    container: Optional[str] = None

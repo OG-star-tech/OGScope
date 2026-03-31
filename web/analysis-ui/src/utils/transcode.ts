@@ -1,0 +1,92 @@
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
+
+type TranscodeProgress = (ratio: number, message?: string) => void;
+
+let ffmpegSingleton: FFmpeg | null = null;
+let ffmpegLoading: Promise<FFmpeg> | null = null;
+
+async function ensureFfmpeg(onProgress?: TranscodeProgress): Promise<FFmpeg> {
+  if (ffmpegSingleton) return ffmpegSingleton;
+  if (ffmpegLoading) return ffmpegLoading;
+  ffmpegLoading = (async () => {
+    const ffmpeg = new FFmpeg();
+    ffmpeg.on("progress", ({ progress }) => {
+      if (onProgress) onProgress(progress, "transcoding");
+    });
+    const base = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+    const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript");
+    const wasmURL = await toBlobURL(
+      `${base}/ffmpeg-core.wasm`,
+      "application/wasm",
+    );
+    if (onProgress) onProgress(0.01, "loading_ffmpeg");
+    await ffmpeg.load({ coreURL, wasmURL });
+    ffmpegSingleton = ffmpeg;
+    return ffmpeg;
+  })();
+  try {
+    return await ffmpegLoading;
+  } finally {
+    ffmpegLoading = null;
+  }
+}
+
+async function probeDurationSeconds(file: File): Promise<number | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    const duration = await new Promise<number | null>((resolve) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => {
+        const d = Number(v.duration);
+        resolve(Number.isFinite(d) && d > 0 ? d : null);
+      };
+      v.onerror = () => resolve(null);
+      v.src = url;
+    });
+    return duration;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export async function transcodeAviToMp4(
+  input: File,
+  onProgress?: TranscodeProgress,
+): Promise<{ file: File; duration_s: number | null }> {
+  const ffmpeg = await ensureFfmpeg(onProgress);
+  const srcName = "input.avi";
+  const outName = "output.mp4";
+  if (onProgress) onProgress(0.03, "writing_input");
+  await ffmpeg.writeFile(srcName, await fetchFile(input));
+  // 低复杂度参数，优先速度与兼容性 / Favor speed and compatibility.
+  await ffmpeg.exec([
+    "-i",
+    srcName,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "24",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-an",
+    outName,
+  ]);
+  const output = await ffmpeg.readFile(outName);
+  if (onProgress) onProgress(0.98, "packing_output");
+  const blob = new Blob([output], { type: "video/mp4" });
+  const outFile = new File([blob], input.name.replace(/\.avi$/i, ".mp4"), {
+    type: "video/mp4",
+  });
+  // 清理虚拟文件，避免 wasm 内存堆积 / Cleanup in-memory FS.
+  await ffmpeg.deleteFile(srcName);
+  await ffmpeg.deleteFile(outName);
+  const duration_s = await probeDurationSeconds(outFile);
+  if (onProgress) onProgress(1, "done");
+  return { file: outFile, duration_s };
+}

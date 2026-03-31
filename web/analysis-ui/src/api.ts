@@ -88,6 +88,24 @@ export async function importFromDebug(filename: string): Promise<{ filename: str
   return data as { filename: string };
 }
 
+export async function replaceTranscodedVideo(payload: {
+  old_filename: string;
+  new_filename: string;
+  duration_s?: number | null;
+  nominal_fps?: number | null;
+  codec_fourcc?: string | null;
+  container?: string | null;
+}): Promise<{ success: boolean; filename: string }> {
+  const r = await fetch(`${API}/analysis/uploads/replace_video`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseJson(r);
+  if (!r.ok) throw new Error(String((data as { detail?: string }).detail || r.status));
+  return data as { success: boolean; filename: string };
+}
+
 export async function solveImage(
   input_name: string,
   params: SolveParams
@@ -252,6 +270,10 @@ export async function fetchUploadExperimentCount(
 export type LabPublicSettings = {
   solver_timeout_ms: number;
   star_analysis_target_fps: number;
+  star_analysis_min_interval_ms: number;
+  star_analysis_max_interval_ms: number;
+  star_analysis_request_timeout_ms: number;
+  star_analysis_slow_threshold_ms: number;
   camera_width: number;
   camera_height: number;
   camera_fps: number;
@@ -273,11 +295,22 @@ export async function solveVideoFrame(payload: {
   input_name?: string | null;
   frame_index?: number;
   time_sec?: number | null;
+  solve_interval_ms?: number | null;
   /** 自动标注 Top-N 星点（省略则用后端默认） / Auto-label top-N stars (server default if omitted) */
   overlay_topn_count?: number | null;
   /** 是否启用极轴引导信息（省略则用后端默认） / Whether to enable polar guide info (server default if omitted) */
   enable_polar_guide?: boolean | null;
-} & SolveParams): Promise<{ success: boolean; result?: Record<string, unknown>; frame_id?: number | null; frame_ts?: string | null }> {
+} & SolveParams): Promise<{
+  success: boolean;
+  result?: Record<string, unknown>;
+  frame_id?: number | null;
+  frame_ts?: string | null;
+  gate_status?: string | null;
+  gate_reason?: string | null;
+  next_allowed_in_ms?: number | null;
+  requested_interval_ms?: number | null;
+  effective_interval_ms?: number | null;
+}> {
   const r = await fetch(`${API}/analysis/solve/frame`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -285,7 +318,17 @@ export async function solveVideoFrame(payload: {
   });
   const data = await parseJson(r);
   if (!r.ok) throw new Error(String((data as { detail?: string }).detail || r.status));
-  return data as { success: boolean; result?: Record<string, unknown>; frame_id?: number | null; frame_ts?: string | null };
+  return data as {
+    success: boolean;
+    result?: Record<string, unknown>;
+    frame_id?: number | null;
+    frame_ts?: string | null;
+    gate_status?: string | null;
+    gate_reason?: string | null;
+    next_allowed_in_ms?: number | null;
+    requested_interval_ms?: number | null;
+    effective_interval_ms?: number | null;
+  };
 }
 
 export async function solveFrameFromBlob(
@@ -293,8 +336,16 @@ export async function solveFrameFromBlob(
   payload: SolveParams & {
     overlay_topn_count?: number | null;
     enable_polar_guide?: boolean | null;
+    solve_interval_ms?: number | null;
   },
-): Promise<{ success: boolean; result?: Record<string, unknown> }> {
+): Promise<{
+  success: boolean;
+  result?: Record<string, unknown>;
+  gate_status?: string | null;
+  gate_reason?: string | null;
+  requested_interval_ms?: number | null;
+  effective_interval_ms?: number | null;
+}> {
   const fd = new FormData();
   fd.append("file", frameBlob, "frame.jpg");
   fd.append("payload", JSON.stringify(payload));
@@ -304,7 +355,14 @@ export async function solveFrameFromBlob(
   });
   const data = await parseJson(r);
   if (!r.ok) throw new Error(String((data as { detail?: string }).detail || r.status));
-  return data as { success: boolean; result?: Record<string, unknown> };
+  return data as {
+    success: boolean;
+    result?: Record<string, unknown>;
+    gate_status?: string | null;
+    gate_reason?: string | null;
+    requested_interval_ms?: number | null;
+    effective_interval_ms?: number | null;
+  };
 }
 
 export function experimentAssetUrl(experimentId: string): string {

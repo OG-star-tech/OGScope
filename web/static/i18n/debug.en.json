@@ -135,6 +135,7 @@
   "recording.stop": "Stop Recording",
   "recording.statusLabel": "Recording Status:",
   "recording.durationLabel": "Duration:",
+  "recording.aviHint": "Recording uses low-FPS AVI to reduce board load; transcode to MP4 in Analysis Lab before solving.",
   "histogram.button": "📊 Histogram",
   "histogram.rgbTitle": "RGB Histogram",
   "histogram.frontendOnly": "Frontend-only",

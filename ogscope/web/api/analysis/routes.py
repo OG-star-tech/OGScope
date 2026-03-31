@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from ogscope.web.api.analysis.services import analysis_service
 from ogscope.web.api.models.schemas import (
+    AnalysisReplaceVideoRequest,
     AnalysisBatchSolveRequest,
     AnalysisExperimentCreate,
     AnalysisExtractPreviewRequest,
@@ -124,6 +125,19 @@ async def import_upload_from_debug(body: ImportFromDebugRequest):
         return analysis_service.import_from_debug_capture(body.filename)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/analysis/uploads/replace_video")
+async def replace_transcoded_video(body: AnalysisReplaceVideoRequest):
+    """客户端转码后替换视频并清理原文件 / Replace uploaded video after client transcode."""
+    try:
+        return analysis_service.replace_transcoded_video(body)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -287,8 +301,10 @@ async def solve_uploaded_frame(
             raise ValueError("payload 必须为 JSON 对象 / payload must be a JSON object")
         topn = obj.get("overlay_topn_count")
         enable_polar = obj.get("enable_polar_guide")
+        solve_interval_ms = obj.get("solve_interval_ms")
         obj.pop("overlay_topn_count", None)
         obj.pop("enable_polar_guide", None)
+        obj.pop("solve_interval_ms", None)
         # 前端调试元数据，不参与 Pydantic 模型 / Client metadata not in schema
         obj.pop("time_sec", None)
         obj.pop("frame_width", None)
@@ -300,6 +316,7 @@ async def solve_uploaded_frame(
             solve_params=data,
             overlay_topn_count=topn,
             enable_polar_guide=enable_polar,
+            solve_interval_ms=solve_interval_ms,
         )
     except HTTPException:
         raise

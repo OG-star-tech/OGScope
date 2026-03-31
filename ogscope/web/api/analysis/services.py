@@ -33,6 +33,7 @@ from ogscope.web.api.models.schemas import (
     AnalysisExperimentCreate,
     AnalysisExtractPreviewRequest,
     AnalysisPresetCreate,
+    AnalysisReplaceVideoRequest,
     AnalysisSolveImageRequest,
     AnalysisSolveVideoFrameRequest,
     CentroidParamsPayload,
@@ -137,6 +138,15 @@ class AnalysisJob:
         }
 
 
+@dataclass(slots=True)
+class RealtimeSolveGateState:
+    """实时解算门禁状态 / Gate state for realtime solving."""
+
+    in_flight: bool = False
+    last_started_mono: float = 0.0
+    last_finished_mono: float = 0.0
+
+
 class AnalysisService:
     """分析服务 / Analysis service"""
 
@@ -165,6 +175,66 @@ class AnalysisService:
         self._lab = AnalysisLabStore(settings)
         self._overlay_topn_default = 3
         self._polar_guide_default = True
+        self._realtime_gate_lock = asyncio.Lock()
+        self._realtime_gate_states: dict[str, RealtimeSolveGateState] = {
+            "camera": RealtimeSolveGateState(),
+            "file": RealtimeSolveGateState(),
+        }
+
+    async def _try_enter_realtime_gate(
+        self, source: str, interval_ms: int
+    ) -> dict[str, Any] | None:
+        """尝试进入实时解算门禁；返回 skip 响应或 None / Try entering gate; return skip response or None."""
+        now = time.monotonic()
+        interval = max(0.0, float(interval_ms) / 1000.0)
+        async with self._realtime_gate_lock:
+            state = self._realtime_gate_states.setdefault(source, RealtimeSolveGateState())
+            if state.in_flight:
+                return {
+                    "success": True,
+                    "gate_status": "SKIPPED_BUSY",
+                    "gate_reason": "previous request still running",
+                    "next_allowed_in_ms": 0,
+                }
+            if state.last_finished_mono > 0:
+                elapsed = now - state.last_finished_mono
+                if elapsed < interval:
+                    wait_ms = max(0, int((interval - elapsed) * 1000.0))
+                    return {
+                        "success": True,
+                        "gate_status": "SKIPPED_INTERVAL",
+                        "gate_reason": "minimum interval not reached",
+                        "next_allowed_in_ms": wait_ms,
+                    }
+            state.in_flight = True
+            state.last_started_mono = now
+            return None
+
+    async def _leave_realtime_gate(self, source: str) -> None:
+        """释放实时解算门禁 / Leave realtime solve gate."""
+        now = time.monotonic()
+        async with self._realtime_gate_lock:
+            state = self._realtime_gate_states.setdefault(source, RealtimeSolveGateState())
+            state.in_flight = False
+            state.last_finished_mono = now
+
+    def is_realtime_source_busy(self, source: str) -> bool:
+        """判断实时解算源是否繁忙 / Check whether realtime source is busy."""
+        state = self._realtime_gate_states.get(source)
+        return bool(state and state.in_flight)
+
+    def _resolve_realtime_interval_ms(self, requested_ms: int | None) -> tuple[int, int]:
+        """解析实时解算间隔并按系统上下限裁剪 / Resolve realtime interval with server bounds."""
+        if requested_ms is None:
+            return 0, 0
+        settings = get_settings()
+        min_interval_ms = int(settings.star_analysis_min_interval_ms)
+        max_interval_ms = int(settings.star_analysis_max_interval_ms)
+        requested_interval_ms = int(requested_ms)
+        effective_interval_ms = min(
+            max(requested_interval_ms, min_interval_ms), max_interval_ms
+        )
+        return requested_interval_ms, effective_interval_ms
 
     def _build_topn_labels(
         self,
@@ -705,6 +775,80 @@ class AnalysisService:
             "size": dst.stat().st_size,
         }
 
+    def replace_transcoded_video(
+        self, body: AnalysisReplaceVideoRequest
+    ) -> dict[str, Any]:
+        """转码后替换素材视频并同步侧车 / Replace original video with transcoded output."""
+        old_name = Path(body.old_filename.strip()).name
+        new_name = Path(body.new_filename.strip()).name
+        if not old_name or not new_name:
+            raise ValueError("文件名无效 / Invalid filename")
+        if old_name == new_name:
+            raise ValueError("新旧文件名不能相同 / old_filename and new_filename must differ")
+        old_path = self.resolve_upload_path(old_name)
+        new_path = self.resolve_upload_path(new_name)
+        if not old_path.is_file():
+            raise FileNotFoundError("原始文件不存在 / Original file not found")
+        if not new_path.is_file():
+            raise FileNotFoundError("转码文件不存在 / Transcoded file not found")
+        if old_path.suffix.lower() != ".avi":
+            raise ValueError("仅支持替换 AVI 原始文件 / only AVI source can be replaced")
+        if new_path.suffix.lower() != ".mp4":
+            raise ValueError("新文件必须为 MP4 / new file must be MP4")
+
+        old_sidecar = self.upload_root / f"{old_path.stem}.txt"
+        new_sidecar = self.upload_root / f"{new_path.stem}.txt"
+        sidecar_payload: dict[str, Any] = {}
+        if old_sidecar.is_file():
+            try:
+                raw = json.loads(old_sidecar.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    sidecar_payload = raw
+            except (json.JSONDecodeError, OSError):
+                sidecar_payload = {}
+        sidecar_payload.setdefault("kind", "video")
+        sidecar_payload["media_file"] = new_name
+        sidecar_payload["size"] = int(new_path.stat().st_size)
+        extra = sidecar_payload.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
+        extra["codec_fourcc"] = str(body.codec_fourcc or "mp4v")
+        extra["container"] = str(body.container or "MP4")
+        if body.duration_s is not None:
+            extra["duration_s"] = float(body.duration_s)
+        if body.nominal_fps is not None:
+            extra["nominal_fps"] = float(body.nominal_fps)
+        sidecar_payload["extra"] = extra
+        new_sidecar.write_text(
+            json.dumps(sidecar_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        old_path.unlink()
+        if old_sidecar.is_file() and old_sidecar != new_sidecar:
+            old_sidecar.unlink()
+
+        manifest = self._lab.load_manifest()
+        entries = manifest.setdefault("entries", {})
+        old_ent = entries.get(old_name, {})
+        new_ent = entries.setdefault(new_name, {})
+        if isinstance(old_ent, dict):
+            for key in ("source", "last_solve"):
+                if key in old_ent and key not in new_ent:
+                    new_ent[key] = old_ent[key]
+        new_ent["source"] = new_ent.get("source", "analysis_upload")
+        new_ent["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if old_name in entries:
+            del entries[old_name]
+        self._lab.save_manifest(manifest)
+        return {
+            "success": True,
+            "old_filename": old_name,
+            "filename": new_name,
+            "deleted_old": True,
+            "sidecar": new_sidecar.name,
+            "size": int(new_path.stat().st_size),
+        }
+
     def list_presets(self, scope: str) -> dict[str, Any]:
         """列出官方或用户预设 / List official or user presets."""
         if scope not in {"official", "user"}:
@@ -766,68 +910,112 @@ class AnalysisService:
         solve_params: AnalysisSolveImageRequest,
         overlay_topn_count: int | None = None,
         enable_polar_guide: bool | None = None,
+        solve_interval_ms: int | None = None,
     ) -> dict[str, Any]:
         """解析上传的单帧图像并解算 / Solve a single uploaded frame (multipart)."""
-        if not image_bytes:
-            raise ValueError("空图像数据 / Empty image payload")
-        buf = np.frombuffer(image_bytes, dtype=np.uint8)
-        frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-        if frame is None:
-            raise ValueError("无法解码图像 / Cannot decode image")
-
-        centroid_params, max_stars, timeout_ms, effective_profile = (
-            self._resolve_solve_profile(
-                solve_params.solve_profile,
-                solve_params.centroid,
-                solve_params.solve_timeout_ms,
-            )
+        settings = get_settings()
+        requested_interval_ms, effective_interval_ms = (
+            self._resolve_realtime_interval_ms(solve_interval_ms)
         )
-        loop = asyncio.get_running_loop()
-
-        def _run() -> dict[str, Any]:
-            return self._solve_bgr_to_row(
-                frame,
-                solve_params.hint_ra_deg,
-                solve_params.hint_dec_deg,
-                solve_params.fov_estimate,
-                solve_params.fov_max_error,
-                timeout_ms,
-                centroid_params,
-                solve_params.max_image_side,
-                max_stars,
-                bool(solve_params.large_scale_bg_subtract),
-            )
-
-        row = await loop.run_in_executor(self._solver_executor, _run)
-        # 统一 overlay_ext 结构，便于前端复用渲染逻辑
-        topn = (
-            int(overlay_topn_count)
-            if overlay_topn_count is not None
-            else self._overlay_topn_default
+        gate_skip = await self._try_enter_realtime_gate(
+            "file_upload", effective_interval_ms
         )
-        enable_polar = (
-            bool(enable_polar_guide)
-            if enable_polar_guide is not None
-            else self._polar_guide_default
-        )
-        overlay_ext: dict[str, Any] = {}
+        if gate_skip is not None:
+            gate_skip["requested_interval_ms"] = requested_interval_ms
+            gate_skip["effective_interval_ms"] = effective_interval_ms
+            return gate_skip
+        t_total = time.perf_counter()
         try:
-            overlay_ext["labels_topn"] = self._build_topn_labels(
-                row, topn_count=topn
+            if not image_bytes:
+                raise ValueError("空图像数据 / Empty image payload")
+            buf = np.frombuffer(image_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            if frame is None:
+                raise ValueError("无法解码图像 / Cannot decode image")
+            centroid_params, max_stars, timeout_ms, effective_profile = (
+                self._resolve_solve_profile(
+                    solve_params.solve_profile,
+                    solve_params.centroid,
+                    solve_params.solve_timeout_ms,
+                )
             )
-        except Exception:
-            overlay_ext["labels_topn"] = []
-        if enable_polar:
+            loop = asyncio.get_running_loop()
+
+            def _run() -> dict[str, Any]:
+                return self._solve_bgr_to_row(
+                    frame,
+                    solve_params.hint_ra_deg,
+                    solve_params.hint_dec_deg,
+                    solve_params.fov_estimate,
+                    solve_params.fov_max_error,
+                    timeout_ms,
+                    centroid_params,
+                    solve_params.max_image_side,
+                    max_stars,
+                    bool(solve_params.large_scale_bg_subtract),
+                )
+
+            hard_timeout_sec = max(
+                0.2, float(settings.star_analysis_request_timeout_ms) / 1000.0
+            )
+            row = await asyncio.wait_for(
+                loop.run_in_executor(self._solver_executor, _run),
+                timeout=hard_timeout_sec,
+            )
+            # 统一 overlay_ext 结构，便于前端复用渲染逻辑
+            topn = (
+                int(overlay_topn_count)
+                if overlay_topn_count is not None
+                else self._overlay_topn_default
+            )
+            enable_polar = (
+                bool(enable_polar_guide)
+                if enable_polar_guide is not None
+                else self._polar_guide_default
+            )
+            overlay_ext: dict[str, Any] = {}
             try:
-                overlay_ext["polar_guide"] = self._build_polar_guide(row)
+                overlay_ext["labels_topn"] = self._build_topn_labels(
+                    row, topn_count=topn
+                )
             except Exception:
-                overlay_ext["polar_guide"] = None
-        row["overlay_ext"] = overlay_ext
-        row["solve_profile"] = effective_profile
-        detail_level = getattr(solve_params, "detail_level", None) or "summary"
-        if detail_level != "full":
-            row.pop("tetra", None)
-        return {"success": True, "result": row}
+                overlay_ext["labels_topn"] = []
+            if enable_polar:
+                try:
+                    overlay_ext["polar_guide"] = self._build_polar_guide(row)
+                except Exception:
+                    overlay_ext["polar_guide"] = None
+            row["overlay_ext"] = overlay_ext
+            row["solve_profile"] = effective_profile
+            row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
+            detail_level = getattr(solve_params, "detail_level", None) or "summary"
+            if detail_level != "full":
+                row.pop("tetra", None)
+            return {
+                "success": True,
+                "result": row,
+                "gate_status": "SOLVED",
+                "requested_interval_ms": requested_interval_ms,
+                "effective_interval_ms": effective_interval_ms,
+            }
+        except asyncio.TimeoutError:
+            return {
+                "success": True,
+                "result": {
+                    "status": "TIMEOUT_RELEASED",
+                    "status_code": None,
+                    "solve_source": "full",
+                    "ra_deg": 0.0,
+                    "dec_deg": 0.0,
+                    "detected_stars": 0,
+                },
+                "gate_status": "TIMEOUT_RELEASED",
+                "gate_reason": "outer request timeout",
+                "requested_interval_ms": requested_interval_ms,
+                "effective_interval_ms": effective_interval_ms,
+            }
+        finally:
+            await self._leave_realtime_gate("file_upload")
 
     def delete_experiment(self, experiment_id: str) -> None:
         """删除一条实验记录 / Delete one experiment record."""
@@ -1029,98 +1217,171 @@ class AnalysisService:
         self, body: AnalysisSolveVideoFrameRequest
     ) -> dict[str, Any]:
         """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
+        if body.source == "camera":
+            try:
+                from ogscope.web.api.debug.services import is_recording_active
+
+                if is_recording_active():
+                    return {
+                        "success": True,
+                        "input_name": body.input_name or "",
+                        "gate_status": "SKIPPED_BUSY",
+                        "gate_reason": "recording is active",
+                        "next_allowed_in_ms": 0,
+                    }
+            except Exception:
+                pass
+        settings = get_settings()
+        requested_interval_ms, effective_interval_ms = (
+            self._resolve_realtime_interval_ms(body.solve_interval_ms)
+        )
+        gate_source_key = (
+            body.source
+            if body.source == "camera"
+            else f"file:{(body.input_name or '').strip()}"
+        )
+        gate_skip = await self._try_enter_realtime_gate(
+            gate_source_key, effective_interval_ms
+        )
+        if gate_skip is not None:
+            gate_skip["requested_interval_ms"] = requested_interval_ms
+            gate_skip["effective_interval_ms"] = effective_interval_ms
+            gate_skip["input_name"] = body.input_name or ""
+            return gate_skip
+
         t_total = time.perf_counter()
         t_open_decode_ms = None
         frame = None
         frame_id = None
         frame_ts = None
-        if body.source == "camera":
-            from ogscope.web.camera_shared import get_camera_manager
-
-            t_decode = time.perf_counter()
-            frame, frame_id, frame_ts = await get_camera_manager().get_raw_frame()
-            t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
-        else:
-            if not body.input_name:
-                raise ValueError(
-                    "需要 input_name / input_name required for file source"
-                )
-            path = self._resolve_frame_source_path(body.input_name)
-            t_decode = time.perf_counter()
-            cap = cv2.VideoCapture(str(path))
-            if not cap.isOpened():
-                raise ValueError("无法打开视频 / Cannot open video")
-            try:
-                if body.time_sec is not None:
-                    cap.set(cv2.CAP_PROP_POS_MSEC, float(body.time_sec) * 1000.0)
-                else:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, float(body.frame_index))
-                ok, frame = cap.read()
-                if not ok or frame is None:
-                    raise ValueError("无法读取视频帧 / Cannot read video frame")
-            finally:
-                cap.release()
-            t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
-        centroid_params, max_stars, timeout_ms, effective_profile = (
-            self._resolve_solve_profile(
-                body.solve_profile, body.centroid, body.solve_timeout_ms
-            )
-        )
-        loop = asyncio.get_running_loop()
-
-        def _run() -> dict[str, Any]:
-            return self._solve_bgr_to_row(
-                frame,
-                body.hint_ra_deg,
-                body.hint_dec_deg,
-                body.fov_estimate,
-                body.fov_max_error,
-                timeout_ms,
-                centroid_params,
-                body.max_image_side,
-                max_stars,
-                bool(body.large_scale_bg_subtract),
-            )
-
-        row = await loop.run_in_executor(self._solver_executor, _run)
-        # 二次分析与极轴引导（失败降级，不影响基础解算）
-        topn = (
-            int(body.overlay_topn_count)
-            if getattr(body, "overlay_topn_count", None) is not None
-            else self._overlay_topn_default
-        )
-        enable_polar = (
-            bool(body.enable_polar_guide)
-            if getattr(body, "enable_polar_guide", None) is not None
-            else self._polar_guide_default
-        )
-        overlay_ext: dict[str, Any] = {}
+        elapsed_ms = 0.0
         try:
-            overlay_ext["labels_topn"] = self._build_topn_labels(row, topn_count=topn)
-        except Exception:
-            overlay_ext["labels_topn"] = []
-        if enable_polar:
-            try:
-                overlay_ext["polar_guide"] = self._build_polar_guide(row)
-            except Exception:
-                overlay_ext["polar_guide"] = None
-        row["overlay_ext"] = overlay_ext
+            if body.source == "camera":
+                from ogscope.web.camera_shared import get_camera_manager
 
-        if t_open_decode_ms is not None:
-            row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
-        row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
-        row["solve_profile"] = effective_profile
-        # 默认精简 raw，大字段仅在 detail_level==full 时返回 / Drop heavy raw unless client asks for full detail.
-        detail_level = getattr(body, "detail_level", None) or "summary"
-        if detail_level != "full":
-            row.pop("tetra", None)
-        return {
-            "success": True,
-            "input_name": body.input_name or "",
-            "result": row,
-            "frame_id": frame_id,
-            "frame_ts": frame_ts,
-        }
+                t_decode = time.perf_counter()
+                frame, frame_id, frame_ts = await get_camera_manager().get_raw_frame()
+                t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
+            else:
+                if not body.input_name:
+                    raise ValueError(
+                        "需要 input_name / input_name required for file source"
+                    )
+                path = self._resolve_frame_source_path(body.input_name)
+                t_decode = time.perf_counter()
+                cap = cv2.VideoCapture(str(path))
+                if not cap.isOpened():
+                    raise ValueError("无法打开视频 / Cannot open video")
+                try:
+                    if body.time_sec is not None:
+                        cap.set(cv2.CAP_PROP_POS_MSEC, float(body.time_sec) * 1000.0)
+                    else:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, float(body.frame_index))
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        raise ValueError("无法读取视频帧 / Cannot read video frame")
+                finally:
+                    cap.release()
+                t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
+            centroid_params, max_stars, timeout_ms, effective_profile = (
+                self._resolve_solve_profile(
+                    body.solve_profile, body.centroid, body.solve_timeout_ms
+                )
+            )
+            loop = asyncio.get_running_loop()
+
+            def _run() -> dict[str, Any]:
+                return self._solve_bgr_to_row(
+                    frame,
+                    body.hint_ra_deg,
+                    body.hint_dec_deg,
+                    body.fov_estimate,
+                    body.fov_max_error,
+                    timeout_ms,
+                    centroid_params,
+                    body.max_image_side,
+                    max_stars,
+                    bool(body.large_scale_bg_subtract),
+                )
+
+            hard_timeout_sec = max(
+                0.2, float(settings.star_analysis_request_timeout_ms) / 1000.0
+            )
+            row = await asyncio.wait_for(
+                loop.run_in_executor(self._solver_executor, _run),
+                timeout=hard_timeout_sec,
+            )
+            # 二次分析与极轴引导（失败降级，不影响基础解算）
+            topn = (
+                int(body.overlay_topn_count)
+                if getattr(body, "overlay_topn_count", None) is not None
+                else self._overlay_topn_default
+            )
+            enable_polar = (
+                bool(body.enable_polar_guide)
+                if getattr(body, "enable_polar_guide", None) is not None
+                else self._polar_guide_default
+            )
+            overlay_ext: dict[str, Any] = {}
+            try:
+                overlay_ext["labels_topn"] = self._build_topn_labels(
+                    row, topn_count=topn
+                )
+            except Exception:
+                overlay_ext["labels_topn"] = []
+            if enable_polar:
+                try:
+                    overlay_ext["polar_guide"] = self._build_polar_guide(row)
+                except Exception:
+                    overlay_ext["polar_guide"] = None
+            row["overlay_ext"] = overlay_ext
+            if t_open_decode_ms is not None:
+                row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
+            elapsed_ms = (time.perf_counter() - t_total) * 1000.0
+            row["t_backend_total_ms"] = round(elapsed_ms, 3)
+            row["solve_profile"] = effective_profile
+            # 默认精简 raw，大字段仅在 detail_level==full 时返回 / Drop heavy raw unless client asks for full detail.
+            detail_level = getattr(body, "detail_level", None) or "summary"
+            if detail_level != "full":
+                row.pop("tetra", None)
+            return {
+                "success": True,
+                "input_name": body.input_name or "",
+                "result": row,
+                "frame_id": frame_id,
+                "frame_ts": frame_ts,
+                "gate_status": "SOLVED",
+                "gate_reason": (
+                    "slow request"
+                    if elapsed_ms >= float(settings.star_analysis_slow_threshold_ms)
+                    else None
+                ),
+                "requested_interval_ms": requested_interval_ms,
+                "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": effective_interval_ms,
+            }
+        except asyncio.TimeoutError:
+            return {
+                "success": True,
+                "input_name": body.input_name or "",
+                "result": {
+                    "status": "TIMEOUT_RELEASED",
+                    "status_code": None,
+                    "solve_source": "full",
+                    "ra_deg": 0.0,
+                    "dec_deg": 0.0,
+                    "detected_stars": 0,
+                },
+                "frame_id": frame_id,
+                "frame_ts": frame_ts,
+                "gate_status": "TIMEOUT_RELEASED",
+                "gate_reason": "outer request timeout",
+                "requested_interval_ms": requested_interval_ms,
+                "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": effective_interval_ms,
+            }
+        finally:
+            await self._leave_realtime_gate(gate_source_key)
 
     def lab_public_settings(self) -> dict[str, Any]:
         """分析台默认参数（供前端）/ Public defaults for analysis UI."""
@@ -1128,6 +1389,10 @@ class AnalysisService:
         return {
             "solver_timeout_ms": s.solver_timeout_ms,
             "star_analysis_target_fps": s.star_analysis_target_fps,
+            "star_analysis_min_interval_ms": s.star_analysis_min_interval_ms,
+            "star_analysis_max_interval_ms": s.star_analysis_max_interval_ms,
+            "star_analysis_request_timeout_ms": s.star_analysis_request_timeout_ms,
+            "star_analysis_slow_threshold_ms": s.star_analysis_slow_threshold_ms,
             "camera_width": s.camera_width,
             "camera_height": s.camera_height,
             "camera_fps": s.camera_fps,

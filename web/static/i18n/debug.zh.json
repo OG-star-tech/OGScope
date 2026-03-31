@@ -135,6 +135,7 @@
   "recording.stop": "停止录制",
   "recording.statusLabel": "录制状态:",
   "recording.durationLabel": "录制时长:",
+  "recording.aviHint": "录制将使用低帧率 AVI 以降低开发板负载；可在解算控制台转码为 MP4 后再分析。",
   "histogram.button": "📊 直方图",
   "histogram.rgbTitle": "RGB 直方图",
   "histogram.frontendOnly": "纯前端实现",

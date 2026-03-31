@@ -141,6 +141,30 @@ class Settings(BaseSettings):
         default=2 / 3,
         description="星空分析目标帧率（约 1.5 秒 1 帧），仅用于前端节流 / Target star-analysis FPS for UI throttle (~1.5s per frame)",
     )
+    star_analysis_min_interval_ms: int = Field(
+        default=2000,
+        ge=500,
+        le=30000,
+        description="实时解算最小间隔（毫秒）/ Minimum interval for realtime solving in ms",
+    )
+    star_analysis_max_interval_ms: int = Field(
+        default=12000,
+        ge=1000,
+        le=60000,
+        description="实时解算最大间隔（毫秒）/ Maximum interval for realtime solving in ms",
+    )
+    star_analysis_request_timeout_ms: int = Field(
+        default=4500,
+        ge=500,
+        le=120000,
+        description="实时解算请求外层硬超时（毫秒）/ Outer hard timeout for realtime solve request in ms",
+    )
+    star_analysis_slow_threshold_ms: int = Field(
+        default=3000,
+        ge=200,
+        le=120000,
+        description="实时解算慢请求阈值（毫秒）/ Slow realtime solve threshold in ms",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

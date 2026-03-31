@@ -3,6 +3,7 @@
 """
 
 import json
+import time
 from pathlib import Path
 
 import cv2
@@ -374,3 +375,181 @@ def test_analysis_solve_frame_upload_endpoint(
     assert "status" in row
     ext = row.get("overlay_ext") or {}
     assert "labels_topn" in ext
+
+
+@pytest.mark.unit
+def test_analysis_realtime_gate_skips_by_interval(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
+    """连续请求在最小间隔内会被跳过 / Consecutive calls are skipped by interval gate."""
+    video_path = tmp_path / "gate_interval.mp4"
+    _build_test_video(video_path)
+    with video_path.open("rb") as f:
+        up = client.post(
+            "/api/analysis/upload",
+            files={"file": ("gate_interval.mp4", f, "video/mp4")},
+        )
+    assert up.status_code == 200
+
+    first = client.post(
+        "/api/analysis/solve/frame",
+        json={
+            "source": "file",
+            "input_name": "gate_interval.mp4",
+            "time_sec": 0.1,
+            "solve_interval_ms": 4000,
+        },
+    )
+    assert first.status_code == 200
+    assert first.json().get("gate_status") == "SOLVED"
+
+    second = client.post(
+        "/api/analysis/solve/frame",
+        json={
+            "source": "file",
+            "input_name": "gate_interval.mp4",
+            "time_sec": 0.1,
+            "solve_interval_ms": 4000,
+        },
+    )
+    assert second.status_code == 200
+    data2 = second.json()
+    assert data2.get("gate_status") == "SKIPPED_INTERVAL"
+    assert isinstance(data2.get("next_allowed_in_ms"), int)
+
+
+@pytest.mark.unit
+def test_analysis_realtime_timeout_releases_gate(
+    client, temp_analysis_dir, mock_plate_solve, monkeypatch, tmp_path: Path
+):
+    """超时后门禁释放，后续请求可恢复 / Timeout releases gate for following requests."""
+    from ogscope.config import get_settings
+    from ogscope.web.api.analysis.services import analysis_service
+
+    image_path = tmp_path / "gate_timeout.jpg"
+    _build_star_image(image_path)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "star_analysis_request_timeout_ms", 80, raising=False)
+    monkeypatch.setattr(settings, "star_analysis_min_interval_ms", 50, raising=False)
+    monkeypatch.setattr(settings, "star_analysis_max_interval_ms", 20000, raising=False)
+    gate = analysis_service._realtime_gate_states.get("file_upload")
+    if gate is not None:
+        gate.in_flight = False
+        gate.last_finished_mono = 0.0
+
+    def _slow(*_args, **_kwargs):
+        time.sleep(0.2)
+        return {
+            "frame_index": 0,
+            "status": "MATCH_FOUND",
+            "ra_deg": 1.0,
+            "dec_deg": 2.0,
+            "solve_overlay": {},
+        }
+
+    monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _slow)
+    with image_path.open("rb") as f:
+        resp = client.post(
+            "/api/analysis/solve/frame_upload",
+            files={"file": ("frame.jpg", f, "image/jpeg")},
+            data={"payload": json.dumps({"solve_interval_ms": 50})},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("gate_status") == "TIMEOUT_RELEASED"
+
+    def _fast(*_args, **_kwargs):
+        return {
+            "frame_index": 0,
+            "status": "MATCH_FOUND",
+            "ra_deg": 1.0,
+            "dec_deg": 2.0,
+            "solve_overlay": {},
+        }
+
+    monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _fast)
+    time.sleep(0.06)
+    with image_path.open("rb") as f:
+        resp2 = client.post(
+            "/api/analysis/solve/frame_upload",
+            files={"file": ("frame.jpg", f, "image/jpeg")},
+            data={"payload": json.dumps({"solve_interval_ms": 50})},
+        )
+    assert resp2.status_code == 200
+    assert resp2.json().get("gate_status") == "SOLVED"
+
+
+@pytest.mark.unit
+def test_analysis_camera_solve_skipped_when_recording_active(
+    client, temp_analysis_dir, mock_plate_solve, monkeypatch
+):
+    """录制进行中时拒绝实时相机解算 / Reject camera solve when recording is active."""
+    monkeypatch.setattr(
+        "ogscope.web.api.debug.services.is_recording_active", lambda: True
+    )
+    resp = client.post(
+        "/api/analysis/solve/frame",
+        json={"source": "camera"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("gate_status") == "SKIPPED_BUSY"
+    assert "recording" in str(data.get("gate_reason", ""))
+
+
+@pytest.mark.unit
+def test_analysis_replace_transcoded_video_updates_sidecar(
+    client, temp_analysis_dir, tmp_path: Path
+):
+    """转码替换后删除旧 AVI 并更新侧车 / Replace transcoded video deletes old AVI and updates sidecar."""
+    avi_path = tmp_path / "raw.avi"
+    avi_path.write_bytes(b"AVI")
+    mp4_path = tmp_path / "out.mp4"
+    mp4_path.write_bytes(b"MP4")
+    with avi_path.open("rb") as f:
+        up_avi = client.post(
+            "/api/analysis/upload",
+            files={"file": ("raw.avi", f, "video/x-msvideo")},
+        )
+    assert up_avi.status_code == 200
+    with mp4_path.open("rb") as f:
+        up_mp4 = client.post(
+            "/api/analysis/upload",
+            files={"file": ("out.mp4", f, "video/mp4")},
+        )
+    assert up_mp4.status_code == 200
+
+    side = temp_analysis_dir / "uploads" / "raw.txt"
+    side.write_text(
+        json.dumps(
+            {
+                "kind": "video",
+                "media_file": "raw.avi",
+                "extra": {"codec_fourcc": "MJPG", "container": "AVI"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resp = client.post(
+        "/api/analysis/uploads/replace_video",
+        json={
+            "old_filename": "raw.avi",
+            "new_filename": "out.mp4",
+            "duration_s": 3.2,
+            "nominal_fps": 2.0,
+            "codec_fourcc": "libx264",
+            "container": "MP4",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("success") is True
+    assert not (temp_analysis_dir / "uploads" / "raw.avi").exists()
+    assert (temp_analysis_dir / "uploads" / "out.mp4").is_file()
+    new_side = temp_analysis_dir / "uploads" / "out.txt"
+    assert new_side.is_file()
+    side_obj = json.loads(new_side.read_text(encoding="utf-8"))
+    assert side_obj.get("media_file") == "out.mp4"
+    extra = side_obj.get("extra") or {}
+    assert extra.get("container") == "MP4"

@@ -35,6 +35,7 @@ class DebugConsole {
         this.files = [];
         this.recordingStartTime = null;
         this.recordingInterval = null;
+        this.recordingCommandInFlight = false;
         this.statusInterval = null;
         this.systemInfoInterval = null;
         this.previewObjectUrl = null;
@@ -1703,11 +1704,12 @@ class DebugConsole {
      * 开始录制 / Start recording
      */
     async startRecording() {
+        if (this.recordingCommandInFlight) return;
         if (!this.cameraStatus.streaming) {
             this.showNotification('请先启动相机预览', 'warning');
             return;
         }
-        
+        this.recordingCommandInFlight = true;
         try {
             const response = await fetch('/api/debug/camera/record/start', {
                 method: 'POST'
@@ -1715,7 +1717,10 @@ class DebugConsole {
             
             if (response.ok) {
                 const result = await response.json();
-                this.showNotification(`开始录制: ${result.filename}`, 'success');
+                this.showNotification(
+                    `开始录制: ${this.compactFilename(result.filename)}`,
+                    'success'
+                );
                 
                 // 开始计时 / Start timing
                 this.recordingStartTime = Date.now();
@@ -1734,6 +1739,10 @@ class DebugConsole {
         } catch (error) {
             console.error('[DebugConsole] 开始录制失败:', error);
             this.showNotification(`开始录制失败: ${error.message}`, 'error');
+        } finally {
+            this.recordingCommandInFlight = false;
+            // 请求结束立即恢复按钮可用态，避免必须刷新页面 / Refresh button state immediately after request.
+            this.updateRecordingButtons(!!this.cameraStatus.recording);
         }
     }
     
@@ -1741,10 +1750,22 @@ class DebugConsole {
      * 停止录制 / Stop recording
      */
     async stopRecording() {
+        if (this.recordingCommandInFlight) return;
+        this.recordingCommandInFlight = true;
         try {
-            await fetch('/api/debug/camera/record/stop', {
+            const response = await fetch('/api/debug/camera/record/stop', {
                 method: 'POST'
             });
+            if (!response.ok) {
+                let detail = '停止录制失败';
+                try {
+                    const payload = await response.json();
+                    detail = payload.detail || detail;
+                } catch (_) {
+                    // ignore parse failure
+                }
+                throw new Error(detail);
+            }
             
             this.stopRecordingTimer();
             this.updateRecordingButtons(false);
@@ -1756,7 +1777,11 @@ class DebugConsole {
             
         } catch (error) {
             console.error('[DebugConsole] 停止录制失败:', error);
-            this.showNotification('停止录制失败', 'error');
+            this.showNotification(`停止录制失败: ${error.message}`, 'error');
+        } finally {
+            this.recordingCommandInFlight = false;
+            // 请求结束立即恢复按钮可用态，避免必须刷新页面 / Refresh button state immediately after request.
+            this.updateRecordingButtons(!!this.cameraStatus.recording);
         }
     }
     
@@ -1821,8 +1846,9 @@ class DebugConsole {
         const startBtn = document.getElementById('start-recording');
         const stopBtn = document.getElementById('stop-recording');
         
-        if (startBtn) startBtn.disabled = isRecording;
-        if (stopBtn) stopBtn.disabled = !isRecording;
+        const opBusy = !!this.recordingCommandInFlight;
+        if (startBtn) startBtn.disabled = opBusy || isRecording;
+        if (stopBtn) stopBtn.disabled = opBusy || !isRecording;
     }
     
     /**
@@ -3297,6 +3323,12 @@ class DebugConsole {
                 }
             }, 300);
         }, 3000);
+    }
+
+    compactFilename(name, head = 18, tail = 14) {
+        if (typeof name !== 'string') return String(name || '');
+        if (name.length <= head + tail + 1) return name;
+        return `${name.slice(0, head)}...${name.slice(-tail)}`;
     }
     
     /**
