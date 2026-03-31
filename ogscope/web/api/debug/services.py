@@ -563,7 +563,11 @@ class DebugCameraService:
                         video_writer.release()
 
                 recording_task = asyncio.create_task(record_video())
-                return {"success": True, "filename": f"{stem}.avi", "path": str(video_path)}
+                return {
+                    "success": True,
+                    "filename": f"{stem}.avi",
+                    "path": str(video_path),
+                }
             except ImportError:
                 raise Exception("OpenCV未安装")
             except Exception as e:

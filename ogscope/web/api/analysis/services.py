@@ -188,7 +188,9 @@ class AnalysisService:
         now = time.monotonic()
         interval = max(0.0, float(interval_ms) / 1000.0)
         async with self._realtime_gate_lock:
-            state = self._realtime_gate_states.setdefault(source, RealtimeSolveGateState())
+            state = self._realtime_gate_states.setdefault(
+                source, RealtimeSolveGateState()
+            )
             if state.in_flight:
                 return {
                     "success": True,
@@ -214,7 +216,9 @@ class AnalysisService:
         """释放实时解算门禁 / Leave realtime solve gate."""
         now = time.monotonic()
         async with self._realtime_gate_lock:
-            state = self._realtime_gate_states.setdefault(source, RealtimeSolveGateState())
+            state = self._realtime_gate_states.setdefault(
+                source, RealtimeSolveGateState()
+            )
             state.in_flight = False
             state.last_finished_mono = now
 
@@ -223,7 +227,9 @@ class AnalysisService:
         state = self._realtime_gate_states.get(source)
         return bool(state and state.in_flight)
 
-    def _resolve_realtime_interval_ms(self, requested_ms: int | None) -> tuple[int, int]:
+    def _resolve_realtime_interval_ms(
+        self, requested_ms: int | None
+    ) -> tuple[int, int]:
         """解析实时解算间隔并按系统上下限裁剪 / Resolve realtime interval with server bounds."""
         if requested_ms is None:
             return 0, 0
@@ -348,16 +354,20 @@ class AnalysisService:
         c_dec = math.radians(dec_center)
         t_dec = math.radians(target_dec)
         d_ra_rad = math.radians(d_ra)
-        cos_ang = (
-            math.sin(c_dec) * math.sin(t_dec)
-            + math.cos(c_dec) * math.cos(t_dec) * math.cos(d_ra_rad)
-        )
+        cos_ang = math.sin(c_dec) * math.sin(t_dec) + math.cos(c_dec) * math.cos(
+            t_dec
+        ) * math.cos(d_ra_rad)
         cos_ang = max(-1.0, min(1.0, cos_ang))
         angular_sep_deg = math.degrees(math.acos(cos_ang))
 
         return {
             "target_kind": "north_celestial_pole",
-            "frame_center": {"x": cx, "y": cy, "ra_deg": ra_center, "dec_deg": dec_center},
+            "frame_center": {
+                "x": cx,
+                "y": cy,
+                "ra_deg": ra_center,
+                "dec_deg": dec_center,
+            },
             "target": {"x": tx, "y": ty, "ra_deg": target_ra, "dec_deg": target_dec},
             "delta_px": {"dx": dx_px, "dy": dy_px},
             "angular_sep_deg": angular_sep_deg,
@@ -784,7 +794,9 @@ class AnalysisService:
         if not old_name or not new_name:
             raise ValueError("文件名无效 / Invalid filename")
         if old_name == new_name:
-            raise ValueError("新旧文件名不能相同 / old_filename and new_filename must differ")
+            raise ValueError(
+                "新旧文件名不能相同 / old_filename and new_filename must differ"
+            )
         old_path = self.resolve_upload_path(old_name)
         new_path = self.resolve_upload_path(new_name)
         if not old_path.is_file():
@@ -792,7 +804,9 @@ class AnalysisService:
         if not new_path.is_file():
             raise FileNotFoundError("转码文件不存在 / Transcoded file not found")
         if old_path.suffix.lower() != ".avi":
-            raise ValueError("仅支持替换 AVI 原始文件 / only AVI source can be replaced")
+            raise ValueError(
+                "仅支持替换 AVI 原始文件 / only AVI source can be replaced"
+            )
         if new_path.suffix.lower() != ".mp4":
             raise ValueError("新文件必须为 MP4 / new file must be MP4")
 
@@ -987,7 +1001,9 @@ class AnalysisService:
                     overlay_ext["polar_guide"] = None
             row["overlay_ext"] = overlay_ext
             row["solve_profile"] = effective_profile
-            row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
+            row["t_backend_total_ms"] = round(
+                (time.perf_counter() - t_total) * 1000.0, 3
+            )
             detail_level = getattr(solve_params, "detail_level", None) or "summary"
             if detail_level != "full":
                 row.pop("tetra", None)

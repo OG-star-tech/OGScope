@@ -10,12 +10,12 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from ogscope.web.api.analysis.services import analysis_service
 from ogscope.web.api.models.schemas import (
-    AnalysisReplaceVideoRequest,
     AnalysisBatchSolveRequest,
     AnalysisExperimentCreate,
     AnalysisExtractPreviewRequest,
     AnalysisJobCreateRequest,
     AnalysisPresetCreate,
+    AnalysisReplaceVideoRequest,
     AnalysisSolveImageRequest,
     AnalysisSolveVideoFrameRequest,
     ImportFromDebugRequest,
