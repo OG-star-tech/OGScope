@@ -43,6 +43,11 @@ class CameraManager:
         self._runtime_overrides: dict[str, Any] = {}
         self._jpeg_quality = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
         self._target_fps = max(1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8")))
+        # 是否常驻 raw 帧缓存；默认关闭以降低内存占用（分析路径可同步抓帧）
+        # Whether to retain raw frame cache; default off to reduce RAM (analysis can sync-grab).
+        self._keep_raw_cache = bool(
+            int(os.getenv("OGSCOPE_KEEP_RAW_CACHE", "0") or "0")
+        )
         self._logger = logging.getLogger(__name__)
 
     def _build_base_config(self) -> dict[str, Any]:
@@ -203,7 +208,9 @@ class CameraManager:
                         w = int(getattr(frame, "shape", [0, 0])[1] or 0)
                         with self._frame_lock:
                             self._frame_id += 1
-                            self._latest_raw = frame
+                            # 默认不保留 raw，避免与 JPEG 双份常驻；需要时设 OGSCOPE_KEEP_RAW_CACHE=1
+                            # By default do not retain raw to avoid dual large buffers; set env to keep.
+                            self._latest_raw = frame if self._keep_raw_cache else None
                             self._latest_jpeg = jpeg
                             self._latest_ts = time.time()
                             self._latest_w = w
@@ -271,13 +278,25 @@ class CameraManager:
         """读取分析帧 / Get frame for analysis."""
         await self.ensure_started()
         with self._frame_lock:
-            if self._latest_raw is None:
-                raise RuntimeError("无可用视频帧 / No frame available")
-            try:
-                frame = self._latest_raw.copy()
-            except Exception:
-                frame = self._latest_raw
-            return frame, self._frame_id, self._latest_ts
+            if self._latest_raw is not None:
+                try:
+                    frame = self._latest_raw.copy()
+                except Exception:
+                    frame = self._latest_raw
+                return frame, self._frame_id, self._latest_ts
+        # 无常驻 raw 时同步抓一帧，供解算使用（不写入 _latest_raw，除非开启 keep cache）
+        # Sync-grab when raw cache is disabled; avoids breaking analysis while saving RAM.
+        frame = await asyncio.to_thread(self._read_frame_sync)
+        if frame is None:
+            raise RuntimeError("无可用视频帧 / No frame available")
+        with self._frame_lock:
+            fid = self._frame_id
+            ts = self._latest_ts
+        try:
+            out = frame.copy()
+        except Exception:
+            out = frame
+        return out, fid, ts
 
     async def get_cached_frame_snapshot(self) -> SharedFrame | None:
         """读取当前缓存帧快照（不触发 ensure）/ Read cached snapshot without ensure."""

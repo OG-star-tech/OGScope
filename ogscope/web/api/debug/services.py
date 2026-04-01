@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from fastapi import HTTPException
+
 from ogscope.web.camera_shared import get_camera_manager
 
 # 调试控制台相关 / Debug console related
@@ -333,21 +335,11 @@ class DebugCameraService:
         if code == 304:
             return Response(status_code=304)
         if code != 200 or frame is None or frame.jpeg_frame is None:
-            # 首帧兜底：直接抓一帧并编码，避免前端启动后长时间黑屏
-            # First-frame fallback: grab one frame immediately to avoid prolonged black screen.
-            raw, frame_id, frame_ts = await manager.get_raw_frame()
-            jpeg = await asyncio.to_thread(manager.encode_frame, raw, "jpeg", 75)
-            if jpeg is None:
-                raise Exception("暂无预览帧")
-            return Response(
-                content=jpeg,
-                media_type="image/jpeg",
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "X-Frame-Id": str(frame_id),
-                    "X-Frame-Ts": str(frame_ts),
-                },
+            # 预览仅消费共享 JPEG 缓存，避免触发 raw 抓取与二次编码导致内存尖峰
+            # Preview consumes shared JPEG cache only; avoid raw grab + re-encode spikes.
+            raise HTTPException(
+                status_code=503,
+                detail="暂无预览帧，请稍后重试 / No preview frame yet, retry shortly",
             )
         return Response(
             content=frame.jpeg_frame,
@@ -370,16 +362,19 @@ class DebugCameraService:
         manager = get_camera_manager()
         await manager.ensure_started()
         snap = await manager.get_cached_frame_snapshot()
-        if snap is None or snap.raw_frame is None:
+        if snap is None:
             return 503, None, 0
         if image_format.lower() == "jpeg" and snap.jpeg_frame is not None:
             return 200, snap.jpeg_frame, snap.frame_id
+        # PNG 或自定义质量 JPEG：按需从相机同步一帧，避免依赖常驻 raw 缓存
+        # PNG or custom-quality JPEG: sync grab one frame on demand.
+        raw, fid, _ts = await manager.get_raw_frame()
         encoded = await asyncio.to_thread(
-            manager.encode_frame, snap.raw_frame, image_format, int(quality)
+            manager.encode_frame, raw, image_format, int(quality)
         )
         if encoded is None:
-            return 500, None, snap.frame_id
-        return 200, encoded, snap.frame_id
+            return 500, None, int(fid)
+        return 200, encoded, int(fid)
 
     @staticmethod
     async def capture_image():

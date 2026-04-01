@@ -39,6 +39,8 @@ class DebugConsole {
         this.statusInterval = null;
         this.systemInfoInterval = null;
         this.previewObjectUrl = null;
+        /** 上一帧 X-Frame-Id，用于 since_frame_id 去重 / Last X-Frame-Id for conditional GET */
+        this.lastPreviewFrameId = null;
         this.systemInfo = null;
         this.statusErrorCount = 0;
         this.statusLastNotifyTs = 0;
@@ -1536,93 +1538,38 @@ class DebugConsole {
         overlay.classList.add('hidden');
         this.resetStreamStats();
 
-        // 使用单次请求循环（避免并发取消）：每次等上一帧 onload / Use a single request loop (to avoid concurrent cancellation): wait for the previous frame onload each time
+        // 单连接 MJPEG 流，避免每帧 HTTP 轮询带来的内存抖动（Zero2W）
+        // Single MJPEG connection avoids per-frame HTTP polling jitter on Zero2W.
         this.previewActive = true;
-        // 提高预览帧率到15fps以获得更流畅的体验 / Increase the preview frame rate to 15fps for a smoother experience
-        const fps = 15;
-        const intervalMs = Math.max(1000 / fps, 50);
+        this.lastPreviewFrameId = null;
         let consecutiveFailures = 0;
-        let frameToken = 0;
-        let firstFrameAttempts = 0;
-        const maxFirstFrameAttempts = 10;  // 前10次请求使用更短间隔 / Use shorter intervals for the first 10 requests
-
-        const loop = async () => {
+        const attachStream = () => {
             if (!this.previewActive) return;
-            const startedAt = performance.now();
-            const myToken = ++frameToken;
-            
-            // 增加第一帧尝试计数 / Increase first frame attempt count
-            if (firstFrameAttempts < maxFirstFrameAttempts) {
-                firstFrameAttempts++;
-            }
-
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1000);
-
             try {
-                const response = await fetch(`/api/debug/camera/preview?t=${Date.now()}`, {
-                    cache: 'no-store',
-                    signal: controller.signal,
-                });
-                if (!response.ok) {
-                    throw new Error(`preview status=${response.status}`);
-                }
-
-                const frameIdRaw = response.headers.get('X-Frame-Id');
-                const frameId = frameIdRaw !== null ? parseInt(frameIdRaw, 10) : null;
-                const frameTsRaw = response.headers.get('X-Frame-Ts');
-                const frameTs = frameTsRaw !== null ? parseFloat(frameTsRaw) : null;
-                const blob = await response.blob();
-
-                const objectUrl = URL.createObjectURL(blob);
-                const loader = new Image();
-                loader.onload = () => {
-                    if (!this.previewActive || myToken !== frameToken) {
-                        URL.revokeObjectURL(objectUrl);
-                        return;
-                    }
-
-                    if (this.previewObjectUrl) {
-                        URL.revokeObjectURL(this.previewObjectUrl);
-                    }
-                    this.previewObjectUrl = objectUrl;
-                    previewImg.src = objectUrl;
-
-                    this.analyzeStreamData(loader, {
-                        frameId: Number.isFinite(frameId) ? frameId : null,
-                        frameTs: Number.isFinite(frameTs) ? frameTs : null,
-                        sizeBytes: blob.size,
+                previewImg.onload = () => {
+                    if (!this.previewActive) return;
+                    this.analyzeStreamData(previewImg, {
+                        frameId: null,
+                        frameTs: null,
+                        sizeBytes: 0,
                     });
-                    this.updateHistogramFromImage(loader);
-
+                    this.updateHistogramFromImage(previewImg);
                     consecutiveFailures = 0;
-
-                    if (firstFrameAttempts < maxFirstFrameAttempts) {
-                        firstFrameAttempts = maxFirstFrameAttempts;
-                        console.log(`[Preview] 第一帧获取成功，耗时 ${(performance.now() - startedAt).toFixed(1)}ms`);
-                    }
-
-                    const elapsed = performance.now() - startedAt;
-                    const currentInterval = firstFrameAttempts < maxFirstFrameAttempts ? 100 : intervalMs;
-                    const delay = Math.max(0, currentInterval - elapsed);
-                    this.previewTimer = setTimeout(loop, delay);
                 };
-                loader.onerror = () => {
-                    URL.revokeObjectURL(objectUrl);
+                previewImg.onerror = () => {
+                    if (!this.previewActive) return;
                     consecutiveFailures++;
-                    const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
-                    this.previewTimer = setTimeout(loop, retryDelay);
+                    const retryDelay = Math.min(2000, 300 + consecutiveFailures * 300);
+                    this.previewTimer = setTimeout(attachStream, retryDelay);
                 };
-                loader.src = objectUrl;
-            } catch (error) {
+                previewImg.src = `/api/debug/camera/stream?t=${Date.now()}`;
+            } catch (_e) {
                 consecutiveFailures++;
-                const retryDelay = Math.min(1000, 200 + consecutiveFailures * 200);
-                this.previewTimer = setTimeout(loop, retryDelay);
-            } finally {
-                clearTimeout(timeoutId);
+                const retryDelay = Math.min(2000, 300 + consecutiveFailures * 300);
+                this.previewTimer = setTimeout(attachStream, retryDelay);
             }
         };
-        loop();
+        attachStream();
 
         // 看门狗：若2秒未收到帧，强制刷新状态（更敏感的检测） / Watchdog: If no frame is received for 2 seconds, force refresh status (more sensitive detection)
         this.previewWatchdog = setInterval(() => {
@@ -1655,10 +1602,12 @@ class DebugConsole {
             URL.revokeObjectURL(this.previewObjectUrl);
             this.previewObjectUrl = null;
         }
+        this.lastPreviewFrameId = null;
         // 复位预览图片 / Reset preview image
         const previewImg = document.getElementById('preview-image');
         if (previewImg) {
             try { previewImg.onload = null; previewImg.onerror = null; } catch(_){}
+            previewImg.removeAttribute('src');
             previewImg.src = '/static/images/placeholder-camera.png';
         }
         // 显示覆盖层 / Show overlay

@@ -89,7 +89,7 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率） / Sampling mode and size (supersample: acquisition resolution can be higher than output resolution)
         self.sampling_mode = config.get(
-            "sampling_mode", "supersample"
+            "sampling_mode", "native"
         )  # supersample | native | crop
         (
             self.sampling_mode,
@@ -245,13 +245,22 @@ class IMX327MIPICamera(CameraInterface):
         )
         if mode not in {"supersample", "native", "crop"}:
             mode = "native"
-        capture_w = self.SENSOR_MAX_WIDTH
-        capture_h = self.SENSOR_MAX_HEIGHT
+        if mode == "supersample":
+            capture_w = self.SENSOR_MAX_WIDTH
+            capture_h = self.SENSOR_MAX_HEIGHT
+        else:
+            # 关闭超采样时按输出尺寸采集，减少大帧常驻与重采样开销
+            # Capture at output size when supersample is off to reduce RAM and resize cost.
+            capture_w = output_width
+            capture_h = output_height
         if mode == "supersample" and (
-            output_width >= capture_w or output_height >= capture_h
+            output_width >= self.SENSOR_MAX_WIDTH
+            or output_height >= self.SENSOR_MAX_HEIGHT
         ):
             logger.warning("当前分辨率下超采样无有效增益，自动切换为 native 模式")
             mode = "native"
+            capture_w = output_width
+            capture_h = output_height
         return mode, capture_w, capture_h, output_width, output_height
 
     def _resize_preserve_fov(
@@ -425,7 +434,7 @@ class IMX327MIPICamera(CameraInterface):
                 # 暂时返回原始数据 / Temporarily return to original data
                 pass
 
-            # 输出重采样（保持最大视野） / Output resampling (preserve maximum field of view)
+            # 输出重采样（仅当采集与输出不一致） / Output resampling only when capture/output differ
             try:
                 if (self.output_width, self.output_height) != (
                     image.shape[1],

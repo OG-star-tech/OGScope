@@ -3,9 +3,11 @@
 """
 
 import asyncio
+import os
+import time
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.web.api.debug.services import (
@@ -16,6 +18,13 @@ from ogscope.web.api.debug.services import (
 from ogscope.web.api.models.schemas import CameraPreset, CameraSettings
 
 router = APIRouter()
+
+_DEFAULT_PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
+_PREVIEW_CLIENT_LAST_TS: dict[str, float] = {}
+_DEBUG_PREVIEW_MIN_INTERVAL_SEC = max(
+    0.0,
+    float(os.getenv("OGSCOPE_DEBUG_PREVIEW_MIN_INTERVAL_MS", "150") or "150") / 1000.0,
+)
 
 
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
@@ -67,13 +76,19 @@ async def start_debug_camera():
 
 
 @router.get("/debug/camera/stream")
-async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
+async def stream_debug_camera(
+    quality: int = Query(_DEFAULT_PREVIEW_JPEG_QUALITY, ge=10, le=100),
+):
     """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
         boundary = "frame"
+        min_emit_interval = 1.0 / max(
+            1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
+        )
 
         async def frame_generator():
             last_frame_id = -1
+            last_emit_mono = 0.0
             while True:
                 code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
                     "jpeg", quality
@@ -84,7 +99,12 @@ async def stream_debug_camera(quality: int = Query(70, ge=10, le=100)):
                 if frame_id == last_frame_id:
                     await asyncio.sleep(0.03)
                     continue
+                now = time.monotonic()
+                wait = last_emit_mono + min_emit_interval - now
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 last_frame_id = frame_id
+                last_emit_mono = time.monotonic()
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/jpeg\r\n"
@@ -110,9 +130,13 @@ async def stream_debug_camera_lossless():
     """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
     try:
         boundary = "frame"
+        min_emit_interval = 1.0 / max(
+            1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
+        )
 
         async def frame_generator():
             last_frame_id = -1
+            last_emit_mono = 0.0
             while True:
                 code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
                     "png", 100
@@ -123,7 +147,12 @@ async def stream_debug_camera_lossless():
                 if frame_id == last_frame_id:
                     await asyncio.sleep(0.03)
                     continue
+                now = time.monotonic()
+                wait = last_emit_mono + min_emit_interval - now
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 last_frame_id = frame_id
+                last_emit_mono = time.monotonic()
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
                     b"Content-Type: image/png\r\n"
@@ -166,10 +195,22 @@ async def set_camera_rotation(rotation: int):
 
 
 @router.get("/debug/camera/preview")
-async def get_debug_camera_preview(since_frame_id: int | None = Query(default=None)):
+async def get_debug_camera_preview(
+    request: Request,
+    since_frame_id: int | None = Query(default=None),
+):
     """获取调试相机预览 / Get debug camera preview"""
     try:
+        if _DEBUG_PREVIEW_MIN_INTERVAL_SEC > 0:
+            client_host = request.client.host if request.client else "unknown"
+            now = time.monotonic()
+            last = _PREVIEW_CLIENT_LAST_TS.get(client_host, 0.0)
+            if now - last < _DEBUG_PREVIEW_MIN_INTERVAL_SEC:
+                return Response(status_code=304)
+            _PREVIEW_CLIENT_LAST_TS[client_host] = now
         return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
