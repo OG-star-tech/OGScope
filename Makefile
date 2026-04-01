@@ -54,8 +54,8 @@ lock:  ## 锁定依赖版本
 build:  ## 构建包
 	poetry build
 
-deploy:  ## 部署到 Orange Pi（需要配置 SSH）
-	@echo "同步代码到 Orange Pi..."
+deploy:  ## 部署到 Raspberry Pi（需要配置 SSH 主机别名）
+	@echo "同步代码到 Raspberry Pi..."
 	rsync -avz --exclude '.git' --exclude '__pycache__' --exclude '*.pyc' \
 		--exclude '.venv' --exclude 'PiFinder-release' \
 		. orangepi:~/OGScope/
@@ -69,7 +69,7 @@ logs:  ## 查看日志
 status:  ## 查看服务状态
 	ssh orangepi "sudo systemctl status ogscope"
 
-ssh:  ## SSH 到 Orange Pi
+ssh:  ## SSH 到 Raspberry Pi（主机名见 Makefile 中 rsync 目标）
 	ssh orangepi
 
 docs:  ## 生成文档（如果使用 Sphinx）

@@ -55,5 +55,5 @@
 
 ## 7. 性能提示 / Performance
 
-- Orange Pi 等资源受限设备：可适当**降低分辨率**、限制 `solver_max_stars`、拉大 `solver_fullsolve_interval_frames`（实时模式）。
+- Raspberry Pi Zero 2W 等资源受限设备：可适当**降低分辨率**、限制 `solver_max_stars`、拉大 `solver_fullsolve_interval_frames`（实时模式）。
 - Tetra 解算在后台线程执行，避免阻塞事件循环（见 `asyncio.to_thread`）。

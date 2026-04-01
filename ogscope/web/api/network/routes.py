@@ -1,0 +1,65 @@
+"""
+网络相关 API 路由（WiFi AP/STA） / Network API routes for WiFi AP/STA.
+"""
+
+from __future__ import annotations
+
+import subprocess
+
+from fastapi import APIRouter, HTTPException
+
+from ogscope.config import get_settings
+from ogscope.hardware.wifi_switch import wifi_switch_service
+from ogscope.web.api.models.schemas import WifiModeRequest, WifiStatus
+
+router = APIRouter()
+
+
+def _build_wifi_status() -> WifiStatus:
+    settings = get_settings()
+    configured = wifi_switch_service.is_configured()
+    data = wifi_switch_service.get_status()
+    mode = data.get("MODE", "unknown")
+    active_connection = data.get("ACTIVE_CONNECTION") or None
+    wireless_interface = data.get("WIRELESS_INTERFACE", settings.wifi_interface)
+    sta_connection = data.get("STA_CONNECTION", settings.wifi_sta_connection)
+    ap_connection = data.get("AP_CONNECTION", settings.wifi_ap_connection)
+    ap_ipv4 = data.get("AP_IPV4") or None
+    ap_url_hint = (
+        f"http://{settings.wifi_ap_url_host}:{settings.port}"
+        if mode == "ap"
+        else None
+    )
+    message = data.get("error")
+    return WifiStatus(
+        mode=mode if mode in {"ap", "sta"} else "unknown",
+        active_connection=active_connection,
+        wireless_interface=wireless_interface,
+        sta_connection=sta_connection,
+        ap_connection=ap_connection,
+        ap_ipv4=ap_ipv4,
+        ap_url_hint=ap_url_hint,
+        configured=configured,
+        message=message,
+    )
+
+
+@router.get("/network/wifi", response_model=WifiStatus)
+async def get_wifi_status() -> WifiStatus:
+    """获取 WiFi 模式状态 / Get WiFi mode status."""
+    return _build_wifi_status()
+
+
+@router.post("/network/wifi", response_model=WifiStatus)
+async def switch_wifi_mode(payload: WifiModeRequest) -> WifiStatus:
+    """切换 WiFi 模式（AP/STA）/ Switch WiFi mode."""
+    try:
+        wifi_switch_service.switch(payload.mode)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail=f"wifi_switch_timeout: {e}") from e
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or e.output or str(e)).strip()
+        raise HTTPException(status_code=500, detail=f"wifi_switch_failed: {err}") from e
+    return _build_wifi_status()

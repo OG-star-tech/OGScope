@@ -1,6 +1,6 @@
 #!/bin/bash
 # OGScope 安装脚本 / OGScope installation script
-# 适用于 Raspberry Pi / Orange Pi 等嵌入式板 / For Raspberry Pi, Orange Pi, etc.
+# 适用于 Raspberry Pi Zero 2W 等嵌入式板 / For Raspberry Pi Zero 2W, etc.
 #
 # 环境变量 / Environment:
 #   OGSCOPE_INSTALL_DEV=1  — 安装含 dev 依赖（开发机）；默认仅 main / Install dev deps; default main only
@@ -84,7 +84,7 @@ sudo apt install -y \
     libfreetype6-dev
 _apt_pause
 
-# 树莓派常见；Orange Pi 若无此包可忽略 / Raspberry Pi; skip if unavailable on Orange Pi
+# 树莓派常见；若无此包可忽略 / Common on Raspberry Pi OS; skip if unavailable
 if apt-cache show python3-picamera2 >/dev/null 2>&1; then
     echo "📦 安装 python3-picamera2..."
     sudo apt install -y python3-picamera2 || echo "⚠️ picamera2 安装跳过 / picamera2 install skipped"

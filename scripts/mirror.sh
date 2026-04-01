@@ -50,7 +50,7 @@ ogscope_is_debian_family() {
 # 安装脚本入口：非 Debian 系则退出，避免误改软件源 / Abort install on non-Debian systems (safety)
 ogscope_require_debian_family_apt() {
     if ! ogscope_is_debian_family; then
-        echo "❌ 本脚本仅支持 Debian/Ubuntu 系发行版（含 Raspberry Pi OS、Orange Pi Debian 镜像）。" >&2
+        echo "❌ 本脚本仅支持 Debian/Ubuntu 系发行版（含 Raspberry Pi OS）。" >&2
         echo "❌ This installer only supports Debian/Ubuntu family (incl. Raspberry Pi OS, Armbian Debian)." >&2
         echo "   当前 ID=${OGSCOPE_OS_ID:-?} ID_LIKE=${OGSCOPE_OS_ID_LIKE:-?} / Current OS ID shown above." >&2
         return 1

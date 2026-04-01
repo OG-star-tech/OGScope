@@ -4,11 +4,11 @@
 
 ## 项目概述
 
-OGScope 是一个基于 Orange Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
+OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
 ## 技术栈
 
-- **硬件**: Orange Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
+- **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
 - **语言**: Python 3.9+
 - **包管理**: Poetry
 - **Web 框架**: FastAPI + Uvicorn
@@ -93,7 +93,7 @@ ogscope/
 - **虚拟环境**: Poetry 管理
 
 ### 部署配置
-- **生产环境**: Orange Pi Zero 2W 开发板
+- **生产环境**: Raspberry Pi Zero 2W 开发板
 - **测试环境**: [与生产环境相同]
 - **虚拟环境目录**: [用户自定义]
 
@@ -122,6 +122,12 @@ WantedBy=multi-user.target
 ```
 
 在本地运行时，使用虚拟环境，因为有些硬件只能在开发板上调用，所以本地只是代码编写，远程测试
+
+### WiFi 模式（NetworkManager）
+
+- 项目提供 `scripts/ogscope-wifi-switch.sh`，通过 `nmcli` 在 **STA（连路由器）** 与 **AP（热点 + 固定网关如 192.168.4.1）** 间切换；需在板上创建两个 NM 连接并配置 `OGSCOPE_WIFI_STA_CONNECTION`、`OGSCOPE_WIFI_AP_CONNECTION` 等环境变量。
+- 将脚本安装到 `/usr/local/bin/ogscope-wifi-switch` 后，在 **sudoers** 中为运行用户配置免密执行该绝对路径（见脚本头部注释）。
+- AP 与 STA **互斥**；STA 模式使用 DHCP，不会残留 AP 的静态地址。
 
 **重要说明**：
 - 系统库（如 `libcamera`、`picamera2`）安装在系统环境中，通过 `PYTHONPATH` 环境变量注入到虚拟环境

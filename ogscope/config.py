@@ -166,6 +166,56 @@ class Settings(BaseSettings):
         description="实时解算慢请求阈值（毫秒）/ Slow realtime solve threshold in ms",
     )
 
+    # WiFi（nmcli + scripts/ogscope-wifi-switch.sh）/ WiFi (NetworkManager helper script)
+    wifi_switch_script: Path = Field(
+        default=Path("/usr/local/bin/ogscope-wifi-switch"),
+        description="WiFi 切换脚本路径 / Path to ogscope-wifi-switch script",
+    )
+    wifi_switch_use_sudo: bool = Field(
+        default=True,
+        description="调用脚本时是否使用 sudo -n / sudo -n when invoking script",
+    )
+    wifi_switch_timeout_seconds: int = Field(
+        default=90,
+        ge=10,
+        le=600,
+        description="nmcli 切换超时（秒）/ Timeout for nmcli switch",
+    )
+    wifi_sta_connection: str = Field(
+        default="",
+        description="STA 模式 NM 连接名（空则禁用 WiFi API）/ STA connection name (empty disables API)",
+    )
+    wifi_ap_connection: str = Field(
+        default="",
+        description="AP 模式 NM 连接名 / AP connection name",
+    )
+    wifi_interface: str = Field(
+        default="wlan0",
+        description="无线接口名 / Wireless interface name",
+    )
+    wifi_ap_url_host: str = Field(
+        default="192.168.4.1",
+        description="AP 模式下前端提示用的主机地址（不含端口）/ AP URL hint host without port",
+    )
+    wifi_emergency_gpio_enabled: bool = Field(
+        default=False,
+        description="启用短接 GPIO 强制切 STA / Enable GPIO short-to-STA recovery",
+    )
+    wifi_emergency_pin_out_bcm: int = Field(
+        default=22,
+        description="应急检测：输出低电平（BCM）/ Emergency: output LOW (BCM)",
+    )
+    wifi_emergency_pin_in_bcm: int = Field(
+        default=23,
+        description="应急检测：上拉输入（BCM）/ Emergency: input with pull-up (BCM)",
+    )
+    wifi_emergency_hold_seconds: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=30.0,
+        description="短接持续多久触发 STA / Hold time before forcing STA",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

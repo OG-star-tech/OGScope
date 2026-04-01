@@ -45,7 +45,7 @@ web/analysis-ui/node_modules/
 # ====================
 # Poetry
 # ====================
-poetry.lock  # 在开发机和 Orange Pi 上可能不一致，建议忽略
+poetry.lock  # 在开发机与树莓派上可能不一致，建议忽略
 .poetry/
 
 # ====================

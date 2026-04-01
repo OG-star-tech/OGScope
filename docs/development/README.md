@@ -2,7 +2,7 @@
 
 中文 | [English](README_EN.md)
 
-本文档面向项目成员与协作者，说明 OGScope 在开发板（Raspberry Pi / Orange Pi）环境中的实际运行方式、依赖要求与标准调试流程。
+本文档面向项目成员与协作者，说明 OGScope 在 **Raspberry Pi Zero 2W** 等开发板环境中的实际运行方式、依赖要求与标准调试流程。
 
 测试实践请见：[测试指南](testing-guide.md)。
 
@@ -15,7 +15,7 @@
 
 ### 0.1 系统要求
 
-- 单板：**ARM**（`aarch64` 或 `armhf`），如 Raspberry Pi / Orange Pi  
+- 单板：**ARM**（`aarch64` 或 `armhf`），推荐 **Raspberry Pi Zero 2W**  
 - 系统：**Debian/apt** 系镜像（与 `picamera2`/`libcamera` 文档一致；脚本会读 `/etc/os-release`，见 **§1.4**）  
 - Python：**3.10+**（以 `pyproject.toml` 为准）  
 - 网络：首次安装需拉取依赖；浏览器访问 Web 需可达设备 **TCP 8000**（按需防火墙放行）
@@ -99,7 +99,7 @@ poetry install
 
 仓库提供 `scripts/install.sh`，用于在开发板执行一次性环境准备。脚本会：
 
-- 读取 `/etc/os-release` 识别发行版，**仅支持 Debian/Ubuntu 系**（含 **Raspberry Pi OS**、Orange Pi Debian 等）；非该系将退出，避免误改软件源
+- 读取 `/etc/os-release` 识别发行版，**仅支持 Debian/Ubuntu 系**（含 **Raspberry Pi OS**）；非该系将退出，避免误改软件源
 - 安装系统依赖与 Poetry
 - 配置 Poetry 使用项目 `.venv` 与 `system-site-packages`（Poetry 版本支持时）
 - 默认执行 `poetry install --only main`（设 `OGSCOPE_INSTALL_DEV=1` 可装 dev）

@@ -3,7 +3,7 @@
 [中文](README.md) | English
 
 This document explains how OGScope is actually run on development boards
-(Raspberry Pi / Orange Pi), including dependency requirements, service startup,
+(primarily **Raspberry Pi Zero 2W**), including dependency requirements, service startup,
 and the team-standard debug workflow.
 
 For testing workflow, see [Testing Guide](testing-guide.md).
@@ -18,7 +18,7 @@ This section lists **common commands and checks only**. For Poetry/PEP 668, mirr
 
 ### 0.1 Requirements
 
-- Board: **ARM** (`aarch64` or `armhf`), e.g. Raspberry Pi / Orange Pi  
+- Board: **ARM** (`aarch64` or `armhf`), e.g. Raspberry Pi Zero 2W  
 - OS: **Debian/apt**-based images (compatible with `picamera2`/`libcamera`; install script reads `/etc/os-release`, see **§1.4**)  
 - Python: **3.10+** (see `pyproject.toml`)  
 - Network: first install downloads dependencies; Web UI needs **TCP 8000** reachable (configure firewall as needed)

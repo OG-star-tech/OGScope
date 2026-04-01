@@ -432,6 +432,9 @@ def test_analysis_realtime_timeout_releases_gate(
     monkeypatch.setattr(settings, "star_analysis_request_timeout_ms", 80, raising=False)
     monkeypatch.setattr(settings, "star_analysis_min_interval_ms", 50, raising=False)
     monkeypatch.setattr(settings, "star_analysis_max_interval_ms", 20000, raising=False)
+    # 固定 monotonic，避免 CI 上墙钟流逝导致「最小间隔」二次请求抖动 / Pin monotonic so
+    # wall-clock elapsed time does not trigger SKIPPED_INTERVAL on the follow-up request.
+    monkeypatch.setattr("ogscope.web.api.analysis.services.time.monotonic", lambda: 0.0)
     gate = analysis_service._realtime_gate_states.get("file_upload")
     if gate is not None:
         gate.in_flight = False
@@ -459,15 +462,6 @@ def test_analysis_realtime_timeout_releases_gate(
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("gate_status") == "TIMEOUT_RELEASED"
-
-    # 勿 patch 全局 time.monotonic：asyncio.wait_for 依赖它推进截止时间 / Do not patch
-    # time.monotonic globally — asyncio.wait_for uses it for deadlines.
-    # 仅重置门禁时间戳，使第二次请求不依赖「墙钟已过最小间隔」/ Reset gate timestamp so
-    # the follow-up request does not rely on wall-clock interval elapsed.
-    gate_after = analysis_service._realtime_gate_states.get("file_upload")
-    assert gate_after is not None
-    assert gate_after.in_flight is False
-    gate_after.last_finished_mono = 0.0
 
     def _fast(*_args, **_kwargs):
         return {

@@ -110,6 +110,13 @@ class RaspberryPiZero2WGPIO:
         "error_led_pin": 21,  # 错误 LED / Error LED
     }
 
+    # WiFi 应急短接（BCM）：输出低 + 上拉输入，短接 ≥2s 切 STA；物理排针 15–16 相邻
+    # WiFi emergency short (BCM): OUT low + pull-up IN; hold ≥2s forces STA; physical pins 15–16 adjacent
+    WIFI_EMERGENCY_SHORT_PINS = {
+        "out_bcm": 22,
+        "in_bcm": 23,
+    }
+
 
 class GPIOConfig:
     """GPIO 配置管理类 / GPIO configuration management class"""
@@ -186,7 +193,11 @@ class GPIOConfig:
         return self.gpio_config.GPIO_PINS.get(pin_name)
 
     def get_all_used_pins(self) -> list:
-        """获取所有已使用的引脚 / Get all used pins"""
+        """获取所有已使用的引脚 / Get all used pins
+
+        注：WiFi 应急短接使用 BCM22/23，启用 `OGSCOPE_WIFI_EMERGENCY_GPIO_ENABLED` 时勿占用。
+        Note: WiFi emergency uses BCM 22/23; avoid conflicts when emergency GPIO is enabled.
+        """
         used_pins = []
 
         # 显示屏引脚 / Display pins

@@ -60,10 +60,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Warm the solver synchronously during startup to avoid first-request cold-start race.
     await _warm_solver()
 
+    try:
+        from ogscope.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+
+        wifi_emergency_gpio_monitor.start()
+    except Exception as e:
+        logger.warning("应急 GPIO 启动失败 / Emergency GPIO start failed: {}", e)
+
     yield
 
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
+    try:
+        from ogscope.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+
+        wifi_emergency_gpio_monitor.stop()
+    except Exception as e:
+        logger.warning("应急 GPIO 停止异常 / Emergency GPIO stop error: {}", e)
     try:
         from ogscope.utils.environment import should_use_simulation_mode
 
@@ -96,6 +109,10 @@ openapi_tags = [
     {
         "name": "Analysis - 分析",
         "description": "素材分析与任务管理 / Asset analysis and job management",
+    },
+    {
+        "name": "Network - 网络",
+        "description": "WiFi AP/STA 切换 / WiFi AP vs STA switching",
     },
     {
         "name": "Catalog - 星表",
@@ -177,6 +194,21 @@ async def debug_console(request: Request):
     )
 
 
+@app.get("/debug/system", response_class=HTMLResponse)
+async def debug_system_console(request: Request):
+    """系统调试控制台（WiFi 等）/ System debug console (WiFi, etc.)."""
+    ds_js = settings.static_dir / "js" / "debug-system.js"
+    return templates.TemplateResponse(
+        "debug_system.html",
+        {
+            "request": request,
+            "version": __version__,
+            "app_name": "OGScope System Debug",
+            "debug_system_assets_version": _asset_stamp(ds_js),
+        },
+    )
+
+
 @app.get("/debug/analysis", response_class=HTMLResponse)
 async def debug_analysis_console(request: Request):
     """星空解算控制台（Vite 构建 SPA）或回退旧模板 / Plate solve console SPA or legacy template."""
@@ -209,6 +241,7 @@ async def api_root():
             "camera": "/api/camera/",
             "alignment": "/api/alignment/",
             "system": "/api/system/",
+            "network": "/api/network/",
             "analysis": "/api/analysis/",
         },
     }

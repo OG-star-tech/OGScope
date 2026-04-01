@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OGScope 系统调试控制台</title>
+    <link rel="stylesheet" href="/static/css/debug-system.css">
+</head>
+<body>
+<main class="container">
+    <header class="header">
+        <h1>🔧 OGScope 系统调试控制台</h1>
+        <div class="actions">
+            <button class="btn" onclick="window.location.href='/debug'">相机调试</button>
+            <button class="btn" onclick="window.location.href='/debug/analysis'">星空解算</button>
+            <button class="btn" onclick="window.location.href='/'">返回主页</button>
+        </div>
+    </header>
+
+    <section class="card">
+        <h2>WiFi 模式</h2>
+        <div id="wifi-status" class="status">加载中...</div>
+        <div class="buttons">
+            <button id="to-ap" class="btn btn-primary">切到 AP 模式</button>
+            <button id="to-sta" class="btn btn-primary">切到 STA 模式</button>
+            <button id="refresh" class="btn">刷新状态</button>
+        </div>
+        <p class="hint">
+            AP 模式固定访问地址：<span id="ap-url-hint">http://192.168.4.1:8000</span>
+        </p>
+        <p class="hint">
+            注意：从 STA 切到 AP 时，当前页面会断开连接，需要先连接热点后再访问固定地址。
+        </p>
+    </section>
+</main>
+
+<script src="/static/js/debug-system.js?v={{ version }}&av={{ debug_system_assets_version }}"></script>
+</body>
+</html>

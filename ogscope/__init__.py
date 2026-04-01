@@ -1,7 +1,7 @@
 """
 OGScope - 电子极轴镜
 
-基于 Orange Pi Zero 2W 和 IMX327 的智能极轴校准系统
+基于 Raspberry Pi Zero 2W 和 IMX327 的智能极轴校准系统
 """
 
 # 使 vendored tetra3 可被 import / Make vendored tetra3 importable

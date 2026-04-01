@@ -77,6 +77,26 @@ class SystemInfo(BaseModel):
     load_average_1m: float = 0.0
 
 
+class WifiStatus(BaseModel):
+    """WiFi 模式状态 / WiFi mode status (STA vs AP)."""
+
+    mode: Literal["ap", "sta", "unknown"]
+    active_connection: Optional[str] = None
+    wireless_interface: str = "wlan0"
+    sta_connection: str = ""
+    ap_connection: str = ""
+    ap_ipv4: Optional[str] = None
+    ap_url_hint: Optional[str] = None
+    configured: bool = True
+    message: Optional[str] = None
+
+
+class WifiModeRequest(BaseModel):
+    """切换 WiFi 模式 / Switch WiFi mode."""
+
+    mode: Literal["ap", "sta"]
+
+
 class AlignmentStatus(BaseModel):
     """校准状态 / calibration status"""
 
