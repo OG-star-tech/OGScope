@@ -438,7 +438,9 @@ def test_analysis_realtime_timeout_releases_gate(
         gate.last_finished_mono = 0.0
 
     def _slow(*_args, **_kwargs):
-        time.sleep(0.2)
+        # 外层 wait_for 下限为 0.2s；线程若仅睡 0.2s 可能与超时边界竞态 / Outer wait_for is
+        # at least 0.2s; a 0.2s worker sleep can race the deadline.
+        time.sleep(0.5)
         return {
             "frame_index": 0,
             "status": "MATCH_FOUND",
@@ -458,6 +460,15 @@ def test_analysis_realtime_timeout_releases_gate(
     data = resp.json()
     assert data.get("gate_status") == "TIMEOUT_RELEASED"
 
+    # 勿 patch 全局 time.monotonic：asyncio.wait_for 依赖它推进截止时间 / Do not patch
+    # time.monotonic globally — asyncio.wait_for uses it for deadlines.
+    # 仅重置门禁时间戳，使第二次请求不依赖「墙钟已过最小间隔」/ Reset gate timestamp so
+    # the follow-up request does not rely on wall-clock interval elapsed.
+    gate_after = analysis_service._realtime_gate_states.get("file_upload")
+    assert gate_after is not None
+    assert gate_after.in_flight is False
+    gate_after.last_finished_mono = 0.0
+
     def _fast(*_args, **_kwargs):
         return {
             "frame_index": 0,
@@ -468,25 +479,14 @@ def test_analysis_realtime_timeout_releases_gate(
         }
 
     monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _fast)
-    deadline = time.time() + 1.0
-    final_status = None
-    while time.time() < deadline:
-        with image_path.open("rb") as f:
-            resp2 = client.post(
-                "/api/analysis/solve/frame_upload",
-                files={"file": ("frame.jpg", f, "image/jpeg")},
-                data={"payload": json.dumps({"solve_interval_ms": 50})},
-            )
-        assert resp2.status_code == 200
-        final_status = resp2.json().get("gate_status")
-        if final_status == "SOLVED":
-            break
-        if final_status == "SKIPPED_INTERVAL":
-            time.sleep(0.02)
-            continue
-        break
-
-    assert final_status == "SOLVED"
+    with image_path.open("rb") as f:
+        resp2 = client.post(
+            "/api/analysis/solve/frame_upload",
+            files={"file": ("frame.jpg", f, "image/jpeg")},
+            data={"payload": json.dumps({"solve_interval_ms": 50})},
+        )
+    assert resp2.status_code == 200
+    assert resp2.json().get("gate_status") == "SOLVED"
 
 
 @pytest.mark.unit
