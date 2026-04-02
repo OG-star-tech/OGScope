@@ -105,3 +105,61 @@ body {
   font-variant-numeric: tabular-nums;
   word-break: break-all;
 }
+
+.wizard-steps {
+  margin: 8px 0 0 18px;
+  line-height: 1.6;
+  color: #d1d5db;
+  font-size: 14px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid #4b5563;
+  padding: 8px;
+  text-align: left;
+}
+
+.data-table th {
+  background: #111827;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #d1d5db;
+}
+
+.form-row input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #f9fafb;
+  min-width: 160px;
+}
+
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}

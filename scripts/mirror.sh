@@ -208,3 +208,90 @@ ogscope_sync_systemd_execstart_if_needed() {
     sudo sed -i "s|^ExecStart=.*|${expected_line}|" "${unit_path}"
     echo "✅ 已更新 ${unit_path} / Unit updated"
 }
+
+# 若项目目录变更，同步 ogscope-network-boot.service 的 ExecStart（与 install.sh 一致）
+# If project path changed, sync ExecStart in ogscope-network-boot.service (matches install.sh)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+ogscope_sync_network_boot_unit_if_needed() {
+    local project_dir="${1:?}"
+    local unit_path="/etc/systemd/system/ogscope-network-boot.service"
+    local script_path="${project_dir}/scripts/ogscope-network-boot.sh"
+    local expected_line="ExecStart=${script_path}"
+
+    if [ ! -f "${unit_path}" ]; then
+        echo "ℹ️  未找到 ${unit_path}，跳过开机网络 boot 同步（未安装或已移除）/ No boot unit; skip sync"
+        return 0
+    fi
+    if [ ! -f "${script_path}" ]; then
+        echo "⚠️  项目内缺少 ${script_path}，跳过 ExecStart 同步 / Script missing; skip ExecStart sync" >&2
+        return 0
+    fi
+
+    local cur_line
+    cur_line="$(grep '^ExecStart=' "${unit_path}" | head -n1 || true)"
+    if [ -z "${cur_line}" ]; then
+        echo "⚠️  ${unit_path} 中无 ExecStart / No ExecStart in unit" >&2
+        return 0
+    fi
+
+    if [ "${cur_line}" = "${expected_line}" ]; then
+        echo "✅ ogscope-network-boot ExecStart 与当前项目目录一致 / Boot unit ExecStart matches project"
+        return 0
+    fi
+
+    echo "⚙️  修正 ogscope-network-boot ExecStart（项目目录可能已变更）/ Fixing boot unit ExecStart"
+    echo "   旧 / Old: ${cur_line}"
+    echo "   新 / New: ${expected_line}"
+    sudo sed -i "s|^ExecStart=.*|${expected_line}|" "${unit_path}"
+    echo "✅ 已更新 ${unit_path} / Unit updated"
+}
+
+# 将 default_database.npz 复制到 data/plate_solve/（与 solver 优先路径一致）
+# Copy default_database.npz into data/plate_solve/ (matches solver resolution order)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+# 环境 / Env: OGSCOPE_SKIP_PLATE_DB=1 跳过；OGSCOPE_FORCE_PLATE_DB=1 覆盖已存在目标 / skip; overwrite dest
+ogscope_sync_plate_solve_database_if_needed() {
+    local project_dir="${1:?}"
+    local dest="${project_dir}/data/plate_solve/default_database.npz"
+    local vendor_src="${project_dir}/ogscope/vendor/tetra3/data/default_database.npz"
+
+    if [ "${OGSCOPE_SKIP_PLATE_DB:-}" = "1" ]; then
+        echo "⏭️  跳过图案库复制（OGSCOPE_SKIP_PLATE_DB=1）/ Skipping plate DB copy"
+        return 0
+    fi
+
+    mkdir -p "${project_dir}/data/plate_solve"
+
+    if [ -f "${dest}" ] && [ "${OGSCOPE_FORCE_PLATE_DB:-}" != "1" ]; then
+        echo "ℹ️  已存在 ${dest}，跳过复制（覆盖：OGSCOPE_FORCE_PLATE_DB=1）/ Already present; skip (overwrite: OGSCOPE_FORCE_PLATE_DB=1)"
+        return 0
+    fi
+
+    local src=""
+    if [ -f "${vendor_src}" ]; then
+        src="${vendor_src}"
+    else
+        src="$(
+            cd "${project_dir}" && poetry run python - <<'PY'
+import ogscope  # noqa: F401
+from pathlib import Path
+
+import tetra3
+
+p = Path(tetra3.__file__).resolve().parent / "data" / "default_database.npz"
+print(p if p.is_file() else "", end="")
+PY
+        )"
+    fi
+
+    if [ -z "${src}" ] || [ ! -f "${src}" ]; then
+        echo "ℹ️  未找到可复制的 default_database.npz（请放入 ogscope/vendor/tetra3/data/ 或手动复制到 data/plate_solve/）"
+        echo "ℹ️  No default_database.npz to copy; see docs/development/plate-solve-data.md"
+        return 0
+    fi
+
+    echo "📋 复制 Tetra3 图案库到 data/plate_solve/default_database.npz ..."
+    echo "📋 Copying Tetra3 pattern database to data/plate_solve/default_database.npz ..."
+    cp -a "${src}" "${dest}"
+    echo "✅ 图案库已就绪 / Pattern database ready: ${dest}"
+}

@@ -181,6 +181,13 @@ class Settings(BaseSettings):
         le=600,
         description="nmcli 切换超时（秒）/ Timeout for nmcli switch",
     )
+    wifi_nmcli_use_sudo: bool = Field(
+        default=True,
+        description=(
+            "非 root 时对 nmcli 使用 sudo -n（需 sudoers 放行 nmcli；"
+            "否则 polkit 会拒绝 connection up）/ sudo -n for nmcli when not root"
+        ),
+    )
     wifi_sta_connection: str = Field(
         default="",
         description="STA 模式 NM 连接名（空则禁用 WiFi API）/ STA connection name (empty disables API)",
@@ -214,6 +221,26 @@ class Settings(BaseSettings):
         ge=0.5,
         le=30.0,
         description="短接持续多久触发 STA / Hold time before forcing STA",
+    )
+    device_id_suffix: str = Field(
+        default="",
+        description="设备后缀（network.env 中 OGSCOPE_DEVICE_ID_SUFFIX）/ Device id suffix from network.env",
+    )
+    wifi_ap_ssid: str = Field(
+        default="",
+        description="AP 的 SSID（可选，来自 network.env）/ AP SSID from network.env",
+    )
+    wifi_sta_rollback_timeout_seconds: int = Field(
+        default=90,
+        ge=20,
+        le=600,
+        description="切 STA 后无可用 IPv4 则回滚 AP 的超时（秒）/ Roll back to AP if no IPv4",
+    )
+    wifi_sta_rollback_interval_seconds: int = Field(
+        default=5,
+        ge=2,
+        le=60,
+        description="STA 连通性轮询间隔（秒）/ Poll interval for STA rollback check",
     )
 
     model_config = SettingsConfigDict(

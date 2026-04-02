@@ -70,6 +70,8 @@ poetry shell
 python -m ogscope.main
 ```
 
+开发板一键部署、WiFi 热点与 **`/debug/system`** 等以 [docs/development/wifi-nm.md](docs/development/wifi-nm.md) 与 [docs/development/README.md](docs/development/README.md) 为准。
+
 ### Web 界面访问
 
 启动后访问: http://raspberrypi.local:8000 或 http://<IP>:8000
@@ -89,6 +91,7 @@ python -m ogscope.main
 ### 开发文档
 - [开发指南（中文）](docs/development/README.md)
 - [开发指南（English）](docs/development/README_EN.md)
+- [树莓派 WiFi / AP / STA / 调试页（NetworkManager）](docs/development/wifi-nm.md)
 - [FastAPI 开发](docs/development/fastapi-guide.md)
 - [测试指南](docs/development/testing-guide.md)
 

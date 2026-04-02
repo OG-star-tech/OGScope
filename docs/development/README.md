@@ -30,11 +30,18 @@ chmod +x scripts/install.sh
 
 说明摘要：默认 `poetry install --only main`；国内网络可 **`export OGSCOPE_MIRROR=cn`**；低配板可 **`OGSCOPE_APT_SLOW=1`**。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
 
-### 0.3 星图解算数据
+### 0.3 网络与 WiFi（AP/STA）
+
+- **`install.sh`** 会安装 `network-manager`、`avahi-daemon`，并执行 **`ogscope-network-init.sh init`**（NM 连接、`/etc/ogscope/network.env`、sudoers、主机名与 `hosts` 等），除非 **`OGSCOPE_SKIP_NETWORK_INIT=1`**。
+- 同次安装会写入 **`ogscope-network-boot.service`**（开机无线网络引导：无可用 STA 则回 AP），除非 **`OGSCOPE_SKIP_NETWORK_BOOT=1`**。
+- **日常仅同步代码与依赖**优先 **`./scripts/board-update.sh`**；全量重装或改系统级依赖时再跑 **`install.sh`**（见 **§0.5**）。
+- 热点 SSID/密码、调试页 **`/debug/system`**、API、**开机引导与运行时 STA 回滚** 的分工：**唯一详解**见 **[wifi-nm.md](wifi-nm.md)**。
+
+### 0.4 星图解算数据
 
 将 **`default_database.npz`** 放到 **`data/plate_solve/`**（不随仓库分发）。放置与配置见 [plate-solve-data.md](plate-solve-data.md)。
 
-### 0.4 日常更新
+### 0.5 日常更新
 
 ```bash
 cd /path/to/OGScope
@@ -45,7 +52,7 @@ chmod +x scripts/board-update.sh
 
 详情见 **§6.2**。
 
-### 0.5 卸载与健康检查
+### 0.6 卸载与健康检查
 
 - 卸载服务与 `.venv`：见 **§6.3**（`scripts/uninstall.sh`）  
 - 健康检查与日志：
@@ -56,7 +63,7 @@ sudo systemctl status ogscope
 sudo journalctl -u ogscope -f
 ```
 
-### 0.6 常见故障（简表）
+### 0.7 常见故障（简表）
 
 | 现象 | 处理方向 |
 |------|----------|
@@ -270,6 +277,7 @@ sudo journalctl -u ogscope -f
 
 - 若仅前端模板/静态文件变更，通常不需要 `poetry install`
 - 若服务文件配置有改动，需先 `sudo systemctl daemon-reload`
+- 脚本会同步主服务 `ExecStart` 与已安装的 **`ogscope-network-boot.service`** 内 `ExecStart`（项目目录变更时）；未安装开机单元则跳过
 
 ### 6.3 卸载服务与本地环境（`scripts/uninstall.sh`）
 
@@ -278,7 +286,10 @@ sudo journalctl -u ogscope -f
 **会执行的操作 / What it does**
 
 - `systemctl stop` / `disable` `ogscope`
-- 删除 `/etc/systemd/system/ogscope.service`（若存在），并 `daemon-reload`
+- 删除 `/etc/systemd/system/ogscope.service`（若存在）
+- 若存在 **`ogscope-network-boot.service`**：`stop` / `disable` 并删除该 unit（与 `install.sh` 安装的引导一致）
+- 若存在 **`/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf`**：删除该 drop-in（空目录会尝试 `rmdir`）
+- `daemon-reload`
 - 默认删除项目根目录下的 **`.venv`**（可用环境变量保留，见下）
 
 **默认保留 / Kept by default**

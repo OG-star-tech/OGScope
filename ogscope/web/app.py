@@ -205,6 +205,7 @@ async def debug_system_console(request: Request):
             "version": __version__,
             "app_name": "OGScope System Debug",
             "debug_system_assets_version": _asset_stamp(ds_js),
+            "http_port": settings.port,
         },
     )
 

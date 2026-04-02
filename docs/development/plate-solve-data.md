@@ -14,6 +14,10 @@
 
 ## 2. 获取图案库文件 / Obtaining `default_database.npz`
 
+**自动复制（安装/更新脚本）**：若 `ogscope/vendor/tetra3/data/default_database.npz` 已存在，或 Poetry 解析到的 `tetra3` 包内带有该文件，`scripts/install.sh` 与 `scripts/board-update.sh` 会将其复制到 `data/plate_solve/default_database.npz`（目标已存在则跳过；覆盖用 `OGSCOPE_FORCE_PLATE_DB=1`；跳过整步用 `OGSCOPE_SKIP_PLATE_DB=1`）。
+
+**Auto-copy (install/update scripts)**: If `ogscope/vendor/tetra3/data/default_database.npz` exists, or the resolved `tetra3` package ships it, `scripts/install.sh` and `scripts/board-update.sh` copy it to `data/plate_solve/default_database.npz` (skip if dest exists; `OGSCOPE_FORCE_PLATE_DB=1` to overwrite; `OGSCOPE_SKIP_PLATE_DB=1` to skip).
+
 任选其一：
 
 1. **从 PyPI `cedar-solve` wheel 提取**  

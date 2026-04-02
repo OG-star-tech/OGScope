@@ -4,8 +4,12 @@
 #
 # 环境变量 / Environment:
 #   OGSCOPE_INSTALL_DEV=1  — 安装含 dev 依赖（开发机）；默认仅 main / Install dev deps; default main only
-#   OGSCOPE_APT_SLOW=1     — 分批安装 apt 包并在批次间暂停，减轻低配板内存压力 / Stagger apt for low-memory boards
+#   OGSCOPE_APT_SLOW=0|1|未设置 — 未设置且内存≤1GB 时自动开；1 强制开；0 强制关 / Auto on if RAM≤1GB; 1=force; 0=disable
+#   OGSCOPE_SKIP_OPENCV_APT=1 — 不 apt 安装 libopencv-dev（减轻 OOM；OpenCV 由 pip opencv-python-headless 提供）/ Skip libopencv-dev to avoid OOM
 #   OGSCOPE_MIRROR=auto|cn|international — 软件源：auto 按语言/时区启发；中国大陆建议 cn 或保持 auto / Mirrors for CN vs abroad
+#   OGSCOPE_SKIP_NETWORK_BOOT=1 — 不安装开机 WiFi 引导单元 / Skip ogscope-network-boot.service
+#   OGSCOPE_SKIP_PLATE_DB=1 — 不自动复制 default_database.npz 到 data/plate_solve/ / Skip Tetra3 pattern DB copy
+#   OGSCOPE_FORCE_PLATE_DB=1 — 若目标已存在仍覆盖 / Overwrite data/plate_solve/default_database.npz if present
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
 
 set -euo pipefail
@@ -53,11 +57,25 @@ if [ "${OGSCOPE_MIRROR_RESOLVED}" = "cn" ]; then
     ogscope_apply_apt_mirror_cn
 fi
 
-# 低配板可选在 apt 批次间暂停 / Optional pause between apt batches on low-RAM boards
+# 低配板在 apt 批次间暂停，减轻 OOM（apt/dpkg 解压时）/ Pause between apt batches to reduce OOM risk
+_mem_kb="$(grep '^MemTotal:' /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 9999999)"
+if [ "${OGSCOPE_APT_SLOW:-}" = "1" ]; then
+    _apt_effective_slow="1"
+elif [ "${OGSCOPE_APT_SLOW:-}" = "0" ]; then
+    _apt_effective_slow="0"
+else
+    if [ "${_mem_kb}" -lt 1048576 ]; then
+        _apt_effective_slow="1"
+        echo "ℹ️  MemTotal≈$((_mem_kb / 1024)) MiB — 已自动启用 apt 分批间隔（关闭：OGSCOPE_APT_SLOW=0）/ Auto staggered apt (disable: OGSCOPE_APT_SLOW=0)"
+    else
+        _apt_effective_slow="0"
+    fi
+fi
+
 _apt_pause() {
-    if [ "${OGSCOPE_APT_SLOW:-}" = "1" ]; then
-        echo "⏳ 等待 3s 释放内存... / Waiting to free memory..."
-        sleep 3
+    if [ "${_apt_effective_slow}" = "1" ]; then
+        echo "⏳ 等待 4s 释放内存... / Waiting to free memory..."
+        sleep 4
     fi
 }
 
@@ -73,15 +91,25 @@ sudo apt install -y \
     python3-dev \
     git \
     curl \
-    build-essential
+    build-essential \
+    network-manager \
+    avahi-daemon
 _apt_pause
 
-echo "📦 安装图像与开发库 / Installing image and dev libraries..."
+echo "📦 安装图像基础库（jpeg/png/freetype）/ Installing image base dev libraries..."
 sudo apt install -y \
-    libopencv-dev \
     libjpeg-dev \
     libpng-dev \
     libfreetype6-dev
+_apt_pause
+
+if [ "${OGSCOPE_SKIP_OPENCV_APT:-}" = "1" ]; then
+    echo "ℹ️  已跳过 apt 安装 libopencv-dev（OGSCOPE_SKIP_OPENCV_APT=1）；OpenCV 由 pip opencv-python-headless 提供 / Skipped libopencv-dev; pip provides OpenCV"
+else
+    echo "📦 安装 libopencv-dev（依赖多；若进程被 Killed 多为 OOM，可重试并加 OGSCOPE_SKIP_OPENCV_APT=1 或 swap）"
+    echo "📦 Installing libopencv-dev (--no-install-recommends); if Killed (OOM), retry with OGSCOPE_SKIP_OPENCV_APT=1 or add swap"
+    sudo apt install -y --no-install-recommends libopencv-dev
+fi
 _apt_pause
 
 # 树莓派常见；若无此包可忽略 / Common on Raspberry Pi OS; skip if unavailable
@@ -169,6 +197,8 @@ fi
 echo "📁 创建数据目录 / Creating data directories..."
 mkdir -p logs data uploads data/plate_solve data/analysis
 
+ogscope_sync_plate_solve_database_if_needed "${PROJECT_DIR}"
+
 # systemd 注入 PYTHONPATH，便于 venv 内 import apt 安装的包 / PYTHONPATH for apt-installed packages in venv
 PY_PATHS=()
 [ -d "/usr/lib/python3/dist-packages" ] && PY_PATHS+=("/usr/lib/python3/dist-packages")
@@ -198,7 +228,7 @@ echo "⚙️ 写入 systemd: ${SERVICE_PATH}"
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
 Description=OGScope Service
-After=network.target
+After=network.target NetworkManager.service
 
 [Service]
 Type=simple
@@ -208,6 +238,7 @@ Environment=PYTHONPATH=${PYTHONPATH_VALUE}
 Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH_VALUE}
 Environment=OGSCOPE_RELOAD=false
 Environment=OGSCOPE_LOG_LEVEL=INFO
+EnvironmentFile=-/etc/ogscope/network.env
 ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure
 RestartSec=3
@@ -216,8 +247,45 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+if [ "${OGSCOPE_SKIP_NETWORK_INIT:-}" = "1" ]; then
+    echo "⏭️  跳过网络初始化（OGSCOPE_SKIP_NETWORK_INIT=1）/ Skipping network init"
+else
+    chmod +x "${SCRIPT_DIR}/ogscope-network-init.sh" 2>/dev/null || true
+    echo "🌐 运行网络初始化（需 sudo）/ Running network bootstrap..."
+    sudo env OGSCOPE_SERVICE_USER="${USER}" "${SCRIPT_DIR}/ogscope-network-init.sh" init --yes \
+        || echo "⚠️ 网络初始化失败，可稍后 sudo ${SCRIPT_DIR}/ogscope-network-init.sh diag / network init failed"
+fi
+
+BOOT_UNIT="ogscope-network-boot"
+BOOT_UNIT_PATH="/etc/systemd/system/${BOOT_UNIT}.service"
+if [ "${OGSCOPE_SKIP_NETWORK_BOOT:-}" = "1" ]; then
+    echo "⏭️  跳过开机网络引导单元（OGSCOPE_SKIP_NETWORK_BOOT=1）/ Skipping ${BOOT_UNIT}.service"
+else
+    chmod +x "${SCRIPT_DIR}/ogscope-network-boot.sh" 2>/dev/null || true
+    echo "⚙️ 写入开机 WiFi 引导（root oneshot）/ Writing ${BOOT_UNIT}.service..."
+    sudo tee "${BOOT_UNIT_PATH}" >/dev/null <<EOF
+[Unit]
+Description=OGScope boot WiFi (STA wait, fallback AP)
+After=NetworkManager.service
+Before=${SERVICE_NAME}.service
+ConditionPathExists=/etc/ogscope/network.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/ogscope/network.env
+ExecStart=${PROJECT_DIR}/scripts/ogscope-network-boot.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}"
+if [ "${OGSCOPE_SKIP_NETWORK_BOOT:-}" != "1" ]; then
+    sudo systemctl enable "${BOOT_UNIT}.service" 2>/dev/null || true
+fi
 
 echo ""
 echo "======================================"
@@ -228,12 +296,20 @@ echo "虚拟环境 / venv: ${VENV_PATH}"
 echo "PYTHONPATH: ${PYTHONPATH_VALUE}"
 echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH_VALUE}"
 echo ""
-echo "请将 default_database.npz 放到 data/plate_solve/（星图解算）"
-echo "Place default_database.npz under data/plate_solve/ for plate solving"
+if [ -f "${PROJECT_DIR}/data/plate_solve/default_database.npz" ]; then
+    echo "星图解算图案库 / Plate DB: data/plate_solve/default_database.npz ✅"
+    echo "Plate DB: data/plate_solve/default_database.npz ✅"
+else
+    echo "⚠️  星图解算需 default_database.npz：放入 data/plate_solve/ 或 ogscope/vendor/tetra3/data/ 后重装步骤见 plate-solve-data.md"
+    echo "⚠️  Plate solving needs default_database.npz; see docs/development/plate-solve-data.md"
+fi
 echo ""
 echo "下一步 / Next:"
 echo "  sudo systemctl start ${SERVICE_NAME}"
 echo "  sudo systemctl status ${SERVICE_NAME}"
 echo "  sudo journalctl -u ${SERVICE_NAME} -f"
+if [ "${OGSCOPE_SKIP_NETWORK_BOOT:-}" != "1" ]; then
+    echo "  开机 WiFi 引导日志 / Boot WiFi: sudo journalctl -u ${BOOT_UNIT} -b"
+fi
 echo "  日常更新可运行: ./scripts/board-update.sh"
 echo ""

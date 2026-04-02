@@ -119,3 +119,43 @@ def test_network_api(client, monkeypatch) -> None:
 
     response2 = client.post("/api/network/wifi", json={"mode": "sta"})
     assert response2.status_code == 200
+
+
+@pytest.mark.unit
+def test_network_wifi_scan_api(client, monkeypatch) -> None:
+    """WiFi 扫描 API / WiFi scan API."""
+    from ogscope.web.api.network import services as net_services
+
+    monkeypatch.setattr(
+        net_services,
+        "nmcli_wifi_scan",
+        lambda iface: ([{"ssid": "Home", "signal": 80, "security": "WPA2"}], None),
+    )
+
+    response = client.get("/api/network/wifi/scan")
+    assert response.status_code == 200
+    data = response.json()
+    assert "networks" in data
+    assert len(data["networks"]) >= 1
+    assert data["networks"][0]["ssid"] == "Home"
+
+
+@pytest.mark.unit
+def test_network_profiles_api(client, monkeypatch) -> None:
+    """WiFi profiles API / WiFi profiles API."""
+    from ogscope.web.api.network import services as net_services
+
+    def _fake_profiles(_settings):
+        return [
+            {
+                "connection_name": "OGScope-STA",
+                "ssid": "MyWifi",
+                "autoconnect": True,
+            }
+        ]
+
+    monkeypatch.setattr(net_services, "nmcli_wifi_profiles", _fake_profiles)
+    response = client.get("/api/network/wifi/profiles")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profiles"][0]["connection_name"] == "OGScope-STA"

@@ -33,11 +33,18 @@ chmod +x scripts/install.sh
 
 Summary: default `poetry install --only main`; in mainland China use **`export OGSCOPE_MIRROR=cn`**; low-memory boards: **`OGSCOPE_APT_SLOW=1`**. Full options: **§1.4**. After install: `sudo systemctl start ogscope`.
 
-### 0.3 Plate-solve data
+### 0.3 Network and WiFi (AP/STA)
+
+- **`install.sh`** installs `network-manager`, `avahi-daemon`, and runs **`ogscope-network-init.sh init`** (NM profiles, `/etc/ogscope/network.env`, sudoers, hostname/`hosts`, …) unless **`OGSCOPE_SKIP_NETWORK_INIT=1`**.
+- The same install writes **`ogscope-network-boot.service`** (boot-time WiFi: fall back to AP if STA has no usable IPv4) unless **`OGSCOPE_SKIP_NETWORK_BOOT=1`**.
+- For **routine code and dependency sync**, prefer **`./scripts/board-update.sh`**; rerun **`install.sh`** only for full reinstall or system-level changes (see **§0.5**).
+- Hotspot SSID/password, **`/debug/system`**, APIs, and **boot vs runtime STA rollback**: see **[wifi-nm.md](wifi-nm.md)** (authoritative).
+
+### 0.4 Plate-solve data
 
 Place **`default_database.npz`** under **`data/plate_solve/`** (not shipped in the repo). See [plate-solve-data.md](plate-solve-data.md).
 
-### 0.4 Routine updates
+### 0.5 Routine updates
 
 ```bash
 cd /path/to/OGScope
@@ -48,7 +55,7 @@ chmod +x scripts/board-update.sh
 
 Details: **§6.2**.
 
-### 0.5 Uninstall and health check
+### 0.6 Uninstall and health check
 
 - Remove service and `.venv`: **§6.3** (`scripts/uninstall.sh`)  
 - Health and logs:
@@ -59,7 +66,7 @@ sudo systemctl status ogscope
 sudo journalctl -u ogscope -f
 ```
 
-### 0.6 Troubleshooting (short)
+### 0.7 Troubleshooting (short)
 
 | Symptom | Where to look |
 |---------|----------------|
@@ -279,15 +286,19 @@ Notes:
 
 - if only templates/static files changed, `poetry install` is usually not needed
 - if service file changed, run `sudo systemctl daemon-reload` first
+- the script syncs **`ExecStart`** for the main `ogscope` unit and, if installed, **`ogscope-network-boot.service`** (when the project directory path changed); if the boot unit was never installed, that step is skipped
 
 ### 6.3 Uninstall service and local environment (`scripts/uninstall.sh`)
 
-Use `scripts/uninstall.sh` when you need to **remove the systemd unit**, delete the project **`.venv`**, or clean up before reinstalling in another directory. The script **does not** remove packages installed with `apt` (e.g. `python3-picamera2`) or the user-level **Poetry** installation; it only manages the OGScope service file and optional content under the project tree.
+Use `scripts/uninstall.sh` when you need to **remove the systemd unit**, delete the project **`.venv`**, or clean up before reinstalling in another directory. The script **does not** remove packages installed with `apt` (e.g. `python3-picamera2`) or the user-level **Poetry** installation; it removes the OGScope main unit, the optional **network boot** unit and **drop-in** (if present), and optional content under the project tree as described below.
 
 **What it does**
 
 - `systemctl stop` / `disable` `ogscope`
-- removes `/etc/systemd/system/ogscope.service` if present, then `daemon-reload`
+- removes `/etc/systemd/system/ogscope.service` if present
+- if **`ogscope-network-boot.service`** exists: `stop` / `disable` and remove that unit (matches what `install.sh` installs for boot-time WiFi)
+- if **`/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf`** exists: remove that drop-in (empty `ogscope.service.d` is removed with `rmdir` when possible)
+- `daemon-reload`
 - by default removes `.venv` at the project root (can be kept; see below)
 
 **Kept by default**

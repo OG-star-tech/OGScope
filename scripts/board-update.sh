@@ -6,6 +6,8 @@
 #   OGSCOPE_INSTALL_DEV=1  — poetry install 时包含 dev 依赖 / Include dev dependency group
 #   POETRY_INSTALLER_MAX_WORKERS — 默认 2，低配板可设为 1 / Default 2; set to 1 on low-RAM boards
 #   OGSCOPE_MIRROR=auto|cn|international — 与 install.sh 相同 / Same as install.sh
+#   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
+#   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
 
 set -euo pipefail
 
@@ -83,6 +85,11 @@ echo "✅ numpy/scipy 已就绪 / numpy & scipy OK"
 VENV_PYTHON="$(poetry env info --path)/bin/python"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 ogscope_sync_systemd_execstart_if_needed "${SERVICE_PATH}" "${VENV_PYTHON}"
+
+chmod +x "${PROJECT_DIR}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
+ogscope_sync_network_boot_unit_if_needed "${PROJECT_DIR}"
+
+ogscope_sync_plate_solve_database_if_needed "${PROJECT_DIR}"
 
 echo "🔄 重启服务 / Restarting service..."
 sudo systemctl daemon-reload

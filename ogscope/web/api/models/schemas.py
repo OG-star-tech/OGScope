@@ -89,12 +89,60 @@ class WifiStatus(BaseModel):
     ap_url_hint: Optional[str] = None
     configured: bool = True
     message: Optional[str] = None
+    device_id_suffix: Optional[str] = None
+    ap_ssid: Optional[str] = None
+    mdns_hostname_hint: Optional[str] = None
 
 
 class WifiModeRequest(BaseModel):
     """切换 WiFi 模式 / Switch WiFi mode."""
 
     mode: Literal["ap", "sta"]
+
+
+class WifiNetworkScanEntry(BaseModel):
+    """扫描到的 WiFi / One scanned WiFi network."""
+
+    ssid: str
+    signal: Optional[int] = None
+    security: Optional[str] = None
+
+
+class WifiScanResponse(BaseModel):
+    """WiFi 扫描结果 / WiFi scan response."""
+
+    networks: list[WifiNetworkScanEntry]
+    hint: Optional[str] = Field(
+        default=None,
+        description="空列表或降级时的说明（如 AP 模式无法扫描）/ UX hint when empty or degraded",
+    )
+
+
+class WifiProfileEntry(BaseModel):
+    """已保存的 WiFi 连接 / Saved WiFi connection profile."""
+
+    connection_name: str
+    ssid: str
+    autoconnect: bool
+
+
+class WifiProfilesResponse(BaseModel):
+    """已保存配置列表 / Saved profiles list."""
+
+    profiles: list[WifiProfileEntry]
+
+
+class WifiStaConnectRequest(BaseModel):
+    """连接外部 WiFi（切 STA）/ Connect to external WiFi (STA mode)."""
+
+    ssid: str
+    password: Optional[str] = None
+
+
+class WifiProfileActivateRequest(BaseModel):
+    """激活已保存连接 / Activate saved connection."""
+
+    connection_name: str
 
 
 class AlignmentStatus(BaseModel):

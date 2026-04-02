@@ -1,6 +1,6 @@
 #!/bin/bash
 # OGScope 卸载脚本 / OGScope uninstall script
-# 从本机移除 systemd 服务与（可选）项目虚拟环境；不卸载 apt 包与全局 Poetry / Removes service and optional venv; does not remove apt packages or global Poetry
+# 从本机移除 systemd 主服务、开机网络单元（若存在）与 drop-in，以及（可选）项目虚拟环境；不卸载 apt 包与全局 Poetry / Removes main service, ogscope-network-boot unit (if any), drop-in, and optional venv; does not remove apt packages or global Poetry
 #
 # 环境变量 / Environment:
 #   OGSCOPE_UNINSTALL_CONFIRM=1 — 必须设置，否则脚本退出（防误删）/ Must be set to proceed (safety)
@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SERVICE_NAME="ogscope"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+BOOT_SERVICE_NAME="ogscope-network-boot"
+BOOT_SERVICE_PATH="/etc/systemd/system/${BOOT_SERVICE_NAME}.service"
+NETWORK_DROPIN="/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf"
 
 echo "======================================"
 echo "  OGScope 卸载 / OGScope uninstall"
@@ -34,8 +37,8 @@ fi
 if [ "${OGSCOPE_UNINSTALL_CONFIRM:-}" != "1" ]; then
     if [ -t 0 ] && [ -t 1 ]; then
         echo ""
-        echo "⚠️ 将停止并移除 systemd 服务 ${SERVICE_NAME}，并可选删除 .venv。"
-        echo "⚠️ Will stop and remove systemd service ${SERVICE_NAME}, and optionally remove .venv."
+        echo "⚠️ 将停止并移除 systemd 服务 ${SERVICE_NAME}、ogscope-network-boot（若存在）与相关 drop-in，并可选删除 .venv。"
+        echo "⚠️ Will stop and remove ${SERVICE_NAME}, ogscope-network-boot (if present), related drop-ins, and optionally remove .venv."
         echo "   数据目录默认保留；设 OGSCOPE_UNINSTALL_REMOVE_DATA=1 可删除 logs/uploads/data。"
         echo "   Data dirs are kept by default; set OGSCOPE_UNINSTALL_REMOVE_DATA=1 to remove them."
         echo ""
@@ -52,7 +55,7 @@ fi
 
 cd "${PROJECT_DIR}"
 
-# 停止并禁用服务 / Stop and disable service
+# 停止并禁用主服务 / Stop and disable main service
 echo "🛑 停止服务 / Stopping service..."
 sudo systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
 sudo systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
@@ -60,12 +63,25 @@ sudo systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
 if [ -f "${SERVICE_PATH}" ]; then
     echo "🗑️  移除 unit 文件 / Removing unit file: ${SERVICE_PATH}"
     sudo rm -f "${SERVICE_PATH}"
-    sudo systemctl daemon-reload
-    echo "✅ systemd 已更新 / systemd reloaded"
 else
-    echo "ℹ️  未找到 ${SERVICE_PATH}，跳过删除 unit / Unit file not found, skipping"
-    sudo systemctl daemon-reload 2>/dev/null || true
+    echo "ℹ️  未找到 ${SERVICE_PATH}，跳过删除主 unit / Main unit file not found, skipping"
 fi
+
+# 开机网络单元与 drop-in（与 install.sh 对应）/ Boot unit and drop-in (matches install.sh)
+if [ -f "${BOOT_SERVICE_PATH}" ]; then
+    echo "🛑 禁用并移除 ${BOOT_SERVICE_NAME}.service ..."
+    sudo systemctl stop "${BOOT_SERVICE_NAME}.service" 2>/dev/null || true
+    sudo systemctl disable "${BOOT_SERVICE_NAME}.service" 2>/dev/null || true
+    sudo rm -f "${BOOT_SERVICE_PATH}"
+fi
+if [ -f "${NETWORK_DROPIN}" ]; then
+    echo "🗑️  移除 systemd drop-in ${NETWORK_DROPIN} ..."
+    sudo rm -f "${NETWORK_DROPIN}"
+    sudo rmdir /etc/systemd/system/ogscope.service.d 2>/dev/null || true
+fi
+
+sudo systemctl daemon-reload
+echo "✅ systemd 已更新 / systemd reloaded"
 
 # 虚拟环境 / Virtualenv
 if [ "${OGSCOPE_UNINSTALL_KEEP_VENV:-}" = "1" ]; then

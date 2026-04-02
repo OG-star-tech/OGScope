@@ -123,11 +123,12 @@ WantedBy=multi-user.target
 
 在本地运行时，使用虚拟环境，因为有些硬件只能在开发板上调用，所以本地只是代码编写，远程测试
 
-### WiFi 模式（NetworkManager）
+### WiFi 与网络（NetworkManager）
 
-- 项目提供 `scripts/ogscope-wifi-switch.sh`，通过 `nmcli` 在 **STA（连路由器）** 与 **AP（热点 + 固定网关如 192.168.4.1）** 间切换；需在板上创建两个 NM 连接并配置 `OGSCOPE_WIFI_STA_CONNECTION`、`OGSCOPE_WIFI_AP_CONNECTION` 等环境变量。
-- 将脚本安装到 `/usr/local/bin/ogscope-wifi-switch` 后，在 **sudoers** 中为运行用户配置免密执行该绝对路径（见脚本头部注释）。
-- AP 与 STA **互斥**；STA 模式使用 DHCP，不会残留 AP 的静态地址。
+- **唯一详解**见 [`docs/development/wifi-nm.md`](docs/development/wifi-nm.md)：热点默认密码、`network.env`、`/debug/system`、Web API、sudoers（`ogscope-wifi` / `ogscope-nmcli`）等。
+- **开机引导**：`ogscope-network-boot.service`（root oneshot，`Before=ogscope.service`）在冷启动时若 STA 长时间无可用 IPv4 则切 **AP**，不依赖 Python 进程。
+- **运行时 STA 回滚**：用户通过 Web/API 切 STA 成功后，应用内按 `wifi_sta_rollback_*` 超时无 IPv4 再切回 AP；与开机引导**分工不同、不冲突**（先 boot 完成再启动 `ogscope`）。
+- 二者均可能最终执行「切 AP」，行为**幂等**；不建议删除运行时回滚，否则仅冷启动有保障，**运行中**切 STA 失败后需手动恢复。
 
 **重要说明**：
 - 系统库（如 `libcamera`、`picamera2`）安装在系统环境中，通过 `PYTHONPATH` 环境变量注入到虚拟环境

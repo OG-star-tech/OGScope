@@ -70,6 +70,8 @@ poetry shell
 python -m ogscope.main
 ```
 
+On the Raspberry Pi, one-shot deployment, WiFi hotspot, and **`/debug/system`** are documented in [docs/development/wifi-nm.md](docs/development/wifi-nm.md) and [docs/development/README_EN.md](docs/development/README_EN.md).
+
 ### Web Interface Access
 
 After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
@@ -89,6 +91,7 @@ After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
 ### Development Documentation
 - [Development Guide (English)](docs/development/README_EN.md)
 - [Development Guide (中文)](docs/development/README.md)
+- [Raspberry Pi WiFi / AP / STA (NetworkManager)](docs/development/wifi-nm.md)
 - [FastAPI Development](docs/development/fastapi-guide.md)
 - [Testing Guide](docs/development/testing-guide.md)
 
