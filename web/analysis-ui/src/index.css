@@ -7,3 +7,31 @@ body,
 #root {
   height: 100%;
 }
+
+/*
+ * 可滚动区域细滚动条（与深色主题一致）/ Thin scrollbar for scroll areas, matches dark theme.
+ * Firefox: scrollbar-width / scrollbar-color; WebKit: pseudo-elements.
+ */
+.og-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #414754 #191c22;
+}
+
+.og-scrollbar::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.og-scrollbar::-webkit-scrollbar-track {
+  background: #191c22;
+  border-radius: 4px;
+}
+
+.og-scrollbar::-webkit-scrollbar-thumb {
+  background: #414754;
+  border-radius: 4px;
+}
+
+.og-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #5c6070;
+}

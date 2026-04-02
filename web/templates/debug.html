@@ -52,6 +52,20 @@
 
         <!-- 主内容区域 -->
         <main class="debug-main">
+            <!-- 系统监控横条（预览上方，仅 CPU/内存/温度/WiFi）/ Compact system bar above preview -->
+            <div class="system-monitor-bar" id="system-monitor-bar" aria-label="系统监控">
+                <span class="sys-monitor-chip" data-i18n="system.cpuUsage">CPU</span>
+                <span class="sys-monitor-value" id="system-cpu-usage">--</span>
+                <span class="sys-monitor-sep">·</span>
+                <span class="sys-monitor-chip" data-i18n="system.memoryUsage">内存</span>
+                <span class="sys-monitor-value" id="system-memory-usage">--</span>
+                <span class="sys-monitor-sep">·</span>
+                <span class="sys-monitor-chip" data-i18n="system.temperature">温度</span>
+                <span class="sys-monitor-value" id="system-temperature">--</span>
+                <span class="sys-monitor-sep">·</span>
+                <span class="sys-monitor-chip" data-i18n="system.wifiSignal">WiFi</span>
+                <span class="sys-monitor-value" id="system-wifi-signal">--</span>
+            </div>
             <!-- 实时预览置顶 -->
             <div class="card preview-top">
                 <div class="card-header">
@@ -279,51 +293,6 @@
                         </div>
                     </div>
 
-                    <div class="stream-analysis">
-                        <h4 data-i18n="system.sectionTitle">🖥️ 系统监控</h4>
-                        <div class="analysis-grid">
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.platform">平台</span>
-                                <span class="info-value" id="system-platform">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.os">系统</span>
-                                <span class="info-value" id="system-os">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.cpuUsage">CPU 占用</span>
-                                <span class="info-value" id="system-cpu-usage">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.memoryUsage">内存占用</span>
-                                <span class="info-value" id="system-memory-usage">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.temperature">CPU 温度</span>
-                                <span class="info-value" id="system-temperature">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.wifiQuality">WiFi 质量</span>
-                                <span class="info-value" id="system-wifi-quality">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.wifiSignal">WiFi 信号</span>
-                                <span class="info-value" id="system-wifi-signal">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.uptime">系统运行时长</span>
-                                <span class="info-value" id="system-uptime">--</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="info-label" data-i18n="system.loadAvg">1 分钟负载</span>
-                                <span class="info-value" id="system-loadavg">--</span>
-                            </div>
-                        </div>
-                        <div class="analysis-actions">
-                            <span class="info-label" data-i18n="system.refreshHint">低频刷新（约每10秒）</span>
-                        </div>
-                    </div>
-                    
                     <!-- 旋转控制 -->
                     <div class="rotation-controls">
                         <h4 data-i18n="rotation.sectionTitle">🔄 画面旋转控制</h4>

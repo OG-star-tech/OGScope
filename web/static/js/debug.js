@@ -1890,15 +1890,11 @@ class DebugConsole {
             }
         };
 
-        setText('system-platform', info.platform || '--');
-        setText('system-os', info.os || '--');
+        // 仅更新预览上方横条（CPU/内存/温度/WiFi）/ Top bar only: CPU, memory, temp, WiFi signal
         setText('system-cpu-usage', this.formatPercent(info.cpu_usage));
         setText('system-memory-usage', this.formatPercent(info.memory_usage));
         setText('system-temperature', this.formatTemperature(info.temperature));
-        setText('system-wifi-quality', this.formatPercent(info.wifi_quality));
         setText('system-wifi-signal', this.formatWifiSignal(info.wifi_signal_dbm, info.wifi_interface));
-        setText('system-uptime', this.formatUptime(info.uptime_seconds));
-        setText('system-loadavg', this.formatLoadAverage(info.load_average_1m));
     }
 
     formatPercent(value) {

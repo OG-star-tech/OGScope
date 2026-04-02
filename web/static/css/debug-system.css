@@ -75,3 +75,33 @@ body {
   color: #d1d5db;
   font-size: 14px;
 }
+
+/* 系统信息监控 / System info monitor */
+.system-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.system-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #374151;
+}
+
+.system-info-k {
+  color: #9ca3af;
+  font-weight: 500;
+  min-width: 6em;
+}
+
+.system-info-v {
+  color: #f9fafb;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}

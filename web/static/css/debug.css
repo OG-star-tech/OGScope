@@ -1613,3 +1613,34 @@ button:disabled:hover,
   transform: scale(1.05);
 }
 
+/* 预览上方系统监控横条 / Compact system bar above live preview */
+.system-monitor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--debug-text-secondary);
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius);
+}
+
+.system-monitor-bar .sys-monitor-chip {
+  color: var(--debug-text-secondary);
+  font-weight: 500;
+}
+
+.system-monitor-bar .sys-monitor-value {
+  color: var(--debug-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.system-monitor-bar .sys-monitor-sep {
+  opacity: 0.45;
+  user-select: none;
+}
+

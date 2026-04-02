@@ -158,9 +158,9 @@ class AnalysisService:
         self.upload_root.mkdir(parents=True, exist_ok=True)
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
-        # 解算专用线程池（避免与相机预览等争用默认线程池）/ Dedicated executor for solving tasks
+        # 解算专用线程池（避免与相机预览等争用默认线程池）；默认单 worker 降低 Zero 2W 等低内存设备上并发解算的内存峰值 / Dedicated executor for solving; default 1 worker to reduce peak RAM on low-memory boards
         self._solver_executor = ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="solver"
+            max_workers=1, thread_name_prefix="solver"
         )
         self._solver_max_stars = settings.solver_max_stars
         self.extractor = StarExtractor(max_stars=settings.solver_max_stars)

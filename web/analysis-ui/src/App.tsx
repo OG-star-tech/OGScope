@@ -159,12 +159,12 @@ export default function App() {
   const [cameraPreviewNatural, setCameraPreviewNatural] = useState({ w: 0, h: 0 });
   /** 视频台：文件预览或设备相机 / Video lab: pool file vs device camera */
   const [videoPreviewMode, setVideoPreviewMode] = useState<"file" | "camera">("file");
-  /** 设备相机预览图 blob URL（与 X-Frame-Id 去重）/ Camera preview blob URL, deduped by frame id */
-  const [cameraPreviewUrl, setCameraPreviewUrl] = useState<string | null>(null);
+  /** MJPEG 流时间戳参数，与相机调试台 /api/debug/camera/stream 一致 / Same stream URL as debug console */
+  const [cameraStreamNonce, setCameraStreamNonce] = useState(() => Date.now());
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [cameraSolveRunning, setCameraSolveRunning] = useState(false);
   const [fileSolveRunning, setFileSolveRunning] = useState(false);
-  const [autoHoldEnabled, setAutoHoldEnabled] = useState(true);
+  const [autoHoldEnabled, setAutoHoldEnabled] = useState(false);
   const [isFrozen, setIsFrozen] = useState(false);
   const [frozenFrameId, setFrozenFrameId] = useState<string | null>(null);
   const [frozenImageUrl, setFrozenImageUrl] = useState<string | null>(null);
@@ -191,12 +191,34 @@ export default function App() {
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
-  const lastCameraFrameIdRef = useRef<string | null>(null);
   const cameraSolveTimerRef = useRef<number | null>(null);
   const fileSolveTimerRef = useRef<number | null>(null);
   const cameraSolveInFlightRef = useRef(false);
   const fileSolveInFlightRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
+
+  /** 从当前预览 img 截一帧为 JPEG blob URL（用于冻结与星点同帧）/ Snapshot current preview frame for freeze */
+  const captureCameraFrameAsBlobUrl = useCallback(async (): Promise<string | null> => {
+    const el = cameraPreviewImgRef.current;
+    if (!el || el.naturalWidth < 2) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = el.naturalWidth;
+    canvas.height = el.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    try {
+      ctx.drawImage(el, 0, 0);
+    } catch {
+      return null;
+    }
+    return await new Promise((resolve) => {
+      canvas.toBlob(
+        (b) => resolve(b ? URL.createObjectURL(b) : null),
+        "image/jpeg",
+        0.92,
+      );
+    });
+  }, []);
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
   const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
 
@@ -366,45 +388,13 @@ export default function App() {
     const draw = () => drawSolveOverlay(cv, img, overlay, layers);
     if (img.complete) draw();
     else img.onload = draw;
-  }, [overlay, layers, view, videoPreviewMode, lastResult, cameraPreviewUrl]);
+  }, [overlay, layers, view, videoPreviewMode, lastResult, cameraStreamNonce, isFrozen]);
 
-  /** 共享预览缓存轮询：仅当 X-Frame-Id 变化时更新图像，减少解码与重绘 / Poll shared cache; update img only on new frame id */
+  /** 进入设备相机模式时重连 MJPEG（与相机调试台同一路径）/ Reconnect MJPEG like debug console */
   useEffect(() => {
     if (view !== "lab_video" || videoPreviewMode !== "camera") return;
-    let cancelled = false;
-    const poll = async () => {
-      if (cancelled || isFrozen) return;
-      try {
-        const qs = lastCameraFrameIdRef.current
-          ? `?since_frame_id=${encodeURIComponent(lastCameraFrameIdRef.current)}`
-          : "";
-        const r = await fetch(`/api/camera/preview${qs}`, { cache: "no-store" });
-        if (r.status === 304) return;
-        if (!r.ok) return;
-        const fid = r.headers.get("X-Frame-Id");
-        if (fid != null) lastCameraFrameIdRef.current = fid;
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        setCameraPreviewUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return url;
-        });
-      } catch {
-        /* 忽略单次失败 / Ignore transient errors */
-      }
-    };
-    void poll();
-    const id = window.setInterval(() => void poll(), 180);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      setCameraPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-      lastCameraFrameIdRef.current = null;
-    };
-  }, [view, videoPreviewMode, isFrozen]);
+    setCameraStreamNonce(Date.now());
+  }, [view, videoPreviewMode]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -533,7 +523,11 @@ export default function App() {
             ? String((out as { frame_id?: number }).frame_id)
             : null,
         );
-        setFrozenImageUrl(cameraPreviewUrl);
+        const snap = await captureCameraFrameAsBlobUrl();
+        setFrozenImageUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return snap;
+        });
         stopCameraSolveLoop();
       }
       setLastRoundTripMs(performance.now() - t0);
@@ -745,7 +739,11 @@ export default function App() {
   const resumeLivePreview = () => {
     setIsFrozen(false);
     setFrozenFrameId(null);
-    setFrozenImageUrl(null);
+    setFrozenImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setCameraStreamNonce(Date.now());
   };
 
   const togglePreset = (id: string) => {
@@ -877,7 +875,10 @@ export default function App() {
       stopCameraSolveLoop();
       setIsFrozen(false);
       setFrozenFrameId(null);
-      setFrozenImageUrl(null);
+      setFrozenImageUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
     }
     if (view !== "lab_video" || videoPreviewMode !== "file") {
       stopFileSolveLoop();
@@ -1007,7 +1008,7 @@ export default function App() {
           >
             <RefreshCw className="h-3 w-3" /> {t("sidebar.refresh")}
           </button>
-          <div className="max-h-36 overflow-y-auto border-t border-outline-variant/10 pt-2">
+          <div className="og-scrollbar max-h-36 overflow-y-auto border-t border-outline-variant/10 pt-2">
             {sidebarUploads.map((u) => (
               <div
                 key={u.filename}
@@ -1090,7 +1091,7 @@ export default function App() {
               <p className="text-[10px] text-on-surface-variant">{t("sidebar.debugEmpty")}</p>
             ) : (
               <>
-                <div className="max-h-[min(22rem,55vh)] space-y-1.5 overflow-y-auto pr-0.5">
+                <div className="og-scrollbar max-h-[min(22rem,55vh)] space-y-1.5 overflow-y-auto pr-0.5">
                   {debugPagedFiles.map((f) => (
                     <button
                       key={f.name}
@@ -1155,7 +1156,7 @@ export default function App() {
 
         {(view === "lab_image" || view === "lab_video") && (
           <div className="flex min-h-0 min-w-0 flex-1">
-            <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
+            <main className="og-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
               {err && (
                 <div className="mb-2 rounded border border-error/40 bg-error-container/20 px-3 py-2 text-xs text-error">
                   {err}
@@ -1199,10 +1200,14 @@ export default function App() {
                 {view === "lab_video" && videoPreviewMode === "camera" ? (
                   <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
                     <div className="relative inline-block max-h-[70vh] max-w-full">
-                      {((isFrozen && frozenImageUrl) || cameraPreviewUrl) ? (
+                      {!isFrozen || frozenImageUrl ? (
                         <img
                           ref={cameraPreviewImgRef}
-                          src={(isFrozen && frozenImageUrl) || cameraPreviewUrl || ""}
+                          src={
+                            isFrozen && frozenImageUrl
+                              ? frozenImageUrl
+                              : `/api/debug/camera/stream?t=${cameraStreamNonce}`
+                          }
                           alt=""
                           className="max-h-[70vh] w-full min-h-[120px] object-contain"
                           onLoad={(e) =>
@@ -1225,7 +1230,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : selected ? (
-                  <div className="relative h-full min-h-[200px] overflow-auto">
+                  <div className="og-scrollbar relative h-full min-h-[200px] overflow-auto">
                     {view === "lab_video" ? (
                       <>
                         <div className="absolute left-2 top-2 z-20 flex flex-wrap gap-1">
@@ -1756,8 +1761,8 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                  <div className="min-h-0 overflow-y-auto p-3">
-                    <div className="flex gap-3 overflow-x-auto text-xs">
+                  <div className="og-scrollbar min-h-0 overflow-y-auto p-3">
+                    <div className="og-scrollbar flex gap-3 overflow-x-auto text-xs">
                       {batchPack?.results.map((r, i) => {
                         const row = r.result as Record<string, unknown> | undefined;
                         const rawOpen = batchRawOpen[i] ?? false;
@@ -1785,7 +1790,7 @@ export default function App() {
                                   {rawOpen ? t("results.hideRaw") : t("results.viewRaw")}
                                 </button>
                                 {rawOpen && (
-                                  <pre className="mt-1 max-h-40 overflow-auto rounded bg-surface-container-highest p-2 text-[9px] text-on-surface-variant">
+                                  <pre className="og-scrollbar mt-1 max-h-40 overflow-auto rounded bg-surface-container-highest p-2 text-[9px] text-on-surface-variant">
                                     {JSON.stringify(r, null, 2)}
                                   </pre>
                                 )}
@@ -1793,7 +1798,7 @@ export default function App() {
                             ) : (
                               <div className="mt-2 text-[10px] text-error">{String(r.error)}</div>
                             )}
-                            {r.success && selected && (
+                            {r.success === true && selected ? (
                               <button
                                 type="button"
                                 className="mt-3 w-full rounded bg-surface-container-high py-1.5 text-[10px] font-medium"
@@ -1809,7 +1814,7 @@ export default function App() {
                               >
                                 {t("results.saveRow")}
                               </button>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })}
@@ -1831,7 +1836,7 @@ export default function App() {
                             {singleFooterRawOpen ? t("results.hideRaw") : t("results.viewRaw")}
                           </button>
                           {singleFooterRawOpen && (
-                            <pre className="mt-1 max-h-48 overflow-auto rounded bg-surface-container-highest p-2 text-[9px] text-on-surface-variant">
+                            <pre className="og-scrollbar mt-1 max-h-48 overflow-auto rounded bg-surface-container-highest p-2 text-[9px] text-on-surface-variant">
                               {JSON.stringify(lastResult, null, 2)}
                             </pre>
                           )}
@@ -1954,7 +1959,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="og-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
                 <details
                   open
                   className="rounded-lg border border-outline-variant/20 bg-surface-container-highest/30"
@@ -2155,7 +2160,7 @@ export default function App() {
                   <p className="mb-2 text-[10px] leading-snug text-on-surface-variant">
                     {t("sidebar.batchHint")}
                   </p>
-                  <div className="max-h-36 space-y-1.5 overflow-y-auto">
+                  <div className="og-scrollbar max-h-36 space-y-1.5 overflow-y-auto">
                     {[...official, ...userPresets].map((p) => (
                       <label key={p.id} className="flex cursor-pointer items-center gap-2">
                         <input
@@ -2170,7 +2175,7 @@ export default function App() {
                 </div>
                 <div className="mt-6 border-t border-outline-variant/20 pt-4">
                   <div className="mb-2 font-semibold">{t("btn.applyPresets")}</div>
-                  <div className="max-h-24 space-y-1 overflow-y-auto">
+                  <div className="og-scrollbar max-h-24 space-y-1 overflow-y-auto">
                     {[...official, ...userPresets].map((p) => (
                       <button
                         key={p.id}
@@ -2218,7 +2223,7 @@ export default function App() {
         )}
 
         {view === "pool" && (
-          <main className="flex-1 overflow-auto p-4">
+          <main className="og-scrollbar flex-1 overflow-auto p-4">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
               <Database className="h-5 w-5" /> {t("pool.title")}
             </h2>
@@ -2258,7 +2263,7 @@ export default function App() {
         )}
 
         {view === "history" && (
-          <main className="flex-1 overflow-auto p-4">
+          <main className="og-scrollbar flex-1 overflow-auto p-4">
             <p className="mb-4 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90 p-3 text-xs leading-relaxed text-on-surface-variant">
               {t("history.intro")}
             </p>
@@ -2386,7 +2391,7 @@ export default function App() {
                             className="max-h-48 max-w-full rounded border border-outline-variant/20 object-contain"
                           />
                         ) : null}
-                        <pre className="max-h-64 overflow-auto rounded bg-surface-container p-2 text-[10px]">
+                        <pre className="og-scrollbar max-h-64 overflow-auto rounded bg-surface-container p-2 text-[10px]">
                           {JSON.stringify(row.result_json, null, 2)}
                         </pre>
                       </div>

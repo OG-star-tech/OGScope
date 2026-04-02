@@ -49,6 +49,68 @@ async function switchMode(mode) {
   renderStatus(data);
 }
 
+/** 格式化运行时长 / Format uptime */
+function formatUptime(sec) {
+  const s = Math.max(0, parseInt(String(sec), 10) || 0);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}天 ${h}小时`;
+  if (h > 0) return `${h}小时 ${m}分`;
+  return `${m}分`;
+}
+
+/** 渲染系统信息监控 / Render system info from /api/system/info */
+function renderSystemInfo(info) {
+  const grid = document.getElementById("system-info-grid");
+  const statusEl = document.getElementById("system-info-status");
+  if (!grid || !statusEl) return;
+  statusEl.textContent = "";
+  const wifiQ =
+    info.wifi_quality != null && !Number.isNaN(Number(info.wifi_quality))
+      ? `${Number(info.wifi_quality).toFixed(1)}%`
+      : "—";
+  const wifiSig =
+    info.wifi_signal_dbm != null && !Number.isNaN(Number(info.wifi_signal_dbm))
+      ? `${Number(info.wifi_signal_dbm).toFixed(0)} dBm (${info.wifi_interface || "?"})`
+      : "—";
+  const rows = [
+    ["平台", info.platform || "—"],
+    ["系统", info.os || "—"],
+    ["CPU 占用", `${Number(info.cpu_usage ?? 0).toFixed(1)}%`],
+    ["内存占用", `${Number(info.memory_usage ?? 0).toFixed(1)}%`],
+    ["CPU 温度", `${Number(info.temperature ?? 0).toFixed(1)} °C`],
+    ["运行时长", formatUptime(info.uptime_seconds)],
+    ["1 分钟负载", String(info.load_average_1m ?? "—")],
+    ["WiFi 质量", wifiQ],
+    ["WiFi 信号", wifiSig],
+  ];
+  grid.innerHTML = rows
+    .map(
+      ([k, v]) =>
+        `<div class="system-info-row"><span class="system-info-k">${escapeHtml(k)}</span><span class="system-info-v">${escapeHtml(String(v))}</span></div>`,
+    )
+    .join("");
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+let systemInfoTimer = null;
+
+async function refreshSystemInfo() {
+  const statusEl = document.getElementById("system-info-status");
+  try {
+    const info = await requestJson("/api/system/info");
+    renderSystemInfo(info);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `加载失败: ${err.message}`;
+  }
+}
+
 function boot() {
   document.getElementById("refresh").addEventListener("click", async () => {
     try {
@@ -74,6 +136,10 @@ function boot() {
   refreshStatus().catch((err) => {
     document.getElementById("wifi-status").textContent = `获取状态失败: ${err.message}`;
   });
+
+  refreshSystemInfo();
+  if (systemInfoTimer) clearInterval(systemInfoTimer);
+  systemInfoTimer = setInterval(refreshSystemInfo, 8000);
 }
 
 window.addEventListener("DOMContentLoaded", boot);

@@ -158,6 +158,8 @@ class SystemInfoService:
         except OSError:
             return None, None, None
 
+        # /proc/net/wireless 列顺序：iface、status、link、level、noise / Columns: iface, status, link, level, noise
+        # 示例 / Example: wlan0: 0000   45.  -50.  -256  （link 在 status 之后）
         for line in lines[2:]:
             if ":" not in line:
                 continue
@@ -166,8 +168,8 @@ class SystemInfoService:
             if len(values) < 3:
                 continue
             try:
-                link_quality = float(values[0].rstrip("."))
-                signal_level = float(values[1].rstrip("."))
+                link_quality = float(values[1].rstrip("."))
+                signal_level = float(values[2].rstrip("."))
                 quality_percent = max(0.0, min(100.0, (link_quality / 70.0) * 100.0))
                 return (
                     round(quality_percent, 2),
