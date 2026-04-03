@@ -622,6 +622,7 @@ export default function App() {
       const out = await transcodeAviToMp4(aviFile, (ratio, msg) => {
         setTranscodeProgress(Math.max(0, Math.min(1, ratio)));
         if (msg === "loading_ffmpeg") setTranscodeHint(t("lab.transcode.loading"));
+        else if (msg === "writing_input") setTranscodeHint(t("lab.transcode.writingBuffer"));
         else if (msg === "transcoding") setTranscodeHint(t("lab.transcode.running"));
         else if (msg === "packing_output") setTranscodeHint(t("lab.transcode.packaging"));
       });
@@ -648,6 +649,8 @@ export default function App() {
   };
 
   const transcodePoolAviAndReplace = async (aviFilename: string) => {
+    setDebugImportStep(t("sidebar.flowDownloadingPool"));
+    setDebugImportProgress(0.19);
     const srcUrl = uploadFileUrl(aviFilename);
     const res = await fetch(srcUrl, { cache: "no-store" });
     if (!res.ok) throw new Error(t("lab.transcode.fetchFailed"));
@@ -658,6 +661,7 @@ export default function App() {
       const span = 0.6;
       setDebugImportProgress(base + Math.max(0, Math.min(1, ratio)) * span);
       if (msg === "loading_ffmpeg") setDebugImportStep(t("sidebar.flowLoadingTranscoder"));
+      else if (msg === "writing_input") setDebugImportStep(t("sidebar.flowWritingBuffer"));
       else if (msg === "transcoding") setDebugImportStep(t("sidebar.flowTranscoding"));
       else if (msg === "packing_output") setDebugImportStep(t("sidebar.flowPackaging"));
     });
