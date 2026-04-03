@@ -25,12 +25,23 @@ const BUNDLED: Record<Locale, Record<string, string>> = {
   en: enDict as Record<string, string>,
 };
 
+const LOCALE_KEY = "ogscope.analysis.locale";
+
+function detectInitialLocale(): Locale {
+  const saved = window.localStorage.getItem(LOCALE_KEY);
+  if (saved === "zh" || saved === "en") return saved;
+  const navLang = (navigator.language || "zh").toLowerCase();
+  return navLang.startsWith("en") ? "en" : "zh";
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>("zh");
-  const [dict, setDict] = useState<Record<string, string>>(BUNDLED.zh);
+  const [locale, setLocale] = useState<Locale>(detectInitialLocale);
+  const [dict, setDict] = useState<Record<string, string>>(BUNDLED[detectInitialLocale()]);
 
   useEffect(() => {
     setDict(BUNDLED[locale]);
+    window.localStorage.setItem(LOCALE_KEY, locale);
+    document.documentElement.lang = locale === "en" ? "en" : "zh-CN";
   }, [locale]);
 
   const t = useMemo(

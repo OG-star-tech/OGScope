@@ -3,7 +3,10 @@
 """
 
 import asyncio
+import datetime as dt
+import json
 import os
+import subprocess
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -25,6 +28,74 @@ _DEBUG_PREVIEW_MIN_INTERVAL_SEC = max(
     0.0,
     float(os.getenv("OGSCOPE_DEBUG_PREVIEW_MIN_INTERVAL_MS", "150") or "150") / 1000.0,
 )
+
+
+def _journal_priority_to_level(priority: str | int | None) -> str:
+    try:
+        p = int(priority) if priority is not None else 6
+    except (TypeError, ValueError):
+        p = 6
+    if p <= 3:
+        return "ERROR"
+    if p == 4:
+        return "WARN"
+    return "INFO"
+
+
+def _read_journal_logs(
+    service: str,
+    since_seconds: int,
+    limit: int,
+) -> list[dict[str, str | int | None]]:
+    cmd = [
+        "journalctl",
+        "--no-pager",
+        "-o",
+        "json",
+        "-u",
+        service,
+        "--since",
+        f"{since_seconds} seconds ago",
+        "-n",
+        str(limit),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "journalctl failed")
+    rows: list[dict[str, str | int | None]] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = str(item.get("MESSAGE", "")).strip()
+        if not msg:
+            continue
+        priority = item.get("PRIORITY")
+        level = _journal_priority_to_level(priority)
+        ts_iso: str | None = None
+        rt = item.get("__REALTIME_TIMESTAMP")
+        try:
+            if rt is not None:
+                ts = dt.datetime.fromtimestamp(
+                    int(str(rt)) / 1_000_000, tz=dt.timezone.utc
+                )
+                ts_iso = ts.isoformat()
+        except (ValueError, TypeError):
+            ts_iso = None
+        rows.append(
+            {
+                "ts": ts_iso,
+                "level": level,
+                "message": msg,
+                "source": str(item.get("_SYSTEMD_UNIT", service)),
+                "priority": int(priority) if str(priority).isdigit() else None,
+            }
+        )
+    return rows
 
 
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
@@ -455,6 +526,44 @@ async def delete_capture_file(filename: str):
     """删除拍摄文件 / Delete shooting files"""
     try:
         return await DebugFileService.delete_file(filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 系统日志 ==================== / ==================== System Logs ====================
+
+
+@router.get("/debug/logs/systemd")
+async def get_systemd_logs(
+    service: str = Query(default="ogscope"),
+    since_seconds: int = Query(default=600, ge=10, le=86400),
+    limit: int = Query(default=120, ge=10, le=1000),
+    levels: str = Query(default="INFO,WARN,ERROR"),
+):
+    """读取 systemd/journalctl 日志 / Read systemd journal logs."""
+    level_set = {
+        part.strip().upper()
+        for part in levels.split(",")
+        if part.strip().upper() in {"INFO", "WARN", "ERROR"}
+    }
+    if not level_set:
+        level_set = {"INFO", "WARN", "ERROR"}
+    try:
+        rows = await asyncio.to_thread(
+            _read_journal_logs,
+            service,
+            since_seconds,
+            limit,
+        )
+        filtered = [row for row in rows if str(row.get("level")) in level_set]
+        return {
+            "service": service,
+            "since_seconds": since_seconds,
+            "limit": limit,
+            "levels": sorted(level_set),
+            "items": filtered,
+            "count": len(filtered),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

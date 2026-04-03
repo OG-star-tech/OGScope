@@ -4,108 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OGScope 系统调试控制台</title>
-    <link rel="stylesheet" href="/static/css/debug-system.css">
+    <meta http-equiv="refresh" content="0; url=/static/analysis-lab/system.html#/overview">
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #10131a;
+            color: #e1e2eb;
+            display: grid;
+            place-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            border: 1px solid #414754;
+            border-radius: 12px;
+            padding: 20px;
+            background: #1d2026;
+            max-width: 560px;
+        }
+        a { color: #adc6ff; }
+        p { margin: 0.45rem 0; }
+    </style>
 </head>
 <body>
-<main class="container">
-    <header class="header">
-        <h1>🔧 OGScope 系统调试控制台</h1>
-        <div class="actions">
-            <button class="btn" onclick="window.location.href='/debug'">相机调试</button>
-            <button class="btn" onclick="window.location.href='/debug/analysis'">星空解算</button>
-            <button class="btn" onclick="window.location.href='/'">返回主页</button>
-        </div>
-    </header>
-
-    <section class="card" id="system-info-section">
-        <h2>系统信息</h2>
-        <p class="hint" id="system-info-status">加载中...</p>
-        <div class="system-info-grid" id="system-info-grid"></div>
-    </section>
-
-    <section class="card">
-        <h2>WiFi 引导</h2>
-        <ol class="wizard-steps">
-            <li>手机/电脑连接热点 <strong id="wizard-ap-ssid">OGScope_xxxx</strong>，密码 <code>ogscopeadmin</code></li>
-            <li>浏览器打开本页（AP 下地址一般为 <span id="wizard-ap-url">http://192.168.4.1:{{ http_port }}</span>）</li>
-            <li>点击下方「扫描 WiFi」（由<strong>设备</strong>执行 nmcli，浏览器无法直接扫 WiFi）；热点(AP)模式下部分网卡<strong>列不出周边网络</strong>，请用手动输入 SSID</li>
-            <li>连接成功后设备会加入局域网；可用下方「mDNS」或「扫描局域网」找回新地址（需同网段 HTTP，HTTPS 页面无法扫 HTTP）</li>
-        </ol>
-    </section>
-
-    <section class="card">
-        <h2>WiFi 模式</h2>
-        <div id="wifi-status" class="status">加载中...</div>
-        <div class="buttons">
-            <button id="to-ap" class="btn btn-primary">切到 AP 模式</button>
-            <button id="to-sta" class="btn btn-primary">切到 STA 模式</button>
-            <button id="refresh" class="btn">刷新状态</button>
-        </div>
-        <p class="hint">
-            AP 模式固定访问地址：<span id="ap-url-hint">http://192.168.4.1:{{ http_port }}</span>
-        </p>
-        <p class="hint" id="mdns-hint-row">
-            mDNS（局域网内）：<a id="mdns-hint-link" href="#">—</a>
-        </p>
-        <p class="hint">
-            注意：从 STA 切到 AP 时，当前页面会断开，需先连热点再访问固定地址。
-        </p>
-    </section>
-
-    <section class="card">
-        <h2>扫描 WiFi（由树莓派执行 nmcli）</h2>
-        <p class="hint">
-            出于安全与隐私，网页<strong>不能</strong>在客户端扫描周边 WiFi；列表由本机 NetworkManager 生成。
-            若列表为空，多为当前处于热点(AP)模式或需稍候重试；可直接用下方「手动输入 SSID」。
-        </p>
-        <div class="buttons">
-            <button id="btn-scan" class="btn btn-primary">扫描 WiFi</button>
-        </div>
-        <p class="hint" id="scan-status"></p>
-        <div class="table-wrap">
-            <table class="data-table" id="scan-table">
-                <thead><tr><th>SSID</th><th>信号</th><th>安全</th><th></th></tr></thead>
-                <tbody id="scan-tbody"></tbody>
-            </table>
-        </div>
-    </section>
-
-    <section class="card">
-        <h2>手动连接 SSID</h2>
-        <div class="form-row">
-            <label>SSID <input type="text" id="manual-ssid" placeholder="SSID"></label>
-            <label>密码 <input type="password" id="manual-pass" placeholder="开放网络可留空"></label>
-            <button id="btn-manual-connect" class="btn btn-primary">连接并切 STA</button>
-        </div>
-        <p class="hint" id="manual-connect-hint"></p>
-    </section>
-
-    <section class="card">
-        <h2>已保存的 WiFi</h2>
-        <div class="buttons">
-            <button id="btn-profiles-refresh" class="btn">刷新列表</button>
-        </div>
-        <div class="table-wrap">
-            <table class="data-table" id="profiles-table">
-                <thead><tr><th>连接名</th><th>SSID</th><th>自动连接</th><th></th></tr></thead>
-                <tbody id="profiles-tbody"></tbody>
-            </table>
-        </div>
-    </section>
-
-    <section class="card">
-        <h2>切换后找回局域网地址</h2>
-        <p class="hint">手机连上同一 WiFi 后，优先尝试 mDNS；若无法解析，再点「扫描局域网」在常见网段探测 <code>/health</code>（仅 HTTP 同页有效）。</p>
-        <div class="buttons">
-            <button id="btn-lan-scan" class="btn btn-primary">扫描局域网</button>
-            <span id="lan-scan-status" class="hint"></span>
-        </div>
-    </section>
-</main>
-
+<div class="card">
+    <h1>正在进入新版系统调试控制台...</h1>
+    <p>如果没有自动跳转，请点击：<a href="/static/analysis-lab/system.html#/overview">打开系统调试控制台</a></p>
+    <p>相机调试控制台：<a href="/debug">/debug</a></p>
+    <p>星空解算控制台：<a href="/debug/analysis">/debug/analysis</a></p>
+</div>
 <script>
-    window.OGSCOPE_HTTP_PORT = {{ http_port }};
+    const target = "/static/analysis-lab/system.html#/overview";
+    window.location.replace(target);
 </script>
-<script src="/static/js/debug-system.js?v={{ version }}&av={{ debug_system_assets_version }}"></script>
 </body>
 </html>

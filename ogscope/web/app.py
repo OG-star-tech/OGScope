@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -181,22 +181,10 @@ async def root(request: Request):
 
 @app.get("/debug", response_class=HTMLResponse)
 async def debug_console(request: Request):
-    """调试控制台页面 / Debug console page"""
-    debug_js_path = settings.static_dir / "js" / "debug.js"
-    return templates.TemplateResponse(
-        "debug.html",
-        {
-            "request": request,
-            "version": __version__,
-            "app_name": "OGScope Debug Console",
-            "debug_assets_version": _asset_stamp(debug_js_path),
-        },
-    )
-
-
-@app.get("/debug/system", response_class=HTMLResponse)
-async def debug_system_console(request: Request):
-    """系统调试控制台（WiFi 等）/ System debug console (WiFi, etc.)."""
+    """统一调试后台入口 / Unified debug admin entry."""
+    admin_index = settings.static_dir / "analysis-lab" / "system.html"
+    if admin_index.is_file():
+        return FileResponse(admin_index)
     ds_js = settings.static_dir / "js" / "debug-system.js"
     return templates.TemplateResponse(
         "debug_system.html",
@@ -206,6 +194,31 @@ async def debug_system_console(request: Request):
             "app_name": "OGScope System Debug",
             "debug_system_assets_version": _asset_stamp(ds_js),
             "http_port": settings.port,
+        },
+    )
+
+
+@app.get("/debug/system", response_class=HTMLResponse)
+async def debug_system_console(request: Request):
+    """兼容旧系统调试入口，重定向到新后台 / Legacy system debug entry."""
+    _ = request
+    return RedirectResponse(url="/debug", status_code=307)
+
+
+@app.get("/debug/camera", response_class=HTMLResponse)
+async def debug_camera_console(request: Request):
+    """相机调试页入口（新 SPA 优先，旧页兜底）/ Camera debug entry (SPA first, legacy fallback)."""
+    camera_index = settings.static_dir / "analysis-lab" / "camera.html"
+    if camera_index.is_file():
+        return FileResponse(camera_index)
+    debug_js_path = settings.static_dir / "js" / "debug.js"
+    return templates.TemplateResponse(
+        "debug.html",
+        {
+            "request": request,
+            "version": __version__,
+            "app_name": "OGScope Debug Console",
+            "debug_assets_version": _asset_stamp(debug_js_path),
         },
     )
 

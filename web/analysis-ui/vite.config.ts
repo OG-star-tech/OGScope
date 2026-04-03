@@ -19,6 +19,13 @@ export default defineConfig({
   build: {
     outDir: "../static/analysis-lab",
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        analysis: path.resolve(__dirname, "index.html"),
+        system: path.resolve(__dirname, "system.html"),
+        camera: path.resolve(__dirname, "camera.html"),
+      },
+    },
   },
   // 开发时把 /api 转到本机 FastAPI，便于本地联调 / Proxy API to FastAPI during dev
   server: {

@@ -119,7 +119,7 @@ function compactFilename(name: string, head = 16, tail = 14): string {
   return `${name.slice(0, head)}...${name.slice(-tail)}`;
 }
 
-export default function App() {
+export function AnalysisLabPage() {
   const { t, locale, setLocale } = useI18n();
   const [view, setView] = useState<View>("lab_image");
   const [uploads, setUploads] = useState<UploadFileRow[]>([]);
