@@ -1167,11 +1167,13 @@ export function AnalysisLabPage() {
                   {err}
                 </div>
               )}
-              {lastGateHint && (
-                <div className="mb-2 rounded border border-outline-variant/35 bg-surface-container px-3 py-2 text-xs text-on-surface-variant">
-                  {lastGateHint}
-                </div>
-              )}
+              <div className="mb-2 min-h-[24px] text-xs">
+                {lastGateHint && (
+                  <div className="rounded border border-outline-variant/35 bg-surface-container px-3 py-2 text-on-surface-variant">
+                    {lastGateHint}
+                  </div>
+                )}
+              </div>
               {view === "lab_video" && (
                 <div className="mb-3 max-w-5xl rounded-lg border border-outline-variant/25 bg-surface-container-low/80 p-3 text-[11px] leading-relaxed text-on-surface">
                   <p className="text-[10px] text-on-surface-variant">{t("lab.videoLiveIntro")}</p>
