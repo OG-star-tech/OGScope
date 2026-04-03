@@ -14,6 +14,7 @@ import {
   Square,
   Sun,
   Trash2,
+  X,
 } from "lucide-react";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSystemInfo } from "../context/SystemInfoContext";
@@ -118,6 +119,7 @@ type DebugFileInfo = {
 
 const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1080"] as const;
 const ROTATION_PRESETS = [0, 90, 180, 270] as const;
+const FILE_PAGE_SIZE = 12;
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
@@ -193,7 +195,6 @@ export function CameraConsoleApp() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [recordBusy, setRecordBusy] = useState(false);
   const [captureBusy, setCaptureBusy] = useState(false);
-  const [stopPending, setStopPending] = useState(false);
   const [fpsValue, setFpsValue] = useState("5");
   const [resValue, setResValue] = useState("1280x720");
   const [samplingMode, setSamplingMode] = useState("supersample");
@@ -231,6 +232,9 @@ export function CameraConsoleApp() {
   const [fileBusy, setFileBusy] = useState(false);
   const [fileInfo, setFileInfo] = useState<DebugFileInfo | null>(null);
   const [fileInfoBusy, setFileInfoBusy] = useState(false);
+  /** 当前展开详情的列表项文件名（与 API 返回的 filename 可能不同）/ Key for which row detail is open */
+  const [fileDetailKey, setFileDetailKey] = useState<string | null>(null);
+  const [filePage, setFilePage] = useState(1);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const histogramCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -276,7 +280,10 @@ export function CameraConsoleApp() {
     try {
       const next = await requestJson<CameraStatus>("/api/debug/camera/status", { cache: "no-store" });
       setStatus(next);
-      if (!next.streaming) setPreviewActive(false);
+      if (!next.streaming) {
+        setPreviewActive(false);
+        previewActiveRef.current = false;
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -299,6 +306,7 @@ export function CameraConsoleApp() {
         await requestJson("/api/debug/camera/start", { method: "POST" });
       }
       setPreviewActive(true);
+      previewActiveRef.current = true;
       setNotice(t("cam.notice.previewStart"));
       resetStreamStats();
       streamStartedAtRef.current = performance.now();
@@ -314,14 +322,17 @@ export function CameraConsoleApp() {
   const stopPreview = async () => {
     if (previewBusy) return;
     setPreviewBusy(true);
-    setStopPending(true);
     setErr(null);
     try {
       // 先卸载预览，释放长连接，再通知后端停止 / Release stream before stop API
       clearReconnectTimer();
       setPreviewActive(false);
+      previewActiveRef.current = false;
       resetStreamStats();
       setStatus((prev) => (prev ? { ...prev, streaming: false, recording: false } : prev));
+      if (imgRef.current) {
+        imgRef.current.src = "";
+      }
       setStreamNonce(Date.now());
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       await requestJson("/api/debug/camera/stop", { method: "POST" });
@@ -330,7 +341,6 @@ export function CameraConsoleApp() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setStopPending(false);
       setPreviewBusy(false);
     }
   };
@@ -594,6 +604,7 @@ export function CameraConsoleApp() {
     try {
       const data = await requestJson<{ files?: DebugFileItem[] }>("/api/debug/files", { cache: "no-store" });
       setFiles(data.files ?? []);
+      setFilePage(1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -601,7 +612,20 @@ export function CameraConsoleApp() {
     }
   };
 
+  const closeFileInfo = () => {
+    setFileDetailKey(null);
+    setFileInfo(null);
+    setFileInfoBusy(false);
+  };
+
   const showFileInfo = async (name: string) => {
+    // 再次点击同一行：关闭详情 / Toggle same row: close detail
+    if (fileDetailKey === name) {
+      closeFileInfo();
+      return;
+    }
+    setFileDetailKey(name);
+    setFileInfo(null);
     setFileInfoBusy(true);
     setErr(null);
     try {
@@ -609,6 +633,7 @@ export function CameraConsoleApp() {
       setFileInfo(data);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+      setFileDetailKey(null);
     } finally {
       setFileInfoBusy(false);
     }
@@ -649,7 +674,7 @@ export function CameraConsoleApp() {
     try {
       await requestJson(`/api/debug/files/${encodeURIComponent(name)}`, { method: "DELETE" });
       setNotice(t("cam.notice.fileDeleted", { name }));
-      if (fileInfo?.filename === name) setFileInfo(null);
+      if (fileDetailKey === name || fileInfo?.filename === name) closeFileInfo();
       await loadFiles();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -861,16 +886,27 @@ export function CameraConsoleApp() {
 
   useEffect(() => () => clearReconnectTimer(), []);
 
+  useEffect(() => {
+    const total = Math.max(1, Math.ceil(files.length / FILE_PAGE_SIZE));
+    if (filePage > total) {
+      setFilePage(total);
+    }
+  }, [files.length, filePage]);
+
   const streamSrc = previewActive ? `/api/debug/camera/stream?t=${streamNonce}` : "";
   const s = statsRef.current;
   const exposureLocked = form.autoExposure;
   const wbManual = form.whiteBalanceMode === "manual";
   const nightModeEnabled = Boolean(status?.info?.night_mode);
-  const isStreaming = previewActive || (Boolean(status?.streaming) && !stopPending);
+  const isStreaming = previewActive;
   const canStartPreview = !previewBusy && !previewActive && !Boolean(status?.recording);
-  const canStopPreview = !previewBusy && isStreaming;
+  const canStopPreview = !previewBusy && previewActive;
   const canCapture = !previewBusy && !captureBusy && isStreaming;
   const canRecordToggle = !previewBusy && !recordBusy && isStreaming;
+  const totalFilePages = Math.max(1, Math.ceil(files.length / FILE_PAGE_SIZE));
+  const filePageClamped = Math.min(filePage, totalFilePages);
+  const fileStart = (filePageClamped - 1) * FILE_PAGE_SIZE;
+  const pagedFiles = files.slice(fileStart, fileStart + FILE_PAGE_SIZE);
   return (
     <div className="min-h-screen bg-background text-on-surface">
       <header className="sticky top-0 z-30 border-b border-outline-variant/20 bg-surface-container-low/90 px-4 py-3 backdrop-blur">
@@ -1130,10 +1166,38 @@ export function CameraConsoleApp() {
                 {t("cam.files.refresh")}
               </button>
             </div>
-            <div className="max-h-56 space-y-2 overflow-auto">
+            {fileInfoBusy && <div className="mb-2 text-on-surface-variant">{t("cam.files.loadingInfo")}</div>}
+            {fileInfo && (
+              <div className="mb-3 rounded border border-outline-variant/20 p-2">
+                <div className="mb-2 flex items-center justify-between gap-2 font-semibold">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{fileInfo.filename}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => closeFileInfo()}
+                    className="shrink-0 rounded border border-outline-variant/40 p-1 text-on-surface-variant hover:bg-surface-container"
+                    aria-label={t("cam.files.closeDetail")}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div>{t("cam.files.size")}: <span className="font-mono">{formatSize(fileInfo.size)}</span></div>
+                <div>{t("cam.files.type")}: <span className="font-mono">{fileInfo.type}</span></div>
+                <div>{t("cam.files.modified")}: <span className="font-mono">{new Date(fileInfo.modified).toLocaleString()}</span></div>
+                {fileInfo.exposure_us != null && <div>{t("cam.controls.exposure")}: <span className="font-mono">{fileInfo.exposure_us}us</span></div>}
+                {fileInfo.analogue_gain != null && <div>{t("cam.controls.gain")}: <span className="font-mono">{fileInfo.analogue_gain}</span></div>}
+                {fileInfo.resolution && <div>{t("cam.controls.resolution")}: <span className="font-mono">{fileInfo.resolution}</span></div>}
+              </div>
+            )}
+            <div className="max-h-96 space-y-2 overflow-auto">
               {files.length === 0 && !fileBusy && <div className="text-on-surface-variant">{t("cam.files.empty")}</div>}
-              {files.map((f) => (
-                <div key={f.name} className="rounded border border-outline-variant/20 p-2">
+              {pagedFiles.map((f) => (
+                <div
+                  key={f.name}
+                  className={`rounded border p-2 ${fileDetailKey === f.name ? "border-primary/50 bg-primary/5" : "border-outline-variant/20"}`}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate font-semibold">{f.name}</div>
@@ -1143,28 +1207,41 @@ export function CameraConsoleApp() {
                   </div>
                   <div className="mt-2 flex gap-2">
                     <button type="button" onClick={() => downloadFile(f.name)} className="rounded border border-outline-variant/40 px-2 py-1"><Download className="mr-1 inline h-3.5 w-3.5" />{t("cam.files.download")}</button>
-                    <button type="button" onClick={() => void showFileInfo(f.name)} className="rounded border border-outline-variant/40 px-2 py-1"><Info className="mr-1 inline h-3.5 w-3.5" />{t("cam.files.info")}</button>
+                    <button
+                      type="button"
+                      onClick={() => void showFileInfo(f.name)}
+                      className={`rounded border px-2 py-1 ${fileDetailKey === f.name ? "border-primary text-primary" : "border-outline-variant/40"}`}
+                    >
+                      <Info className="mr-1 inline h-3.5 w-3.5" />{t("cam.files.info")}
+                    </button>
                     <button type="button" onClick={() => void deleteFile(f.name)} className="rounded border border-outline-variant/40 px-2 py-1"><Trash2 className="mr-1 inline h-3.5 w-3.5" />{t("cam.files.delete")}</button>
                   </div>
                 </div>
               ))}
             </div>
-            {fileInfoBusy && <div className="mt-2 text-on-surface-variant">{t("cam.files.loadingInfo")}</div>}
-            {fileInfo && (
-              <div className="mt-3 rounded border border-outline-variant/20 p-2">
-                <div className="mb-2 flex items-center gap-1 font-semibold"><FileText className="h-3.5 w-3.5" /> {fileInfo.filename}</div>
-                <div>{t("cam.files.size")}: <span className="font-mono">{formatSize(fileInfo.size)}</span></div>
-                <div>{t("cam.files.type")}: <span className="font-mono">{fileInfo.type}</span></div>
-                <div>{t("cam.files.modified")}: <span className="font-mono">{new Date(fileInfo.modified).toLocaleString()}</span></div>
-                {fileInfo.exposure_us != null && <div>{t("cam.controls.exposure")}: <span className="font-mono">{fileInfo.exposure_us}us</span></div>}
-                {fileInfo.analogue_gain != null && <div>{t("cam.controls.gain")}: <span className="font-mono">{fileInfo.analogue_gain}</span></div>}
-                {fileInfo.resolution && <div>{t("cam.controls.resolution")}: <span className="font-mono">{fileInfo.resolution}</span></div>}
-              </div>
-            )}
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                disabled={filePageClamped <= 1}
+                onClick={() => setFilePage((p) => Math.max(1, p - 1))}
+                className="rounded border border-outline-variant/40 px-2 py-1 disabled:opacity-50"
+              >
+                {t("cam.files.prev")}
+              </button>
+              <div className="text-on-surface-variant">{t("cam.files.page", { current: filePageClamped, total: totalFilePages })}</div>
+              <button
+                type="button"
+                disabled={filePageClamped >= totalFilePages}
+                onClick={() => setFilePage((p) => Math.min(totalFilePages, p + 1))}
+                className="rounded border border-outline-variant/40 px-2 py-1 disabled:opacity-50"
+              >
+                {t("cam.files.next")}
+              </button>
+            </div>
           </section>
           </div>
 
-          <section className="col-span-12 grid grid-cols-12 gap-4 xl:col-span-3 xl:self-start xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-auto">
+          <section className="col-span-12 grid grid-cols-12 gap-4 xl:col-span-3 xl:self-start">
             <section className="col-span-12 rounded-xl border border-outline-variant/20 bg-surface-container p-4">
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider">{t("cam.controls.title")}</h2>
               <div className="space-y-3 text-xs">
