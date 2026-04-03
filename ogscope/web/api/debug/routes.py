@@ -87,23 +87,23 @@ async def stream_debug_camera(
         )
 
         async def frame_generator():
-            last_frame_id = -1
+            last_snap_frame_id = -1
             last_emit_mono = 0.0
             while True:
-                code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
-                    "jpeg", quality
+                code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
+                    "jpeg", quality, since_frame_id=last_snap_frame_id
                 )
+                if code == 304:
+                    await asyncio.sleep(0.03)
+                    continue
                 if code != 200 or data is None:
                     await asyncio.sleep(0.05)
-                    continue
-                if frame_id == last_frame_id:
-                    await asyncio.sleep(0.03)
                     continue
                 now = time.monotonic()
                 wait = last_emit_mono + min_emit_interval - now
                 if wait > 0:
                     await asyncio.sleep(wait)
-                last_frame_id = frame_id
+                last_snap_frame_id = snap_id
                 last_emit_mono = time.monotonic()
                 yield (
                     b"--" + boundary.encode() + b"\r\n"
@@ -135,23 +135,23 @@ async def stream_debug_camera_lossless():
         )
 
         async def frame_generator():
-            last_frame_id = -1
+            last_snap_frame_id = -1
             last_emit_mono = 0.0
             while True:
-                code, data, frame_id = await DebugCameraService.get_stream_frame_bytes(
-                    "png", 100
+                code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
+                    "png", 100, since_frame_id=last_snap_frame_id
                 )
+                if code == 304:
+                    await asyncio.sleep(0.03)
+                    continue
                 if code != 200 or data is None:
                     await asyncio.sleep(0.05)
-                    continue
-                if frame_id == last_frame_id:
-                    await asyncio.sleep(0.03)
                     continue
                 now = time.monotonic()
                 wait = last_emit_mono + min_emit_interval - now
                 if wait > 0:
                     await asyncio.sleep(wait)
-                last_frame_id = frame_id
+                last_snap_frame_id = snap_id
                 last_emit_mono = time.monotonic()
                 yield (
                     b"--" + boundary.encode() + b"\r\n"

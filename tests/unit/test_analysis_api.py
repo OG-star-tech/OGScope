@@ -423,27 +423,38 @@ def test_analysis_realtime_timeout_releases_gate(
     client, temp_analysis_dir, mock_plate_solve, monkeypatch, tmp_path: Path
 ):
     """超时后门禁释放，后续请求可恢复 / Timeout releases gate for following requests."""
-    from ogscope.config import get_settings
+    from ogscope.config import get_settings as cfg_get_settings
     from ogscope.web.api.analysis.services import analysis_service
 
     image_path = tmp_path / "gate_timeout.jpg"
     _build_star_image(image_path)
-    settings = get_settings()
-    monkeypatch.setattr(settings, "star_analysis_request_timeout_ms", 80, raising=False)
-    monkeypatch.setattr(settings, "star_analysis_min_interval_ms", 50, raising=False)
-    monkeypatch.setattr(settings, "star_analysis_max_interval_ms", 20000, raising=False)
-    # 固定 monotonic，避免 CI 上墙钟流逝导致「最小间隔」二次请求抖动 / Pin monotonic so
-    # wall-clock elapsed time does not trigger SKIPPED_INTERVAL on the follow-up request.
-    monkeypatch.setattr("ogscope.web.api.analysis.services.time.monotonic", lambda: 0.0)
+    base = cfg_get_settings()
+    # model_copy 保证合法值；直接 setattr 可能被 Pydantic 模型拒绝 / model_copy applies validated values.
+    low_timeout_settings = base.model_copy(
+        update={
+            "star_analysis_request_timeout_ms": 500,
+            "star_analysis_min_interval_ms": 500,
+            "star_analysis_max_interval_ms": 20000,
+        }
+    )
+    def _settings_for_timeout_test():
+        return low_timeout_settings
+
+    # 须 patch 本模块内名字：「from config import get_settings」不会随 config.get_settings 替换而更新
+    # Must patch the name in this module: "from config import get_settings" does not track config replacement.
+    import ogscope.web.api.analysis.services as analysis_services_mod
+
+    monkeypatch.setattr(
+        analysis_services_mod, "get_settings", _settings_for_timeout_test
+    )
     gate = analysis_service._realtime_gate_states.get("file_upload")
     if gate is not None:
         gate.in_flight = False
         gate.last_finished_mono = 0.0
 
     def _slow(*_args, **_kwargs):
-        # 外层 wait_for 下限为 0.2s；线程若仅睡 0.2s 可能与超时边界竞态 / Outer wait_for is
-        # at least 0.2s; a 0.2s worker sleep can race the deadline.
-        time.sleep(0.5)
+        # hard_timeout = max(0.2, 500ms)=0.5s；须明显超过 / Must exceed 0.5s hard timeout.
+        time.sleep(0.65)
         return {
             "frame_index": 0,
             "status": "MATCH_FOUND",
@@ -452,7 +463,7 @@ def test_analysis_realtime_timeout_releases_gate(
             "solve_overlay": {},
         }
 
-    monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _slow)
+    monkeypatch.setattr(type(analysis_service), "_solve_bgr_to_row", _slow)
     with image_path.open("rb") as f:
         resp = client.post(
             "/api/analysis/solve/frame_upload",
@@ -463,6 +474,10 @@ def test_analysis_realtime_timeout_releases_gate(
     data = resp.json()
     assert data.get("gate_status") == "TIMEOUT_RELEASED"
 
+    # 满足 effective_interval_ms（≥500）再发第二请求；勿再 patch time.monotonic（会破坏 asyncio 超时）
+    # Satisfy effective interval (≥500ms) before second request; do not patch time.monotonic (breaks asyncio timeouts).
+    time.sleep(0.55)
+
     def _fast(*_args, **_kwargs):
         return {
             "frame_index": 0,
@@ -472,7 +487,7 @@ def test_analysis_realtime_timeout_releases_gate(
             "solve_overlay": {},
         }
 
-    monkeypatch.setattr(analysis_service, "_solve_bgr_to_row", _fast)
+    monkeypatch.setattr(type(analysis_service), "_solve_bgr_to_row", _fast)
     with image_path.open("rb") as f:
         resp2 = client.post(
             "/api/analysis/solve/frame_upload",

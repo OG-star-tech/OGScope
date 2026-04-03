@@ -50,6 +50,11 @@ class CameraManager:
         )
         self._logger = logging.getLogger(__name__)
 
+    @property
+    def preview_jpeg_quality(self) -> int:
+        """共享抓帧 JPEG 质量（与缓存一致）/ Shared grabber JPEG quality (matches cache)."""
+        return int(self._jpeg_quality)
+
     def _build_base_config(self) -> dict[str, Any]:
         from ogscope.config import get_settings
 

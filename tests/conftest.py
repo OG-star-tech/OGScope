@@ -25,7 +25,6 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
     debug_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(debug_services, "DEBUG_CAPTURES_DIR", debug_root)
-    monkeypatch.setattr(debug_services, "camera_instance", None)
     monkeypatch.setattr(debug_services, "is_recording", False)
     monkeypatch.setattr(debug_services, "recording_task", None)
     monkeypatch.setattr(debug_services, "recording_stem", None)
@@ -34,10 +33,6 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(debug_services, "recording_media_filename", None)
     monkeypatch.setattr(debug_services, "recording_codec_fourcc", "mp4v")
     monkeypatch.setattr(debug_services, "recording_container", "MP4")
-    monkeypatch.setattr(debug_services, "latest_preview_jpeg", None)
-    monkeypatch.setattr(debug_services, "last_preview_time", None)
-    monkeypatch.setattr(debug_services, "latest_preview_id", 0)
-    monkeypatch.setattr(debug_services, "preview_grabber_task", None)
 
     return debug_root
 

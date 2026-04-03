@@ -2,6 +2,7 @@
 调试相机 API 的第二层最小测试网（无真实硬件依赖）。
 """
 
+import numpy as np
 import pytest
 
 
@@ -103,10 +104,18 @@ class FakeCamera:
     def set_night_mode(self, enabled):
         return True
 
+    def get_video_frame(self):
+        """与 CameraManager 抓帧路径一致 / Matches CameraManager grabber path."""
+        return np.zeros((self.output_height, self.output_width, 3), dtype=np.uint8)
+
+    def capture_image(self):
+        return self.get_video_frame()
+
 
 @pytest.fixture
 def fake_camera_env(monkeypatch, temp_debug_dir):
     from ogscope.web.api.debug import services as debug_services
+    from ogscope.web.camera_shared import get_camera_manager
 
     camera = FakeCamera()
 
@@ -116,6 +125,7 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
     async def _noop():
         return None
 
+    get_camera_manager().attach_camera_instance(camera)
     monkeypatch.setattr(debug_services, "get_camera_instance", _get_camera_instance)
     monkeypatch.setattr(
         debug_services.DebugCameraService,

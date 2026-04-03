@@ -5,9 +5,7 @@
 import asyncio
 import json
 import logging
-import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -20,8 +18,7 @@ from ogscope.web.camera_shared import get_camera_manager
 DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
 DEBUG_CAPTURES_DIR.mkdir(exist_ok=True)
 
-# 全局变量存储相机状态 / Global variables store camera status
-camera_instance = None
+# 全局变量存储相机状态（相机单例在 CameraManager）/ Global state (camera singleton lives in CameraManager).
 is_recording = False
 recording_task = None
 recording_state_lock: Optional[asyncio.Lock] = None
@@ -32,14 +29,6 @@ recording_fps_value: float = 15.0
 recording_media_filename: Optional[str] = None
 recording_codec_fourcc: str = "MJPG"
 recording_container: str = "AVI"
-
-# 预览帧缓存与抓取任务 / Preview frame buffering and grabbing tasks
-latest_preview_jpeg: Optional[bytes] = None
-last_preview_time: Optional[float] = None
-latest_preview_id: int = 0
-preview_grabber_task = None
-PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
-PREVIEW_PIPELINE_WORKERS = 2
 
 _CAMERA_ENV_KEY_MAP = {
     "width": "OGSCOPE_CAMERA_WIDTH",
@@ -356,42 +345,62 @@ class DebugCameraService:
 
     @staticmethod
     async def get_stream_frame_bytes(
-        image_format: str = "jpeg", quality: int = 75
+        image_format: str = "jpeg",
+        quality: int = 75,
+        *,
+        since_frame_id: int | None = None,
     ) -> tuple[int, bytes | None, int]:
-        """读取共享流帧并编码 / Read shared frame and encode."""
+        """读取共享流帧并编码 / Read shared frame and encode.
+
+        返回 (code, data, snap_frame_id)。snap_frame_id 供 MJPEG 循环写入 since_frame_id，
+        在共享缓存未前进时返回 304 以避免 PNG/自定义质量下的疯狂同步抓帧。
+        Returns (code, data, snap_frame_id). snap_frame_id is fed back as since_frame_id for
+        the MJPEG loop; returns 304 when the shared cache has not advanced to avoid sync grabs.
+        """
         manager = get_camera_manager()
         await manager.ensure_started()
         snap = await manager.get_cached_frame_snapshot()
         if snap is None:
             return 503, None, 0
-        if image_format.lower() == "jpeg" and snap.jpeg_frame is not None:
+
+        fmt = image_format.lower()
+        q = int(max(10, min(100, int(quality))))
+        default_q = int(manager.preview_jpeg_quality)
+
+        if since_frame_id is not None and since_frame_id == snap.frame_id:
+            return 304, None, snap.frame_id
+
+        if fmt == "jpeg" and q == default_q and snap.jpeg_frame is not None:
             return 200, snap.jpeg_frame, snap.frame_id
-        # PNG 或自定义质量 JPEG：按需从相机同步一帧，避免依赖常驻 raw 缓存
-        # PNG or custom-quality JPEG: sync grab one frame on demand.
-        raw, fid, _ts = await manager.get_raw_frame()
-        encoded = await asyncio.to_thread(
-            manager.encode_frame, raw, image_format, int(quality)
-        )
+
+        raw, _fid, _ts = await manager.get_raw_frame()
+        encoded = await asyncio.to_thread(manager.encode_frame, raw, image_format, q)
         if encoded is None:
-            return 500, None, int(fid)
-        return 200, encoded, int(fid)
+            return 500, None, snap.frame_id
+        snap2 = await manager.get_cached_frame_snapshot()
+        sid = int(snap2.frame_id) if snap2 is not None else int(snap.frame_id)
+        return 200, encoded, sid
 
     @staticmethod
     async def capture_image():
         """拍摄单张图片 / Take a single picture"""
-        camera = get_camera_instance()
+        manager = get_camera_manager()
+        await manager.ensure_started()
+        camera = manager.get_camera_instance()
         if not camera or not camera.is_capturing:
             raise Exception("相机未运行")
 
         try:
             import cv2
 
-            # 捕获图像 / capture image
-            image = camera.capture_image()
+            try:
+                image, _rfid, _rts = await manager.get_raw_frame()
+            except RuntimeError as exc:
+                raise Exception("图像捕获失败") from exc
             if image is None:
                 raise Exception("图像捕获失败")
 
-            camera_info = camera.get_camera_info()
+            camera_info = await asyncio.to_thread(camera.get_camera_info)
             expected_w = int(
                 camera_info.get("output_width", camera_info.get("width", 0)) or 0
             )
@@ -545,8 +554,12 @@ class DebugCameraService:
                 async def record_video():
                     nonlocal video_writer
                     try:
+                        mgr = get_camera_manager()
                         while is_recording:
-                            image = await asyncio.to_thread(camera.capture_image)
+                            try:
+                                image, _, _ = await mgr.get_raw_frame()
+                            except RuntimeError:
+                                image = None
                             if image is not None:
                                 try:
                                     bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -838,77 +851,6 @@ class DebugCameraService:
     async def _restart_preview_grabber():
         await get_camera_manager().pause_grabber()
         await get_camera_manager().resume_grabber()
-
-    @staticmethod
-    def _capture_preview_frame(camera):
-        """抓取预览帧（线程池执行） / Capture preview frame (run in thread pool)"""
-        try:
-            return camera.get_video_frame()
-        except Exception:
-            return None
-
-    @staticmethod
-    def _encode_preview_jpeg(image, quality: int) -> Optional[bytes]:
-        """编码 JPEG（线程池执行） / Encode JPEG (run in thread pool)"""
-        try:
-            import cv2
-
-            ok, buf = cv2.imencode(
-                ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, int(quality)]
-            )
-            if not ok:
-                return None
-            return buf.tobytes()
-        except Exception:
-            return None
-
-    @staticmethod
-    async def _preview_grabber_loop():
-        """后台抓取最新帧，编码为 JPEG 缓存，降低单次请求阻塞与抖动 / The latest frames are captured in the background and encoded into JPEG cache to reduce single request blocking and jitter."""
-        global latest_preview_jpeg, last_preview_time, latest_preview_id
-        camera = get_camera_instance()
-        if not camera or not camera.is_capturing:
-            return
-        target_fps = max(1, int(camera.get_camera_info().get("fps", 5)))
-        interval = 1.0 / target_fps
-        loop = asyncio.get_running_loop()
-        # 使用双工人流水线：一个抓帧，一个编码，提升 Zero2W 下实时预览稳定性 / Use a two-worker pipeline: one captures frames and one encodes, improving preview stability on Zero2W.
-        executor = ThreadPoolExecutor(
-            max_workers=PREVIEW_PIPELINE_WORKERS, thread_name_prefix="preview-pipe"
-        )
-        try:
-            capture_future = loop.run_in_executor(
-                executor, DebugCameraService._capture_preview_frame, camera
-            )
-            while True:
-                start = time.time()
-                image = await asyncio.wrap_future(capture_future)
-                # 先提交下一帧抓取，让抓取与编码并行 / Submit next frame capture first to overlap capture and encoding
-                capture_future = loop.run_in_executor(
-                    executor, DebugCameraService._capture_preview_frame, camera
-                )
-                if image is not None:
-                    jpeg_bytes = await loop.run_in_executor(
-                        executor,
-                        DebugCameraService._encode_preview_jpeg,
-                        image,
-                        PREVIEW_JPEG_QUALITY,
-                    )
-                    if jpeg_bytes is not None:
-                        latest_preview_jpeg = jpeg_bytes
-                        last_preview_time = time.time()
-                        latest_preview_id += 1
-                # 按 fps 节流 / Throttle by fps
-                spent = time.time() - start
-                await asyncio.sleep(max(0.0, interval - spent))
-        except asyncio.CancelledError:
-            # 正确处理取消信号 / Correctly handle cancellation signals
-            raise
-        except Exception as e:
-            # 记录其他异常 / Log other exceptions
-            logging.getLogger(__name__).error(f"预览抓取器异常: {e}")
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
