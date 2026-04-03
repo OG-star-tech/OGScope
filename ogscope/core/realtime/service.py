@@ -11,7 +11,7 @@ from typing import Any
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.star_extract import StarExtractor, StarPoint
 from ogscope.config import get_settings
-from ogscope.web.api.debug.services import DebugCameraService
+from ogscope.web.camera_shared import get_camera_manager
 
 
 @dataclass(slots=True)
@@ -98,11 +98,18 @@ class RealtimeSolveService:
         """后台循环 / Background loop"""
         while self.state.running:
             try:
-                camera = DebugCameraService.get_camera_instance()
-                if not camera or not getattr(camera, "is_capturing", False):
+                manager = get_camera_manager()
+                cam = manager.get_camera_instance()
+                if not cam or not getattr(cam, "is_capturing", False):
                     await asyncio.sleep(0.1)
                     continue
-                frame = camera.get_video_frame()
+                # 必须与共享预览走同一套读锁 + 线程卸载，禁止在事件循环线程里直接 capture_array
+                # Must share the same read lock as shared preview; never call capture_array on the event-loop thread.
+                try:
+                    frame, _fid, _ts = await manager.get_raw_frame()
+                except RuntimeError:
+                    await asyncio.sleep(0.02)
+                    continue
                 if frame is None:
                     await asyncio.sleep(0.02)
                     continue

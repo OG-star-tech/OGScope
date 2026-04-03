@@ -26,13 +26,21 @@ class _FakeCamera:
 def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve):
     """测试实时解算启停接口 / Test realtime solver start and stop endpoints."""
     from ogscope.web.api.debug import routes as debug_routes
+    from ogscope.web.camera_shared import CameraManager, get_camera_manager
 
     fake_camera = _FakeCamera()
+    get_camera_manager().attach_camera_instance(fake_camera)
     monkeypatch.setattr(
         debug_routes.DebugCameraService,
         "get_camera_instance",
         staticmethod(lambda: fake_camera),
     )
+
+    async def _fake_get_raw_frame(_self):
+        frame = fake_camera.get_video_frame()
+        return frame, 1, 0.0
+
+    monkeypatch.setattr(CameraManager, "get_raw_frame", _fake_get_raw_frame)
 
     start_resp = client.post(
         "/api/debug/analysis/realtime/start",
