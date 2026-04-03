@@ -246,6 +246,30 @@ ogscope_sync_network_boot_unit_if_needed() {
     echo "✅ 已更新 ${unit_path} / Unit updated"
 }
 
+# 解析 vendored tetra3 内 default_database.npz 路径（不依赖 import ogscope，避免路径注入异常）
+# Resolve path to default_database.npz in vendored tetra3 (no import ogscope; avoids path edge cases)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+# 标准输出：若存在则打印绝对路径，否则空 / Prints absolute path if file exists, else empty
+ogscope_resolve_plate_solve_database_src_from_venv() {
+    local project_dir="${1:?}"
+    (
+        cd "${project_dir}" && PROJECT_ROOT="${project_dir}" poetry run python - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+project = Path(os.environ["PROJECT_ROOT"]).resolve()
+vendor = project / "ogscope" / "vendor"
+if vendor.is_dir():
+    sys.path.insert(0, str(vendor))
+import tetra3  # noqa: E402 — after vendor path
+
+p = Path(tetra3.__file__).resolve().parent / "data" / "default_database.npz"
+print(p if p.is_file() else "", end="")
+PY
+    )
+}
+
 # 将 default_database.npz 复制到 data/plate_solve/（与 solver 优先路径一致）
 # Copy default_database.npz into data/plate_solve/ (matches solver resolution order)
 # 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
@@ -271,22 +295,12 @@ ogscope_sync_plate_solve_database_if_needed() {
     if [ -f "${vendor_src}" ]; then
         src="${vendor_src}"
     else
-        src="$(
-            cd "${project_dir}" && poetry run python - <<'PY'
-import ogscope  # noqa: F401
-from pathlib import Path
-
-import tetra3
-
-p = Path(tetra3.__file__).resolve().parent / "data" / "default_database.npz"
-print(p if p.is_file() else "", end="")
-PY
-        )"
+        src="$(ogscope_resolve_plate_solve_database_src_from_venv "${project_dir}" || true)"
     fi
 
     if [ -z "${src}" ] || [ ! -f "${src}" ]; then
-        echo "ℹ️  未找到可复制的 default_database.npz（请放入 ogscope/vendor/tetra3/data/ 或手动复制到 data/plate_solve/）"
-        echo "ℹ️  No default_database.npz to copy; see docs/development/plate-solve-data.md"
+        echo "⚠️  未找到可复制的 default_database.npz（请放入 ogscope/vendor/tetra3/data/ 或手动复制到 data/plate_solve/）"
+        echo "⚠️  No default_database.npz to copy; see docs/development/plate-solve-data.md"
         return 0
     fi
 
@@ -294,4 +308,77 @@ PY
     echo "📋 Copying Tetra3 pattern database to data/plate_solve/default_database.npz ..."
     cp -a "${src}" "${dest}"
     echo "✅ 图案库已就绪 / Pattern database ready: ${dest}"
+}
+
+# 安装/升级后校验 data/plate_solve/default_database.npz 是否存在（主动检查）
+# Verify default_database.npz after install/update (explicit check)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+ogscope_report_plate_solve_database_status() {
+    local project_dir="${1:?}"
+    local dest="${project_dir}/data/plate_solve/default_database.npz"
+
+    if [ "${OGSCOPE_SKIP_PLATE_DB:-}" = "1" ]; then
+        echo "ℹ️  已跳过图案库步骤（OGSCOPE_SKIP_PLATE_DB=1）；未校验 ${dest} / Skipped plate DB step"
+        return 0
+    fi
+
+    if [ -f "${dest}" ]; then
+        local sz
+        sz="$(du -h "${dest}" 2>/dev/null | awk '{print $1}' || echo "?")"
+        echo "✅ 星图解算图案库 / Plate DB: data/plate_solve/default_database.npz（${sz}）"
+        echo "✅ Plate DB: data/plate_solve/default_database.npz (${sz})"
+        return 0
+    fi
+
+    echo "⚠️  星图解算需 default_database.npz，但未在 data/plate_solve/ 找到。"
+    echo "   请将文件放入 ogscope/vendor/tetra3/data/ 后重装/重跑本脚本，或手动复制到 data/plate_solve/；见 docs/development/plate-solve-data.md"
+    echo "⚠️  Plate solving needs default_database.npz under data/plate_solve/; see docs/development/plate-solve-data.md"
+}
+
+# 增量更新：同步网络相关工件（与近期 wifi-nm / systemd 文档一致）
+# Board update: sync network artifacts (matches wifi-nm + systemd docs)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+# 环境 / Env: OGSCOPE_SKIP_NETWORK_SYNC=1 跳过；需 sudo（免密或交互）/ skip; requires sudo
+ogscope_sync_network_board_artifacts_if_needed() {
+    local project_dir="${1:?}"
+    local init_script="${project_dir}/scripts/ogscope-network-init.sh"
+    local switch_src="${project_dir}/scripts/ogscope-wifi-switch.sh"
+    local switch_dst="/usr/local/bin/ogscope-wifi-switch"
+
+    if [ "${OGSCOPE_SKIP_NETWORK_SYNC:-}" = "1" ]; then
+        echo "⏭️  跳过网络工件同步（OGSCOPE_SKIP_NETWORK_SYNC=1）/ Skipping network artifact sync"
+        return 0
+    fi
+
+    chmod +x "${project_dir}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
+    chmod +x "${init_script}" 2>/dev/null || true
+
+    if [ -f "${switch_src}" ]; then
+        if [ ! -f "${switch_dst}" ] || ! cmp -s "${switch_src}" "${switch_dst}" 2>/dev/null; then
+            echo "📋 同步 WiFi 切换脚本 / Syncing WiFi switch script → ${switch_dst} ..."
+            if sudo -n true 2>/dev/null; then
+                sudo install -m 755 "${switch_src}" "${switch_dst}"
+                echo "✅ 已更新 ${switch_dst} / Updated"
+            else
+                echo "⚠️  无法免密 sudo，未更新 ${switch_dst}；请手动: sudo install -m 755 ${switch_src} ${switch_dst}"
+                echo "⚠️  Non-interactive sudo unavailable; install switch script manually (see wifi-nm.md)"
+            fi
+        else
+            echo "✅ ogscope-wifi-switch 已是最新 / WiFi switch script up to date"
+        fi
+    fi
+
+    if [ ! -f "/etc/ogscope/network.env" ]; then
+        echo "ℹ️  无 /etc/ogscope/network.env，跳过 ensure-systemd（首次部署请运行 install.sh）/ No network.env; skip ensure-systemd"
+        return 0
+    fi
+
+    echo "🌐 同步 systemd network.env 与 nmcli sudoers（ensure-systemd）/ Syncing ensure-systemd ..."
+    if sudo -n true 2>/dev/null; then
+        sudo env OGSCOPE_SERVICE_USER="${USER}" "${init_script}" ensure-systemd \
+            || echo "⚠️  ensure-systemd 失败；可手动: sudo env OGSCOPE_SERVICE_USER=\$USER ${init_script} ensure-systemd"
+    else
+        echo "⚠️  无法免密 sudo，未运行 ensure-systemd；若 Web WiFi 异常请手动执行上述命令（见 docs/development/wifi-nm.md）"
+        echo "⚠️  Non-interactive sudo unavailable; run ensure-systemd manually if WiFi/API issues"
+    fi
 }

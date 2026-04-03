@@ -8,6 +8,7 @@
 #   OGSCOPE_MIRROR=auto|cn|international — 与 install.sh 相同 / Same as install.sh
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
+#   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
 
 set -euo pipefail
 
@@ -89,7 +90,10 @@ ogscope_sync_systemd_execstart_if_needed "${SERVICE_PATH}" "${VENV_PYTHON}"
 chmod +x "${PROJECT_DIR}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
 ogscope_sync_network_boot_unit_if_needed "${PROJECT_DIR}"
 
+ogscope_sync_network_board_artifacts_if_needed "${PROJECT_DIR}"
+
 ogscope_sync_plate_solve_database_if_needed "${PROJECT_DIR}"
+ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
 
 echo "🔄 重启服务 / Restarting service..."
 sudo systemctl daemon-reload

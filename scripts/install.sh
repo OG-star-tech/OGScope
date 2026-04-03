@@ -296,13 +296,7 @@ echo "虚拟环境 / venv: ${VENV_PATH}"
 echo "PYTHONPATH: ${PYTHONPATH_VALUE}"
 echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH_VALUE}"
 echo ""
-if [ -f "${PROJECT_DIR}/data/plate_solve/default_database.npz" ]; then
-    echo "星图解算图案库 / Plate DB: data/plate_solve/default_database.npz ✅"
-    echo "Plate DB: data/plate_solve/default_database.npz ✅"
-else
-    echo "⚠️  星图解算需 default_database.npz：放入 data/plate_solve/ 或 ogscope/vendor/tetra3/data/ 后重装步骤见 plate-solve-data.md"
-    echo "⚠️  Plate solving needs default_database.npz; see docs/development/plate-solve-data.md"
-fi
+ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
 echo ""
 echo "下一步 / Next:"
 echo "  sudo systemctl start ${SERVICE_NAME}"
