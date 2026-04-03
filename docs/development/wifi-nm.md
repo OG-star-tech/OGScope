@@ -12,7 +12,7 @@
 |------|------|
 | **SSID** | `OGScope_xxxx`，其中 `xxxx` 为 **wlan0 MAC 地址后 4 位**（十六进制，小写），每台设备不同。可在设备标签或执行 `init` 后的日志 / `diag` 中确认。 |
 | **密码（PSK）** | 固定为 **`ogscopeadmin`**（由 [`ogscope-network-init.sh`](../../scripts/ogscope-network-init.sh) 写入 NetworkManager，**非随机**）。 |
-| **网关 / 固定地址** | 热点模式下无线侧一般为 **`192.168.4.1/24`**（与 NM 中 `OGScope-AP` 配置一致）。 |
+| **网关 / 固定地址** | 热点模式下无线侧一般为 **`192.168.4.1/24`**；NM 中 `OGScope-AP` 使用 **`ipv4.method shared`**（dnsmasq DHCP），避免客户端仅有 **169.254.x.x** 而无法访问网关。 |
 | **Web 访问** | 手机/电脑连上该热点后，浏览器打开 **`http://192.168.4.1:<端口>`**；HTTP 端口以设备上 OGScope 配置为准（常见为 **8000**，见应用或 `ogscope` 服务环境变量）。 |
 | **mDNS 主机名** | 初始化后主机名形如 **`ogscope-xxxx`**（`xxxx` 与 SSID 后缀一致），局域网内可尝试 **`http://ogscope-xxxx.local:<端口>/debug/system`**（需 **Avahi** 与 DNS 解析正常）。 |
 
@@ -38,6 +38,8 @@
 3. **从 STA 切回 AP** 或 **换网** 后，当前浏览器会话可能断开；请重新连接热点 `OGScope_xxxx` 或在本机局域网用 **mDNS / 路由器管理页** 查找设备 IP。
 4. **HTTPS 页面无法混合访问 HTTP API**：若用纯 HTTPS 入口访问，设备上的 **`/health` 局域网探测** 可能受限；优先使用 **HTTP** 同网段访问调试页（见页面提示）。
 5. 更新代码后若 WiFi 相关异常，需同步 **`ogscope-wifi-switch` 脚本** 到 `/usr/local/bin` 并 **重启 `ogscope` 服务**（见后文「验证 nmcli」与 `board-update.sh`）。
+6. **连上热点后手机/电脑只有 169.254.x.x**：多为旧版 **`OGScope-AP`** 使用 `ipv4.method manual`、未向客户端发 DHCP。请同步最新 `ogscope-network-init.sh` 后执行 **`sudo ./scripts/ogscope-network-init.sh init --yes`**（复用设备后缀、重建 NM 连接）；或仅改连接：  
+   `sudo nmcli connection modify OGScope-AP wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp ipv4.method shared ipv4.addresses 192.168.4.1/24`，再 `sudo nmcli connection down OGScope-AP && sudo nmcli connection up OGScope-AP`（接口名一般为 `wlan0`）。
 
 ### 安全与隐私（简要）
 
@@ -58,7 +60,7 @@ sudo env OGSCOPE_SERVICE_USER="$USER" ./scripts/ogscope-network-init.sh init --y
 ```
 
 - 根据 **wlan0 MAC 后 4 位十六进制** 生成热点 SSID：`OGScope_xxxx`，密码固定 **`ogscopeadmin`**。
-- 创建 NM 连接 **`OGScope-STA`**（占位，供 Web 填写 SSID/密码）与 **`OGScope-AP`**（网关 `192.168.4.1/24`）。
+- 创建 NM 连接 **`OGScope-STA`**（占位，供 Web 填写 SSID/密码）与 **`OGScope-AP`**（`192.168.4.1/24`、`ipv4.method shared`、WPA2-only）。
 - 写入 **`/etc/ogscope/network.env`**（供 systemd `EnvironmentFile` 加载）。
 - 安装 **`/usr/local/bin/ogscope-wifi-switch`** 并配置 **sudoers**（免密执行该脚本；另写入 **`ogscope-nmcli`**，供 Web API 调用 **`nmcli`**，避免 polkit 拒绝）。
 - 设置主机名为 **`ogscope-xxxx`**，并同步 **`/etc/hosts`** 中 `127.0.1.1`（减轻 `sudo: unable to resolve host`）。
@@ -68,6 +70,8 @@ sudo env OGSCOPE_SERVICE_USER="$USER" ./scripts/ogscope-network-init.sh init --y
 - **与进程内 STA 回滚的区别**：**开机引导**不依赖 `ogscope` 进程；应用内 **`wifi_sta_rollback_*`** 仅在用户通过 Web/API **切 STA 成功后** 监视超时并回滚 AP。
 
 跳过初始化：`OGSCOPE_SKIP_NETWORK_INIT=1 ./scripts/install.sh`
+
+**`init` 与 SSH**：脚本会删除并重建 `wlan0` 上的 NetworkManager 连接；若你通过 **Wi‑Fi 上的 SSH** 执行，会话很可能在 `create_nm_connections` 阶段即断开，属正常现象。请改用 **有线网口**、**串口** 或 **直连键盘/显示器** 执行 `init`，或断线后连接热点 `OGScope_xxxx` 再访问 Web。
 
 诊断与重置：
 

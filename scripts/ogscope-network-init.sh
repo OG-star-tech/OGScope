@@ -169,7 +169,8 @@ create_nm_connections() {
     nmcli connection delete "${AP_NAME}" 2>/dev/null || true
     nmcli connection delete "${STA_NAME}" 2>/dev/null || true
 
-    # AP：热点 + 固定网关 / Access point with static IPv4
+    # AP：热点 + 共享 IPv4（dnsmasq DHCP，避免客户端仅 169.254）/ Shared IPv4 + DHCP for clients
+    # 仅 WPA2（RSN+CCMP），避免部分系统提示弱加密 / WPA2-only to avoid weak-security warnings
     nmcli connection add \
         type wifi \
         ifname "${IFACE}" \
@@ -179,7 +180,10 @@ create_nm_connections() {
         wifi.ssid "${ssid}" \
         wifi-sec.key-mgmt wpa-psk \
         wifi-sec.psk "${AP_PSK}" \
-        ipv4.method manual \
+        wifi-sec.proto rsn \
+        wifi-sec.pairwise ccmp \
+        wifi-sec.group ccmp \
+        ipv4.method shared \
         ipv4.addresses "${AP_IPV4}" \
         ipv6.method ignore
 
@@ -238,6 +242,10 @@ cmd_init() {
         fi
     fi
 
+    # 重建 wlan0 的 NM 连接会中断当前 WiFi（含经 WiFi 的 SSH）/ Recreating NM WiFi drops link (SSH over Wi-Fi included)
+    info "⚠️  若当前经 WiFi 连接本机（含 SSH），下面步骤会重建无线配置，SSH 可能立即断开；请优先用有线网口、串口或本地控制台执行。"
+    info "   If connected via Wi-Fi (including SSH), the next steps may drop this session; prefer Ethernet, serial, or local console."
+
     install_switch_script
     create_nm_connections "${suffix}"
     write_network_env "${suffix}"
@@ -283,6 +291,15 @@ cmd_diag() {
     if command -v nmcli >/dev/null; then
         nmcli connection show "${AP_NAME}" >/dev/null 2>&1 && ok "连接 ${AP_NAME} 存在" || echo "⚠️  无 ${AP_NAME}"
         nmcli connection show "${STA_NAME}" >/dev/null 2>&1 && ok "连接 ${STA_NAME} 存在" || echo "⚠️  无 ${STA_NAME}"
+        if nmcli connection show "${AP_NAME}" >/dev/null 2>&1; then
+            local ap_method
+            ap_method="$(nmcli -g ipv4.method connection show "${AP_NAME}" 2>/dev/null | head -n1 || true)"
+            if [[ "${ap_method}" == "manual" ]]; then
+                echo "⚠️  ${AP_NAME} 为 ipv4.method manual：客户端可能仅有 169.254，无法访问 192.168.4.1"
+                echo "   请执行: sudo ${SCRIPT_DIR}/$(basename "$0") init --yes（重建 AP 为 shared + DHCP）"
+                echo "   Or: sudo ${SCRIPT_DIR}/$(basename "$0") init --yes to recreate AP (shared + DHCP)"
+            fi
+        fi
     fi
     if [[ -f "${ID_FILE}" ]]; then
         info "后缀 / Suffix: $(cat "${ID_FILE}")"
