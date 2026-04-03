@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     )
     camera_exposure: int = Field(default=10000, description="曝光时间(us)")
     camera_gain: float = Field(default=1.0, description="增益")
+    camera_ae_polar_preset: bool = Field(
+        default=True,
+        description="自动曝光时启用电子极轴镜 AE 预设 (Shadows/Matrix/Long+EV) / AE polar-scope preset",
+    )
+    camera_ae_exposure_value: float = Field(
+        default=0.35,
+        ge=-2.0,
+        le=2.0,
+        description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
+    )
 
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")

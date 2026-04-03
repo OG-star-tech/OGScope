@@ -62,6 +62,8 @@ class CameraManager:
             "exposure_us": settings.camera_exposure,
             "analogue_gain": settings.camera_gain,
             "auto_exposure": True,
+            "ae_polar_preset": settings.camera_ae_polar_preset,
+            "ae_exposure_value": settings.camera_ae_exposure_value,
             "rotation": 180,
             "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
             "noise_reduction": 0,

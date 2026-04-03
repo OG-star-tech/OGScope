@@ -99,6 +99,10 @@ class IMX327MIPICamera(CameraInterface):
             self.output_height,
         ) = self._resolve_sampling_layout(self.sampling_mode, self.width, self.height)
 
+        # 电子极轴镜默认 AE 策略（约 16mm 广角、低帧率夜空）；仍由 libcamera ISP 闭环 / Polar-scope AE defaults (16mm, dark sky; ISP AE loop).
+        self.ae_polar_preset = bool(config.get("ae_polar_preset", True))
+        self.ae_exposure_value = float(config.get("ae_exposure_value", 0.35))
+
         logger.info(
             f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps"
         )
@@ -298,6 +302,52 @@ class IMX327MIPICamera(CameraInterface):
             value=border_value,
         )
 
+    def _apply_polar_auto_exposure_controls(self) -> None:
+        """libcamera AE 预设：暗部优先、矩阵测光、偏长曝光、EV；失败项跳过 / AE preset; skip unsupported controls."""
+        if not self.camera or not self.auto_exposure:
+            return
+        if not self.ae_polar_preset:
+            try:
+                self.camera.set_controls({"AeEnable": True})
+            except Exception as e:
+                logger.debug("AeEnable only: %s", e)
+            return
+        try:
+            from picamera2 import controls as pcc
+        except ImportError:
+            return
+
+        cc = getattr(self.camera, "camera_controls", None) or {}
+        updates: dict[str, Any] = {"AeEnable": True}
+        if hasattr(pcc, "AeConstraintModeEnum"):
+            updates["AeConstraintMode"] = pcc.AeConstraintModeEnum.Shadows
+        if hasattr(pcc, "AeMeteringModeEnum"):
+            updates["AeMeteringMode"] = pcc.AeMeteringModeEnum.Matrix
+        if hasattr(pcc, "AeExposureModeEnum"):
+            updates["AeExposureMode"] = pcc.AeExposureModeEnum.Long
+        ev = float(self.ae_exposure_value)
+        if abs(ev) > 1e-6:
+            if "ExposureValue" in cc:
+                updates["ExposureValue"] = ev
+            elif "Brightness" in cc:
+                updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
+
+        try:
+            self.camera.set_controls(updates)
+            logger.info(
+                "已应用电子极轴镜 AE 预设 (Shadows/Matrix/Long, EV≈%.2f)",
+                ev,
+            )
+        except Exception as e:
+            logger.warning("AE 预设批量设置失败，逐项重试: %s", e)
+            for key, val in updates.items():
+                if key != "AeEnable" and key not in cc:
+                    continue
+                try:
+                    self.camera.set_controls({key: val})
+                except Exception as err:
+                    logger.debug("AE 控制 %s 未生效: %s", key, err)
+
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
         try:
@@ -334,6 +384,9 @@ class IMX327MIPICamera(CameraInterface):
             except Exception:
                 # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is not supported, it will degenerate to not setting this item.
                 self.camera.set_controls(controls)
+
+            if self.auto_exposure:
+                self._apply_polar_auto_exposure_controls()
 
             self.is_initialized = True
             logger.info("IMX327 MIPI 相机初始化成功")
@@ -376,7 +429,7 @@ class IMX327MIPICamera(CameraInterface):
             # 重新配置后重放曝光控制，避免状态漂移到驱动默认值 / Replay exposure control after reconfiguration to avoid state drift to driver defaults
             try:
                 if self.auto_exposure:
-                    self.camera.set_controls({"AeEnable": True})
+                    self._apply_polar_auto_exposure_controls()
                 else:
                     controls = {
                         "AeEnable": False,
@@ -646,8 +699,11 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
-            self.camera.set_controls({"AeEnable": enabled})
             self.auto_exposure = enabled
+            if enabled:
+                self._apply_polar_auto_exposure_controls()
+            else:
+                self.camera.set_controls({"AeEnable": False})
 
             # 关闭自动曝光时，立即重放当前手动参数，确保状态一致 / When auto-exposure is turned off, the current manual parameters are immediately replayed to ensure consistent status.
             if not enabled:
@@ -781,6 +837,8 @@ class IMX327MIPICamera(CameraInterface):
                 "white_balance_mode": self.white_balance_mode,
                 "white_balance_gain_r": self.white_balance_gain_r,
                 "white_balance_gain_b": self.white_balance_gain_b,
+                "ae_polar_preset": self.ae_polar_preset,
+                "ae_exposure_value": self.ae_exposure_value,
                 "control_ranges": self.get_manual_control_ranges(),
             }
         except Exception as e:
