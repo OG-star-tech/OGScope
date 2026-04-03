@@ -1486,11 +1486,14 @@ button:disabled:hover,
   }
   
   .debug-header h1 {
-    font-size: 1.1rem;
+    font-size: 1.0rem;
+    line-height: 1.15;
   }
   
   .header-actions {
     gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .lang-switch label {
@@ -1499,12 +1502,21 @@ button:disabled:hover,
 
   .lang-select {
     padding: 4px 6px;
-    max-width: 110px;
+    max-width: 96px;
+    font-size: 0.75rem;
   }
   
   .status-indicator {
     padding: 6px 8px;
     font-size: 0.8rem;
+    gap: 6px;
+  }
+
+  .header-actions .btn {
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    min-height: 36px;
+    white-space: nowrap;
   }
   
   .tab-navigation {

@@ -83,10 +83,18 @@ class DebugConsole {
         this.histogramOffscreenCtx = null;
 
         this.supportedLocales = ['zh', 'en', 'bilingual'];
-        this.locale = localStorage.getItem('debugConsole.language') || 'zh';
-        if (!this.supportedLocales.includes(this.locale)) {
-            this.locale = 'zh';
-        }
+        const savedLocale = localStorage.getItem('debugConsole.language');
+        this.locale =
+            savedLocale && this.supportedLocales.includes(savedLocale)
+                ? savedLocale
+                : this.detectDefaultLocale();
+        if (!this.supportedLocales.includes(this.locale)) this.locale = 'zh';
+
+        // 先同步下拉的默认值，避免 i18n 加载前短暂显示为中文
+        // Before i18n is applied, sync the selected option to avoid
+        // briefly showing Chinese on mobile.
+        const languageSelect = document.getElementById('language-select');
+        if (languageSelect) languageSelect.value = this.locale;
         this.translations = { zh: {}, en: {} };
         this.dynamicTextPatterns = this.buildDynamicTextPatterns();
         this.rawTextToKeyMap = this.buildRawTextToKeyMap();
@@ -172,6 +180,19 @@ class DebugConsole {
             { regex: /^颜色模式已切换为(.+)模式$/u, key: 'server.colorModeSwitched', map: (m) => ({ mode: m[1] }) },
             { regex: /^旋转角度设置为:\s*(\d+)度$/u, key: 'server.rotationSet', map: (m) => ({ rotation: m[1] }) }
         ];
+    }
+
+    detectDefaultLocale() {
+        try {
+            const navLang =
+                (navigator.languages && navigator.languages[0]) || navigator.language || '';
+            const lang = navLang.toLowerCase();
+            if (lang.startsWith('en')) return 'en';
+            if (lang.startsWith('zh')) return 'zh';
+            return 'zh';
+        } catch (_) {
+            return 'zh';
+        }
     }
 
     async initI18n() {
