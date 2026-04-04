@@ -580,7 +580,9 @@ class Tetra3():
             path = Path(path).with_suffix('.npz')
 
         self._logger.info('Loading database from: ' + str(path))
-        with np.load(path) as data:
+        # NumPy 2+ 默认禁止 unpickle；官方 .npz 含 object 数组时需显式允许 / NumPy 2+ blocks
+        # unpickling by default; upstream Tetra3 DB may contain object arrays.
+        with np.load(path, allow_pickle=True) as data:
             self._logger.debug('Loaded database, unpack files')
             self._pattern_catalog = data['pattern_catalog']
 
