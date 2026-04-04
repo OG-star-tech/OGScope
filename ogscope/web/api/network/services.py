@@ -99,7 +99,9 @@ def _parse_nmcli_wifi_colon(stdout: str) -> list[dict[str, Any]]:
 
 def _device_active_connection_name(iface: str) -> str:
     """当前接口活动连接名 / Active connection name on iface."""
-    proc = _run_nm(["-t", "-f", "GENERAL.CONNECTION", "device", "show", iface], timeout=15)
+    proc = _run_nm(
+        ["-t", "-f", "GENERAL.CONNECTION", "device", "show", iface], timeout=15
+    )
     if proc.returncode != 0:
         return ""
     line = (proc.stdout or "").strip().split("\n", 1)[0].strip()
@@ -141,10 +143,18 @@ def _wifi_list_one(
     if prefer_tab:
         proc = _run_nm(args_tab, timeout=60)
         if proc.returncode == 0 and (proc.stdout or "").strip():
-            return _parse_nmcli_wifi_tab(proc.stdout or ""), proc.returncode, proc.stderr or ""
+            return (
+                _parse_nmcli_wifi_tab(proc.stdout or ""),
+                proc.returncode,
+                proc.stderr or "",
+            )
         proc2 = _run_nm(args_t, timeout=60)
         if proc2.returncode == 0:
-            return _parse_nmcli_wifi_colon(proc2.stdout or ""), proc2.returncode, proc2.stderr or ""
+            return (
+                _parse_nmcli_wifi_colon(proc2.stdout or ""),
+                proc2.returncode,
+                proc2.stderr or "",
+            )
         logger.debug(
             "nmcli wifi list(tab+t) iface={} rc={} / {}",
             iface,
@@ -154,7 +164,11 @@ def _wifi_list_one(
         return [], proc2.returncode, proc2.stderr or ""
     proc = _run_nm(args_t, timeout=60)
     if proc.returncode == 0:
-        return _parse_nmcli_wifi_colon(proc.stdout or ""), proc.returncode, proc.stderr or ""
+        return (
+            _parse_nmcli_wifi_colon(proc.stdout or ""),
+            proc.returncode,
+            proc.stderr or "",
+        )
     return [], proc.returncode, proc.stderr or ""
 
 
@@ -175,7 +189,9 @@ def nmcli_wifi_scan(iface: str) -> tuple[list[dict[str, Any]], str | None]:
             last_err = err or last_err
             if nets:
                 networks = _merge_networks_by_ssid(nets)
-                networks.sort(key=lambda x: (-(x.get("signal") or -1000), x.get("ssid") or ""))
+                networks.sort(
+                    key=lambda x: (-(x.get("signal") or -1000), x.get("ssid") or "")
+                )
                 return networks, None
             if rc != 0 and err:
                 logger.warning(
@@ -202,21 +218,27 @@ def nmcli_wifi_scan(iface: str) -> tuple[list[dict[str, Any]], str | None]:
 
 
 def _connection_mode(name: str) -> str:
-    proc = _run_nm(["-g", "802-11-wireless.mode", "connection", "show", name], timeout=15)
+    proc = _run_nm(
+        ["-g", "802-11-wireless.mode", "connection", "show", name], timeout=15
+    )
     if proc.returncode != 0:
         return ""
     return (proc.stdout or "").strip().split("\n", 1)[0].strip()
 
 
 def _connection_ssid(name: str) -> str:
-    proc = _run_nm(["-g", "802-11-wireless.ssid", "connection", "show", name], timeout=15)
+    proc = _run_nm(
+        ["-g", "802-11-wireless.ssid", "connection", "show", name], timeout=15
+    )
     if proc.returncode != 0:
         return ""
     return (proc.stdout or "").strip().split("\n", 1)[0].strip()
 
 
 def _connection_autoconnect(name: str) -> bool:
-    proc = _run_nm(["-g", "connection.autoconnect", "connection", "show", name], timeout=15)
+    proc = _run_nm(
+        ["-g", "connection.autoconnect", "connection", "show", name], timeout=15
+    )
     if proc.returncode != 0:
         return False
     v = (proc.stdout or "").strip().lower()
@@ -254,7 +276,9 @@ def nmcli_wifi_profiles(settings: Settings) -> list[dict[str, Any]]:
     return profiles
 
 
-def nmcli_modify_sta_to_ssid(settings: Settings, ssid: str, password: str | None) -> None:
+def nmcli_modify_sta_to_ssid(
+    settings: Settings, ssid: str, password: str | None
+) -> None:
     """将 STA 连接改为指定 SSID 与密码 / Point STA profile at SSID (WPA or open)."""
     sta = settings.wifi_sta_connection
     if not sta:
@@ -276,14 +300,18 @@ def nmcli_modify_sta_to_ssid(settings: Settings, ssid: str, password: str | None
             timeout=30,
         )
         if proc2.returncode != 0:
-            raise RuntimeError(proc2.stderr or proc2.stdout or "nmcli modify psk failed")
+            raise RuntimeError(
+                proc2.stderr or proc2.stdout or "nmcli modify psk failed"
+            )
     else:
         proc3 = _run_nm(
             ["connection", "modify", sta, "wifi-sec.key-mgmt", "none"],
             timeout=30,
         )
         if proc3.returncode != 0:
-            raise RuntimeError(proc3.stderr or proc3.stdout or "nmcli modify open failed")
+            raise RuntimeError(
+                proc3.stderr or proc3.stdout or "nmcli modify open failed"
+            )
 
 
 def nm_down_if_exists(conn_name: str) -> None:
@@ -362,9 +390,13 @@ async def _sta_rollback_loop() -> None:
             await asyncio.sleep(interval_s)
             ok = await asyncio.to_thread(sta_interface_has_usable_ipv4, settings)
             if ok:
-                logger.info("STA 回滚监视：已获得 IPv4，停止 / STA watchdog: got IPv4, stop")
+                logger.info(
+                    "STA 回滚监视：已获得 IPv4，停止 / STA watchdog: got IPv4, stop"
+                )
                 return
-        logger.warning("STA 回滚监视：超时，切回 AP / STA watchdog: timeout, switching to AP")
+        logger.warning(
+            "STA 回滚监视：超时，切回 AP / STA watchdog: timeout, switching to AP"
+        )
         await asyncio.to_thread(wifi_switch_service.switch, "ap")
     except asyncio.CancelledError:
         logger.info("STA 回滚监视已取消 / STA rollback cancelled")

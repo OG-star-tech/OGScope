@@ -96,7 +96,9 @@ def test_network_api(client, monkeypatch) -> None:
     """网络 API 状态与切换 / Network API status and switch."""
     from ogscope.web.api.network import routes as network_routes
 
-    monkeypatch.setattr(network_routes.wifi_switch_service, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        network_routes.wifi_switch_service, "is_configured", lambda: True
+    )
     monkeypatch.setattr(
         network_routes.wifi_switch_service,
         "get_status",

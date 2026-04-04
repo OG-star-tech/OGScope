@@ -14,7 +14,9 @@ _WIRELESS_SAMPLE = """Inter-| sta-|   Quality        |   Discarded packets
 
 
 @pytest.mark.unit
-def test_read_wifi_metrics_link_not_status_column(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_wifi_metrics_link_not_status_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """第一列为 status(0000)，link 在 values[1] / First column is status, not link quality."""
     real_path = Path
 

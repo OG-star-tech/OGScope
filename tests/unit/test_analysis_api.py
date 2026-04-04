@@ -437,6 +437,7 @@ def test_analysis_realtime_timeout_releases_gate(
             "star_analysis_max_interval_ms": 20000,
         }
     )
+
     def _settings_for_timeout_test():
         return low_timeout_settings
 

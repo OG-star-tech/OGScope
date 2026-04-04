@@ -45,7 +45,9 @@ class WifiEmergencyGpioMonitor:
         try:
             import RPi.GPIO as gpio  # type: ignore
         except Exception as e:
-            logger.warning("未安装 RPi.GPIO，无法启用应急短接 / RPi.GPIO unavailable: {}", e)
+            logger.warning(
+                "未安装 RPi.GPIO，无法启用应急短接 / RPi.GPIO unavailable: {}", e
+            )
             return
 
         self._gpio = gpio
@@ -111,9 +113,13 @@ class WifiEmergencyGpioMonitor:
             time.sleep(interval)
 
     def _force_sta(self) -> None:
-        logger.warning("检测到应急短接，强制切换 STA / Emergency short detected, forcing STA")
+        logger.warning(
+            "检测到应急短接，强制切换 STA / Emergency short detected, forcing STA"
+        )
         if not wifi_switch_service.is_configured():
-            logger.error("WiFi 未配置，无法应急切 STA / WiFi not configured, cannot force STA")
+            logger.error(
+                "WiFi 未配置，无法应急切 STA / WiFi not configured, cannot force STA"
+            )
             return
         try:
             wifi_switch_service.switch("sta")

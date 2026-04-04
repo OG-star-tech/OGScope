@@ -37,9 +37,7 @@ def _build_wifi_status() -> WifiStatus:
     ap_connection = data.get("AP_CONNECTION", settings.wifi_ap_connection)
     ap_ipv4 = data.get("AP_IPV4") or None
     ap_url_hint = (
-        f"http://{settings.wifi_ap_url_host}:{settings.port}"
-        if mode == "ap"
-        else None
+        f"http://{settings.wifi_ap_url_host}:{settings.port}" if mode == "ap" else None
     )
     message = data.get("error")
     suffix = settings.device_id_suffix or None
@@ -166,7 +164,9 @@ async def activate_wifi_profile(payload: WifiProfileActivateRequest) -> WifiStat
         if name == settings.wifi_sta_connection:
             await asyncio.to_thread(wifi_switch_service.switch, "sta")
         else:
-            await asyncio.to_thread(net_services.nm_down_if_exists, settings.wifi_ap_connection)
+            await asyncio.to_thread(
+                net_services.nm_down_if_exists, settings.wifi_ap_connection
+            )
             await asyncio.to_thread(
                 net_services.nmcli_activate_connection,
                 settings,
