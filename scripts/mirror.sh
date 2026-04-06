@@ -133,8 +133,8 @@ ogscope_export_pypi_mirror_international() {
     unset PIP_INDEX_URL PIP_TRUSTED_HOST UV_INDEX_URL || true
 }
 
-# 交互式选择网络区域（国内/国外/自动）；已显式设置 cn 或 international 时跳过 / Interactive region
-# selection; skipped when OGSCOPE_MIRROR is already cn or international.
+# 交互式选择 apt/PyPI 镜像（cn / international / auto）；已显式设置时跳过 / Interactive mirror choice;
+# skipped when OGSCOPE_MIRROR is already set to cn or international.
 ogscope_prompt_mirror_if_needed() {
     if [ -n "${OGSCOPE_MIRROR_PROMPT_DONE:-}" ]; then
         return 0
@@ -152,32 +152,32 @@ ogscope_prompt_mirror_if_needed() {
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  网络环境 / Network region"
+    echo "  软件下载源 / Download mirrors (apt & PyPI)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  PyPI 与系统源会影响 Poetry 安装速度；请选择当前所在区域："
-    echo "  Mirrors affect Poetry/apt speed; select your region:"
+    echo "  影响 apt 与 Poetry 下载速度；请按网络情况选择。"
+    echo "  Affects apt & Poetry download speed; pick what works best."
     echo ""
-    echo "    1) 中国大陆（清华镜像，推荐国内用户）/ Mainland China (Tsinghua mirror)"
-    echo "    2) 国外或港澳台（官方 PyPI）/ Outside mainland China (official PyPI)"
-    echo "    3) 自动检测（语言与时区，可能不准）/ Auto (locale & timezone, may mis-detect)"
+    echo "    1) 全球（上游 Debian/Ubuntu + PyPI.org）/ Global (upstream mirrors)"
+    echo "    2) 中国大陆（清华镜像）/ Mainland China (Tsinghua mirror)"
+    echo "    3) 自动（语言与时区启发，可能不准）/ Auto (locale & timezone heuristic)"
     echo ""
     read -r -p "  请输入 1–3 / Enter 1–3 [default: 1]: " _ogscope_mirror_choice || true
     case "${_ogscope_mirror_choice:-1}" in
-    1 | "")
-        OGSCOPE_MIRROR=cn
-        echo "  → 已选：中国大陆镜像 / Selected: China mirrors"
+    1)
+        OGSCOPE_MIRROR=international
+        echo "  → 已选：全球 / Selected: Global (international)"
         ;;
     2)
-        OGSCOPE_MIRROR=international
-        echo "  → 已选：官方源 / Selected: International (official)"
+        OGSCOPE_MIRROR=cn
+        echo "  → 已选：中国大陆 / Selected: Mainland China (cn)"
         ;;
     3)
         OGSCOPE_MIRROR=auto
-        echo "  → 已选：自动检测 / Selected: Auto-detect"
+        echo "  → 已选：自动 / Selected: Auto"
         ;;
     *)
-        echo "  ⚠️ 无效输入，使用中国大陆镜像 / Invalid input; using China mirrors"
-        OGSCOPE_MIRROR=cn
+        echo "  ⚠️ 无效输入，使用自动 / Invalid input; using auto"
+        OGSCOPE_MIRROR=auto
         ;;
     esac
     export OGSCOPE_MIRROR

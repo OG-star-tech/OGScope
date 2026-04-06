@@ -6,12 +6,14 @@
 #   OGSCOPE_INSTALL_DEV=1  — 安装含 dev 依赖（开发机）；默认仅 main / Install dev deps; default main only
 #   OGSCOPE_APT_SLOW=0|1|未设置 — 未设置且内存≤1GB 时自动开；1 强制开；0 强制关 / Auto on if RAM≤1GB; 1=force; 0=disable
 #   OGSCOPE_SKIP_OPENCV_APT=1 — 不 apt 安装 libopencv-dev（减轻 OOM；OpenCV 由 pip opencv-python-headless 提供）/ Skip libopencv-dev to avoid OOM
-#   OGSCOPE_MIRROR=auto|cn|international — 软件源：未显式指定时，交互终端会询问国内/国外/自动 / Mirrors; interactive TTY prompts if unset
+#   OGSCOPE_MIRROR=auto|cn|international — apt/PyPI 镜像；未显式指定时交互选择 / apt & PyPI mirrors; interactive prompt if unset
 #   OGSCOPE_NONINTERACTIVE=1 — 跳过网络环境询问（CI/无人值守）/ Skip mirror region prompt
 #   OGSCOPE_SKIP_NETWORK_BOOT=1 — 不安装开机 WiFi 引导单元 / Skip ogscope-network-boot.service
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不自动复制 default_database.npz 到 data/plate_solve/ / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 若目标已存在仍覆盖 / Overwrite data/plate_solve/default_database.npz if present
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
+#   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
+#   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 
 set -euo pipefail
 
@@ -41,8 +43,10 @@ cd "${PROJECT_DIR}"
 # 加载镜像逻辑（apt / PyPI）/ Load mirror helpers for apt and PyPI
 # shellcheck source=mirror.sh
 source "${SCRIPT_DIR}/mirror.sh"
+# shellcheck source=boot-config-camera.sh
+source "${SCRIPT_DIR}/boot-config-camera.sh"
 
-# 交互式选择国内/国外镜像（未显式指定 cn|international 时）/ Interactive mirror region when not preset
+# 交互式选择 apt/PyPI 镜像（未显式指定 cn|international 时）/ Interactive mirror selection when not preset
 ogscope_prompt_mirror_if_needed
 
 # 识别发行版并要求 Debian 系 + apt，避免误操作 / Detect OS; require Debian family + apt for safety
@@ -53,6 +57,8 @@ ogscope_print_os_summary
 if ! ogscope_require_debian_family_apt; then
     exit 1
 fi
+
+ogscope_prompt_camera_model_and_apply
 
 OGSCOPE_MIRROR_RESOLVED="$(ogscope_resolve_mirror)"
 echo "🌐 镜像模式 / Mirror: ${OGSCOPE_MIRROR_RESOLVED}（OGSCOPE_MIRROR=${OGSCOPE_MIRROR:-auto}）"

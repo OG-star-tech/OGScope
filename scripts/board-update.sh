@@ -10,6 +10,8 @@
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
+#   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
+#   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 
 set -euo pipefail
 
@@ -22,6 +24,8 @@ cd "${PROJECT_DIR}"
 # 加载镜像逻辑 / Load mirror helpers
 # shellcheck source=mirror.sh
 source "${SCRIPT_DIR}/mirror.sh"
+# shellcheck source=boot-config-camera.sh
+source "${SCRIPT_DIR}/boot-config-camera.sh"
 ogscope_prompt_mirror_if_needed
 OGSCOPE_MIRROR_RESOLVED="$(ogscope_resolve_mirror)"
 echo "🌐 镜像模式 / Mirror: ${OGSCOPE_MIRROR_RESOLVED}（OGSCOPE_MIRROR=${OGSCOPE_MIRROR:-auto}）"
@@ -96,6 +100,8 @@ ogscope_sync_network_board_artifacts_if_needed "${PROJECT_DIR}"
 
 ogscope_sync_plate_solve_database_if_needed "${PROJECT_DIR}"
 ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
+
+ogscope_prompt_camera_model_and_apply
 
 echo "🔄 重启服务 / Restarting service..."
 sudo systemctl daemon-reload
