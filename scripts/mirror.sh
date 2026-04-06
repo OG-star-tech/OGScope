@@ -10,8 +10,12 @@
 #     cn — 使用中国大陆常用镜像（apt + PyPI）
 #     international — 使用系统默认与官方 PyPI，不替换 apt 源
 #
+#   OGSCOPE_NONINTERACTIVE=1 — 跳过交互式网络环境询问（CI/无人值守）/ Skip region prompt (CI, automation)
+#
 # 启发式说明 / Heuristic: 非中文环境用户若在国内，请显式设置 OGSCOPE_MIRROR=cn
 # / Users in China with English locale should set OGSCOPE_MIRROR=cn explicitly.
+# 交互安装时若未显式指定 cn/international，将询问国内/国外/自动 / Interactive installs prompt
+# unless OGSCOPE_MIRROR is already cn or international.
 
 # 从 /etc/os-release 加载发行版信息（供检测与安全判断）/ Load distro info from /etc/os-release
 # 导出 OGSCOPE_OS_* / Exports OGSCOPE_OS_ID, VERSION_ID, PRETTY_NAME, ID_LIKE, VARIANT, etc.
@@ -127,6 +131,57 @@ ogscope_export_pypi_mirror_cn() {
 # 取消国内 PyPI 覆盖，使用默认官方索引 / Unset CN overrides; use default PyPI
 ogscope_export_pypi_mirror_international() {
     unset PIP_INDEX_URL PIP_TRUSTED_HOST UV_INDEX_URL || true
+}
+
+# 交互式选择网络区域（国内/国外/自动）；已显式设置 cn 或 international 时跳过 / Interactive region
+# selection; skipped when OGSCOPE_MIRROR is already cn or international.
+ogscope_prompt_mirror_if_needed() {
+    if [ -n "${OGSCOPE_MIRROR_PROMPT_DONE:-}" ]; then
+        return 0
+    fi
+    # CI、管道、非 TTY、显式非交互 / CI, pipes, non-TTY, explicit non-interactive
+    if [ ! -t 0 ] || [ ! -t 1 ] || [ "${CI:-}" = "true" ] || [ "${OGSCOPE_NONINTERACTIVE:-}" = "1" ]; then
+        return 0
+    fi
+    case "${OGSCOPE_MIRROR:-}" in
+    cn | CN | china | China | international | global | intl | default | us | US | eu | EU)
+        export OGSCOPE_MIRROR_PROMPT_DONE=1
+        return 0
+        ;;
+    esac
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  网络环境 / Network region"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  PyPI 与系统源会影响 Poetry 安装速度；请选择当前所在区域："
+    echo "  Mirrors affect Poetry/apt speed; select your region:"
+    echo ""
+    echo "    1) 中国大陆（清华镜像，推荐国内用户）/ Mainland China (Tsinghua mirror)"
+    echo "    2) 国外或港澳台（官方 PyPI）/ Outside mainland China (official PyPI)"
+    echo "    3) 自动检测（语言与时区，可能不准）/ Auto (locale & timezone, may mis-detect)"
+    echo ""
+    read -r -p "  请输入 1–3 / Enter 1–3 [default: 1]: " _ogscope_mirror_choice || true
+    case "${_ogscope_mirror_choice:-1}" in
+    1 | "")
+        OGSCOPE_MIRROR=cn
+        echo "  → 已选：中国大陆镜像 / Selected: China mirrors"
+        ;;
+    2)
+        OGSCOPE_MIRROR=international
+        echo "  → 已选：官方源 / Selected: International (official)"
+        ;;
+    3)
+        OGSCOPE_MIRROR=auto
+        echo "  → 已选：自动检测 / Selected: Auto-detect"
+        ;;
+    *)
+        echo "  ⚠️ 无效输入，使用中国大陆镜像 / Invalid input; using China mirrors"
+        OGSCOPE_MIRROR=cn
+        ;;
+    esac
+    export OGSCOPE_MIRROR
+    export OGSCOPE_MIRROR_PROMPT_DONE=1
 }
 
 # 将 apt 源替换为清华镜像（需 sudo）/ Replace apt sources with Tsinghua mirror (requires sudo)

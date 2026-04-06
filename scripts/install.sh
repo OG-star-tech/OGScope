@@ -6,7 +6,8 @@
 #   OGSCOPE_INSTALL_DEV=1  — 安装含 dev 依赖（开发机）；默认仅 main / Install dev deps; default main only
 #   OGSCOPE_APT_SLOW=0|1|未设置 — 未设置且内存≤1GB 时自动开；1 强制开；0 强制关 / Auto on if RAM≤1GB; 1=force; 0=disable
 #   OGSCOPE_SKIP_OPENCV_APT=1 — 不 apt 安装 libopencv-dev（减轻 OOM；OpenCV 由 pip opencv-python-headless 提供）/ Skip libopencv-dev to avoid OOM
-#   OGSCOPE_MIRROR=auto|cn|international — 软件源：auto 按语言/时区启发；中国大陆建议 cn 或保持 auto / Mirrors for CN vs abroad
+#   OGSCOPE_MIRROR=auto|cn|international — 软件源：未显式指定时，交互终端会询问国内/国外/自动 / Mirrors; interactive TTY prompts if unset
+#   OGSCOPE_NONINTERACTIVE=1 — 跳过网络环境询问（CI/无人值守）/ Skip mirror region prompt
 #   OGSCOPE_SKIP_NETWORK_BOOT=1 — 不安装开机 WiFi 引导单元 / Skip ogscope-network-boot.service
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不自动复制 default_database.npz 到 data/plate_solve/ / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 若目标已存在仍覆盖 / Overwrite data/plate_solve/default_database.npz if present
@@ -40,6 +41,9 @@ cd "${PROJECT_DIR}"
 # 加载镜像逻辑（apt / PyPI）/ Load mirror helpers for apt and PyPI
 # shellcheck source=mirror.sh
 source "${SCRIPT_DIR}/mirror.sh"
+
+# 交互式选择国内/国外镜像（未显式指定 cn|international 时）/ Interactive mirror region when not preset
+ogscope_prompt_mirror_if_needed
 
 # 识别发行版并要求 Debian 系 + apt，避免误操作 / Detect OS; require Debian family + apt for safety
 if ! ogscope_load_os_release; then

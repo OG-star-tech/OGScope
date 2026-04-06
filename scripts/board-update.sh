@@ -6,6 +6,7 @@
 #   OGSCOPE_INSTALL_DEV=1  — poetry install 时包含 dev 依赖 / Include dev dependency group
 #   POETRY_INSTALLER_MAX_WORKERS — 默认 2，低配板可设为 1 / Default 2; set to 1 on low-RAM boards
 #   OGSCOPE_MIRROR=auto|cn|international — 与 install.sh 相同 / Same as install.sh
+#   OGSCOPE_NONINTERACTIVE=1 — 跳过网络环境询问 / Skip mirror region prompt
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
@@ -21,6 +22,7 @@ cd "${PROJECT_DIR}"
 # 加载镜像逻辑 / Load mirror helpers
 # shellcheck source=mirror.sh
 source "${SCRIPT_DIR}/mirror.sh"
+ogscope_prompt_mirror_if_needed
 OGSCOPE_MIRROR_RESOLVED="$(ogscope_resolve_mirror)"
 echo "🌐 镜像模式 / Mirror: ${OGSCOPE_MIRROR_RESOLVED}（OGSCOPE_MIRROR=${OGSCOPE_MIRROR:-auto}）"
 
