@@ -18,5 +18,15 @@ RSYNC_TARGET="${OGSCOPE_DEV_USER:+$OGSCOPE_DEV_USER@}$OGSCOPE_DEV_HOST:$OGSCOPE_
 rsync -avz --delete \
   "$ROOT/web/static/analysis-lab/" \
   "$RSYNC_TARGET/web/static/analysis-lab/"
-echo "已同步 web/static/analysis-lab/ -> $RSYNC_TARGET/web/static/analysis-lab/"
+rsync -avz \
+  "$ROOT/web/templates/index.html" \
+  "$RSYNC_TARGET/web/templates/index.html"
+rsync -avz \
+  "$ROOT/web/static/css/hud-home.css" \
+  "$ROOT/web/static/css/hud-home.bundle.css" \
+  "$RSYNC_TARGET/web/static/css/"
+rsync -avz --delete \
+  "$ROOT/web/static/fonts/" \
+  "$RSYNC_TARGET/web/static/fonts/"
+echo "已同步 analysis-lab + 主页离线资源（模板/CSS/字体）到 $RSYNC_TARGET"
 echo "可选 / Optional: ssh $RSYNC_TARGET 'sudo systemctl restart ogscope'"

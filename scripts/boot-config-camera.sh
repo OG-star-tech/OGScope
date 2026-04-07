@@ -39,15 +39,45 @@ ogscope_boot_config_remove_ogscope_camera_block() {
     fi
 }
 
-# 写入 IMX327 设备树块（幂等：先删旧块再追加）/ Write IMX327 dtoverlay block (idempotent)
+# 写入 IMX327 设备树块（插在 vc4-kms-v3d 之后，固件才会加载；勿仅放在 [all] 段末尾）/
+# Insert IMX327 block after dtoverlay=vc4-kms-v3d so firmware loads it (not only at end of [all]).
 ogscope_boot_config_apply_imx327() {
     local cfg="$1"
     ogscope_boot_config_remove_ogscope_camera_block "${cfg}"
     ogscope_boot_config_set_camera_auto_detect_off "${cfg}"
-    if grep -qE '^[[:space:]]*dtoverlay=imx327([[:space:]]|$)' "${cfg}" 2>/dev/null; then
-        echo "ℹ️  已存在 dtoverlay=imx327，仅保留 camera_auto_detect=0 / dtoverlay=imx327 already present; kept auto-detect off"
+    # 去掉仅含 imx327、无参数的重复行（旧版曾追加在 [all] 末尾且固件未加载）/
+    # Drop bare dtoverlay=imx327 lines from old layout (firmware may ignore them there)
+    if grep -qE '^[[:space:]]*dtoverlay=imx327[[:space:]]*$' "${cfg}" 2>/dev/null; then
+        sudo sed -i '/^[[:space:]]*dtoverlay=imx327[[:space:]]*$/d' "${cfg}"
+    fi
+    if grep -qE '^[[:space:]]*dtoverlay=imx327,' "${cfg}" 2>/dev/null; then
+        echo "ℹ️  已存在带参数的 dtoverlay=imx327…，不重复插入 / dtoverlay=imx327 with params present; skipping insert"
         return 0
     fi
+    local tmp
+    tmp="$(mktemp)"
+    if awk '
+        /^[[:space:]]*dtoverlay=vc4-kms-v3d/ && !inserted {
+            print
+            print ""
+            print "# OGScope camera begin"
+            print "# IMX327 Camera configuration"
+            print "dtoverlay=imx327"
+            print "# OGScope camera end"
+            inserted = 1
+            next
+        }
+        { print }
+        END { exit (inserted ? 0 : 1) }
+    ' "${cfg}" > "${tmp}"; then
+        sudo cp -a "${cfg}" "${cfg}.bak.ogscope.$(date +%s)"
+        sudo mv "${tmp}" "${cfg}"
+        sudo chown root:root "${cfg}" 2>/dev/null || true
+        sudo chmod 644 "${cfg}" 2>/dev/null || true
+        return 0
+    fi
+    rm -f "${tmp}"
+    echo "⚠️  未找到 dtoverlay=vc4-kms-v3d，将把 IMX327 块追加到文件末尾 / vc4-kms-v3d not found; appending block"
     {
         echo ""
         echo "# OGScope camera begin"

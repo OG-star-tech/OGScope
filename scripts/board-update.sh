@@ -12,6 +12,7 @@
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
+#   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
 
 set -euo pipefail
 
@@ -103,6 +104,19 @@ ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
 
 ogscope_prompt_camera_model_and_apply
 
+JOURNALD_DROPIN_SRC="${SCRIPT_DIR}/systemd/journald.conf.d/ogscope-persistent.conf"
+JOURNALD_DROPIN_DST="/etc/systemd/journald.conf.d/ogscope-persistent.conf"
+if [ "${OGSCOPE_SKIP_JOURNALD_PERSISTENT:-}" = "1" ]; then
+    echo "⏭️  跳过 journald 持久化（OGSCOPE_SKIP_JOURNALD_PERSISTENT=1）/ Skipping journald persistent config"
+elif [ ! -f "${JOURNALD_DROPIN_SRC}" ]; then
+    echo "⚠️  未找到 ${JOURNALD_DROPIN_SRC}，跳过 journald 配置 / journald drop-in missing; skipping"
+else
+    echo "📝 同步持久化 systemd journal 配置 / Syncing persistent journald drop-in..."
+    sudo install -d /etc/systemd/journald.conf.d
+    sudo install -m 0644 "${JOURNALD_DROPIN_SRC}" "${JOURNALD_DROPIN_DST}"
+    sudo systemctl restart systemd-journald
+fi
+
 echo "🔄 重启服务 / Restarting service..."
 sudo systemctl daemon-reload
 sudo systemctl restart "${SERVICE_NAME}"
@@ -112,4 +126,7 @@ sudo systemctl --no-pager status "${SERVICE_NAME}" || true
 
 echo ""
 echo "✅ 更新完成 / Update done. 日志 / Logs: sudo journalctl -u ${SERVICE_NAME} -f"
+if [ "${OGSCOPE_SKIP_JOURNALD_PERSISTENT:-}" != "1" ] && [ -f "${JOURNALD_DROPIN_DST:-}" ]; then
+    echo "上次启动排查 / Previous boot: sudo journalctl -b -1 -e  |  errors: sudo journalctl -b -1 -p err..alert --no-pager"
+fi
 echo "健康检查 / Health: curl -s http://127.0.0.1:8000/health"

@@ -14,6 +14,7 @@
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
+#   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不安装 journald 持久化 drop-in（默认安装）/ Skip persistent journald config
 
 set -euo pipefail
 
@@ -291,6 +292,19 @@ WantedBy=multi-user.target
 EOF
 fi
 
+JOURNALD_DROPIN_SRC="${SCRIPT_DIR}/systemd/journald.conf.d/ogscope-persistent.conf"
+JOURNALD_DROPIN_DST="/etc/systemd/journald.conf.d/ogscope-persistent.conf"
+if [ "${OGSCOPE_SKIP_JOURNALD_PERSISTENT:-}" = "1" ]; then
+    echo "⏭️  跳过 journald 持久化（OGSCOPE_SKIP_JOURNALD_PERSISTENT=1）/ Skipping journald persistent config"
+elif [ ! -f "${JOURNALD_DROPIN_SRC}" ]; then
+    echo "⚠️  未找到 ${JOURNALD_DROPIN_SRC}，跳过 journald 配置 / journald drop-in missing; skipping"
+else
+    echo "📝 配置持久化 systemd journal（卡死后可用 journalctl -b -1）/ Enabling persistent journal..."
+    sudo install -d /etc/systemd/journald.conf.d
+    sudo install -m 0644 "${JOURNALD_DROPIN_SRC}" "${JOURNALD_DROPIN_DST}"
+    sudo systemctl restart systemd-journald
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable "${SERVICE_NAME}"
 if [ "${OGSCOPE_SKIP_NETWORK_BOOT:-}" != "1" ]; then
@@ -312,6 +326,10 @@ echo "下一步 / Next:"
 echo "  sudo systemctl start ${SERVICE_NAME}"
 echo "  sudo systemctl status ${SERVICE_NAME}"
 echo "  sudo journalctl -u ${SERVICE_NAME} -f"
+if [ "${OGSCOPE_SKIP_JOURNALD_PERSISTENT:-}" != "1" ] && [ -f "${JOURNALD_DROPIN_DST:-}" ]; then
+    echo "  上次启动内核/系统日志 / Previous boot: sudo journalctl -b -1 -e"
+    echo "  上次启动错误级 / Previous boot errors: sudo journalctl -b -1 -p err..alert --no-pager"
+fi
 if [ "${OGSCOPE_SKIP_NETWORK_BOOT:-}" != "1" ]; then
     echo "  开机 WiFi 引导日志 / Boot WiFi: sudo journalctl -u ${BOOT_UNIT} -b"
 fi
