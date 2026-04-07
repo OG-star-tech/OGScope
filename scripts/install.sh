@@ -15,6 +15,9 @@
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不安装 journald 持久化 drop-in（默认安装）/ Skip persistent journald config
+#   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，写入 ogscope.service.d MemoryMax（cgroup 内存上限；过小会提前 SIGKILL）/ Optional cgroup MemoryMax
+#   低内存解算保护另见环境变量 OGSCOPE_SOLVER_MAX_STARS_HARD_CAP、OGSCOPE_SOLVER_MAX_IMAGE_SIDE_HARD_CAP（见 config.py）/ Low-RAM solve caps
+#   OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1 — 内存≤512MiB 时不自动安装 ogscope-low-ram.conf（默认会自动装）/ Skip auto low-RAM solver drop-in
 
 set -euo pipefail
 
@@ -257,6 +260,29 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+
+if [ -n "${OGSCOPE_SYSTEMD_MEMORY_MAX:-}" ]; then
+    echo "📝 写入 ogscope cgroup MemoryMax=${OGSCOPE_SYSTEMD_MEMORY_MAX} / Writing MemoryMax drop-in..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    sudo tee /etc/systemd/system/ogscope.service.d/memory-limit.conf >/dev/null <<EOF
+[Service]
+MemoryMax=${OGSCOPE_SYSTEMD_MEMORY_MAX}
+EOF
+fi
+
+LOW_RAM_DROPIN_SRC="${SCRIPT_DIR}/systemd/system/ogscope.service.d/ogscope-low-ram.conf"
+_mem_total_kb_install="$(grep '^MemTotal:' /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 9999999)"
+if [ "${OGSCOPE_SKIP_LOW_RAM_DEFAULTS:-}" = "1" ]; then
+    echo "⏭️  跳过低内存解算默认（OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1）/ Skipping low-RAM solver drop-in"
+elif [ ! -f "${LOW_RAM_DROPIN_SRC}" ]; then
+    echo "⚠️  未找到 ${LOW_RAM_DROPIN_SRC}，跳过低内存解算默认 / Low-RAM drop-in missing; skipping"
+elif [ "${_mem_total_kb_install}" -le 524288 ]; then
+    echo "📝 安装低内存解算推荐值（MemTotal≤512MiB → 星数≤40、长边≤1280）/ Installing low-RAM solver caps..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    sudo install -m 0644 "${LOW_RAM_DROPIN_SRC}" /etc/systemd/system/ogscope.service.d/ogscope-low-ram.conf
+else
+    echo "ℹ️  MemTotal≈$((_mem_total_kb_install / 1024)) MiB — 未安装 ogscope-low-ram.conf（仅≤512MiB 自动）/ Skipping low-RAM drop-in"
+fi
 
 if [ "${OGSCOPE_SKIP_NETWORK_INIT:-}" = "1" ]; then
     echo "⏭️  跳过网络初始化（OGSCOPE_SKIP_NETWORK_INIT=1）/ Skipping network init"

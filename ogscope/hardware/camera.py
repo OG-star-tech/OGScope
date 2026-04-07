@@ -250,9 +250,13 @@ class IMX327MIPICamera(CameraInterface):
         if mode not in {"supersample", "native", "crop"}:
             mode = "native"
         if mode == "supersample":
+            # 先采满幅 1920×1020，再经 _resize_preserve_fov 缩到输出（保留整幅视场，非中心裁切）
+            # Full sensor readout then letterbox resize to output (full FOV preserved, not center crop).
             capture_w = self.SENSOR_MAX_WIDTH
             capture_h = self.SENSOR_MAX_HEIGHT
         else:
+            # native/crop：当前与输出同尺寸采集；视场由 libcamera 传感器模式决定，一般为整幅缩放非裁切
+            # native/crop: capture at output size; FOV from sensor mode (typically full-frame scale, not arbitrary crop).
             # 关闭超采样时按输出尺寸采集，减少大帧常驻与重采样开销
             # Capture at output size when supersample is off to reduce RAM and resize cost.
             capture_w = output_width
@@ -270,6 +274,7 @@ class IMX327MIPICamera(CameraInterface):
     def _resize_preserve_fov(
         self, image: np.ndarray, target_width: int, target_height: int
     ) -> np.ndarray:
+        """整幅等比缩放后必要时黑边填充，不裁切画面中心 / Uniform scale + letterbox; no center crop."""
         import cv2
 
         src_h, src_w = image.shape[:2]

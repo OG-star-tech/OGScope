@@ -19,8 +19,14 @@ from ogscope.web.api.debug.services import (
     DebugPresetService,
 )
 from ogscope.web.api.models.schemas import CameraPreset, CameraSettings
+from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 router = APIRouter()
+
+_MJPEG_LIMIT_DETAIL = (
+    "MJPEG stream limit reached; close other previews or tabs / "
+    "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
+)
 
 _DEFAULT_PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
 _PREVIEW_CLIENT_LAST_TS: dict[str, float] = {}
@@ -152,39 +158,45 @@ async def stream_debug_camera(
 ):
     """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
+        limiter = get_mjpeg_stream_limiter()
+        if not await limiter.try_acquire():
+            raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
         boundary = "frame"
         min_emit_interval = 1.0 / max(
             1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
         )
 
         async def frame_generator():
-            last_snap_frame_id = -1
-            last_emit_mono = 0.0
-            while True:
-                code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
-                    "jpeg", quality, since_frame_id=last_snap_frame_id
-                )
-                if code == 304:
-                    await asyncio.sleep(0.03)
-                    continue
-                if code != 200 or data is None:
-                    await asyncio.sleep(0.05)
-                    continue
-                now = time.monotonic()
-                wait = last_emit_mono + min_emit_interval - now
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                last_snap_frame_id = snap_id
-                last_emit_mono = time.monotonic()
-                yield (
-                    b"--" + boundary.encode() + b"\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Content-Length: "
-                    + str(len(data)).encode()
-                    + b"\r\n\r\n"
-                    + data
-                    + b"\r\n"
-                )
+            try:
+                last_snap_frame_id = -1
+                last_emit_mono = 0.0
+                while True:
+                    code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
+                        "jpeg", quality, since_frame_id=last_snap_frame_id
+                    )
+                    if code == 304:
+                        await asyncio.sleep(0.03)
+                        continue
+                    if code != 200 or data is None:
+                        await asyncio.sleep(0.05)
+                        continue
+                    now = time.monotonic()
+                    wait = last_emit_mono + min_emit_interval - now
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    last_snap_frame_id = snap_id
+                    last_emit_mono = time.monotonic()
+                    yield (
+                        b"--" + boundary.encode() + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: "
+                        + str(len(data)).encode()
+                        + b"\r\n\r\n"
+                        + data
+                        + b"\r\n"
+                    )
+            finally:
+                await limiter.release()
 
         return StreamingResponse(
             frame_generator(),
@@ -200,39 +212,45 @@ async def stream_debug_camera(
 async def stream_debug_camera_lossless():
     """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
     try:
+        limiter = get_mjpeg_stream_limiter()
+        if not await limiter.try_acquire():
+            raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
         boundary = "frame"
         min_emit_interval = 1.0 / max(
             1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
         )
 
         async def frame_generator():
-            last_snap_frame_id = -1
-            last_emit_mono = 0.0
-            while True:
-                code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
-                    "png", 100, since_frame_id=last_snap_frame_id
-                )
-                if code == 304:
-                    await asyncio.sleep(0.03)
-                    continue
-                if code != 200 or data is None:
-                    await asyncio.sleep(0.05)
-                    continue
-                now = time.monotonic()
-                wait = last_emit_mono + min_emit_interval - now
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                last_snap_frame_id = snap_id
-                last_emit_mono = time.monotonic()
-                yield (
-                    b"--" + boundary.encode() + b"\r\n"
-                    b"Content-Type: image/png\r\n"
-                    b"Content-Length: "
-                    + str(len(data)).encode()
-                    + b"\r\n\r\n"
-                    + data
-                    + b"\r\n"
-                )
+            try:
+                last_snap_frame_id = -1
+                last_emit_mono = 0.0
+                while True:
+                    code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
+                        "png", 100, since_frame_id=last_snap_frame_id
+                    )
+                    if code == 304:
+                        await asyncio.sleep(0.03)
+                        continue
+                    if code != 200 or data is None:
+                        await asyncio.sleep(0.05)
+                        continue
+                    now = time.monotonic()
+                    wait = last_emit_mono + min_emit_interval - now
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    last_snap_frame_id = snap_id
+                    last_emit_mono = time.monotonic()
+                    yield (
+                        b"--" + boundary.encode() + b"\r\n"
+                        b"Content-Type: image/png\r\n"
+                        b"Content-Length: "
+                        + str(len(data)).encode()
+                        + b"\r\n\r\n"
+                        + data
+                        + b"\r\n"
+                    )
+            finally:
+                await limiter.release()
 
         return StreamingResponse(
             frame_generator(),

@@ -4,10 +4,12 @@ export type LayerToggles = {
   matched: boolean;
   pattern: boolean;
   all: boolean;
+  rejected: boolean;
 };
 
 export type SolveOverlay = {
   stars_all_centroids?: Array<{ x: number; y: number }>;
+  stars_rejected_centroids?: Array<{ x: number; y: number }>;
   stars_pattern?: Array<{ x: number; y: number }>;
   stars_matched?: Array<{ x: number; y: number; mag?: number }>;
   overlay_ext?: {
@@ -45,6 +47,18 @@ function drawOverlayCore(
       ctx.beginPath();
       ctx.arc(s.x, s.y, 2.4, 0, Math.PI * 2);
       ctx.fill();
+    }
+  }
+  if (layers.rejected && Array.isArray(overlay.stars_rejected_centroids)) {
+    ctx.strokeStyle = "rgba(248, 113, 113, 0.95)";
+    ctx.lineWidth = 1.6;
+    for (const s of overlay.stars_rejected_centroids) {
+      ctx.beginPath();
+      ctx.moveTo(s.x - 4, s.y - 4);
+      ctx.lineTo(s.x + 4, s.y + 4);
+      ctx.moveTo(s.x + 4, s.y - 4);
+      ctx.lineTo(s.x - 4, s.y + 4);
+      ctx.stroke();
     }
   }
   if (layers.pattern && Array.isArray(overlay.stars_pattern)) {

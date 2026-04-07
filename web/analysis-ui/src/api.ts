@@ -32,6 +32,8 @@ export type SolveParams = {
   large_scale_bg_subtract?: boolean | null;
   /** 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level */
   detail_level?: "summary" | "full" | null;
+  /** 质心几何剔除 1–5（过密/共线）；默认由服务器 / Centroid rejection level */
+  centroid_rejection_level?: number | null;
 };
 
 async function parseJson(resp: Response): Promise<unknown> {
@@ -280,6 +282,10 @@ export type LabPublicSettings = {
   solver_fov_deg: number;
   solver_max_image_side: number;
   solver_large_scale_bg_downsample?: number;
+  /** 0 = 不限制 MJPEG 并发 / 0 = unlimited concurrent MJPEG */
+  stream_max_mjpeg_clients?: number;
+  /** 默认质心剔除档位 / Default centroid rejection level */
+  centroid_rejection_level_default?: number;
 };
 
 export async function fetchLabSettings(): Promise<LabPublicSettings> {

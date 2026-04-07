@@ -68,7 +68,7 @@ const defaultParams = (): SolveParams => ({
   fov_max_error: undefined,
   solve_timeout_ms: 1500,
   solve_profile: "balanced",
-  max_image_side: 1600,
+  max_image_side: 1280,
   large_scale_bg_subtract: false,
   detail_level: "summary",
   centroid: {
@@ -145,7 +145,12 @@ export function AnalysisLabPage() {
   );
   const [historyExpandId, setHistoryExpandId] = useState<string | null>(null);
   const [newPresetName, setNewPresetName] = useState("");
-  const [layers, setLayers] = useState({ matched: true, pattern: true, all: true });
+  const [layers, setLayers] = useState({
+    matched: true,
+    pattern: true,
+    all: true,
+    rejected: true,
+  });
   const [debugFiles, setDebugFiles] = useState<DebugFileRow[]>([]);
   const [debugPick, setDebugPick] = useState<string | null>(null);
   const [debugPage, setDebugPage] = useState(1);
@@ -737,6 +742,14 @@ export function AnalysisLabPage() {
 
   const stopCameraPreview = async () => {
     try {
+      const img = cameraPreviewImgRef.current;
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.src = "";
+        img.removeAttribute("src");
+      }
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       await fetch("/api/debug/camera/stop", { method: "POST" });
       setCameraStreamNonce(Date.now());
       if (videoPreviewMode === "camera") {
@@ -1458,7 +1471,7 @@ export function AnalysisLabPage() {
                     {t("lab.layers")}
                   </span>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {(["matched", "pattern", "all"] as const).map((k) => (
+                    {(["matched", "pattern", "all", "rejected"] as const).map((k) => (
                       <label key={k} className="flex cursor-pointer items-center gap-1">
                         <input
                           type="checkbox"
@@ -1473,7 +1486,9 @@ export function AnalysisLabPage() {
                             ? t("lab.layer.matched")
                             : k === "pattern"
                               ? t("lab.layer.pattern")
-                              : t("lab.layer.all")}
+                              : k === "all"
+                                ? t("lab.layer.all")
+                                : t("lab.layer.rejected")}
                         </span>
                       </label>
                     ))}

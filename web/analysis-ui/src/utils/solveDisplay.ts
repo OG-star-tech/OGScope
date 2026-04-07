@@ -54,11 +54,23 @@ export function formatAngleDeg(v: number | null): string {
   return `${v.toFixed(4)}°`;
 }
 
-/** 置信度 0–1 转百分比 / Confidence to percent string */
+/**
+ * Tetra3 `Prob`：假阳性概率（越低越可信）/ Tetra3 Prob = false-positive probability (lower is better).
+ * 界面匹配置信度：0–100% / Display match confidence in 0–100%.
+ */
+export function tetraFalsePositiveProbToConfidencePercent(
+  fp: number | null | undefined,
+): number | null {
+  if (fp == null || typeof fp !== "number" || Number.isNaN(fp) || fp < 0) return null;
+  const capped = Math.min(1, fp);
+  return Math.min(100, Math.max(0, (1 - capped) * 100));
+}
+
+/** 匹配置信度百分比字符串 / Match confidence percent string */
 export function formatProb(p: number | null): string {
-  if (p == null) return "—";
-  if (p >= 0 && p <= 1) return `${(p * 100).toFixed(1)}%`;
-  return String(p);
+  const pct = tetraFalsePositiveProbToConfidencePercent(p);
+  if (pct == null) return "—";
+  return `${pct.toFixed(1)}%`;
 }
 
 /** 原始 Tetra3 Prob 字段（可能为对数等）/ Raw Prob from tetra block */
@@ -73,20 +85,14 @@ export function formatTetraProb(raw: unknown): string {
   return String(raw);
 }
 
-/** 置信度展示：极小值与 0 更易读 / Human-readable confidence line */
+/** 置信度展示：与预览角标同一换算 / Same conversion as preview badge */
 export function formatProbLine(
   p: number | null,
   result: Record<string, unknown> | null | undefined,
 ): { line: string; rawLine: string | null } {
   const tetra = result?.tetra as Record<string, unknown> | undefined;
   const rawProb = tetra ? (tetra.Prob ?? tetra.prob) : undefined;
-  let line = formatProb(p);
-  if (p != null && p >= 0 && p <= 1 && p > 0 && p < 0.0001) {
-    line = `${(p * 100).toExponential(2)}%`;
-  }
-  if (p === 0 && rawProb !== undefined && rawProb !== null) {
-    line = "—";
-  }
+  const line = formatProb(p);
   const rawLine =
     rawProb !== undefined && rawProb !== null ? formatTetraProb(rawProb) : null;
   return { line, rawLine };

@@ -331,7 +331,10 @@ export function CameraConsoleApp() {
       resetStreamStats();
       setStatus((prev) => (prev ? { ...prev, streaming: false, recording: false } : prev));
       if (imgRef.current) {
+        imgRef.current.onload = null;
+        imgRef.current.onerror = null;
         imgRef.current.src = "";
+        imgRef.current.removeAttribute("src");
       }
       setStreamNonce(Date.now());
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));

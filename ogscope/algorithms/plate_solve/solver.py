@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from ogscope.algorithms.plate_solve.centroid_quality import filter_centroids_yx
 from ogscope.algorithms.star_extract import StarPoint
 from ogscope.config import Settings, get_settings
 
@@ -267,6 +268,8 @@ class SolveResult:
     raw: dict[str, Any] = field(default_factory=dict)
     # 原图像素系下的叠加数据（与 Canvas x,y 一致）/ Overlay in original image pixels (Canvas x,y)
     solve_overlay: dict[str, Any] | None = None
+    # 质心质量过滤（过密/共线）/ Centroid quality (dense + collinear)
+    centroid_quality: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         base = {
@@ -286,6 +289,8 @@ class SolveResult:
             "t_preprocess_ms": self.t_preprocess_ms,
             "large_scale_bg_subtract": self.large_scale_bg_subtract,
         }
+        if self.centroid_quality is not None:
+            base["centroid_quality"] = _json_safe(self.centroid_quality)
         if self.solve_overlay is not None:
             base["solve_overlay"] = _json_safe(self.solve_overlay)
         if self.raw:
@@ -320,6 +325,7 @@ class PlateSolver:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        centroid_rejection_level: int = 3,
     ) -> SolveResult:
         """解算画面中心赤道坐标 / Solve frame center RA/Dec.
 
@@ -327,6 +333,7 @@ class PlateSolver:
         """
         del hint_ra_deg, hint_dec_deg
         height, width = int(frame_shape[0]), int(frame_shape[1])
+        level = max(1, min(5, int(centroid_rejection_level)))
         fov_est = float(fov_estimate if fov_estimate is not None else self.fov_deg)
         fov_err = fov_max_error if fov_max_error is not None else self.fov_max_error_deg
         timeout = float(
@@ -337,7 +344,9 @@ class PlateSolver:
             sorted_stars = sorted(stars, key=lambda s: s.flux, reverse=True)
             cyx = np.array([[s.y, s.x] for s in sorted_stars], dtype=np.float64)
             overlay = (
-                _make_solve_overlay({}, cyx, (height, width), (height, width))
+                _make_solve_overlay(
+                    {}, cyx, None, (height, width), (height, width)
+                )
                 if len(cyx) > 0
                 else None
             )
@@ -363,6 +372,35 @@ class PlateSolver:
 
         sorted_stars = sorted(stars, key=lambda s: s.flux, reverse=True)
         centroids = np.array([[s.y, s.x] for s in sorted_stars], dtype=np.float64)
+        centroids, cq = filter_centroids_yx(centroids, (height, width), level)
+        if centroids.shape[0] < 4:
+            overlay = (
+                _make_solve_overlay(
+                    {}, centroids, None, (height, width), (height, width)
+                )
+                if len(centroids) > 0
+                else None
+            )
+            return SolveResult(
+                ra_deg=0.0,
+                dec_deg=0.0,
+                detected_stars=int(centroids.shape[0]),
+                solve_source=solve_source,
+                status="TOO_FEW",
+                status_code=5,
+                roll_deg=None,
+                fov_deg=None,
+                matches=None,
+                prob=None,
+                rmse_arcsec=None,
+                t_solve_ms=None,
+                t_extract_ms=None,
+                t_preprocess_ms=None,
+                large_scale_bg_subtract=False,
+                raw={"reason": "too_few_after_centroid_filter"},
+                solve_overlay=overlay,
+                centroid_quality=cq,
+            )
 
         try:
             t3 = self._tetra()
@@ -396,11 +434,12 @@ class PlateSolver:
 
         return _tetra_dict_to_result(
             out,
-            len(stars),
+            int(centroids.shape[0]),
             solve_source,
             centroids_yx=centroids,
             frame_shape_original=(height, width),
             solve_shape=(height, width),
+            centroid_quality=cq,
         )
 
     def solve_from_bgr_frame(
@@ -416,6 +455,7 @@ class PlateSolver:
         max_image_side: int | None = None,
         centroid_params: CentroidExtractionParams | None = None,
         large_scale_bg_subtract: bool = False,
+        centroid_rejection_level: int = 3,
     ) -> SolveResult:
         """与 Tetra3 ``solve_from_image`` 等价：内置 ``get_centroids_from_image`` + ``solve_from_centroids``.
 
@@ -432,6 +472,13 @@ class PlateSolver:
             if max_image_side is not None
             else int(settings.solver_max_image_side)
         )
+        if settings.solver_max_image_side_hard_cap is not None:
+            side_cap = min(side_cap, int(settings.solver_max_image_side_hard_cap))
+        side_cap = max(256, int(side_cap))
+        level = max(1, min(5, int(centroid_rejection_level)))
+        max_stars = max(4, int(max_stars))
+        if settings.solver_max_stars_hard_cap is not None:
+            max_stars = min(max_stars, int(settings.solver_max_stars_hard_cap))
         params = (
             centroid_params
             if centroid_params is not None
@@ -484,14 +531,32 @@ class PlateSolver:
             )
         t_extract_ms = (time.perf_counter() - t0) * 1000.0
 
-        detected = int(len(centroids))
+        detected_raw = int(len(centroids))
+        cyx = np.asarray(centroids, dtype=np.float64)
+        if detected_raw >= 4:
+            cyx_f, cq = filter_centroids_yx(cyx, (height, width), level)
+        else:
+            cyx_f, cq = cyx, {
+                "level": level,
+                "flags": [],
+                "hints": [],
+                "metrics": {
+                    "input_count": detected_raw,
+                    "output_count": detected_raw,
+                    "removed_dense": 0,
+                    "removed_line": 0,
+                },
+            }
+        detected = int(cyx_f.shape[0])
         if detected < 4:
-            cyx = np.asarray(centroids, dtype=np.float64)
             overlay = (
-                _make_solve_overlay({}, cyx, (h0, w0), (height, width))
-                if len(cyx) > 0
+                _make_solve_overlay({}, cyx_f, None, (h0, w0), (height, width))
+                if len(cyx_f) > 0
                 else None
             )
+            raw_ex: dict[str, Any] = {"reason": "need_at_least_4_stars"}
+            if detected_raw >= 4 and detected < 4:
+                raw_ex["reason"] = "too_few_after_centroid_filter"
             return SolveResult(
                 ra_deg=0.0,
                 dec_deg=0.0,
@@ -508,14 +573,15 @@ class PlateSolver:
                 t_extract_ms=t_extract_ms,
                 t_preprocess_ms=t_preprocess_ms,
                 large_scale_bg_subtract=large_scale_bg_subtract,
-                raw={"reason": "need_at_least_4_stars"},
+                raw=raw_ex,
                 solve_overlay=overlay,
+                centroid_quality=cq,
             )
 
         try:
             t3 = self._tetra()
             out = t3.solve_from_centroids(
-                centroids,
+                cyx_f,
                 (height, width),
                 fov_estimate=fov_est,
                 fov_max_error=fov_err,
@@ -540,6 +606,7 @@ class PlateSolver:
                 t_preprocess_ms=t_preprocess_ms,
                 large_scale_bg_subtract=large_scale_bg_subtract,
                 raw={"error": str(exc)},
+                centroid_quality=cq,
             )
 
         out["T_extract"] = t_extract_ms
@@ -548,16 +615,18 @@ class PlateSolver:
             out,
             detected,
             solve_source,
-            centroids_yx=np.asarray(centroids, dtype=np.float64),
+            centroids_yx=cyx_f,
             frame_shape_original=(h0, w0),
             solve_shape=(height, width),
             large_scale_bg_subtract=large_scale_bg_subtract,
+            centroid_quality=cq,
         )
 
 
 def _make_solve_overlay(
     tetra_out: dict[str, Any],
     centroids_yx: np.ndarray,
+    rejected_centroids_yx: np.ndarray | None,
     frame_shape_original: tuple[int, int],
     solve_shape: tuple[int, int],
 ) -> dict[str, Any] | None:
@@ -575,6 +644,12 @@ def _make_solve_overlay(
         for row in arr:
             y_s, x_s = float(row[0]), float(row[1])
             stars_all.append({"x": x_s * sx, "y": y_s * sy})
+    stars_rejected: list[dict[str, float]] = []
+    rej = np.asarray(rejected_centroids_yx, dtype=np.float64)
+    if rej.size > 0 and rej.ndim == 2 and rej.shape[1] >= 2:
+        for row in rej:
+            y_s, x_s = float(row[0]), float(row[1])
+            stars_rejected.append({"x": x_s * sx, "y": y_s * sy})
 
     stars_matched: list[dict[str, Any]] = []
     raw_matched = tetra_out.get("matched_centroids")
@@ -606,6 +681,7 @@ def _make_solve_overlay(
         "stars_matched": stars_matched,
         "stars_pattern": stars_pattern,
         "stars_all_centroids": stars_all,
+        "stars_rejected_centroids": stars_rejected,
     }
 
 
@@ -618,6 +694,7 @@ def _tetra_dict_to_result(
     frame_shape_original: tuple[int, int] | None = None,
     solve_shape: tuple[int, int] | None = None,
     large_scale_bg_subtract: bool = False,
+    centroid_quality: dict[str, Any] | None = None,
 ) -> SolveResult:
     """Tetra 返回 dict → SolveResult / Map Tetra output dict to SolveResult."""
     st = out.get("status")
@@ -632,13 +709,23 @@ def _tetra_dict_to_result(
     raw = {k: v for k, v in out.items() if k not in ("RA", "Dec")}
 
     overlay: dict[str, Any] | None = None
+    rejected_yx: np.ndarray | None = None
+    if centroid_quality and isinstance(centroid_quality, dict):
+        rejected_raw = centroid_quality.get("rejected_centroids_yx")
+        if isinstance(rejected_raw, list):
+            try:
+                tmp = np.asarray(rejected_raw, dtype=np.float64)
+                if tmp.ndim == 2 and tmp.shape[1] >= 2 and tmp.size > 0:
+                    rejected_yx = tmp[:, :2]
+            except (TypeError, ValueError):
+                rejected_yx = None
     if (
         centroids_yx is not None
         and frame_shape_original is not None
         and solve_shape is not None
     ):
         overlay = _make_solve_overlay(
-            out, centroids_yx, frame_shape_original, solve_shape
+            out, centroids_yx, rejected_yx, frame_shape_original, solve_shape
         )
 
     return SolveResult(
@@ -659,6 +746,7 @@ def _tetra_dict_to_result(
         large_scale_bg_subtract=large_scale_bg_subtract,
         raw=raw,
         solve_overlay=overlay,
+        centroid_quality=centroid_quality,
     )
 
 

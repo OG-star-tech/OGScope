@@ -199,6 +199,13 @@ class AnalysisSolveImageRequest(BaseModel):
     large_scale_bg_subtract: Optional[bool] = False
     # 结果详细程度：summary 仅返回关键字段，full 包含 tetra 原始块 / Result detail level
     detail_level: Optional[Literal["summary", "full"]] = "summary"
+    # 质心几何剔除强度 1–5（过密/共线）；默认 3 / Centroid rejection strength
+    centroid_rejection_level: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="1=mild … 5=aggressive dense+collinear rejection",
+    )
 
 
 class AnalysisExtractPreviewRequest(BaseModel):
@@ -227,6 +234,11 @@ class AnalysisJobCreateRequest(BaseModel):
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
     large_scale_bg_subtract: Optional[bool] = False
+    centroid_rejection_level: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=5,
+    )
 
 
 class SolveFrameResult(BaseModel):
@@ -264,6 +276,11 @@ class AnalysisSolveParamsOnly(BaseModel):
     max_image_side: Optional[int] = None
     large_scale_bg_subtract: Optional[bool] = False
     detail_level: Optional[Literal["summary", "full"]] = "summary"
+    centroid_rejection_level: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=5,
+    )
 
 
 class BatchSolveRunItem(BaseModel):
@@ -341,6 +358,12 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     enable_polar_guide: Optional[bool] = Field(
         default=None,
         description="是否计算极轴引导信息；未填用服务器默认 / Whether to compute polar guide info; server default if omitted",
+    )
+    centroid_rejection_level: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="质心几何剔除档位 / Centroid rejection level",
     )
 
 

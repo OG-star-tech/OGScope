@@ -29,7 +29,7 @@ class OGScopeHomeApp {
         this.solverTimeoutMs = 1200;
         this.solveParams = {
             fov_estimate: 11,
-            max_image_side: 1600,
+            max_image_side: 1280,
             solve_profile: "balanced",
             detail_level: "summary",
             large_scale_bg_subtract: false,
@@ -56,6 +56,22 @@ class OGScopeHomeApp {
             await this.startLoadingProcess();
             await this.bootstrapSettings();
             this.bindControls();
+            window.addEventListener(
+                "pagehide",
+                () => {
+                    const streamImg = document.getElementById("video-stream");
+                    if (!streamImg) return;
+                    try {
+                        streamImg.onload = null;
+                        streamImg.onerror = null;
+                    } catch (_) {
+                        /* ignore */
+                    }
+                    streamImg.src = "";
+                    streamImg.removeAttribute("src");
+                },
+                { capture: false },
+            );
             await this.startCameraStream();
             this.startDataUpdates();
             this.startSolveLoop();
@@ -120,7 +136,7 @@ class OGScopeHomeApp {
                 1200,
             );
             this.solveParams.fov_estimate = Number(settingsResp.solver_fov_deg ?? 11);
-            this.solveParams.max_image_side = Number(settingsResp.solver_max_image_side ?? 1600);
+            this.solveParams.max_image_side = Number(settingsResp.solver_max_image_side ?? 1280);
         } catch (e) {
             console.warn("[OGScope] 读取分析配置失败，使用默认值:", e);
         }

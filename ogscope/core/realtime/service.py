@@ -10,7 +10,7 @@ from typing import Any
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.star_extract import StarExtractor, StarPoint
-from ogscope.config import get_settings
+from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.web.camera_shared import get_camera_manager
 
 
@@ -30,7 +30,7 @@ class RealtimeSolveService:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
+        self.extractor = StarExtractor(max_stars=effective_solver_max_stars(settings))
         self.solver = PlateSolver(
             fov_deg=settings.solver_fov_deg,
             fov_max_error_deg=settings.solver_fov_max_error_deg,

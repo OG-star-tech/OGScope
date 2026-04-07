@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     # 相机配置 / Camera configuration
     camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
     camera_width: int = Field(
-        default=1600, description="图像宽度 / Default capture width"
+        default=1280, description="图像宽度 / Default capture width"
     )
     camera_height: int = Field(
-        default=900, description="图像高度 / Default capture height"
+        default=720, description="图像高度 / Default capture height"
     )
     camera_fps: int = Field(
         default=5, description="预览与调试默认帧率 / Default preview FPS"
@@ -138,8 +138,25 @@ class Settings(BaseSettings):
         description="长细比上限；None 为不限制 / Max major/minor axis ratio, None to disable",
     )
     solver_max_image_side: int = Field(
-        default=1600,
+        default=1280,
         description="提星前长边上限（像素），与默认采集长边对齐 / Max long side before extraction",
+    )
+    solver_max_stars_hard_cap: Optional[int] = Field(
+        default=None,
+        ge=4,
+        le=200,
+        description=(
+            "硬上限：所有解算路径的 max_stars（含 speed/balanced/robust 分档）不超过该值；"
+            "None 表示不额外限制 / Hard cap on max stars for all solve paths; None disables"
+        ),
+    )
+    solver_max_image_side_hard_cap: Optional[int] = Field(
+        default=None,
+        ge=256,
+        le=4096,
+        description=(
+            "硬上限：提星前长边不超过该像素；None 表示不额外限制 / Hard cap on max image side; None disables"
+        ),
     )
     solver_large_scale_bg_downsample: int = Field(
         default=256,
@@ -174,6 +191,15 @@ class Settings(BaseSettings):
         ge=200,
         le=120000,
         description="实时解算慢请求阈值（毫秒）/ Slow realtime solve threshold in ms",
+    )
+    stream_max_mjpeg_clients: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "同时允许的 MJPEG 长连接数（/api/debug/camera/stream 与 stream-lossless）；"
+            "0=不限制 / Max concurrent MJPEG streams; 0=unlimited"
+        ),
     )
 
     # WiFi（nmcli + scripts/ogscope-wifi-switch.sh）/ WiFi (NetworkManager helper script)
@@ -273,3 +299,21 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """获取配置单例 / Get configuration singleton"""
     return Settings()
+
+
+def effective_solver_max_stars(settings: Settings) -> int:
+    """考虑 solver_max_stars_hard_cap 后的最大星点数 / Max stars after optional hard cap."""
+    v = max(4, int(settings.solver_max_stars))
+    cap = settings.solver_max_stars_hard_cap
+    if cap is not None:
+        v = min(v, int(cap))
+    return v
+
+
+def effective_solver_max_image_side(settings: Settings) -> int:
+    """考虑 solver_max_image_side_hard_cap 后的提星长边 / Max image side after optional hard cap."""
+    v = max(256, int(settings.solver_max_image_side))
+    cap = settings.solver_max_image_side_hard_cap
+    if cap is not None:
+        v = min(v, int(cap))
+    return v

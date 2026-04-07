@@ -13,6 +13,8 @@
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
+#   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，同步 ogscope.service.d MemoryMax / Optional MemoryMax drop-in
+#   OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1 — 内存≤512MiB 时不同步 ogscope-low-ram.conf / Skip low-RAM solver drop-in sync
 
 set -euo pipefail
 
@@ -115,6 +117,29 @@ else
     sudo install -d /etc/systemd/journald.conf.d
     sudo install -m 0644 "${JOURNALD_DROPIN_SRC}" "${JOURNALD_DROPIN_DST}"
     sudo systemctl restart systemd-journald
+fi
+
+if [ -n "${OGSCOPE_SYSTEMD_MEMORY_MAX:-}" ]; then
+    echo "📝 同步 ogscope MemoryMax=${OGSCOPE_SYSTEMD_MEMORY_MAX} / Syncing MemoryMax drop-in..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    sudo tee /etc/systemd/system/ogscope.service.d/memory-limit.conf >/dev/null <<EOF
+[Service]
+MemoryMax=${OGSCOPE_SYSTEMD_MEMORY_MAX}
+EOF
+fi
+
+LOW_RAM_DROPIN_SRC="${SCRIPT_DIR}/systemd/system/ogscope.service.d/ogscope-low-ram.conf"
+_mem_total_kb_board="$(grep '^MemTotal:' /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 9999999)"
+if [ "${OGSCOPE_SKIP_LOW_RAM_DEFAULTS:-}" = "1" ]; then
+    echo "⏭️  跳过低内存解算默认（OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1）/ Skipping low-RAM solver drop-in sync"
+elif [ ! -f "${LOW_RAM_DROPIN_SRC}" ]; then
+    echo "⚠️  未找到 ${LOW_RAM_DROPIN_SRC}，跳过 / Low-RAM drop-in missing; skipping"
+elif [ "${_mem_total_kb_board}" -le 524288 ]; then
+    echo "📝 同步低内存解算推荐值（星数≤40、长边≤1280）/ Syncing low-RAM solver caps..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    sudo install -m 0644 "${LOW_RAM_DROPIN_SRC}" /etc/systemd/system/ogscope.service.d/ogscope-low-ram.conf
+else
+    echo "ℹ️  MemTotal≈$((_mem_total_kb_board / 1024)) MiB — 未同步 ogscope-low-ram.conf / Skipping low-RAM drop-in on this host"
 fi
 
 echo "🔄 重启服务 / Restarting service..."

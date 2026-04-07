@@ -57,9 +57,20 @@ import {
   formatAngleDeg,
   formatProbLine,
   parseSolveResult,
+  tetraFalsePositiveProbToConfidencePercent,
 } from "./utils/solveDisplay";
 
 type View = "lab_image" | "lab_video" | "pool" | "history";
+
+/** 单次请求解算历史快照（最多 10 组）/ One request snapshot for solve history */
+type SolveHistoryGroup = {
+  id: string;
+  at: number;
+  single?: Record<string, unknown> | null;
+  batch?: { results: Array<Record<string, unknown>> } | null;
+};
+
+const SOLVE_HISTORY_MAX = 10;
 
 const defaultParams = (): SolveParams => ({
   hint_ra_deg: 45,
@@ -68,9 +79,10 @@ const defaultParams = (): SolveParams => ({
   fov_max_error: undefined,
   solve_timeout_ms: 1500,
   solve_profile: "balanced",
-  max_image_side: 1600,
+  max_image_side: 1280,
   large_scale_bg_subtract: false,
   detail_level: "summary",
+  centroid_rejection_level: 3,
   centroid: {
     sigma: 2.5,
     max_area: 400,
@@ -138,6 +150,12 @@ export default function App() {
   const [batchPack, setBatchPack] = useState<{
     results: Array<Record<string, unknown>>;
   } | null>(null);
+  const [solveHistoryGroups, setSolveHistoryGroups] = useState<SolveHistoryGroup[]>([]);
+  const [toasts, setToasts] = useState<Array<{ id: string; text: string; variant: "error" | "info" | "warn" }>>(
+    [],
+  );
+  const lastResultRef = useRef<Record<string, unknown> | null>(null);
+  const batchPackRef = useRef<typeof batchPack>(null);
   const [historyQ, setHistoryQ] = useState("");
   const [historyPage, setHistoryPage] = useState(1);
   const [historyData, setHistoryData] = useState<{ items: unknown[]; total: number } | null>(
@@ -145,7 +163,12 @@ export default function App() {
   );
   const [historyExpandId, setHistoryExpandId] = useState<string | null>(null);
   const [newPresetName, setNewPresetName] = useState("");
-  const [layers, setLayers] = useState({ matched: true, pattern: true, all: true });
+  const [layers, setLayers] = useState({
+    matched: true,
+    pattern: true,
+    all: true,
+    rejected: true,
+  });
   const [debugFiles, setDebugFiles] = useState<DebugFileRow[]>([]);
   const [debugPick, setDebugPick] = useState<string | null>(null);
   const [debugPage, setDebugPage] = useState(1);
@@ -190,10 +213,13 @@ export default function App() {
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
-  const cameraSolveTimerRef = useRef<number | null>(null);
-  const fileSolveTimerRef = useRef<number | null>(null);
+  const cameraSolveTimeoutRef = useRef<number | null>(null);
+  /** 视频连续解算：setTimeout 链式调度（与后端门禁对齐）/ Chained timeouts for gate alignment */
+  const fileSolveTimeoutRef = useRef<number | null>(null);
   const cameraSolveInFlightRef = useRef(false);
   const fileSolveInFlightRef = useRef(false);
+  const fileSolveRunningRef = useRef(false);
+  const cameraSolveRunningRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
 
   /** 从当前预览 img 截一帧为 JPEG blob URL（用于冻结与星点同帧）/ Snapshot current preview frame for freeze */
@@ -220,6 +246,65 @@ export default function App() {
   }, []);
   const [sysOverview, setSysOverview] = useState<import("./api").SystemInfo | null>(null);
   const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
+
+  const showToast = useCallback((text: string, variant: "error" | "info" | "warn") => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    setToasts((prev) => [...prev, { id, text, variant }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+    }, 4800);
+  }, []);
+
+  useEffect(() => {
+    lastResultRef.current = lastResult;
+  }, [lastResult]);
+  useEffect(() => {
+    batchPackRef.current = batchPack;
+  }, [batchPack]);
+  useEffect(() => {
+    fileSolveRunningRef.current = fileSolveRunning;
+  }, [fileSolveRunning]);
+  useEffect(() => {
+    cameraSolveRunningRef.current = cameraSolveRunning;
+  }, [cameraSolveRunning]);
+
+  useEffect(() => {
+    if (!err) return;
+    showToast(err, "error");
+    setErr(null);
+  }, [err, showToast]);
+
+  useEffect(() => {
+    if (!lastGateHint) return;
+    showToast(lastGateHint, "warn");
+    setLastGateHint(null);
+  }, [lastGateHint, showToast]);
+
+  const pushCurrentToSolveHistory = useCallback(() => {
+    const lr = lastResultRef.current;
+    const bp = batchPackRef.current;
+    if (!lr && !bp) return;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    setSolveHistoryGroups((prev) =>
+      [{ id, at: Date.now(), single: lr ?? undefined, batch: bp ?? undefined }, ...prev].slice(
+        0,
+        SOLVE_HISTORY_MAX,
+      ),
+    );
+  }, []);
+
+  const clearFileSolveSchedule = () => {
+    if (fileSolveTimeoutRef.current != null) {
+      window.clearTimeout(fileSolveTimeoutRef.current);
+      fileSolveTimeoutRef.current = null;
+    }
+  };
+  const clearCameraSolveSchedule = () => {
+    if (cameraSolveTimeoutRef.current != null) {
+      window.clearTimeout(cameraSolveTimeoutRef.current);
+      cameraSolveTimeoutRef.current = null;
+    }
+  };
 
   const intervalMinMs = labSettings?.star_analysis_min_interval_ms ?? 2000;
   const intervalMaxMs = labSettings?.star_analysis_max_interval_ms ?? 12000;
@@ -260,6 +345,10 @@ export default function App() {
           s.star_analysis_max_interval_ms,
         );
         setDesiredSolveIntervalMs(bounded);
+        const cr = s.centroid_rejection_level_default;
+        if (typeof cr === "number" && cr >= 1 && cr <= 5) {
+          setParams((p) => ({ ...p, centroid_rejection_level: cr }));
+        }
       })
       .catch(() => setLabSettings(null));
   }, []);
@@ -324,6 +413,7 @@ export default function App() {
     setLastSolveSource(null);
     setVideoPreviewMode("file");
     setVideoPreviewError(null);
+    setSolveHistoryGroups([]);
   }, [selected]);
 
   const overlay = useMemo(() => {
@@ -437,6 +527,7 @@ export default function App() {
     const t0 = performance.now();
     try {
       const out = (await solveImage(selected, params)) as { result?: Record<string, unknown> };
+      pushCurrentToSolveHistory();
       setLastResult(out as Record<string, unknown>);
       setBatchPack(null);
       setLastSolveSource("file");
@@ -473,6 +564,7 @@ export default function App() {
     const t0 = performance.now();
     try {
       const pack = (await solveBatch(selected, runs)) as { results: unknown[] };
+      pushCurrentToSolveHistory();
       setBatchPack({
         results: pack.results as Array<Record<string, unknown>>,
       });
@@ -489,7 +581,7 @@ export default function App() {
   };
 
   /** 设备相机当前帧解算（与素材池视频无关）/ Live camera frame solve */
-  const onCameraSolve = async () => {
+  const runCameraFrameSolve = async (fromLoop: boolean) => {
     if (cameraSolveInFlightRef.current) return;
     setErr(null);
     cameraSolveInFlightRef.current = true;
@@ -503,12 +595,34 @@ export default function App() {
         solve_timeout_ms: Math.min((labSettings?.solver_timeout_ms ?? 1500) * 0.6, 1200),
         ...params,
       });
-      if (out.gate_status && out.gate_status !== "SOLVED") {
-        setLastGateHint(`${out.gate_status}${out.gate_reason ? `: ${out.gate_reason}` : ""}`);
-      } else {
-        setLastGateHint(null);
+      const gs = (out as { gate_status?: string | null }).gate_status;
+      const nextAllowed = (out as { next_allowed_in_ms?: number | null }).next_allowed_in_ms;
+      const effInt = (out as { effective_interval_ms?: number | null }).effective_interval_ms;
+
+      if (gs === "SKIPPED_INTERVAL" || gs === "SKIPPED_BUSY") {
+        const extra =
+          typeof nextAllowed === "number" && nextAllowed > 0
+            ? ` · ${t("lab.gateNextMs", { ms: nextAllowed })}`
+            : "";
+        setLastGateHint(
+          `${gs}${(out as { gate_reason?: string | null }).gate_reason ? `: ${String((out as { gate_reason?: string | null }).gate_reason)}` : ""}${extra}`,
+        );
+        if (fromLoop) {
+          clearCameraSolveSchedule();
+          const wait = Math.max(50, Number(nextAllowed ?? starAnalysisIntervalMs));
+          cameraSolveTimeoutRef.current = window.setTimeout(() => {
+            cameraSolveTimeoutRef.current = null;
+            if (cameraSolveRunningRef.current) void runCameraFrameSolve(true);
+          }, wait);
+        }
+        return;
       }
-      setLastResult(out as Record<string, unknown>);
+
+      setLastGateHint(null);
+      if ((out as { result?: Record<string, unknown> }).result != null) {
+        pushCurrentToSolveHistory();
+        setLastResult(out as Record<string, unknown>);
+      }
       setBatchPack(null);
       setLastSolveSource("camera");
       setVideoPreviewMode("camera");
@@ -528,6 +642,13 @@ export default function App() {
           return snap;
         });
         stopCameraSolveLoop();
+      } else if (fromLoop) {
+        clearCameraSolveSchedule();
+        const wait = Math.max(50, Number(effInt ?? starAnalysisIntervalMs));
+        cameraSolveTimeoutRef.current = window.setTimeout(() => {
+          cameraSolveTimeoutRef.current = null;
+          if (cameraSolveRunningRef.current) void runCameraFrameSolve(true);
+        }, wait);
       }
       setLastRoundTripMs(performance.now() - t0);
     } catch (e) {
@@ -538,7 +659,9 @@ export default function App() {
     }
   };
 
-  const onVideoFileSolve = async () => {
+  const onCameraSolve = () => void runCameraFrameSolve(false);
+
+  const runVideoFileSolve = async (fromLoop: boolean) => {
     if (fileSolveInFlightRef.current) return;
     if (!selected) return;
     const vd = videoRef.current;
@@ -569,17 +692,45 @@ export default function App() {
         overlay_topn_count: 3,
         enable_polar_guide: true,
       });
-      const gateStatus = (out as { gate_status?: string | null }).gate_status;
-      const gateReason = (out as { gate_reason?: string | null }).gate_reason;
-      if (gateStatus && gateStatus !== "SOLVED") {
-        setLastGateHint(`${gateStatus}${gateReason ? `: ${gateReason}` : ""}`);
-      } else {
-        setLastGateHint(null);
+      const gs = (out as { gate_status?: string | null }).gate_status;
+      const nextAllowed = (out as { next_allowed_in_ms?: number | null }).next_allowed_in_ms;
+      const effInt = (out as { effective_interval_ms?: number | null }).effective_interval_ms;
+
+      if (gs === "SKIPPED_INTERVAL" || gs === "SKIPPED_BUSY") {
+        const extra =
+          typeof nextAllowed === "number" && nextAllowed > 0
+            ? ` · ${t("lab.gateNextMs", { ms: nextAllowed })}`
+            : "";
+        setLastGateHint(
+          `${gs}${(out as { gate_reason?: string | null }).gate_reason ? `: ${String((out as { gate_reason?: string | null }).gate_reason)}` : ""}${extra}`,
+        );
+        if (fromLoop) {
+          clearFileSolveSchedule();
+          const wait = Math.max(50, Number(nextAllowed ?? starAnalysisIntervalMs));
+          fileSolveTimeoutRef.current = window.setTimeout(() => {
+            fileSolveTimeoutRef.current = null;
+            if (fileSolveRunningRef.current) void runVideoFileSolve(true);
+          }, wait);
+        }
+        return;
       }
-      setLastResult(out as Record<string, unknown>);
+
+      setLastGateHint(null);
+      if ((out as { result?: Record<string, unknown> }).result != null) {
+        pushCurrentToSolveHistory();
+        setLastResult(out as Record<string, unknown>);
+      }
       setBatchPack(null);
       setLastSolveSource("file");
       setLastRoundTripMs(performance.now() - t0);
+      if (fromLoop) {
+        clearFileSolveSchedule();
+        const wait = Math.max(50, Number(effInt ?? starAnalysisIntervalMs));
+        fileSolveTimeoutRef.current = window.setTimeout(() => {
+          fileSolveTimeoutRef.current = null;
+          if (fileSolveRunningRef.current) void runVideoFileSolve(true);
+        }, wait);
+      }
     } catch (e) {
       setErr(String(e));
       setLastRoundTripMs(null);
@@ -588,13 +739,13 @@ export default function App() {
     }
   };
 
+  const onVideoFileSolve = () => void runVideoFileSolve(false);
+
   const startFileSolveLoop = () => {
     if (fileSolveRunning || !selected) return;
     setFileSolveRunning(true);
-    void onVideoFileSolve();
-    fileSolveTimerRef.current = window.setInterval(() => {
-      void onVideoFileSolve();
-    }, starAnalysisIntervalMs);
+    clearFileSolveSchedule();
+    void runVideoFileSolve(true);
   };
 
   const canSolveVideoFile = useMemo(() => {
@@ -715,32 +866,32 @@ export default function App() {
 
   const stopFileSolveLoop = () => {
     setFileSolveRunning(false);
-    if (fileSolveTimerRef.current != null) {
-      window.clearInterval(fileSolveTimerRef.current);
-      fileSolveTimerRef.current = null;
-    }
+    clearFileSolveSchedule();
   };
 
   const startCameraSolveLoop = () => {
     if (cameraSolveRunning) return;
     if (isFrozen) return;
     setCameraSolveRunning(true);
-    void onCameraSolve();
-    cameraSolveTimerRef.current = window.setInterval(() => {
-      void onCameraSolve();
-    }, starAnalysisIntervalMs);
+    clearCameraSolveSchedule();
+    void runCameraFrameSolve(true);
   };
 
   const stopCameraSolveLoop = () => {
     setCameraSolveRunning(false);
-    if (cameraSolveTimerRef.current != null) {
-      window.clearInterval(cameraSolveTimerRef.current);
-      cameraSolveTimerRef.current = null;
-    }
+    clearCameraSolveSchedule();
   };
 
   const stopCameraPreview = async () => {
     try {
+      const img = cameraPreviewImgRef.current;
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.src = "";
+        img.removeAttribute("src");
+      }
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       await fetch("/api/debug/camera/stop", { method: "POST" });
       setCameraStreamNonce(Date.now());
       if (videoPreviewMode === "camera") {
@@ -868,6 +1019,10 @@ export default function App() {
   }, [uploads, view]);
 
   const solveHud = useMemo(() => parseSolveResult(resultRow), [resultRow]);
+  const solveProbPercent = useMemo(
+    () => tetraFalsePositiveProbToConfidencePercent(solveHud.prob),
+    [solveHud.prob],
+  );
 
   useEffect(() => {
     setSingleFooterRawOpen(false);
@@ -1166,18 +1321,6 @@ export default function App() {
         {(view === "lab_image" || view === "lab_video") && (
           <div className="flex min-h-0 min-w-0 flex-1">
             <main className="og-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
-              {err && (
-                <div className="mb-2 rounded border border-error/40 bg-error-container/20 px-3 py-2 text-xs text-error">
-                  {err}
-                </div>
-              )}
-              <div className="mb-2 min-h-[24px] text-xs">
-                {lastGateHint && (
-                  <div className="rounded border border-outline-variant/35 bg-surface-container px-3 py-2 text-on-surface-variant">
-                    {lastGateHint}
-                  </div>
-                )}
-              </div>
               {view === "lab_video" && (
                 <div className="mb-3 max-w-5xl rounded-lg border border-outline-variant/25 bg-surface-container-low/80 p-3 text-[11px] leading-relaxed text-on-surface">
                   <p className="text-[10px] text-on-surface-variant">{t("lab.videoLiveIntro")}</p>
@@ -1215,6 +1358,11 @@ export default function App() {
                 </div>
               )}
               <div className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+                {solveProbPercent != null && (
+                  <div className="pointer-events-none absolute right-2 top-2 z-20 rounded border border-white/30 bg-black/55 px-2 py-1 text-[10px] font-semibold tabular-nums text-white">
+                    {t("lab.previewConfidence")}: {solveProbPercent.toFixed(1)}%
+                  </div>
+                )}
                 {view === "lab_video" && videoPreviewMode === "camera" ? (
                   <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
                     <div className="relative inline-block max-h-[70vh] max-w-full">
@@ -1462,7 +1610,7 @@ export default function App() {
                     {t("lab.layers")}
                   </span>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {(["matched", "pattern", "all"] as const).map((k) => (
+                    {(["matched", "pattern", "all", "rejected"] as const).map((k) => (
                       <label key={k} className="flex cursor-pointer items-center gap-1">
                         <input
                           type="checkbox"
@@ -1477,7 +1625,9 @@ export default function App() {
                             ? t("lab.layer.matched")
                             : k === "pattern"
                               ? t("lab.layer.pattern")
-                              : t("lab.layer.all")}
+                              : k === "all"
+                                ? t("lab.layer.all")
+                                : t("lab.layer.rejected")}
                         </span>
                       </label>
                     ))}
@@ -1729,7 +1879,98 @@ export default function App() {
                 </>
               )}
               {(selected || (view === "lab_video" && videoPreviewMode === "camera")) &&
-                (lastResult || batchPack) && (
+                (solveHistoryGroups.length > 0 || lastResult || batchPack) && (
+                <>
+                  {solveHistoryGroups.length > 0 && (
+                    <section className="mt-3 rounded-lg border border-outline-variant/25 bg-surface-container-lowest/90">
+                      <div className="flex h-9 shrink-0 items-center border-b border-outline-variant/15 px-3 text-[10px] uppercase text-on-surface-variant">
+                        <span>{t("results.solveHistoryTitle")}</span>
+                        <span className="ml-2 normal-case text-on-surface-variant/70">
+                          ({solveHistoryGroups.length}/{SOLVE_HISTORY_MAX})
+                        </span>
+                      </div>
+                      <div className="og-scrollbar max-h-[min(36vh,18rem)] space-y-2 overflow-y-auto p-3">
+                        {solveHistoryGroups.map((g) => {
+                          const batch = g.batch;
+                          const single = g.single;
+                          const timeLabel = formatDateTime(
+                            new Date(g.at).toISOString(),
+                            locale,
+                          );
+                          const title =
+                            batch && batch.results.length
+                              ? t("results.historyBatch", { count: batch.results.length })
+                              : t("results.historySingle");
+                          return (
+                            <details
+                              key={g.id}
+                              className="rounded border border-outline-variant/20 bg-surface-container/80 text-xs"
+                            >
+                              <summary className="cursor-pointer list-none px-3 py-2 font-medium text-on-surface [&::-webkit-details-marker]:hidden">
+                                <span>
+                                  {timeLabel} · {title}
+                                </span>
+                              </summary>
+                              <div className="border-t border-outline-variant/15 p-3 pt-2">
+                                {batch?.results?.length ? (
+                                  <div className="og-scrollbar flex gap-2 overflow-x-auto pb-1">
+                                    {batch.results.map((r, i) => {
+                                      const row = r.result as
+                                        | Record<string, unknown>
+                                        | undefined;
+                                      const ok = (r as { success?: boolean }).success === true;
+                                      return (
+                                        <div
+                                          key={i}
+                                          className="min-w-[12rem] max-w-xs shrink-0 rounded border border-outline-variant/20 bg-surface-container-lowest p-2"
+                                        >
+                                          <div className="border-b border-outline-variant/10 pb-1 text-[10px] font-semibold text-secondary">
+                                            {String((r as { label?: string }).label ?? i)}
+                                          </div>
+                                          {ok && row ? (
+                                            <SolveFooterSummary
+                                              result={row}
+                                              t={t}
+                                              roundTripMs={null}
+                                            />
+                                          ) : (
+                                            <div className="mt-1 text-[10px] text-error">
+                                              {String((r as { error?: string }).error ?? "—")}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                                {single &&
+                                (single as { result?: Record<string, unknown> }).result ? (
+                                  <div className="mt-2 rounded border border-outline-variant/15 p-2">
+                                    <SolveFooterSummary
+                                      result={
+                                        (single as { result?: Record<string, unknown> }).result
+                                      }
+                                      t={t}
+                                      roundTripMs={null}
+                                    />
+                                  </div>
+                                ) : null}
+                                <details className="mt-2">
+                                  <summary className="cursor-pointer text-[10px] text-primary hover:underline">
+                                    {t("results.viewRaw")}
+                                  </summary>
+                                  <pre className="og-scrollbar mt-1 max-h-32 overflow-auto rounded bg-surface-container-highest p-2 text-[9px] text-on-surface-variant">
+                                    {JSON.stringify({ single, batch }, null, 2)}
+                                  </pre>
+                                </details>
+                              </div>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
+                  {(lastResult || batchPack) && (
                 <section className="mt-3 max-h-[min(50vh,28rem)] rounded-lg border border-outline-variant/25 bg-surface-container-lowest/95">
                   <div className="flex h-9 shrink-0 items-center justify-between border-b border-outline-variant/15 px-3 text-[10px] uppercase text-on-surface-variant">
                     <span>{t("results.title")}</span>
@@ -1863,6 +2104,8 @@ export default function App() {
                     </div>
                   </div>
                 </section>
+                  )}
+                </>
               )}
             </main>
 
@@ -2051,6 +2294,44 @@ export default function App() {
                           effective: starAnalysisIntervalMs,
                         })}
                       </p>
+                      {view === "lab_video" && (
+                        <label className="mt-2 block">
+                          <span className="text-[10px] font-medium text-on-surface-variant">
+                            {t("params.centroidRejectionLevel")}
+                          </span>
+                          <p className="mb-1 mt-0.5 text-[9px] leading-snug text-on-surface-variant/85">
+                            {t("params.centroidRejectionLevelHelp")}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 shrink-0 text-center text-[9px] text-on-surface-variant">
+                              1
+                            </span>
+                            <input
+                              type="range"
+                              min={1}
+                              max={5}
+                              step={1}
+                              className="h-2 flex-1 accent-primary"
+                              value={params.centroid_rejection_level ?? 3}
+                              onChange={(e) =>
+                                setParams((p) => ({
+                                  ...p,
+                                  centroid_rejection_level: Number(e.target.value),
+                                }))
+                              }
+                            />
+                            <span className="w-5 shrink-0 text-center text-[9px] text-on-surface-variant">
+                              5
+                            </span>
+                            <span className="ml-1 min-w-[1.25rem] tabular-nums text-[10px] font-semibold text-on-surface">
+                              {params.centroid_rejection_level ?? 3}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[9px] text-on-surface-variant/90">
+                            {t("params.centroidRejectionScale")}
+                          </p>
+                        </label>
+                      )}
                       <Field
                         label={t("params.ra")}
                         helpKey="params.raHelp"
@@ -2421,6 +2702,22 @@ export default function App() {
           </main>
         )}
       </div>
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex max-w-sm flex-col gap-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto rounded border px-3 py-2 text-left text-xs shadow-lg ${
+              toast.variant === "error"
+                ? "border-error/50 bg-error-container/95 text-on-error-container"
+                : toast.variant === "warn"
+                  ? "border-amber-500/40 bg-surface-container-highest/95 text-on-surface"
+                  : "border-outline-variant/40 bg-surface-container-high/95 text-on-surface"
+            }`}
+          >
+            {toast.text}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2523,6 +2820,52 @@ function SolveFooterSummary({
           </div>
         )}
       </div>
+      {result.centroid_quality != null &&
+        typeof result.centroid_quality === "object" && (
+          <div className="rounded border border-outline-variant/25 bg-surface-container-high/40 p-2">
+            <div className="text-[9px] font-medium text-on-surface-variant">
+              {t("lab.centroidQualityTitle")}
+              {typeof (result.centroid_quality as { level?: number }).level === "number"
+                ? ` · L${(result.centroid_quality as { level: number }).level}`
+                : ""}
+            </div>
+            {Array.isArray((result.centroid_quality as { hints?: unknown }).hints) &&
+            (result.centroid_quality as { hints: string[] }).hints.length > 0 ? (
+              <ul className="mt-1 list-inside list-disc text-[9px] leading-snug text-on-surface-variant">
+                {(result.centroid_quality as { hints: string[] }).hints.map((h, i) => (
+                  <li key={i}>{h}</li>
+                ))}
+              </ul>
+            ) : null}
+            {(() => {
+              const m = (result.centroid_quality as { metrics?: Record<string, unknown> })
+                .metrics;
+              if (!m) return null;
+              const inn = m.input_count;
+              const outc = m.output_count;
+              const rd = m.removed_dense;
+              const rl = m.removed_line;
+              if (
+                typeof inn !== "number" ||
+                typeof outc !== "number" ||
+                typeof rd !== "number" ||
+                typeof rl !== "number"
+              ) {
+                return null;
+              }
+              return (
+                <p className="mt-1 font-mono text-[9px] text-on-surface-variant/95">
+                  {t("lab.centroidQualityMetrics", {
+                    in: inn,
+                    out: outc,
+                    dense: rd,
+                    line: rl,
+                  })}
+                </p>
+              );
+            })()}
+          </div>
+        )}
       <div>
         <div className="text-on-surface-variant">{t("lab.metric.radec")}</div>
         <div className="font-mono text-[9px] text-on-surface">

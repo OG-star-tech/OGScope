@@ -159,6 +159,7 @@ async def create_analysis_job(payload: AnalysisJobCreateRequest):
             centroid=payload.centroid,
             max_image_side=payload.max_image_side,
             large_scale_bg_subtract=bool(payload.large_scale_bg_subtract),
+            centroid_rejection_level=payload.centroid_rejection_level,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc

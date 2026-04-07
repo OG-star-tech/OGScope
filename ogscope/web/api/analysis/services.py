@@ -26,7 +26,11 @@ from ogscope.algorithms.plate_solve import (
     merge_centroid_params,
 )
 from ogscope.algorithms.star_extract import StarExtractor
-from ogscope.config import get_settings
+from ogscope.config import (
+    effective_solver_max_image_side,
+    effective_solver_max_stars,
+    get_settings,
+)
 from ogscope.web.api.analysis.lab_store import AnalysisLabStore
 from ogscope.web.api.models.schemas import (
     AnalysisBatchSolveRequest,
@@ -162,8 +166,8 @@ class AnalysisService:
         self._solver_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="solver"
         )
-        self._solver_max_stars = settings.solver_max_stars
-        self.extractor = StarExtractor(max_stars=settings.solver_max_stars)
+        self._solver_max_stars = effective_solver_max_stars(settings)
+        self.extractor = StarExtractor(max_stars=self._solver_max_stars)
         self.solver = PlateSolver(
             fov_deg=settings.solver_fov_deg,
             fov_max_error_deg=settings.solver_fov_max_error_deg,
@@ -175,11 +179,19 @@ class AnalysisService:
         self._lab = AnalysisLabStore(settings)
         self._overlay_topn_default = 3
         self._polar_guide_default = True
+        self._centroid_rejection_default = 3
         self._realtime_gate_lock = asyncio.Lock()
         self._realtime_gate_states: dict[str, RealtimeSolveGateState] = {
             "camera": RealtimeSolveGateState(),
             "file": RealtimeSolveGateState(),
         }
+
+    @staticmethod
+    def _clamp_centroid_rejection_level(v: int | None) -> int:
+        """API 质心剔除档位 1–5 / Clamp centroid rejection level."""
+        if v is None:
+            return 3
+        return max(1, min(5, int(v)))
 
     async def _try_enter_realtime_gate(
         self, source: str, interval_ms: int
@@ -408,7 +420,16 @@ class AnalysisService:
             if solve_timeout_ms is not None
             else profile_cfg.get("timeout_ms", settings.solver_timeout_ms)
         )
-        return centroid, max(4, max_stars), max(200, timeout_ms), effective
+        max_stars = self._clamp_max_stars(max_stars)
+        return centroid, max_stars, max(200, timeout_ms), effective
+
+    def _clamp_max_stars(self, n: int) -> int:
+        """应用 solver_max_stars_hard_cap，避免分档或请求把星数抬到过高 / Apply hard cap on star count."""
+        cap = get_settings().solver_max_stars_hard_cap
+        v = max(4, int(n))
+        if cap is not None:
+            v = min(v, int(cap))
+        return v
 
     def resolve_upload_path(self, filename: str) -> Path:
         """解析上传目录内安全路径（仅单层文件名）/ Safe path under upload_root (basename only)."""
@@ -540,6 +561,7 @@ class AnalysisService:
         centroid: CentroidParamsPayload | None = None,
         max_image_side: int | None = None,
         large_scale_bg_subtract: bool = False,
+        centroid_rejection_level: int | None = None,
     ) -> dict[str, Any]:
         """创建并执行任务 / Create and execute job"""
         if input_type not in {"image", "video"}:
@@ -557,6 +579,7 @@ class AnalysisService:
         self._jobs[job.job_id] = job
         self._persist_job(job)
         centroid_params = self._centroid_params_from_payload(centroid)
+        cr_level = self._clamp_centroid_rejection_level(centroid_rejection_level)
 
         try:
             job.status = "running"
@@ -577,6 +600,7 @@ class AnalysisService:
                     max_image_side,
                     None,
                     large_scale_bg_subtract,
+                    cr_level,
                 )
             else:
                 results = await loop.run_in_executor(
@@ -591,6 +615,7 @@ class AnalysisService:
                     fov_estimate,
                     fov_max_error,
                     solve_timeout_ms,
+                    cr_level,
                 )
             result_path = self.results_root / f"{job.job_id}.json"
             result_payload = {
@@ -631,6 +656,7 @@ class AnalysisService:
         )
 
         ls_bg = bool(body.large_scale_bg_subtract)
+        cr_lv = self._clamp_centroid_rejection_level(body.centroid_rejection_level)
 
         def _run_single() -> list[dict[str, Any]]:
             return self._analyze_image(
@@ -644,6 +670,7 @@ class AnalysisService:
                 max_image_side=body.max_image_side,
                 max_stars=max_stars,
                 large_scale_bg_subtract=ls_bg,
+                centroid_rejection_level=cr_lv,
             )
 
         def _run_two_stage() -> list[dict[str, Any]]:
@@ -665,6 +692,7 @@ class AnalysisService:
                 max_image_side=body.max_image_side,
                 max_stars=speed_max_stars,
                 large_scale_bg_subtract=ls_bg,
+                centroid_rejection_level=cr_lv,
             )
             row0 = first[0] if first else None
             if row0 and row0.get("status") == "MATCH_FOUND":
@@ -680,6 +708,7 @@ class AnalysisService:
             )
             if detected > 0 and detected > robust_max_stars:
                 robust_max_stars = max(20, int(robust_max_stars * 0.7))
+            robust_max_stars = self._clamp_max_stars(robust_max_stars)
 
             second = self._analyze_image(
                 source=source,
@@ -692,6 +721,7 @@ class AnalysisService:
                 max_image_side=body.max_image_side,
                 max_stars=robust_max_stars,
                 large_scale_bg_subtract=ls_bg,
+                centroid_rejection_level=cr_lv,
             )
             if second:
                 second[0]["solve_profile"] = "robust"
@@ -967,6 +997,9 @@ class AnalysisService:
                     solve_params.max_image_side,
                     max_stars,
                     bool(solve_params.large_scale_bg_subtract),
+                    self._clamp_centroid_rejection_level(
+                        solve_params.centroid_rejection_level
+                    ),
                 )
 
             hard_timeout_sec = max(
@@ -1068,7 +1101,7 @@ class AnalysisService:
                 raise ValueError("无法读取图片 / Unable to read image")
             return centroid_extraction_preview(
                 frame,
-                max_stars=self._solver_max_stars,
+                max_stars=self._clamp_max_stars(self._solver_max_stars),
                 centroid_params=centroid_params,
                 max_image_side=int(max_side),
                 large_scale_bg_subtract=bool(body.large_scale_bg_subtract),
@@ -1118,12 +1151,18 @@ class AnalysisService:
         max_image_side: int | None = None,
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
+        centroid_rejection_level: int | None = None,
     ) -> dict[str, Any]:
         """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
+        cr_level = self._clamp_centroid_rejection_level(
+            centroid_rejection_level
+            if centroid_rejection_level is not None
+            else self._centroid_rejection_default
+        )
         solved = self.solver.solve_from_bgr_frame(
             frame_bgr=frame_bgr,
-            max_stars=int(
-                max_stars if max_stars is not None else self._solver_max_stars
+            max_stars=self._clamp_max_stars(
+                int(max_stars if max_stars is not None else self._solver_max_stars)
             ),
             hint_ra_deg=(
                 hint_ra_deg if hint_ra_deg is not None else self.default_hint_ra
@@ -1138,6 +1177,7 @@ class AnalysisService:
             centroid_params=centroid_params,
             max_image_side=max_image_side,
             large_scale_bg_subtract=large_scale_bg_subtract,
+            centroid_rejection_level=cr_level,
         )
         return {"frame_index": 0, **solved.to_dict()}
 
@@ -1153,6 +1193,7 @@ class AnalysisService:
         max_image_side: int | None = None,
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
+        centroid_rejection_level: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         t_total = time.perf_counter()
@@ -1172,6 +1213,7 @@ class AnalysisService:
             max_image_side=max_image_side,
             max_stars=max_stars,
             large_scale_bg_subtract=large_scale_bg_subtract,
+            centroid_rejection_level=centroid_rejection_level,
         )
         row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
         row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
@@ -1188,8 +1230,10 @@ class AnalysisService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        centroid_rejection_level: int | None = None,
     ) -> list[dict[str, Any]]:
         """分析视频 / Analyze video"""
+        cr_level = self._clamp_centroid_rejection_level(centroid_rejection_level)
         cap = cv2.VideoCapture(str(source))
         if not cap.isOpened():
             raise ValueError("无法打开视频 / Unable to open video")
@@ -1218,6 +1262,7 @@ class AnalysisService:
                 fov_estimate=fov_estimate,
                 fov_max_error=fov_max_error,
                 solve_timeout_ms=solve_timeout_ms,
+                centroid_rejection_level=cr_level,
             )
             hint_ra = solved.ra_deg
             hint_dec = solved.dec_deg
@@ -1306,6 +1351,8 @@ class AnalysisService:
             )
             loop = asyncio.get_running_loop()
 
+            cr_frame = self._clamp_centroid_rejection_level(body.centroid_rejection_level)
+
             def _run() -> dict[str, Any]:
                 return self._solve_bgr_to_row(
                     frame,
@@ -1318,6 +1365,7 @@ class AnalysisService:
                     body.max_image_side,
                     max_stars,
                     bool(body.large_scale_bg_subtract),
+                    cr_frame,
                 )
 
             hard_timeout_sec = max(
@@ -1403,6 +1451,10 @@ class AnalysisService:
         """分析台默认参数（供前端）/ Public defaults for analysis UI."""
         s = get_settings()
         return {
+            "solver_max_stars_hard_cap": s.solver_max_stars_hard_cap,
+            "solver_max_image_side_hard_cap": s.solver_max_image_side_hard_cap,
+            "effective_solver_max_stars": effective_solver_max_stars(s),
+            "effective_solver_max_image_side": effective_solver_max_image_side(s),
             "solver_timeout_ms": s.solver_timeout_ms,
             "star_analysis_target_fps": s.star_analysis_target_fps,
             "star_analysis_min_interval_ms": s.star_analysis_min_interval_ms,
@@ -1417,6 +1469,8 @@ class AnalysisService:
             "solver_large_scale_bg_downsample": s.solver_large_scale_bg_downsample,
             "solve_profile_default": _SOLVE_PROFILE_DEFAULT,
             "solve_profiles": list(_SOLVE_PROFILE_OVERRIDES.keys()),
+            "stream_max_mjpeg_clients": s.stream_max_mjpeg_clients,
+            "centroid_rejection_level_default": self._centroid_rejection_default,
         }
 
     def upload_experiment_count(self, filename: str) -> dict[str, Any]:
