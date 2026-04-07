@@ -89,6 +89,65 @@ body {
     background-size: 100% 4px;
 }
 
+/* 主画面遮罩：仅压暗四角，不再收缩中间可视圈 / Keep only corner shadows */
+.hud-corner-mask {
+    background:
+        linear-gradient(
+            90deg,
+            rgba(0, 0, 0, 0.58) 0%,
+            rgba(0, 0, 0, 0.42) calc(var(--hud-left-rail) + 1.5rem),
+            rgba(0, 0, 0, 0.10) calc(var(--hud-left-rail) + 5rem),
+            rgba(0, 0, 0, 0.10) calc(100% - var(--hud-right-rail) - 5rem),
+            rgba(0, 0, 0, 0.42) calc(100% - var(--hud-right-rail) - 1.5rem),
+            rgba(0, 0, 0, 0.58) 100%
+        ),
+        radial-gradient(circle at 0% 0%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0) 60%),
+        radial-gradient(circle at 100% 0%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0) 60%),
+        radial-gradient(circle at 0% 100%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0) 60%),
+        radial-gradient(circle at 100% 100%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0) 60%);
+}
+
+.hud-corner-vignette {
+    background:
+        linear-gradient(
+            90deg,
+            rgba(0, 0, 0, 0.52) 0%,
+            rgba(0, 0, 0, 0.28) calc(var(--hud-left-rail) + 2rem),
+            rgba(0, 0, 0, 0.08) calc(var(--hud-left-rail) + 7rem),
+            rgba(0, 0, 0, 0.08) calc(100% - var(--hud-right-rail) - 7rem),
+            rgba(0, 0, 0, 0.28) calc(100% - var(--hud-right-rail) - 2rem),
+            rgba(0, 0, 0, 0.52) 100%
+        ),
+        radial-gradient(circle at 0% 0%, rgba(0, 0, 0, 0.46) 0%, rgba(0, 0, 0, 0) 62%),
+        radial-gradient(circle at 100% 0%, rgba(0, 0, 0, 0.46) 0%, rgba(0, 0, 0, 0) 62%),
+        radial-gradient(circle at 0% 100%, rgba(0, 0, 0, 0.46) 0%, rgba(0, 0, 0, 0) 62%),
+        radial-gradient(circle at 100% 100%, rgba(0, 0, 0, 0.46) 0%, rgba(0, 0, 0, 0) 62%);
+}
+
+/* 分析触发时雷达扫描波纹 / Radar pulse for each solve tick */
+#solve-radar-scan {
+    transform-origin: 50% 50%;
+}
+
+#solve-radar-scan.radar-active {
+    animation: radarSweep 700ms ease-out;
+}
+
+@keyframes radarSweep {
+    0% {
+        opacity: 0;
+        background: radial-gradient(circle at center, rgba(255, 180, 168, 0.30) 0%, rgba(255, 180, 168, 0.12) 12%, rgba(255, 180, 168, 0) 22%);
+    }
+    35% {
+        opacity: 0.95;
+        background: radial-gradient(circle at center, rgba(255, 180, 168, 0.18) 0%, rgba(255, 180, 168, 0.10) 26%, rgba(255, 180, 168, 0) 52%);
+    }
+    100% {
+        opacity: 0;
+        background: radial-gradient(circle at center, rgba(255, 180, 168, 0.10) 0%, rgba(255, 180, 168, 0) 72%);
+    }
+}
+
 .glow-red {
     text-shadow: 0 0 8px rgba(255, 85, 64, 0.6);
 }

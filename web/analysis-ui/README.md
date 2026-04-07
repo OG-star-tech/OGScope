@@ -13,12 +13,13 @@
 cd web/analysis-ui
 npm install          # 安装依赖 / Install deps
 npm run dev          # 开发服务器（见下）/ Dev server
-npm run build        # 生产构建，输出到 ../static/analysis-lab/
+npm run build        # 生产构建（含主页离线 CSS），输出到 ../static/analysis-lab/ 与 ../static/css/hud-home.bundle.css
 ```
 
 ## 构建产物 / Build output
 
 - 目录：**`web/static/analysis-lab/`**（`index.html` + `assets/`）。
+- 主页离线样式：**`web/static/css/hud-home.bundle.css`**（由同一 `npm run build` 一并生成）。
 - 部署到开发板前需包含该目录（本机构建后提交，或由 CI `npm ci && npm run build` 生成）。
 
 ## 本地联调 / Local API
@@ -28,7 +29,7 @@ npm run build        # 生产构建，输出到 ../static/analysis-lab/
 
 ## 同步开发板 / Sync to board
 
-- 脚本：**`scripts/sync_dev_board.sh`**（先 `npm run build`，再 `rsync`）。
+- 脚本：**`scripts/sync_dev_board.sh`**（先 `npm run build`，再 `rsync`；会同步 analysis-lab 与主页离线资源）。
 - 环境变量：`OGSCOPE_DEV_HOST`、`OGSCOPE_DEV_PATH`（可选 `OGSCOPE_DEV_USER`）。
 
 ## CI

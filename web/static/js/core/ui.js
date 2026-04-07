@@ -355,9 +355,14 @@ class UIController {
         this.state.zoomLevel = OGScopeUtils.clamp(level, 1.0, 3.0);
         this.updateZoomUI();
         
-        // 应用缩放到视频 / Apply zoom to video
+        // 应用缩放到视频与叠加层，保证星点标记与视频同缩放 / Apply zoom to stream + overlay together
         if (this.elements.videoStream) {
             this.elements.videoStream.style.transform = `scale(${this.state.zoomLevel})`;
+        }
+        const overlayCanvas = document.getElementById('analysis-overlay-canvas');
+        if (overlayCanvas) {
+            overlayCanvas.style.transform = `scale(${this.state.zoomLevel})`;
+            overlayCanvas.style.transformOrigin = 'center center';
         }
     }
 

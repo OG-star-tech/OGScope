@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && npm run build:home",
+    "build:home": "tailwindcss -c ./home.tailwind.config.js -i ./home.input.css -o ../static/css/hud-home.bundle.css --minify",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,6 +17,8 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@tailwindcss/container-queries": "^0.1.1",
+    "@tailwindcss/forms": "^0.5.11",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

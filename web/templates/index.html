@@ -20,76 +20,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/icon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/images/icon-16x16.png">
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
-
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script id="tailwind-config">
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-              surface: "#131313",
-              "surface-tint": "#ffb4a8",
-              "secondary-fixed": "#ffdad4",
-              "on-error-container": "#ffdad6",
-              "error-container": "#93000a",
-              "inverse-primary": "#c00100",
-              outline: "#b18780",
-              "tertiary-container": "#ff5541",
-              "on-secondary-fixed": "#3e0502",
-              "on-error": "#690005",
-              "secondary-fixed-dim": "#ffb4a8",
-              "on-surface-variant": "#ebbbb4",
-              "on-primary-container": "#5c0000",
-              "surface-variant": "#353535",
-              "inverse-surface": "#e2e2e2",
-              "inverse-on-surface": "#303030",
-              background: "#131313",
-              "surface-container-high": "#2a2a2a",
-              secondary: "#ffb4a8",
-              "on-surface": "#e2e2e2",
-              tertiary: "#ffb4a8",
-              "primary-fixed-dim": "#ffb4a8",
-              "surface-container-low": "#1b1b1b",
-              "surface-bright": "#393939",
-              primary: "#ffb4a8",
-              "on-primary-fixed-variant": "#930100",
-              error: "#ffb4ab",
-              "primary-fixed": "#ffdad4",
-              "surface-container-lowest": "#0e0e0e",
-              "on-tertiary-container": "#5c0000",
-              "secondary-container": "#7b3228",
-              "outline-variant": "#603e39",
-              "surface-container-highest": "#353535",
-              "on-tertiary-fixed-variant": "#930000",
-              "tertiary-fixed": "#ffdad4",
-              "surface-container": "#1f1f1f",
-              "on-secondary-fixed-variant": "#783026",
-              "tertiary-fixed-dim": "#ffb4a8",
-              "on-secondary": "#5b1a12",
-              "on-tertiary": "#690000",
-              "surface-dim": "#131313",
-              "on-secondary-container": "#ff9f90",
-              "primary-container": "#ff5540",
-              "on-primary": "#690100",
-              "on-background": "#e2e2e2",
-              "on-tertiary-fixed": "#410000",
-              "on-primary-fixed": "#410000",
-            },
-            fontFamily: {
-              headline: ["Space Grotesk", "sans-serif"],
-              body: ["Inter", "sans-serif"],
-              label: ["Space Grotesk", "sans-serif"],
-            },
-            borderRadius: { DEFAULT: "0px", lg: "0px", xl: "0px", full: "9999px" },
-          },
-        },
-      };
-    </script>
+    <link rel="stylesheet" href="/static/css/hud-home.bundle.css">
     <link rel="stylesheet" href="/static/css/hud-home.css">
 </head>
 <body class="h-dvh max-h-dvh overflow-hidden bg-background text-on-background font-body select-none">
@@ -180,18 +111,44 @@
                     </button>
                 </div>
                 </div>
-                <button type="button" class="group flex flex-col items-center gap-1">
+                <div class="relative flex w-full flex-col items-center">
+                <button type="button" id="adj-rail-toggle" class="group flex flex-col items-center gap-1" aria-expanded="false" aria-controls="adj-rail-panel" aria-haspopup="true">
                     <div class="flex h-11 w-11 items-center justify-center border border-primary/40 transition-colors duration-100 group-hover:bg-primary/20 group-active:scale-95 sm:h-12 sm:w-12">
                         <span class="material-symbols-outlined text-xl text-primary sm:text-[22px]" aria-hidden="true">tune</span>
                     </div>
                     <span class="font-headline text-[8px] font-bold tracking-widest text-primary sm:text-[9px]">调节 / ADJ</span>
                 </button>
-                <button type="button" class="group flex flex-col items-center gap-1">
+                <div id="adj-rail-panel" class="hud-mode-flyout pointer-events-auto hidden flex flex-col items-stretch gap-1 overflow-y-auto overscroll-contain border border-outline-variant/30 bg-stone-900/90 p-2 backdrop-blur-md" role="menu" aria-label="用户调节 / User adjustment">
+                    <label class="flex items-center justify-between gap-2 text-[10px] text-stone-300" for="adj-stream-quality">
+                        <span class="font-headline text-[8px] tracking-widest text-stone-500">视频质量 / STREAM</span>
+                        <span class="tabular-nums text-stone-400" id="adj-stream-quality-value">60</span>
+                    </label>
+                    <input id="adj-stream-quality" type="range" min="35" max="95" step="1" value="60" class="w-full accent-[rgb(248,113,113)]">
+                    <label class="mt-1 flex items-center justify-between gap-2 text-[10px] text-stone-300" for="adj-solve-interval">
+                        <span class="font-headline text-[8px] tracking-widest text-stone-500">解算间隔 / SOLVE</span>
+                        <span class="tabular-nums text-stone-400" id="adj-solve-interval-value">1500 ms</span>
+                    </label>
+                    <input id="adj-solve-interval" type="range" min="500" max="10000" step="100" value="1500" class="w-full accent-[rgb(248,113,113)]">
+                    <div class="mt-1 flex items-center justify-between gap-1">
+                        <button type="button" id="adj-auto-exposure" class="flex-1 border border-stone-700 px-2 py-1 text-[10px] text-stone-300 transition-colors hover:border-primary/60 hover:text-primary">自动曝光</button>
+                        <button type="button" id="adj-night-mode" class="flex-1 border border-stone-700 px-2 py-1 text-[10px] text-stone-300 transition-colors hover:border-primary/60 hover:text-primary">夜间模式</button>
+                    </div>
+                </div>
+                </div>
+                <div class="relative flex w-full flex-col items-center">
+                <button type="button" id="layer-rail-toggle" class="group flex flex-col items-center gap-1" aria-expanded="false" aria-controls="layer-rail-panel" aria-haspopup="true">
                     <div class="flex h-11 w-11 items-center justify-center border border-stone-700 transition-colors duration-100 group-hover:border-primary/60 group-active:scale-95 sm:h-12 sm:w-12">
                         <span class="material-symbols-outlined text-xl text-stone-500 transition-colors group-hover:text-primary sm:text-[22px]" aria-hidden="true">layers</span>
                     </div>
                     <span class="font-headline text-[8px] tracking-widest text-stone-500 transition-colors group-hover:text-primary sm:text-[9px]">图层 / MOD</span>
                 </button>
+                <div id="layer-rail-panel" class="hud-mode-flyout pointer-events-auto hidden flex flex-col items-stretch gap-1 overflow-y-auto overscroll-contain border border-outline-variant/30 bg-stone-900/90 p-2 backdrop-blur-md" role="menu" aria-label="图层控制 / Layer controls">
+                    <label class="flex items-center gap-2 text-[10px] text-stone-300"><input id="layer-video" type="checkbox" checked> 视频流 / Stream</label>
+                    <label class="flex items-center gap-2 text-[10px] text-stone-300"><input id="layer-all" type="checkbox" checked> 全部质心 / All centroids</label>
+                    <label class="flex items-center gap-2 text-[10px] text-stone-300"><input id="layer-matched" type="checkbox" checked> 匹配星 / Matched stars</label>
+                    <label class="flex items-center gap-2 text-[10px] text-stone-300"><input id="layer-pattern" type="checkbox" checked> 图案星 / Pattern stars</label>
+                </div>
+                </div>
                 <a href="/debug" class="group flex flex-col items-center gap-1 no-underline">
                     <div class="flex h-11 w-11 items-center justify-center border border-stone-700 transition-colors duration-100 group-hover:border-primary/60 group-active:scale-95 sm:h-12 sm:w-12">
                         <span class="material-symbols-outlined text-xl text-stone-500 transition-colors group-hover:text-primary sm:text-[22px]" aria-hidden="true">settings</span>
@@ -206,10 +163,9 @@
             <div class="hud-viewport-host">
                 <div class="hud-viewport-center">
                     <div class="relative hud-viewport-frame border border-outline-variant/20 bg-surface-container-lowest overflow-hidden">
-                <video id="video-stream" class="absolute inset-0 w-full h-full object-cover z-0" autoplay playsinline muted>
-                    您的浏览器不支持视频播放 / Video not supported
-                </video>
-                <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_0%,_#0e0e0e_55%)] z-10 pointer-events-none"></div>
+                <img id="video-stream" class="absolute inset-0 w-full h-full object-cover z-0" alt="实时视频流 / Live stream">
+                <canvas id="analysis-overlay-canvas" class="absolute inset-0 w-full h-full pointer-events-none z-[18]"></canvas>
+                <div class="absolute inset-0 hud-corner-mask z-10 pointer-events-none"></div>
 
                 <div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                     <div class="absolute w-[30%] aspect-square border border-outline/20 rounded-full"></div>
@@ -217,14 +173,15 @@
                     <div class="absolute w-[15%] aspect-square border border-outline/40 rounded-full"></div>
                     <div class="absolute w-full h-[0.5px] bg-outline/20"></div>
                     <div class="absolute h-full w-[0.5px] bg-outline/20"></div>
-                    <div class="absolute left-1/2 top-[42%] flex -translate-x-1/2 flex-col items-center">
+                    <div id="polar-reference" class="absolute hidden flex -translate-x-1/2 -translate-y-1/2 flex-col items-center">
                         <div class="w-3 h-3 bg-primary border border-on-primary-container shadow-[0_0_12px_rgba(255,85,64,0.6)]"></div>
                         <span class="font-headline text-[9px] sm:text-[10px] text-primary mt-2 glow-red">北极星参考 / POLARIS</span>
                     </div>
-                    <div class="guide-line z-30"></div>
+                    <div id="polar-guide-line" class="guide-line hidden z-30"></div>
                 </div>
 
                 <div class="absolute inset-0 hud-scanline pointer-events-none opacity-20 z-[25]"></div>
+                <div id="solve-radar-scan" class="absolute inset-0 pointer-events-none z-[26] opacity-0"></div>
 
                 <!-- 左右内缩避让侧栏；上下 padding 不变 / Horizontal inset clears side rails; vertical padding unchanged -->
                 <div class="pointer-events-none absolute inset-0 z-[30] flex flex-col justify-between pt-4 pb-4 pl-[calc(var(--hud-left-rail)+1.5rem)] pr-[calc(var(--hud-right-rail)+1.5rem)] sm:pt-8 sm:pb-8 sm:pl-[calc(var(--hud-left-rail)+2.25rem)] sm:pr-[calc(var(--hud-right-rail)+2.25rem)]">
@@ -240,11 +197,11 @@
                             <div class="mb-0.5 h-0.5 w-full overflow-hidden bg-primary/20">
                                 <div id="quality-fill" class="h-full bg-primary" style="width:72%"></div>
                             </div>
-                            <span class="font-body text-[9px] text-on-surface-variant sm:text-[10px]" id="quality-value">良好</span>
+                            <span class="font-body text-[9px] text-on-surface-variant sm:text-[10px]" id="quality-value">0%</span>
                         </div>
                         <div class="min-w-0 max-w-[55%] text-right sm:max-w-[48%]">
                             <div class="font-headline text-[8px] uppercase tracking-widest text-primary/90 sm:text-[9px]">对准误差 / Error</div>
-                            <div class="font-headline text-lg tabular-nums tracking-tight text-primary glow-red sm:text-xl">04.22″</div>
+                            <div class="font-headline text-lg tabular-nums tracking-tight text-primary glow-red sm:text-xl" id="alignment-error">--</div>
                             <div class="text-[7px] uppercase text-stone-500 sm:text-[8px]">角秒 RMS / arcsec</div>
                             <div class="mt-1 font-mono text-[8px] text-stone-400 sm:mt-1.5 sm:text-[9px]">
                                 <span id="azimuth-offset">+0.0°</span> <span class="text-stone-600">|</span> <span id="altitude-offset">+0.0°</span>
@@ -280,7 +237,7 @@
         </footer>
 
         <!-- 景深遮罩（低于顶栏/侧栏，避免挡交互）/ Vignette below chrome -->
-        <div class="pointer-events-none fixed inset-0 z-[15] bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.5)_100%)]"></div>
+        <div class="pointer-events-none fixed inset-0 z-[15] hud-corner-vignette"></div>
 
         <!-- 保留旧版菜单与快门 DOM id，供后续接线 / Legacy menu & shutter hooks -->
         <button type="button" class="menu-button hidden fixed w-px h-px overflow-hidden opacity-0" id="menu-button" tabindex="-1" aria-hidden="true">☰</button>
@@ -302,41 +259,68 @@
     <script src="/static/js/core/ui.js"></script>
     <script src="/static/js/core/camera.js"></script>
     <script src="/static/js/core/alignment.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app-home-analysis.js"></script>
     <script>
       (function () {
-        var toggle = document.getElementById("mode-rail-toggle");
-        var panel = document.getElementById("mode-rail-panel");
-        var chevron = document.getElementById("mode-rail-chevron");
-        function positionModeFlyout() {
-          if (!toggle || !panel || panel.classList.contains("hidden")) return;
-          var br = toggle.getBoundingClientRect();
-          panel.style.top = br.top + "px";
-          panel.style.right = Math.max(0, window.innerWidth - br.left + 6) + "px";
-          panel.style.left = "auto";
-          panel.style.maxHeight =
-            Math.min(window.innerHeight - br.top - 8, window.innerHeight * 0.65) + "px";
-        }
-        if (toggle && panel) {
+        function bindRailFlyout(toggleId, panelId, chevronId) {
+          var toggle = document.getElementById(toggleId);
+          var panel = document.getElementById(panelId);
+          var chevron = chevronId ? document.getElementById(chevronId) : null;
+          if (!toggle || !panel) return null;
+          function positionFlyout() {
+            if (panel.classList.contains("hidden")) return;
+            var br = toggle.getBoundingClientRect();
+            panel.style.top = br.top + "px";
+            panel.style.right = Math.max(0, window.innerWidth - br.left + 6) + "px";
+            panel.style.left = "auto";
+            panel.style.maxHeight =
+              Math.min(window.innerHeight - br.top - 8, window.innerHeight * 0.65) + "px";
+          }
+          function closeFlyout() {
+            panel.classList.add("hidden");
+            toggle.setAttribute("aria-expanded", "false");
+            if (chevron) chevron.style.transform = "";
+          }
           toggle.addEventListener("click", function () {
             panel.classList.toggle("hidden");
             var open = !panel.classList.contains("hidden");
             toggle.setAttribute("aria-expanded", open ? "true" : "false");
             if (chevron) chevron.style.transform = open ? "rotate(180deg)" : "";
-            if (open) requestAnimationFrame(positionModeFlyout);
+            if (open) requestAnimationFrame(positionFlyout);
           });
-          window.addEventListener("resize", positionModeFlyout);
+          window.addEventListener("resize", positionFlyout);
           window.addEventListener("orientationchange", function () {
-            setTimeout(positionModeFlyout, 100);
+            setTimeout(positionFlyout, 100);
           });
-          panel.querySelectorAll(".mode-button").forEach(function (btn) {
+          return { closeFlyout: closeFlyout };
+        }
+        var modeFlyout = bindRailFlyout("mode-rail-toggle", "mode-rail-panel", "mode-rail-chevron");
+        var adjFlyout = bindRailFlyout("adj-rail-toggle", "adj-rail-panel");
+        var layerFlyout = bindRailFlyout("layer-rail-toggle", "layer-rail-panel");
+        var modePanel = document.getElementById("mode-rail-panel");
+        if (modePanel && modeFlyout) {
+          modePanel.querySelectorAll(".mode-button").forEach(function (btn) {
             btn.addEventListener("click", function () {
-              panel.classList.add("hidden");
-              toggle.setAttribute("aria-expanded", "false");
-              if (chevron) chevron.style.transform = "";
+              modeFlyout.closeFlyout();
             });
           });
         }
+        document.addEventListener("click", function (event) {
+          var target = event.target;
+          if (!(target instanceof Element)) return;
+          [
+            ["mode-rail-toggle", "mode-rail-panel", modeFlyout],
+            ["adj-rail-toggle", "adj-rail-panel", adjFlyout],
+            ["layer-rail-toggle", "layer-rail-panel", layerFlyout],
+          ].forEach(function (item) {
+            var toggle = document.getElementById(item[0]);
+            var panel = document.getElementById(item[1]);
+            var api = item[2];
+            if (!toggle || !panel || !api) return;
+            if (toggle.contains(target) || panel.contains(target)) return;
+            api.closeFlyout();
+          });
+        });
       })();
     </script>
 </body>
