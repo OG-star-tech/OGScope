@@ -40,7 +40,7 @@ venv.bak/
 # ====================
 # Node (星图解算实验室前端 / Analysis lab UI)
 # ====================
-web/analysis-ui/node_modules/
+web/spa/node_modules/
 
 # ====================
 # Poetry

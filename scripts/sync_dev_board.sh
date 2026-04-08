@@ -7,7 +7,7 @@
 #   ./scripts/sync_dev_board.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT/web/analysis-ui"
+cd "$ROOT/web/spa"
 npm run build
 if [[ -z "${OGSCOPE_DEV_HOST:-}" || -z "${OGSCOPE_DEV_PATH:-}" ]]; then
   echo "请设置 OGSCOPE_DEV_HOST 与 OGSCOPE_DEV_PATH（可选 OGSCOPE_DEV_USER）" >&2

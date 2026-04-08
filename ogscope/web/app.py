@@ -5,14 +5,12 @@ FastAPI Web 应用
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 
 from ogscope.__version__ import __version__
@@ -131,16 +129,19 @@ app = FastAPI(
     redoc_url=None,
 )
 
-# 初始化模板引擎 / Initialize template engine
 settings = get_settings()
-templates = Jinja2Templates(directory=str(settings.template_dir))
 
 
-def _asset_stamp(path: Path) -> int:
-    try:
-        return int(path.stat().st_mtime)
-    except Exception:
-        return 0
+def _spa_unavailable_html(title: str, detail: str) -> HTMLResponse:
+    """Vite 产物缺失时的纯 HTML 提示（无 Jinja）/ Plain HTML when SPA build is missing (no Jinja)."""
+    body = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><title>{title}</title></head>
+<body style="font-family:system-ui,sans-serif;padding:1.5rem;max-width:42rem">
+<h1 style="font-size:1.1rem">{title}</h1>
+<p style="color:#444;line-height:1.5">{detail}</p>
+<pre style="background:#f4f4f4;padding:0.75rem;overflow:auto">cd web/spa && npm ci && npm run build</pre>
+</body></html>"""
+    return HTMLResponse(content=body, status_code=503)
 
 
 # 配置 CORS (允许跨域请求) / Configure CORS (allow cross-origin requests)
@@ -158,43 +159,42 @@ app.add_middleware(
 if settings.static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
-# 挂载Web模板和manifest / Mount web templates and manifests
-if settings.template_dir.exists():
-    from fastapi.staticfiles import StaticFiles
-
-    app.mount(
-        "/web", StaticFiles(directory=str(settings.template_dir.parent)), name="web"
-    )
-
 # 注册路由 / Register route
 app.include_router(api_router, prefix="/api")
 
 
+@app.get("/manifest.json")
+async def web_manifest():
+    """PWA 清单（原 web/manifest.json）/ PWA manifest at repo web/manifest.json."""
+    path = settings.static_dir.parent / "manifest.json"
+    if path.is_file():
+        return FileResponse(path)
+    return HTMLResponse("manifest not found", status_code=404)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """根路径 - 返回主页面 / Root path - return to main page"""
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "version": __version__, "app_name": "OGScope"},
+    """根路径：用户 HUD（Vite home 入口构建产物）/ Root: user HUD from Vite home entry."""
+    _ = request
+    home_index = settings.static_dir / "analysis-lab" / "home.html"
+    if home_index.is_file():
+        return FileResponse(home_index)
+    return _spa_unavailable_html(
+        "OGScope 前端未构建 / Frontend not built",
+        "缺少 web/static/analysis-lab/home.html。请在 web/spa 执行 npm run build。",
     )
 
 
 @app.get("/debug", response_class=HTMLResponse)
 async def debug_console(request: Request):
     """统一调试后台入口 / Unified debug admin entry."""
+    _ = request
     admin_index = settings.static_dir / "analysis-lab" / "system.html"
     if admin_index.is_file():
         return FileResponse(admin_index)
-    ds_js = settings.static_dir / "js" / "debug-system.js"
-    return templates.TemplateResponse(
-        "debug_system.html",
-        {
-            "request": request,
-            "version": __version__,
-            "app_name": "OGScope System Debug",
-            "debug_system_assets_version": _asset_stamp(ds_js),
-            "http_port": settings.port,
-        },
+    return _spa_unavailable_html(
+        "系统调试台未构建 / System debug SPA missing",
+        "缺少 web/static/analysis-lab/system.html。",
     )
 
 
@@ -207,39 +207,27 @@ async def debug_system_console(request: Request):
 
 @app.get("/debug/camera", response_class=HTMLResponse)
 async def debug_camera_console(request: Request):
-    """相机调试页入口（新 SPA 优先，旧页兜底）/ Camera debug entry (SPA first, legacy fallback)."""
+    """相机调试页（Vite camera 入口）/ Camera debug SPA."""
+    _ = request
     camera_index = settings.static_dir / "analysis-lab" / "camera.html"
     if camera_index.is_file():
         return FileResponse(camera_index)
-    debug_js_path = settings.static_dir / "js" / "debug.js"
-    return templates.TemplateResponse(
-        "debug.html",
-        {
-            "request": request,
-            "version": __version__,
-            "app_name": "OGScope Debug Console",
-            "debug_assets_version": _asset_stamp(debug_js_path),
-        },
+    return _spa_unavailable_html(
+        "相机调试台未构建 / Camera debug SPA missing",
+        "缺少 web/static/analysis-lab/camera.html。",
     )
 
 
 @app.get("/debug/analysis", response_class=HTMLResponse)
 async def debug_analysis_console(request: Request):
-    """星空解算控制台（Vite 构建 SPA）或回退旧模板 / Plate solve console SPA or legacy template."""
+    """星空解算控制台（Vite analysis 入口）/ Plate solve lab SPA."""
+    _ = request
     lab_index = settings.static_dir / "analysis-lab" / "index.html"
     if lab_index.is_file():
         return FileResponse(lab_index)
-    da_js = settings.static_dir / "js" / "debug-analysis.js"
-    da_css = settings.static_dir / "css" / "debug-analysis.css"
-    debug_analysis_assets_version = f"{_asset_stamp(da_js)}-{_asset_stamp(da_css)}"
-    return templates.TemplateResponse(
-        "debug_analysis.html",
-        {
-            "request": request,
-            "version": __version__,
-            "app_name": "OGScope Plate Solve Debug Console",
-            "debug_analysis_assets_version": debug_analysis_assets_version,
-        },
+    return _spa_unavailable_html(
+        "解算控制台未构建 / Analysis lab SPA missing",
+        "缺少 web/static/analysis-lab/index.html。",
     )
 
 

@@ -43,11 +43,11 @@ jobs:
       with:
         node-version: "20"
         cache: "npm"
-        cache-dependency-path: web/analysis-ui/package-lock.json
+        cache-dependency-path: web/spa/package-lock.json
 
     - name: 构建星空解算控制台前端
       run: |
-        cd web/analysis-ui
+        cd web/spa
         npm ci
         npm run build
 

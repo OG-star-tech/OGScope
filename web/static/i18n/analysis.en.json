@@ -84,7 +84,7 @@
   "lab.metric.preprocessMs": "Preprocess",
   "lab.metric.extractMs": "Extract",
   "lab.metric.solveOnlyMs": "Solve match",
-  "lab.metric.probHelp": "Tetra3 `Prob` is false-positive probability (lower is better). We show 0–100% match confidence as (1−min(1,Prob))×100%.",
+  "lab.metric.probHelp": "Tetra3 `Prob` is false-positive probability (lower is better). We use (1−Prob)×100% when representable; for extremely small Prob, IEEE doubles round to 100%, so we map −log10(Prob) to ~70–100% for differentiation.",
   "lab.metric.probRawHelp": "Raw Tetra3 Prob (e.g. log-likelihood); compare with the normalized line above.",
   "lab.metric.radec": "RA / Dec",
   "lab.metric.matches": "Matches",

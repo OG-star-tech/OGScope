@@ -92,7 +92,6 @@ class Settings(BaseSettings):
         description="Tetra3 单次解算超时毫秒 / Tetra3 solve timeout in ms",
     )
     static_dir: Path = Field(default=Path("./web/static"), description="静态文件目录")
-    template_dir: Path = Field(default=Path("./web/templates"), description="模板目录")
 
     # 星图解算配置 / Plate solving configuration
     solver_hint_ra_deg: float = Field(default=0.0, description="默认解算RA提示(度)")

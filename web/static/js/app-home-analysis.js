@@ -402,12 +402,29 @@ class OGScopeHomeApp {
         }
     }
 
+    /**
+     * Tetra3 Prob = false-positive probability (lower is better).
+     * 与 web/spa solveDisplay 一致：极小 fp 时线性 (1-fp)*100 在 float 中恒为 100，改用 -log10 映射。
+     */
+    tetraFalsePositiveProbToConfidencePercent(fp) {
+        if (!Number.isFinite(fp) || fp < 0) return null;
+        if (fp >= 1) return 0;
+        if (fp === 0) return 100;
+        const raw = (1 - fp) * 100;
+        if (raw <= 100 - 1e-12) {
+            return Math.min(100, Math.max(0, raw));
+        }
+        const L = -Math.log10(Math.max(fp, Number.MIN_VALUE));
+        const L0 = 14;
+        const L1 = 50;
+        const t = Math.min(1, Math.max(0, (L - L0) / (L1 - L0)));
+        return Math.min(100, Math.max(0, 70 + 30 * t));
+    }
+
     updateSolveMetrics(result) {
         const prob = Number(result?.prob);
-        const normalized = Number.isFinite(prob)
-            ? (prob <= 1 ? prob * 100 : prob)
-            : 0;
-        const confidence = this.clamp(Math.round(normalized), 0, 100);
+        const pct = Number.isFinite(prob) ? this.tetraFalsePositiveProbToConfidencePercent(prob) : null;
+        const confidence = this.clamp(Math.round(pct == null ? 0 : pct), 0, 100);
         const qualityFillElement = document.getElementById("quality-fill");
         const qualityValueElement = document.getElementById("quality-value");
         if (qualityFillElement) qualityFillElement.style.width = `${confidence}%`;

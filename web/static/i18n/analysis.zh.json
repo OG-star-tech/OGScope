@@ -68,7 +68,7 @@
   "lab.metric.preprocessMs": "预处理",
   "lab.metric.extractMs": "提星",
   "lab.metric.solveOnlyMs": "匹配解算",
-  "lab.metric.probHelp": "Tetra3 的 Prob 为假阳性概率（越低越可信）；界面显示为 0–100% 匹配置信度：(1−Prob)×100%（Prob 先限制在 0–1）。",
+  "lab.metric.probHelp": "Tetra3 的 Prob 为假阳性概率（越低越可信）。一般使用 (1−Prob)×100%；当 Prob 极小时浮点数会舍入为 100%，此时用 −log₁₀(Prob) 映射到约 70–100% 以便区分。",
   "lab.metric.probRawHelp": "Tetra3 返回的原始 Prob 字段，可能为对数似然等内部量；与上一行换算后的百分比对照查看即可。",
   "lab.metric.radec": "RA / Dec",
   "lab.metric.matches": "匹配",
