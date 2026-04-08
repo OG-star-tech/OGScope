@@ -39,10 +39,13 @@ class OGScopeHomeApp {
             all: true,
             matched: true,
             pattern: true,
+            rejected: true,
         };
 
         this.latestResult = null;
         this.latestOverlay = null;
+        this.resizeObserver = null;
+        this._overlayFadeTimer = null;
         this.cameraStatus = null;
         this.lastTelemetryAt = 0;
         this.lastGuideAngle = 45;
@@ -195,7 +198,7 @@ class OGScopeHomeApp {
             });
         }
 
-        ["layer-video", "layer-all", "layer-matched", "layer-pattern"].forEach((id) => {
+        ["layer-video", "layer-all", "layer-matched", "layer-pattern", "layer-rejected"].forEach((id) => {
             const node = document.getElementById(id);
             if (!node) return;
             node.addEventListener("change", () => {
@@ -203,6 +206,7 @@ class OGScopeHomeApp {
                 this.overlayLayers.all = Boolean(document.getElementById("layer-all")?.checked);
                 this.overlayLayers.matched = Boolean(document.getElementById("layer-matched")?.checked);
                 this.overlayLayers.pattern = Boolean(document.getElementById("layer-pattern")?.checked);
+                this.overlayLayers.rejected = Boolean(document.getElementById("layer-rejected")?.checked);
                 this.applyStreamLayer();
                 this.renderOverlay();
             });
@@ -223,6 +227,11 @@ class OGScopeHomeApp {
         window.addEventListener("orientationchange", () => {
             setTimeout(() => this.renderOverlay(), 100);
         });
+        const viewportFrame = document.querySelector(".hud-viewport-frame");
+        if (viewportFrame && typeof ResizeObserver !== "undefined") {
+            this.resizeObserver = new ResizeObserver(() => this.renderOverlay());
+            this.resizeObserver.observe(viewportFrame);
+        }
         document.addEventListener("visibilitychange", () => {
             if (document.hidden) return;
             this.refreshStreamSource();
@@ -383,13 +392,21 @@ class OGScopeHomeApp {
             this.latestResult = result;
             const base = result?.solve_overlay || null;
             const ext = result?.overlay_ext || null;
-            this.latestOverlay = base ? { ...base, overlay_ext: ext || undefined } : null;
-            this.updateSolveMetrics(result);
-            this.renderOverlay();
+            const merged = base ? { ...base, overlay_ext: ext || undefined } : null;
+            this.cancelOverlayFade();
+            if (merged) {
+                this.latestOverlay = merged;
+                this.updateSolveMetrics(result, merged);
+                this.renderOverlay();
+            } else {
+                // 避免仍用旧的 latestOverlay 读极轴；新行无 solve_overlay 时以 overlay_ext 为准 / Avoid stale overlay; use new row overlay_ext
+                this.updateSolveMetrics(result, { overlay_ext: result?.overlay_ext });
+                this.fadeOutAndClearOverlay();
+            }
             this.consecutiveSolveErrors = 0;
         } catch (e) {
             console.warn("[OGScope] 实时解算请求失败:", e);
-            this.hidePolarGuides();
+            this.fadeOutAndClearOverlay();
             this.consecutiveSolveErrors += 1;
             if (this.consecutiveSolveErrors >= 4) {
                 // 连续失败时进入短暂冷却，避免高频失败重试拖慢设备
@@ -421,21 +438,31 @@ class OGScopeHomeApp {
         return Math.min(100, Math.max(0, 70 + 30 * t));
     }
 
-    updateSolveMetrics(result) {
+    /**
+     * @param {Record<string, unknown> | null} result
+     * @param {Record<string, unknown> | null} [overlayForGuide] 用于极轴读数（无 solve_overlay 时用新响应的 overlay_ext）/ Polar text from new row when solve_overlay missing
+     */
+    updateSolveMetrics(result, overlayForGuide) {
         const prob = Number(result?.prob);
         const pct = Number.isFinite(prob) ? this.tetraFalsePositiveProbToConfidencePercent(prob) : null;
-        const confidence = this.clamp(Math.round(pct == null ? 0 : pct), 0, 100);
         const qualityFillElement = document.getElementById("quality-fill");
         const qualityValueElement = document.getElementById("quality-value");
-        if (qualityFillElement) qualityFillElement.style.width = `${confidence}%`;
-        if (qualityValueElement) qualityValueElement.textContent = `${confidence}%`;
+        // 与 solveDisplay.formatProb 一致：一位小数 / Match lab one-decimal confidence
+        if (qualityFillElement) {
+            qualityFillElement.style.width = pct == null ? "0%" : `${this.clamp(pct, 0, 100).toFixed(1)}%`;
+        }
+        if (qualityValueElement) {
+            qualityValueElement.textContent = pct == null ? "—" : `${pct.toFixed(1)}%`;
+        }
 
         const errorNode = document.getElementById("alignment-error");
         const rmse = Number(result?.rmse_arcsec);
         if (errorNode) {
             errorNode.textContent = Number.isFinite(rmse) ? `${rmse.toFixed(2)}″` : "--";
         }
-        const guide = this.latestOverlay?.overlay_ext?.polar_guide || null;
+        const overlayRef =
+            overlayForGuide !== undefined ? overlayForGuide : this.latestOverlay;
+        const guide = overlayRef?.overlay_ext?.polar_guide || null;
         const azNode = document.getElementById("azimuth-offset");
         const altNode = document.getElementById("altitude-offset");
         if (guide?.delta_px && typeof guide.angular_sep_deg === "number") {
@@ -448,7 +475,78 @@ class OGScopeHomeApp {
             if (azNode) azNode.textContent = `${az >= 0 ? "+" : ""}${az.toFixed(2)}°`;
             if (altNode) altNode.textContent = `${alt >= 0 ? "+" : ""}${alt.toFixed(2)}°`;
             this.lastGuideAngle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+        } else {
+            if (azNode) azNode.textContent = "—";
+            if (altNode) altNode.textContent = "—";
         }
+    }
+
+    /** MJPEG 可能 naturalWidth=0，回退 solve_overlay.frame_shape / Fallback when MJPEG has no intrinsic size */
+    getOverlaySrcSize(streamImg, overlay) {
+        let srcW = Number(streamImg.naturalWidth || 0);
+        let srcH = Number(streamImg.naturalHeight || 0);
+        const fs = overlay?.frame_shape;
+        if ((srcW < 2 || srcH < 2) && Array.isArray(fs) && fs.length >= 2) {
+            const fh = Number(fs[0]);
+            const fw = Number(fs[1]);
+            if (Number.isFinite(fw) && Number.isFinite(fh) && fw >= 2 && fh >= 2) {
+                srcW = fw;
+                srcH = fh;
+            }
+        }
+        return { srcW, srcH };
+    }
+
+    /** 取消淡出并重置样式 / Cancel overlay fade animation */
+    cancelOverlayFade() {
+        if (this._overlayFadeTimer) {
+            clearTimeout(this._overlayFadeTimer);
+            this._overlayFadeTimer = null;
+        }
+        const canvas = document.getElementById("analysis-overlay-canvas");
+        const guideLine = document.getElementById("polar-guide-line");
+        const ref = document.getElementById("polar-reference");
+        if (canvas) canvas.classList.remove("hud-overlay-fading");
+        if (guideLine) guideLine.classList.remove("hud-overlay-fading");
+        if (ref) ref.classList.remove("hud-overlay-fading");
+    }
+
+    /**
+     * 解算失败或无 overlay 时渐变清空叠加 / Fade out overlay then clear (network error or TOO_FEW etc.)
+     */
+    fadeOutAndClearOverlay() {
+        const hasCanvasData = this.latestOverlay != null;
+        const guideLine = document.getElementById("polar-guide-line");
+        const ref = document.getElementById("polar-reference");
+        const polarVisible =
+            (guideLine && !guideLine.classList.contains("hidden")) ||
+            (ref && !ref.classList.contains("hidden"));
+        if (!hasCanvasData && !polarVisible) {
+            return;
+        }
+        this.cancelOverlayFade();
+        const canvas = document.getElementById("analysis-overlay-canvas");
+        if (!canvas) {
+            this.latestOverlay = null;
+            this.hidePolarGuides();
+            return;
+        }
+        requestAnimationFrame(() => {
+            canvas.classList.add("hud-overlay-fading");
+            if (guideLine && !guideLine.classList.contains("hidden")) {
+                guideLine.classList.add("hud-overlay-fading");
+            }
+            if (ref && !ref.classList.contains("hidden")) {
+                ref.classList.add("hud-overlay-fading");
+            }
+            this._overlayFadeTimer = setTimeout(() => {
+                this._overlayFadeTimer = null;
+                this.cancelOverlayFade();
+                this.latestOverlay = null;
+                this.hidePolarGuides();
+                this.renderOverlay();
+            }, 420);
+        });
     }
 
     renderOverlay() {
@@ -469,9 +567,12 @@ class OGScopeHomeApp {
         ctx.clearRect(0, 0, cssW, cssH);
 
         const overlay = this.latestOverlay;
-        const srcW = Number(streamImg.naturalWidth || 0);
-        const srcH = Number(streamImg.naturalHeight || 0);
-        if (!overlay || srcW < 2 || srcH < 2) {
+        if (!overlay) {
+            this.hidePolarGuides();
+            return;
+        }
+        const { srcW, srcH } = this.getOverlaySrcSize(streamImg, overlay);
+        if (srcW < 2 || srcH < 2) {
             this.hidePolarGuides();
             return;
         }
@@ -490,6 +591,20 @@ class OGScopeHomeApp {
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, Math.max(1.9, 2.9 * coverScale), 0, Math.PI * 2);
                 ctx.fill();
+            }
+        }
+        if (this.overlayLayers.rejected && Array.isArray(overlay.stars_rejected_centroids)) {
+            ctx.strokeStyle = "rgba(248, 113, 113, 0.95)";
+            ctx.lineWidth = Math.max(1.4, 1.6 * coverScale);
+            const d = Math.max(3.2, 4 * coverScale);
+            for (const s of overlay.stars_rejected_centroids) {
+                const p = mapPoint(Number(s.x || 0), Number(s.y || 0));
+                ctx.beginPath();
+                ctx.moveTo(p.x - d, p.y - d);
+                ctx.lineTo(p.x + d, p.y + d);
+                ctx.moveTo(p.x + d, p.y - d);
+                ctx.lineTo(p.x - d, p.y + d);
+                ctx.stroke();
             }
         }
         if (this.overlayLayers.pattern && Array.isArray(overlay.stars_pattern)) {
@@ -518,6 +633,18 @@ class OGScopeHomeApp {
                 }
             }
         }
+        const ext = overlay.overlay_ext;
+        if (Array.isArray(ext?.labels_topn) && ext.labels_topn.length > 0) {
+            ctx.fillStyle = "rgba(96, 165, 250, 0.95)";
+            ctx.font = `${Math.max(11, Math.round(12 * coverScale))}px system-ui, sans-serif`;
+            for (const s of ext.labels_topn) {
+                if (typeof s?.x !== "number" || typeof s?.y !== "number") continue;
+                const p = mapPoint(s.x, s.y);
+                const magText = typeof s.mag === "number" ? ` m${s.mag.toFixed(1)}` : "";
+                const title = `${s.name != null && s.name !== "" ? s.name : "Star"}${magText}`;
+                ctx.fillText(title, p.x + 8, p.y + 14);
+            }
+        }
         this.renderPolarGuides(overlay, mapPoint);
     }
 
@@ -533,19 +660,23 @@ class OGScopeHomeApp {
     hidePolarGuides() {
         const guideLine = document.getElementById("polar-guide-line");
         const ref = document.getElementById("polar-reference");
-        if (guideLine) guideLine.classList.add("hidden");
-        if (ref) ref.classList.add("hidden");
+        if (guideLine) {
+            guideLine.classList.remove("hud-overlay-fading");
+            guideLine.classList.add("hidden");
+        }
+        if (ref) {
+            ref.classList.remove("hud-overlay-fading");
+            ref.classList.add("hidden");
+        }
     }
 
     renderPolarGuides(overlay, mapPoint) {
         const guideLine = document.getElementById("polar-guide-line");
         const ref = document.getElementById("polar-reference");
-        const resultStatus = String(this.latestResult?.status || "");
         const guide = overlay?.overlay_ext?.polar_guide;
         if (
             !guideLine ||
             !ref ||
-            resultStatus !== "MATCH_FOUND" ||
             !guide ||
             typeof guide.frame_center?.x !== "number" ||
             typeof guide.frame_center?.y !== "number" ||
@@ -570,11 +701,11 @@ class OGScopeHomeApp {
         guideLine.style.width = `${lineWidth}px`;
         guideLine.style.transform = `translate(-50%, 0) rotate(${angle}deg)`;
         guideLine.style.background = "linear-gradient(180deg, rgba(255,180,168,0.02) 0%, rgba(255,180,168,0.95) 88%)";
-        guideLine.classList.remove("hidden");
+        guideLine.classList.remove("hud-overlay-fading", "hidden");
 
         ref.style.left = `${t.x}px`;
         ref.style.top = `${t.y}px`;
-        ref.classList.remove("hidden");
+        ref.classList.remove("hud-overlay-fading", "hidden");
 
         this.lastGuideAngle = angle;
     }
@@ -631,6 +762,15 @@ class OGScopeHomeApp {
     }
 
     cleanup() {
+        this.cancelOverlayFade();
+        if (this.resizeObserver) {
+            try {
+                this.resizeObserver.disconnect();
+            } catch (_) {
+                /* ignore */
+            }
+            this.resizeObserver = null;
+        }
         if (this.loadingInterval) {
             clearInterval(this.loadingInterval);
             this.loadingInterval = null;
@@ -647,6 +787,13 @@ class OGScopeHomeApp {
     }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function bootOGScopeHomeApp() {
     window.OGScopeApp = new OGScopeHomeApp();
-});
+}
+
+// 若脚本在 DOMContentLoaded 之后动态插入（如 Vite 首页入口），需立即启动 / If script loads after DOMContentLoaded (e.g. Vite home entry), boot immediately.
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootOGScopeHomeApp);
+} else {
+    bootOGScopeHomeApp();
+}
