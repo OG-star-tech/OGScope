@@ -25,6 +25,13 @@ class CameraSettings(BaseModel):
     colorMode: Optional[str] = "color"  # 颜色模式: 'color' | 'mono'
 
 
+class CameraMirrorBody(BaseModel):
+    """相机输出镜像（与解算同坐标系）/ Camera output mirror (same frame as plate solve)"""
+
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+
+
 class CameraPreset(BaseModel):
     """相机预设 / camera presets"""
 
@@ -47,6 +54,8 @@ class CameraPreset(BaseModel):
     white_balance_gain_b: Optional[float] = 1.0
     # 其他参数 / Other parameters
     rotation: Optional[int] = 180
+    flip_horizontal: Optional[bool] = False
+    flip_vertical: Optional[bool] = False
     color_mode: Optional[str] = "color"  # 颜色模式: 'color' | 'mono'
 
 

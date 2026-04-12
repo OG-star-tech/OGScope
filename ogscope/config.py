@@ -52,6 +52,14 @@ class Settings(BaseSettings):
         le=2.0,
         description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
     )
+    camera_flip_horizontal: bool = Field(
+        default=False,
+        description="相机输出水平镜像；与预览/解算同坐标系 / Camera output horizontal flip",
+    )
+    camera_flip_vertical: bool = Field(
+        default=False,
+        description="相机输出垂直镜像；与预览/解算同坐标系 / Camera output vertical flip",
+    )
 
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")

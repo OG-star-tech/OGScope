@@ -94,6 +94,8 @@ def _merge_debug_style_sidecar_into_info(
             "fps",
             "auto_exposure",
             "rotation",
+            "flip_horizontal",
+            "flip_vertical",
             "sampling_mode",
             "color_mode",
             "sensor",

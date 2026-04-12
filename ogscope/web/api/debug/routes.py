@@ -18,7 +18,11 @@ from ogscope.web.api.debug.services import (
     DebugFileService,
     DebugPresetService,
 )
-from ogscope.web.api.models.schemas import CameraPreset, CameraSettings
+from ogscope.web.api.models.schemas import (
+    CameraMirrorBody,
+    CameraPreset,
+    CameraSettings,
+)
 from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 router = APIRouter()
@@ -278,6 +282,18 @@ async def set_camera_rotation(rotation: int):
         from ogscope.web.api.debug.services import DebugCameraService
 
         result = await DebugCameraService.set_rotation(rotation)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/mirror")
+async def set_camera_mirror(body: CameraMirrorBody):
+    """设置相机输出水平/垂直镜像 / Set camera output horizontal and vertical mirror"""
+    try:
+        result = await DebugCameraService.set_mirror(
+            body.flip_horizontal, body.flip_vertical
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

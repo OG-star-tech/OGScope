@@ -70,6 +70,8 @@ class CameraManager:
             "ae_polar_preset": settings.camera_ae_polar_preset,
             "ae_exposure_value": settings.camera_ae_exposure_value,
             "rotation": 180,
+            "flip_horizontal": bool(getattr(settings, "camera_flip_horizontal", False)),
+            "flip_vertical": bool(getattr(settings, "camera_flip_vertical", False)),
             "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
             "noise_reduction": 0,
             "white_balance_mode": "auto",

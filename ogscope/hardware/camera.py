@@ -83,6 +83,9 @@ class IMX327MIPICamera(CameraInterface):
         self.auto_exposure = config.get("auto_exposure", False)
         self.auto_gain = config.get("auto_gain", False)
         self.rotation = config.get("rotation", 0)
+        # 输出几何镜像（先旋转后镜像，与预览/解算一致）/ Output mirror after rotation
+        self.flip_horizontal = bool(config.get("flip_horizontal", False))
+        self.flip_vertical = bool(config.get("flip_vertical", False))
         self.color_mode = config.get("color_mode", "color")  # 'color' | 'mono'
         self.white_balance_mode = config.get("white_balance_mode", "auto")
         self.white_balance_gain_r = config.get("white_balance_gain_r", 1.0)
@@ -514,6 +517,8 @@ class IMX327MIPICamera(CameraInterface):
             if self.rotation != 0:
                 image = self.apply_rotation(image, self.rotation)
 
+            image = self._apply_flip(image)
+
             # 应用颜色模式转换 / Apply color mode conversion
             if self.color_mode == "mono" and len(image.shape) == 3:
                 # 将彩色图像转换为灰度 / Convert color image to grayscale
@@ -543,6 +548,22 @@ class IMX327MIPICamera(CameraInterface):
                 return image
         except Exception as e:
             logger.error(f"图像旋转失败: {e}")
+            return image
+
+    def _apply_flip(self, image: np.ndarray) -> np.ndarray:
+        """水平/垂直镜像 / Horizontal and vertical flip."""
+        if not self.flip_horizontal and not self.flip_vertical:
+            return image
+        try:
+            import cv2
+
+            if self.flip_horizontal and self.flip_vertical:
+                return cv2.flip(image, -1)
+            if self.flip_horizontal:
+                return cv2.flip(image, 1)
+            return cv2.flip(image, 0)
+        except Exception as e:
+            logger.error(f"图像镜像失败: {e}")
             return image
 
     def get_video_frame(self) -> Optional[np.ndarray]:
@@ -743,6 +764,18 @@ class IMX327MIPICamera(CameraInterface):
         logger.info(f"图像旋转角度设置为: {rotation}度")
         return True
 
+    def set_flip(self, flip_horizontal: bool, flip_vertical: bool) -> bool:
+        """设置水平/垂直镜像 / Set horizontal and vertical flip."""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+        self.flip_horizontal = bool(flip_horizontal)
+        self.flip_vertical = bool(flip_vertical)
+        logger.info(
+            f"图像镜像: 水平={self.flip_horizontal}, 垂直={self.flip_vertical}"
+        )
+        return True
+
     def set_sampling_mode(self, mode: str) -> bool:
         """设置采样模式: supersample | native | crop（目前实现 supersample 与 native）"""
         if not self.is_initialized:
@@ -831,6 +864,8 @@ class IMX327MIPICamera(CameraInterface):
                 "auto_exposure": self.auto_exposure,
                 "auto_gain": self.auto_gain,
                 "rotation": self.rotation,
+                "flip_horizontal": self.flip_horizontal,
+                "flip_vertical": self.flip_vertical,
                 "width": self.width,
                 "height": self.height,
                 "sampling_mode": self.sampling_mode,

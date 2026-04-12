@@ -35,6 +35,8 @@ type CameraInfo = {
   white_balance_gain_b?: number;
   color_mode?: string;
   rotation?: number;
+  flip_horizontal?: boolean;
+  flip_vertical?: boolean;
   width?: number;
   height?: number;
   fps?: number;
@@ -49,17 +51,6 @@ type CameraStatus = {
   camera_ready?: boolean;
   info?: CameraInfo;
   runtime_overrides?: Record<string, unknown>;
-};
-
-type StreamStats = {
-  requestCount: number;
-  frameCount: number;
-  requestFps: number;
-  effectiveFps: number;
-  lastRequestTime: number | null;
-  lastFrameTime: number | null;
-  requestSamples: number[];
-  frameSamples: number[];
 };
 
 type CameraForm = {
@@ -94,6 +85,8 @@ type CameraPreset = {
   white_balance_gain_r?: number;
   white_balance_gain_b?: number;
   rotation?: number;
+  flip_horizontal?: boolean;
+  flip_vertical?: boolean;
   color_mode?: string;
 };
 
@@ -140,6 +133,19 @@ function formatSize(bytes: number): string {
     idx += 1;
   }
   return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+/** 探测 MJPEG 是否可连：503=名额被占；ok 则立即取消 body 释放名额 / Probe stream; 503 = busy; cancel body to release slot */
+async function probeMjpegStream(url: string): Promise<"busy" | "ok" | "fail"> {
+  try {
+    const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+    if (res.status === 503) return "busy";
+    if (!res.ok) return "fail";
+    await res.body?.cancel().catch(() => {});
+    return "ok";
+  } catch {
+    return "fail";
+  }
 }
 
 function ParamSlider({
@@ -191,6 +197,10 @@ export function CameraConsoleApp() {
   const [previewActive, setPreviewActive] = useState(false);
   const [streamNonce, setStreamNonce] = useState<number>(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
+  /** 预览区：流被占或无法拉流 / In-preview hint when MJPEG busy or stream fails */
+  const [previewStreamHint, setPreviewStreamHint] = useState<string | null>(null);
+  /** 是否为 503 名额占满 / True when 503 for extra copy */
+  const [previewStreamIsBusy, setPreviewStreamIsBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [recordBusy, setRecordBusy] = useState(false);
@@ -205,9 +215,12 @@ export function CameraConsoleApp() {
   const [showOverExposure, setShowOverExposure] = useState(false);
   const [histCollapsed, setHistCollapsed] = useState(false);
   const [histStats, setHistStats] = useState({ mean: 0, std: 0, over: 0 });
-  const [actualFps, setActualFps] = useState(0);
+  /** 最近约 1s 内画面像素变化次数（rAF 采样）/ ~1s sliding window from pixel deltas */
+  const [liveFps, setLiveFps] = useState(0);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [rotationValue, setRotationValue] = useState(180);
+  const [flipHorizontal, setFlipHorizontal] = useState(false);
+  const [flipVertical, setFlipVertical] = useState(false);
   const [form, setForm] = useState<CameraForm>({
     exposure: 5000,
     gain: 1.0,
@@ -245,35 +258,15 @@ export function CameraConsoleApp() {
   const reconnectTimerRef = useRef<number | null>(null);
   const previewActiveRef = useRef(false);
   const streamStartedAtRef = useRef<number | null>(null);
-  const fpsSampleRef = useRef<{ ts: number; frames: number }>({
-    ts: performance.now(),
-    frames: 0,
-  });
-  const statsRef = useRef<StreamStats>({
-    requestCount: 0,
-    frameCount: 0,
-    requestFps: 0,
-    effectiveFps: 0,
-    lastRequestTime: null,
-    lastFrameTime: null,
-    requestSamples: [],
-    frameSamples: [],
-  });
-
+  const fpsFrameTsRef = useRef<number[]>([]);
+  const fpsLastHashRef = useRef<number>(0);
+  const fpsSampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** 预览流统计重置（真实帧率见 liveFps）/ Reset preview stats (real FPS is liveFps) */
   const resetStreamStats = () => {
-    statsRef.current = {
-      requestCount: 0,
-      frameCount: 0,
-      requestFps: 0,
-      effectiveFps: 0,
-      lastRequestTime: null,
-      lastFrameTime: null,
-      requestSamples: [],
-      frameSamples: [],
-    };
-    fpsSampleRef.current = { ts: performance.now(), frames: 0 };
+    fpsFrameTsRef.current = [];
+    fpsLastHashRef.current = 0;
     streamStartedAtRef.current = null;
-    setActualFps(0);
+    setLiveFps(0);
   };
 
   const updateCameraStatus = async () => {
@@ -300,17 +293,32 @@ export function CameraConsoleApp() {
     if (previewBusy) return;
     setPreviewBusy(true);
     setErr(null);
+    setPreviewStreamHint(null);
+    setPreviewStreamIsBusy(false);
     try {
       clearReconnectTimer();
       if (!status?.streaming) {
         await requestJson("/api/debug/camera/start", { method: "POST" });
+      }
+      const nonce = Date.now();
+      const streamUrl = `/api/debug/camera/stream?t=${nonce}`;
+      const probe = await probeMjpegStream(streamUrl);
+      if (probe === "busy") {
+        setPreviewStreamHint(t("cam.err.streamBusy"));
+        setPreviewStreamIsBusy(true);
+        return;
+      }
+      if (probe === "fail") {
+        setPreviewStreamHint(t("cam.err.streamProbeFailed"));
+        setPreviewStreamIsBusy(false);
+        return;
       }
       setPreviewActive(true);
       previewActiveRef.current = true;
       setNotice(t("cam.notice.previewStart"));
       resetStreamStats();
       streamStartedAtRef.current = performance.now();
-      setStreamNonce(Date.now());
+      setStreamNonce(nonce);
       await updateCameraStatus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -328,6 +336,8 @@ export function CameraConsoleApp() {
       clearReconnectTimer();
       setPreviewActive(false);
       previewActiveRef.current = false;
+      setPreviewStreamHint(null);
+      setPreviewStreamIsBusy(false);
       resetStreamStats();
       setStatus((prev) => (prev ? { ...prev, streaming: false, recording: false } : prev));
       if (imgRef.current) {
@@ -461,7 +471,26 @@ export function CameraConsoleApp() {
     setSamplingMode(String(info.sampling_mode ?? "supersample"));
     setRuntimeDirty(false);
     setRotationValue(clamp(Math.round(toNum(info.rotation, 180)), 0, 270));
+    setFlipHorizontal(Boolean(info.flip_horizontal));
+    setFlipVertical(Boolean(info.flip_vertical));
     setFormDirty(false);
+  };
+
+  const applyMirror = async (nextH: boolean, nextV: boolean) => {
+    setErr(null);
+    try {
+      await requestJson("/api/debug/camera/mirror", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flip_horizontal: nextH, flip_vertical: nextV }),
+      });
+      setFlipHorizontal(nextH);
+      setFlipVertical(nextV);
+      setNotice(t("cam.notice.mirrorApplied"));
+      await updateCameraStatus();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const applyRotation = async (rotation: number) => {
@@ -558,6 +587,8 @@ export function CameraConsoleApp() {
           white_balance_gain_r: form.whiteBalanceGainR,
           white_balance_gain_b: form.whiteBalanceGainB,
           rotation: rotationValue,
+          flip_horizontal: flipHorizontal,
+          flip_vertical: flipVertical,
           color_mode: form.colorMode,
         }),
       });
@@ -682,35 +713,6 @@ export function CameraConsoleApp() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  };
-
-  const analyzeStreamData = () => {
-    const now = performance.now();
-    const s = statsRef.current;
-    s.requestCount += 1;
-    if (s.lastRequestTime != null) {
-      const diff = now - s.lastRequestTime;
-      if (diff > 10) {
-        s.requestSamples.push(1000 / diff);
-        if (s.requestSamples.length > 10) s.requestSamples.shift();
-        s.requestFps = s.requestSamples.reduce((a, b) => a + b, 0) / s.requestSamples.length;
-      }
-    }
-    s.lastRequestTime = now;
-
-    s.frameCount += 1;
-    if (s.lastFrameTime != null) {
-      const diff = now - s.lastFrameTime;
-      if (diff > 10) {
-        let fps = 1000 / diff;
-        const reported = Number(status?.info?.fps ?? 5) || 5;
-        fps = Math.min(fps, Math.max(10, reported * 2));
-        s.frameSamples.push(fps);
-        if (s.frameSamples.length > 10) s.frameSamples.shift();
-        s.effectiveFps = s.frameSamples.reduce((a, b) => a + b, 0) / s.frameSamples.length;
-      }
-    }
-    s.lastFrameTime = now;
   };
 
   const updateHistogramFromImage = () => {
@@ -850,34 +852,74 @@ export function CameraConsoleApp() {
     }
   }, [previewActive]);
 
+  // MJPEG 在 <img> 上通常不按帧触发 onLoad；勿用 lastFrameTime 做断流重连以免与单槽位冲突导致 503
+  // MJPEG <img> rarely fires onLoad per frame; do not watchdog-reconnect on lastFrameTime (503 with single slot)
+
   useEffect(() => {
     if (!previewActive) return;
-    const watchdog = window.setInterval(() => {
-      const last = statsRef.current.lastFrameTime;
-      if (last != null && performance.now() - last > 2000) {
-        void updateCameraStatus();
-        setStreamNonce(Date.now());
+    fpsFrameTsRef.current = [];
+    fpsLastHashRef.current = 0;
+  }, [streamNonce, previewActive]);
+
+  useEffect(() => {
+    if (!previewActive) {
+      fpsFrameTsRef.current = [];
+      fpsLastHashRef.current = 0;
+      setLiveFps(0);
+      return;
+    }
+    if (!fpsSampleCanvasRef.current) {
+      const c = document.createElement("canvas");
+      c.width = 32;
+      c.height = 32;
+      fpsSampleCanvasRef.current = c;
+    }
+    const canvas = fpsSampleCanvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    let raf = 0;
+    const tick = () => {
+      const img = imgRef.current;
+      if (img?.complete && img.naturalWidth > 0) {
+        try {
+          ctx.drawImage(img, 0, 0, 32, 32);
+          const d = ctx.getImageData(0, 0, 32, 32).data;
+          let h = 2166136261;
+          for (let i = 0; i < d.length; i += 4) {
+            h ^= d[i] + d[i + 1] + d[i + 2];
+            h = Math.imul(h, 16777619);
+          }
+          if (fpsLastHashRef.current !== 0 && h !== fpsLastHashRef.current) {
+            const tNow = performance.now();
+            fpsFrameTsRef.current.push(tNow);
+            const cutoff = tNow - 1000;
+            while (fpsFrameTsRef.current.length && fpsFrameTsRef.current[0] < cutoff) {
+              fpsFrameTsRef.current.shift();
+            }
+          }
+          fpsLastHashRef.current = h;
+        } catch {
+          /* CORS / tainted canvas — ignore */
+        }
       }
-    }, 1000);
-    return () => window.clearInterval(watchdog);
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
   }, [previewActive]);
 
   useEffect(() => {
     if (!previewActive) {
-      setActualFps(0);
-      fpsSampleRef.current = { ts: performance.now(), frames: statsRef.current.frameCount };
+      setLiveFps(0);
       return;
     }
     const timer = window.setInterval(() => {
       const now = performance.now();
-      const currentFrames = statsRef.current.frameCount;
-      const dt = (now - fpsSampleRef.current.ts) / 1000;
-      const df = currentFrames - fpsSampleRef.current.frames;
-      if (dt > 0.2) {
-        setActualFps(Math.max(0, df / dt));
-        fpsSampleRef.current = { ts: now, frames: currentFrames };
-      }
-    }, 1000);
+      const cutoff = now - 1000;
+      const arr = fpsFrameTsRef.current;
+      while (arr.length && arr[0] < cutoff) arr.shift();
+      setLiveFps(arr.length);
+    }, 200);
     return () => window.clearInterval(timer);
   }, [previewActive]);
 
@@ -897,7 +939,6 @@ export function CameraConsoleApp() {
   }, [files.length, filePage]);
 
   const streamSrc = previewActive ? `/api/debug/camera/stream?t=${streamNonce}` : "";
-  const s = statsRef.current;
   const exposureLocked = form.autoExposure;
   const wbManual = form.whiteBalanceMode === "manual";
   const nightModeEnabled = Boolean(status?.info?.night_mode);
@@ -949,6 +990,23 @@ export function CameraConsoleApp() {
                   {rot}°
                 </button>
               ))}
+            </div>
+            <div className="mb-2 text-[11px] text-on-surface-variant">{t("cam.mirror.hint")}</div>
+            <div className="mb-2 flex flex-wrap gap-1 text-xs">
+              <button
+                type="button"
+                onClick={() => void applyMirror(!flipHorizontal, flipVertical)}
+                className={`rounded border px-2 py-1 ${flipHorizontal ? "border-primary text-primary" : "border-outline-variant/30"}`}
+              >
+                {t("cam.mirror.horizontal")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyMirror(flipHorizontal, !flipVertical)}
+                className={`rounded border px-2 py-1 ${flipVertical ? "border-primary text-primary" : "border-outline-variant/30"}`}
+              >
+                {t("cam.mirror.vertical")}
+              </button>
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
               <button type="button" onClick={() => void backupSettings()} className="rounded border border-outline-variant/40 px-2 py-1"><Save className="mr-1 inline h-3.5 w-3.5" />{t("cam.controls.backup")}</button>
@@ -1021,13 +1079,52 @@ export function CameraConsoleApp() {
                 TEMP: <span className="font-mono">{Number(sysInfo?.temperature ?? 0).toFixed(1)}°C</span>
               </div>
             </div>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wider">{t("cam.preview.title")}</h2>
-              <div className="font-mono text-xs text-on-surface-variant">
+            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider">{t("cam.preview.title")}</h2>
+                <p className="mt-1 max-w-2xl text-[11px] leading-snug text-on-surface-variant">
+                  {t("cam.hint.mjpegSingleStream")}
+                </p>
+              </div>
+              <div className="shrink-0 font-mono text-xs text-on-surface-variant">
                 {t("cam.preview.state")}: {status?.streaming ? t("cam.state.streaming") : t("cam.state.idle")}
               </div>
             </div>
+            {previewStreamHint && !previewActive && (
+              <div
+                className="mb-2 rounded-lg border border-error/35 bg-error-container/15 px-3 py-2 text-left"
+                role="alert"
+              >
+                <p className="text-sm font-medium text-error">{previewStreamHint}</p>
+                {previewStreamIsBusy ? (
+                  <p className="mt-1 max-w-2xl text-[11px] leading-snug text-on-surface-variant">
+                    {t("cam.err.streamBusyHint")}
+                  </p>
+                ) : (
+                  <p className="mt-1 max-w-2xl text-[11px] leading-snug text-on-surface-variant">
+                    {t("cam.err.streamProbeDetail")}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="relative aspect-video overflow-hidden rounded border border-outline-variant/20 bg-black">
+              {previewActive && previewStreamHint && (
+                <div
+                  className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 px-4 text-center"
+                  role="alert"
+                >
+                  <p className="text-sm font-medium text-error">{previewStreamHint}</p>
+                  {previewStreamIsBusy ? (
+                    <p className="max-w-md text-[11px] leading-snug text-on-surface-variant">
+                      {t("cam.err.streamBusyHint")}
+                    </p>
+                  ) : (
+                    <p className="max-w-md text-[11px] leading-snug text-on-surface-variant">
+                      {t("cam.err.streamProbeDetail")}
+                    </p>
+                  )}
+                </div>
+              )}
               {previewActive ? (
                 <img
                   ref={imgRef}
@@ -1035,17 +1132,28 @@ export function CameraConsoleApp() {
                   className="h-full w-full object-contain"
                   src={streamSrc}
                   onLoad={() => {
-                    analyzeStreamData();
+                    setPreviewStreamHint(null);
+                    setPreviewStreamIsBusy(false);
                     updateHistogramFromImage();
                   }}
                   onError={() => {
                     clearReconnectTimer();
                     if (!previewActiveRef.current) return;
-                    reconnectTimerRef.current = window.setTimeout(() => {
-                      if (previewActiveRef.current) {
-                        setStreamNonce(Date.now());
+                    const src = imgRef.current?.src;
+                    void (async () => {
+                      if (!previewActiveRef.current || !src) return;
+                      const p = await probeMjpegStream(src);
+                      if (p === "busy") {
+                        setPreviewStreamHint(t("cam.err.streamBusy"));
+                        setPreviewStreamIsBusy(true);
+                        return;
                       }
-                    }, 400);
+                      reconnectTimerRef.current = window.setTimeout(() => {
+                        if (previewActiveRef.current) {
+                          setStreamNonce(Date.now());
+                        }
+                      }, 400);
+                    })();
                   }}
                 />
               ) : (
@@ -1099,15 +1207,14 @@ export function CameraConsoleApp() {
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-4">
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.frameFps")}: </span>
-                <span className="font-mono text-on-surface">{actualFps.toFixed(2)}</span>
+                <span className="font-mono text-on-surface">{liveFps.toFixed(2)}</span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {t("cam.stats.fpsMeasureNote")}
+                </p>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.targetFps")}: </span>
                 <span className="font-mono text-on-surface">{Number(status?.info?.fps ?? 0).toFixed(2)}</span>
-              </div>
-              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
-                <span className="text-on-surface-variant">{t("cam.stats.frameCount")}: </span>
-                <span className="font-mono text-on-surface">{s.frameCount}</span>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.uptime")}: </span>

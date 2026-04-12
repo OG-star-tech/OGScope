@@ -37,6 +37,8 @@ _CAMERA_ENV_KEY_MAP = {
     "sampling_mode": "OGSCOPE_CAMERA_SAMPLING_MODE",
     "exposure_us": "OGSCOPE_CAMERA_EXPOSURE",
     "analogue_gain": "OGSCOPE_CAMERA_GAIN",
+    "flip_horizontal": "OGSCOPE_CAMERA_FLIP_HORIZONTAL",
+    "flip_vertical": "OGSCOPE_CAMERA_FLIP_VERTICAL",
 }
 
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
@@ -480,6 +482,32 @@ class DebugCameraService:
             }
         else:
             raise Exception("设置旋转角度失败")
+
+    @staticmethod
+    async def set_mirror(flip_horizontal: bool, flip_vertical: bool):
+        """设置水平/垂直镜像（采集管线内，与解算一致）/ Set mirror in capture pipeline."""
+        camera = get_camera_instance()
+        if not camera:
+            raise Exception("相机未初始化")
+        if not hasattr(camera, "set_flip"):
+            raise Exception("相机不支持镜像设置")
+        fh = bool(flip_horizontal)
+        fv = bool(flip_vertical)
+        if camera.set_flip(fh, fv):
+            get_camera_manager().update_runtime_overrides(
+                {"flip_horizontal": fh, "flip_vertical": fv}
+            )
+            return {
+                "success": True,
+                "flip_horizontal": fh,
+                "flip_vertical": fv,
+                **i18n_payload(
+                    "server.mirrorSet",
+                    f"镜像: 水平={'开' if fh else '关'}, 垂直={'开' if fv else '关'}",
+                    {"flip_horizontal": fh, "flip_vertical": fv},
+                ),
+            }
+        raise Exception("设置镜像失败")
 
     @staticmethod
     async def start_recording():
@@ -1182,6 +1210,12 @@ class DebugCameraService:
                 )
             if "night_mode" in settings:
                 camera.set_night_mode(settings["night_mode"])
+            if "flip_horizontal" in settings and "flip_vertical" in settings:
+                if hasattr(camera, "set_flip"):
+                    camera.set_flip(
+                        bool(settings["flip_horizontal"]),
+                        bool(settings["flip_vertical"]),
+                    )
 
             return {
                 "success": True,
@@ -1357,6 +1391,15 @@ class DebugPresetService:
                     if hasattr(camera, "set_rotation"):
                         camera.set_rotation(preset["rotation"])
 
+                if "flip_horizontal" in preset or "flip_vertical" in preset:
+                    if hasattr(camera, "set_flip"):
+                        fh = bool(preset.get("flip_horizontal", False))
+                        fv = bool(preset.get("flip_vertical", False))
+                        camera.set_flip(fh, fv)
+                        get_camera_manager().update_runtime_overrides(
+                            {"flip_horizontal": fh, "flip_vertical": fv}
+                        )
+
                 # 颜色模式 / color mode
                 if "color_mode" in preset:
                     if hasattr(camera, "set_color_mode"):
@@ -1515,6 +1558,8 @@ class DebugFileService:
                                 "fps",
                                 "auto_exposure",
                                 "rotation",
+                                "flip_horizontal",
+                                "flip_vertical",
                                 "sampling_mode",
                                 "color_mode",
                                 "sensor",

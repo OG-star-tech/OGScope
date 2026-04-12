@@ -75,6 +75,29 @@ import {
   type SolveHistoryGroup,
 } from "./labTypes";
 
+/** 将门禁状态与后端 reason 转为可读说明 / Human-readable gate hints */
+function buildLabGateHint(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  gateStatus: string | null | undefined,
+  gateReason: string | null | undefined,
+  nextAllowedMs: number | null | undefined,
+): string {
+  const extra =
+    typeof nextAllowedMs === "number" && nextAllowedMs > 0
+      ? ` ${t("lab.gateNextMs", { ms: nextAllowedMs })}`
+      : "";
+  const raw = String(gateReason ?? "").toLowerCase();
+  if (gateStatus === "SKIPPED_BUSY") {
+    if (raw.includes("recording")) return `${t("lab.gate.skipRecording")}${extra}`;
+    if (raw.includes("previous")) return `${t("lab.gate.skipBusyInFlight")}${extra}`;
+    return `${t("lab.gate.skipBusyFallback", { detail: String(gateReason ?? "") })}${extra}`;
+  }
+  if (gateStatus === "SKIPPED_INTERVAL") {
+    return `${t("lab.gate.skipInterval")}${extra}`;
+  }
+  return `${gateStatus ?? "?"}${gateReason ? `: ${String(gateReason)}` : ""}${extra}`;
+}
+
 export default function AnalysisLabApp() {
   const { t, locale } = useI18n();
   const [view, setView] = useState<LabView>("lab_image");
@@ -544,12 +567,13 @@ export default function AnalysisLabApp() {
       const effInt = (out as { effective_interval_ms?: number | null }).effective_interval_ms;
 
       if (gs === "SKIPPED_INTERVAL" || gs === "SKIPPED_BUSY") {
-        const extra =
-          typeof nextAllowed === "number" && nextAllowed > 0
-            ? ` · ${t("lab.gateNextMs", { ms: nextAllowed })}`
-            : "";
         setLastGateHint(
-          `${gs}${(out as { gate_reason?: string | null }).gate_reason ? `: ${String((out as { gate_reason?: string | null }).gate_reason)}` : ""}${extra}`,
+          buildLabGateHint(
+            t,
+            gs,
+            (out as { gate_reason?: string | null }).gate_reason,
+            typeof nextAllowed === "number" ? nextAllowed : null,
+          ),
         );
         if (fromLoop) {
           clearCameraSolveSchedule();
@@ -641,12 +665,13 @@ export default function AnalysisLabApp() {
       const effInt = (out as { effective_interval_ms?: number | null }).effective_interval_ms;
 
       if (gs === "SKIPPED_INTERVAL" || gs === "SKIPPED_BUSY") {
-        const extra =
-          typeof nextAllowed === "number" && nextAllowed > 0
-            ? ` · ${t("lab.gateNextMs", { ms: nextAllowed })}`
-            : "";
         setLastGateHint(
-          `${gs}${(out as { gate_reason?: string | null }).gate_reason ? `: ${String((out as { gate_reason?: string | null }).gate_reason)}` : ""}${extra}`,
+          buildLabGateHint(
+            t,
+            gs,
+            (out as { gate_reason?: string | null }).gate_reason,
+            typeof nextAllowed === "number" ? nextAllowed : null,
+          ),
         );
         if (fromLoop) {
           clearFileSolveSchedule();
@@ -1208,6 +1233,9 @@ export default function AnalysisLabApp() {
               {view === "lab_video" && (
                 <div className="mb-3 max-w-5xl rounded-lg border border-outline-variant/25 bg-surface-container-low/80 p-3 text-[11px] leading-relaxed text-on-surface">
                   <p className="text-[10px] text-on-surface-variant">{t("lab.videoLiveIntro")}</p>
+                  <p className="mt-1.5 text-[10px] leading-snug text-on-surface-variant/95">
+                    {t("lab.videoMjpegHint")}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
