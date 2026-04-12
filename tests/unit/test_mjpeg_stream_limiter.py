@@ -24,3 +24,15 @@ async def test_limiter_one_client_blocks_second() -> None:
     await lim.release()
     assert await lim.try_acquire() is True
     await lim.release()
+
+
+@pytest.mark.asyncio
+async def test_limiter_two_clients_blocks_third() -> None:
+    lim = MjpegStreamLimiter(2)
+    assert await lim.try_acquire() is True
+    assert await lim.try_acquire() is True
+    assert await lim.try_acquire() is False
+    await lim.release()
+    assert await lim.try_acquire() is True
+    await lim.release()
+    await lim.release()

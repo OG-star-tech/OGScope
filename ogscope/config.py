@@ -200,7 +200,7 @@ class Settings(BaseSettings):
         description="实时解算慢请求阈值（毫秒）/ Slow realtime solve threshold in ms",
     )
     stream_max_mjpeg_clients: int = Field(
-        default=0,
+        default=2,
         ge=0,
         le=32,
         description=(
