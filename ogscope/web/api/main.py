@@ -11,6 +11,7 @@ from ogscope.web.api.camera.routes import router as camera_router
 from ogscope.web.api.debug.routes import router as debug_router
 from ogscope.web.api.network.routes import router as network_router
 from ogscope.web.api.system.routes import router as system_router
+from ogscope.web.api.legacy protocol.routes import router as legacy protocol_router
 
 # 创建主路由器 / Create the main router
 router = APIRouter()
@@ -22,3 +23,4 @@ router.include_router(system_router, tags=["System - 系统"])
 router.include_router(network_router, tags=["Network - 网络"])
 router.include_router(debug_router, tags=["Debug - 调试"])
 router.include_router(analysis_router, tags=["Analysis - 分析"])
+router.include_router(legacy protocol_router, tags=["legacy hardware protocol - 赤道仪控制"])
