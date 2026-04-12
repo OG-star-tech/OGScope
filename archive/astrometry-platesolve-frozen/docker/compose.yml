@@ -1,0 +1,46 @@
+# OGScope UI Builder Compose / OGScope UI 构建器 Compose
+# 提供交互式构建环境 / Interactive build environment
+#
+# 用法 / Usage:
+#   docker compose -f docker/compose.yml up -d    # 启动容器 / Start container
+#   docker compose -f docker/compose.yml exec ui-builder bash  # 进入容器 / Attach to container
+#   docker compose -f docker/compose.yml down     # 停止容器 / Stop container
+#
+# 容器内构建命令 / Build commands inside container:
+#   cd /workspace/analysis-ui
+#   npm install    # 首次或 package.json 变更后 / First time or after package.json changes
+#   npm run build  # 构建 / Build
+
+services:
+  ui-builder:
+    container_name: ogscope-ui-builder
+    image: ogscope-ui-builder:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ui-builder
+    
+    # 挂载项目目录 / Mount project directory
+    volumes:
+      - ../web:/workspace:rw
+    
+    # 工作目录 / Working directory
+    working_dir: /workspace/analysis-ui
+    
+    # 使用宿主机用户 ID 避免权限问题 / Use host user ID to avoid permission issues
+    # 注意：在 WSL/某些环境中可能需要以 root 运行 / Note: May need root in WSL/some environments
+    # user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
+    
+    # 环境变量 / Environment variables
+    environment:
+      - NODE_ENV=development
+      # 可选：npm 镜像源 / Optional: npm registry mirror
+      # - NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+    
+    # 标签 / Labels
+    labels:
+      - "com.ogscope.project=ogscope"
+      - "com.ogscope.component=ui-builder"
+      - "com.ogscope.description=Frontend build environment"
+    
+    # 网络模式 / Network mode
+    network_mode: bridge
