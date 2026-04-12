@@ -73,6 +73,13 @@ poetry.lock  # 在开发机与树莓派上可能不一致，建议忽略
 .pytest_cache/
 .coverage
 .coverage.*
+# macOS/复制等可能产生「.coverage 2」等带空格副本 / Spaced duplicates from copy tools
+.coverage *
+# 同上：构建目录内「file 2.js」「page 2.html」等误副本 / Duplicate-named build artifacts
+**/* 2.js
+**/* 3.js
+**/* 2.html
+**/* 3.html
 htmlcov/
 .tox/
 .nox/
