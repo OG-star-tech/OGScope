@@ -5,6 +5,7 @@
 import asyncio
 import datetime as dt
 import json
+import logging
 import os
 import subprocess
 import time
@@ -12,6 +13,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
+from ogscope.config import get_settings
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.web.api.debug.services import (
     DebugCameraService,
@@ -23,8 +25,10 @@ from ogscope.web.api.models.schemas import (
     CameraPreset,
     CameraSettings,
 )
+from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _MJPEG_LIMIT_DETAIL = (
@@ -156,55 +160,84 @@ async def start_debug_camera():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _streaming_response_debug_camera_mjpeg(
+    request: Request,
+    *,
+    image_format: str,
+    quality: int,
+) -> StreamingResponse:
+    """MJPEG 响应体：断连与单帧超时均可结束生成器并释放名额 / MJPEG body: disconnect or per-frame timeout ends generator and releases slot."""
+    limiter = get_mjpeg_stream_limiter()
+    if not await limiter.try_acquire():
+        raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
+    boundary = "frame"
+    min_emit_interval = 1.0 / max(
+        1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
+    )
+    fetch_timeout_s = get_settings().stream_mjpeg_frame_fetch_timeout_ms / 1000.0
+    ctype = "image/jpeg" if image_format.lower() == "jpeg" else "image/png"
+
+    async def frame_generator():
+        try:
+            last_snap_frame_id = -1
+            last_emit_mono = 0.0
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    code, data, snap_id = await asyncio.wait_for(
+                        DebugCameraService.get_stream_frame_bytes(
+                            image_format, quality, since_frame_id=last_snap_frame_id
+                        ),
+                        timeout=fetch_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "MJPEG 单帧取流超时，结束响应以释放名额 / MJPEG frame fetch timed out, closing stream"
+                    )
+                    break
+                if code == 304:
+                    if not await mjpeg_sleep_or_disconnect(request, 0.03):
+                        break
+                    continue
+                if code != 200 or data is None:
+                    if not await mjpeg_sleep_or_disconnect(request, 0.05):
+                        break
+                    continue
+                now = time.monotonic()
+                wait = last_emit_mono + min_emit_interval - now
+                if wait > 0:
+                    if not await mjpeg_sleep_or_disconnect(request, wait):
+                        break
+                last_snap_frame_id = snap_id
+                last_emit_mono = time.monotonic()
+                yield (
+                    b"--" + boundary.encode() + b"\r\n"
+                    b"Content-Type: " + ctype.encode() + b"\r\n"
+                    b"Content-Length: "
+                    + str(len(data)).encode()
+                    + b"\r\n\r\n"
+                    + data
+                    + b"\r\n"
+                )
+        finally:
+            await limiter.release()
+
+    return StreamingResponse(
+        frame_generator(),
+        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+    )
+
+
 @router.get("/debug/camera/stream")
 async def stream_debug_camera(
+    request: Request,
     quality: int = Query(_DEFAULT_PREVIEW_JPEG_QUALITY, ge=10, le=100),
 ):
     """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
-        limiter = get_mjpeg_stream_limiter()
-        if not await limiter.try_acquire():
-            raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
-        boundary = "frame"
-        min_emit_interval = 1.0 / max(
-            1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
-        )
-
-        async def frame_generator():
-            try:
-                last_snap_frame_id = -1
-                last_emit_mono = 0.0
-                while True:
-                    code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
-                        "jpeg", quality, since_frame_id=last_snap_frame_id
-                    )
-                    if code == 304:
-                        await asyncio.sleep(0.03)
-                        continue
-                    if code != 200 or data is None:
-                        await asyncio.sleep(0.05)
-                        continue
-                    now = time.monotonic()
-                    wait = last_emit_mono + min_emit_interval - now
-                    if wait > 0:
-                        await asyncio.sleep(wait)
-                    last_snap_frame_id = snap_id
-                    last_emit_mono = time.monotonic()
-                    yield (
-                        b"--" + boundary.encode() + b"\r\n"
-                        b"Content-Type: image/jpeg\r\n"
-                        b"Content-Length: "
-                        + str(len(data)).encode()
-                        + b"\r\n\r\n"
-                        + data
-                        + b"\r\n"
-                    )
-            finally:
-                await limiter.release()
-
-        return StreamingResponse(
-            frame_generator(),
-            media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        return await _streaming_response_debug_camera_mjpeg(
+            request, image_format="jpeg", quality=quality
         )
     except HTTPException:
         raise
@@ -213,52 +246,11 @@ async def stream_debug_camera(
 
 
 @router.get("/debug/camera/stream-lossless")
-async def stream_debug_camera_lossless():
+async def stream_debug_camera_lossless(request: Request):
     """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
     try:
-        limiter = get_mjpeg_stream_limiter()
-        if not await limiter.try_acquire():
-            raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
-        boundary = "frame"
-        min_emit_interval = 1.0 / max(
-            1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
-        )
-
-        async def frame_generator():
-            try:
-                last_snap_frame_id = -1
-                last_emit_mono = 0.0
-                while True:
-                    code, data, snap_id = await DebugCameraService.get_stream_frame_bytes(
-                        "png", 100, since_frame_id=last_snap_frame_id
-                    )
-                    if code == 304:
-                        await asyncio.sleep(0.03)
-                        continue
-                    if code != 200 or data is None:
-                        await asyncio.sleep(0.05)
-                        continue
-                    now = time.monotonic()
-                    wait = last_emit_mono + min_emit_interval - now
-                    if wait > 0:
-                        await asyncio.sleep(wait)
-                    last_snap_frame_id = snap_id
-                    last_emit_mono = time.monotonic()
-                    yield (
-                        b"--" + boundary.encode() + b"\r\n"
-                        b"Content-Type: image/png\r\n"
-                        b"Content-Length: "
-                        + str(len(data)).encode()
-                        + b"\r\n\r\n"
-                        + data
-                        + b"\r\n"
-                    )
-            finally:
-                await limiter.release()
-
-        return StreamingResponse(
-            frame_generator(),
-            media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        return await _streaming_response_debug_camera_mjpeg(
+            request, image_format="png", quality=100
         )
     except HTTPException:
         raise

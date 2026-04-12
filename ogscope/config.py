@@ -208,6 +208,16 @@ class Settings(BaseSettings):
             "0=不限制 / Max concurrent MJPEG streams; 0=unlimited"
         ),
     )
+    stream_mjpeg_frame_fetch_timeout_ms: int = Field(
+        default=20000,
+        ge=3000,
+        le=120000,
+        description=(
+            "MJPEG 循环单次取帧（含编码线程）最大等待毫秒；超时则结束流并释放名额，"
+            "避免异常断开时长时间占满并发 / Max wait per MJPEG frame fetch (incl. encode thread); "
+            "on timeout the stream ends to free slots after abnormal client disconnect"
+        ),
+    )
 
     # WiFi（nmcli + scripts/ogscope-wifi-switch.sh）/ WiFi (NetworkManager helper script)
     wifi_switch_script: Path = Field(
