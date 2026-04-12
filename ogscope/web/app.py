@@ -113,6 +113,10 @@ openapi_tags = [
         "description": "WiFi AP/STA 切换 / WiFi AP vs STA switching",
     },
     {
+        "name": "legacy hardware protocol - 赤道仪控制",
+        "description": "legacy hardware protocol 协议赤道仪控制调试 / legacy hardware protocol protocol mount control debugging",
+    },
+    {
         "name": "Catalog - 星表",
         "description": "星表下载、索引与状态 / Catalog download, indexing, and status",
     },
