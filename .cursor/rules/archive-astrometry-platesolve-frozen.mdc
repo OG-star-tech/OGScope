@@ -1,0 +1,14 @@
+---
+description: 封存区 astrometry 板解快照 — 禁止日常修改 / Frozen astrometry archive — no routine edits
+globs: archive/astrometry-platesolve-frozen/**
+alwaysApply: true
+---
+
+# `archive/astrometry-platesolve-frozen/`
+
+本路径为**仅作参考的封存快照**，来自历史分支上误与主线混排的 **astrometry 第二套板解** 与 Docker UI 构建脚本，**不是当前运行时代码**。
+
+- **不要**在本目录做格式化、重构、依赖升级或「顺手修复」，除非用户在对话中**明确**要求恢复/集成/删除该封存。
+- 主线解算以 `ogscope/algorithms/plate_solve/` 与现有 Analysis API 为准；不要从本目录复制 `ogscope/` 到包内除非按 `INTEGRATION_TODO.md` 做完整集成评审。
+
+**English:** Treat as read-only. Do not edit unless the user explicitly requests revival or integration work.
