@@ -3,10 +3,11 @@ import { DebugShell } from "./DebugShell";
 import { OverviewPage } from "./pages/OverviewPage";
 import { NetworkPage } from "./pages/NetworkPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { ZacpPage } from "./pages/ZacpPage";
 
-type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power";
+type SystemRoute = "overview" | "network" | "legacy protocol" | "sensors" | "hmi" | "power";
 
-const routeSet = new Set<SystemRoute>(["overview", "network", "sensors", "hmi", "power"]);
+const routeSet = new Set<SystemRoute>(["overview", "network", "legacy protocol", "sensors", "hmi", "power"]);
 
 function readRouteFromHash(): SystemRoute {
   const raw = window.location.hash.replace(/^#\/?/, "").trim().toLowerCase();
@@ -29,6 +30,7 @@ export function SystemConsoleApp() {
 
   const page = useMemo(() => {
     if (route === "network") return <NetworkPage />;
+    if (route === "legacy protocol") return <ZacpPage />;
     if (route === "sensors") return <PlaceholderPage scope="sensors" />;
     if (route === "hmi") return <PlaceholderPage scope="hmi" />;
     if (route === "power") return <PlaceholderPage scope="power" />;
