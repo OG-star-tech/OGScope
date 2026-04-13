@@ -1,0 +1,11 @@
+import{c as f}from"./index-BisiMkmK.js";import{r,j as l}from"./client-Dn7WkGlf.js";/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const S=f("Camera",[["path",{d:"M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",key:"1tc9qg"}],["circle",{cx:"12",cy:"13",r:"3",key:"1vg3eu"}]]);/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const m=f("Info",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"M12 16v-4",key:"1dtifu"}],["path",{d:"M12 8h.01",key:"e9boi3"}]]),u=r.createContext(null),d=8e3;async function h(){const e=await fetch("/api/system/info",{cache:"no-store"});let t={};try{t=await e.json()}catch{}if(!e.ok){const n=t;throw new Error(n.detail||`HTTP ${e.status}`)}return t}function I({children:e}){const[t,n]=r.useState(null),[c,i]=r.useState(null),s=r.useCallback(async()=>{try{i(null);const o=await h();n(o)}catch(o){i(o instanceof Error?o.message:String(o))}},[]);r.useEffect(()=>{s();const o=window.setInterval(()=>void s(),d);return()=>window.clearInterval(o)},[s]);const a=r.useMemo(()=>({info:t,error:c,refresh:s}),[t,c,s]);return l.jsxDEV(u.Provider,{value:a,children:e},void 0,!1,{fileName:"/workspace/spa/src/shared/context/SystemInfoContext.tsx",lineNumber:62,columnNumber:5},this)}function g(){const e=r.useContext(u);if(!e)throw new Error("useSystemInfo must be used within SystemInfoProvider");return e}async function y(e,t={}){const{cache:n,...c}=t,i={headers:{"Content-Type":"application/json"},...c};n!==void 0&&Object.assign(i,{cache:n});const s=await fetch(e,i);let a={};try{a=await s.json()}catch{}if(!s.ok){const o=a;throw new Error(o.detail||`HTTP ${s.status}`)}return a}async function x(e){var c;const t=new URLSearchParams;e!=null&&e.service&&t.set("service",e.service),t.set("since_seconds",String(e.sinceSeconds)),t.set("limit",String(e.limit)),(c=e==null?void 0:e.levels)!=null&&c.length&&t.set("levels",e.levels.join(","));const n=t.toString();return await y(`/api/debug/logs/systemd${n?`?${n}`:""}`,{cache:"no-store"})}export{S as C,m as I,I as S,x as f,y as r,g as u};
