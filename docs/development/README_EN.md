@@ -7,6 +7,7 @@ This document explains how OGScope is actually run on development boards
 and the team-standard debug workflow.
 
 For testing workflow, see [Testing Guide](testing-guide.md).
+For pre-commit architecture guardrails, see [Architecture Quick Checklist](ARCHITECTURE_QUICK_CHECKLIST.md).
 
 Recommended workflow: **edit locally -> upload to board -> restart with
 `systemd` -> verify**.  
