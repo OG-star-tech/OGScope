@@ -55,12 +55,7 @@ loguru = "^0.7.2"            # 更好的日志库
 # INDI 集成 (Phase 3)
 # pyindi-client = "^1.9.0"
 
-# legacy hardware protocol I2C（可选）/ legacy hardware protocol I2C (optional)
-smbus2 = { version = "^0.4.3", optional = true }
-
-[tool.poetry.extras]
-# legacy hardware protocol 赤道仪控制模块 / legacy hardware protocol mount control module (I2C)
-legacy protocol = ["smbus2"]
+# legacy hardware protocol/I2C 已迁移到 external integrator 私有仓库 / legacy hardware protocol/I2C moved to external integrator private repo
 
 [tool.poetry.group.dev.dependencies]
 # 测试

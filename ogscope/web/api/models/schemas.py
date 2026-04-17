@@ -395,3 +395,46 @@ class AnalysisReplaceVideoRequest(BaseModel):
     nominal_fps: Optional[float] = None
     codec_fourcc: Optional[str] = None
     container: Optional[str] = None
+
+
+class CoreStartAnalysisRequest(BaseModel):
+    """Core v1 开始分析请求 / Core v1 start-analysis request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hint_ra_deg: Optional[float] = None
+    hint_dec_deg: Optional[float] = None
+    fov_estimate: Optional[float] = None
+    fov_max_error: Optional[float] = None
+    solve_timeout_ms: Optional[int] = Field(default=None, ge=200, le=120000)
+
+
+class CoreAnalysisControlResponse(BaseModel):
+    """Core 分析控制响应 / Core analysis control response."""
+
+    success: bool
+    session_id: str
+    state: Literal["running", "stopped"]
+    message: str = ""
+
+
+class CoreAnalysisResultResponse(BaseModel):
+    """Core 分析结果响应 / Core analysis result response."""
+
+    success: bool
+    session_id: str
+    state: Literal["running", "completed", "stopped"]
+    result: Optional[dict[str, Any]] = None
+    last_error: str = ""
+    frame_count: int = 0
+    fullsolve_count: int = 0
+
+
+class CoreSystemStatusResponse(BaseModel):
+    """Core 系统状态响应 / Core system status response."""
+
+    success: bool
+    health: str
+    version: str
+    capabilities: dict[str, bool]
+    system: dict[str, Any]
