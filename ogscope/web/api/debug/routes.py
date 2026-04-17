@@ -381,7 +381,7 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
 async def update_debug_camera_settings(settings: CameraSettings):
     """更新调试相机设置 / Update debug camera settings"""
     try:
-        return await DebugCameraService.update_settings(settings.dict())
+        return await DebugCameraService.update_settings(settings.model_dump())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -487,7 +487,7 @@ async def get_camera_presets():
 async def save_camera_preset(preset: CameraPreset):
     """保存相机预设 / Save camera presets"""
     try:
-        return await DebugPresetService.save_preset(preset.dict())
+        return await DebugPresetService.save_preset(preset.model_dump())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
