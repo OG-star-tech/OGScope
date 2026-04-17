@@ -438,3 +438,67 @@ class CoreSystemStatusResponse(BaseModel):
     version: str
     capabilities: dict[str, bool]
     system: dict[str, Any]
+    camera: dict[str, Any] = Field(default_factory=dict)
+    network: dict[str, Any] = Field(default_factory=dict)
+    sensors: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoreCameraTuneRequest(BaseModel):
+    """Core 相机微调请求 / Core camera tuning request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exposure_us: Optional[int] = Field(default=None, ge=100, le=2_000_000)
+    analogue_gain: Optional[float] = Field(default=None, ge=1.0, le=32.0)
+    digital_gain: Optional[float] = Field(default=None, ge=1.0, le=16.0)
+    auto_exposure: Optional[bool] = None
+    fps: Optional[int] = Field(default=None, ge=1, le=60)
+    width: Optional[int] = Field(default=None, ge=160, le=4096)
+    height: Optional[int] = Field(default=None, ge=120, le=4096)
+    rotation: Optional[int] = Field(default=None, ge=0, le=270)
+    flip_horizontal: Optional[bool] = None
+    flip_vertical: Optional[bool] = None
+    sampling_mode: Optional[Literal["supersample", "native", "crop"]] = None
+    color_mode: Optional[Literal["color", "mono"]] = None
+    white_balance_mode: Optional[Literal["auto", "manual", "night"]] = None
+    white_balance_gain_r: Optional[float] = Field(default=None, ge=0.1, le=3.0)
+    white_balance_gain_b: Optional[float] = Field(default=None, ge=0.1, le=3.0)
+
+    @field_validator("rotation")
+    @classmethod
+    def rotation_must_be_right_angle(cls, v: Optional[int]) -> Optional[int]:
+        if v is None:
+            return None
+        if v not in {0, 90, 180, 270}:
+            raise ValueError("rotation must be one of 0,90,180,270")
+        return v
+
+
+class CoreCameraControlResponse(BaseModel):
+    """Core 相机控制响应 / Core camera control response."""
+
+    success: bool
+    message: str = ""
+    info: dict[str, Any] = Field(default_factory=dict)
+    applied: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoreCameraStatusResponse(BaseModel):
+    """Core 相机状态响应 / Core camera status response."""
+
+    success: bool
+    connected: bool
+    streaming: bool
+    recording: bool
+    info: dict[str, Any] = Field(default_factory=dict)
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoreStreamStatusResponse(BaseModel):
+    """Core 视频流状态响应 / Core stream status response."""
+
+    success: bool
+    max_clients: int
+    active_clients: int
+    frame_fetch_timeout_ms: int
+    target_preview_fps: int

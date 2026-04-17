@@ -55,6 +55,40 @@
   - `version: str`
   - `capabilities: object`
   - `system: object`
+  - `camera: object`（相机在线与运行态摘要）
+  - `network: object`（WiFi 模式/信号/连接态）
+  - `sensors: object`（温度/CPU/内存等核心传感状态）
+
+### 5) Camera Runtime & Stream
+
+- `GET /api/core/v1/camera/status`
+  - 返回相机连接状态、流状态与 runtime overrides
+- `POST /api/core/v1/camera/start`
+- `POST /api/core/v1/camera/stop`
+- `GET /api/core/v1/camera/preview`
+  - 单帧 JPEG，支持 `since_frame_id` 以减少重复下发
+- `GET /api/core/v1/camera/stream?quality=75`
+  - MJPEG 压缩流（JPEG）
+- `GET /api/core/v1/camera/stream-lossless`
+  - MJPEG 无损流（PNG）
+- `GET /api/core/v1/camera/stream/status`
+  - 返回 `max_clients`、`active_clients`、取帧超时、目标预览帧率
+
+### 6) Camera Tuning
+
+- `POST /api/core/v1/camera/tune`
+  - 请求体采用可选字段增量更新，支持：
+    - 曝光/增益：`exposure_us`、`analogue_gain`、`digital_gain`、`auto_exposure`
+    - 采集参数：`fps`、`width`、`height`、`sampling_mode`
+    - 成像方向：`rotation`、`flip_horizontal`、`flip_vertical`
+    - 颜色相关：`color_mode`、`white_balance_mode`、`white_balance_gain_r`、`white_balance_gain_b`
+
+### 7) Video Metadata
+
+- `GET /api/core/v1/camera/videos`
+  - 返回录制视频列表（仅 video 类型）
+- `GET /api/core/v1/camera/videos/{filename}`
+  - 返回单个视频的侧车元信息（曝光/增益/分辨率/时长等）
 
 ## 错误码与版本策略
 
