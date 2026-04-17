@@ -207,4 +207,16 @@ chore: 构建/工具变更 / Build/tool changes
 3. **服务重启**: 项目以系统服务方式运行，修改后需要重启服务
 4. **调试前确认**: 如果有不明白的地方，先询问用户再开始工作
 
+## 跨仓协同开发（OGScope 外部集成）
+
+- OGScope 在联动中是 **核心能力提供方**；external integrator 是 **上层调用方**。
+- OGScope 对外稳定契约为 `"/api/core/v1/*"`；内部开发接口为 `"/api/dev/*"`。
+- 任何跨仓需求按以下顺序执行：
+  1. 更新契约文档/兼容矩阵
+  2. 修改 OGScope 核心实现与测试
+  3. 同步 external integrator 适配层与上层逻辑
+  4. 双仓测试通过后再提交
+- 禁止在 OGScope 中重新引入旧路径：`/api/debug/*`、`/api/analysis/*`、`/api/system/*`。
+- 联动开发详细流程见：`docs/development/CROSS_PROJECT_COLLAB.md`。
+
 
