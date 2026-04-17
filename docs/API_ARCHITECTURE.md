@@ -1,150 +1,86 @@
-# OGScope API 架构图
+# OGScope API Architecture
 
-## 📁 目录结构
+本文档描述当前生效的 API 分层与目录约定，供后续开发者快速对齐，避免把业务逻辑重新塞回路由层。
 
+## 1) 目录分层（当前）
+
+```text
+ogscope/
+├── web/
+│   ├── app.py                    # FastAPI 应用入口、docs/docs/dev/docs/all
+│   └── api/
+│       ├── main.py               # 聚合路由（统一 prefix=/api）
+│       ├── core/routes.py        # 标准契约：/api/core/v1/*
+│       ├── debug/routes.py       # 开发调试：/api/dev/debug/*
+│       ├── analysis/routes.py    # 开发分析：/api/dev/analysis/*
+│       ├── system/routes.py      # 开发系统：/api/dev/system/*
+│       ├── network/routes.py     # 网络域接口
+│       ├── camera/routes.py      # 相机基础接口
+│       └── ...                   # alignment/models 等
+├── domain/
+│   ├── camera/
+│   ├── analysis/
+│   ├── network/
+│   ├── system/
+│   └── shared/
+├── core/
+│   └── application/core_service.py # core/v1 契约编排
+└── adapters/                     # 边界适配（懒加载/兼容桥接）
 ```
-ogscope/web/api/
-├── __init__.py
-├── main.py                    # 🎯 主路由文件
-├── camera/                    # 📷 相机模块
-│   ├── __init__.py
-│   └── routes.py              # 相机API路由 (7个端点)
-├── debug/                     # 🔧 调试控制台模块
-│   ├── __init__.py
-│   ├── routes.py              # 调试API路由 (16个端点)
-│   └── services.py            # 调试服务层
-├── alignment/                 # 🎯 极轴校准模块
-│   ├── __init__.py
-│   └── routes.py              # 校准API路由 (6个端点)
-├── system/                    # 💻 系统模块
-│   ├── __init__.py
-│   └── routes.py              # 系统API路由 (1个端点)
-└── models/                    # 📋 数据模型模块
-    ├── __init__.py
-    └── schemas.py             # Pydantic模型定义
-```
 
-## 🔄 数据流向
+## 2) 设计原则（必须遵守）
 
-```
+- 路由层只做 HTTP 适配：参数解析、异常映射、`response_model` 序列化。
+- 业务逻辑下沉到 `domain/*` 或 `core/application/*`，避免写在 `routes.py`。
+- 标准对外能力固定在 `core/v1`，开发实验能力固定在 `dev/*`。
+- 允许通过 `domain/shared` 复用，不要跨域直接复制粘贴逻辑。
+
+## 3) API 分域与文档入口
+
+- 标准契约（对外稳定）：`/api/core/v1/*`
+- 开发者接口（内部调试）：`/api/dev/*`
+  - 调试工具：`/api/dev/debug/*`
+  - 分析实验：`/api/dev/analysis/*`
+  - 系统状态：`/api/dev/system/*`
+
+文档入口：
+
+- `/docs`：仅标准契约
+- `/docs/dev`：仅开发者接口
+- `/docs/all`：全量接口
+
+## 4) 典型请求流
+
+```text
 HTTP Request
-     ↓
-┌─────────────┐
-│ API Routes  │ ← 处理HTTP请求，参数验证
-└─────────────┘
-     ↓
-┌─────────────┐
-│ Services    │ ← 业务逻辑处理，数据操作
-└─────────────┘
-     ↓
-┌─────────────┐
-│ Models      │ ← 数据模型定义，序列化
-└─────────────┘
-     ↓
-HTTP Response
+  -> web/api/*/routes.py          (HTTP 适配)
+  -> domain/*/services.py         (业务逻辑)
+  -> adapters/hardware/algorithms (边界能力)
+  -> route response model          (序列化)
 ```
 
-## 📊 API端点分布
+## 5) 提交前防误改检查（强烈建议）
 
-### 📷 Camera Module (7个端点)
-- `GET /api/camera/status` - 获取相机状态
-- `POST /api/camera/settings` - 更新相机设置
-- `GET /api/camera/config` - 获取相机配置
-- `POST /api/camera/config` - 更新相机配置
-- `POST /api/camera/start` - 启动相机
-- `POST /api/camera/stop` - 停止相机
-- `GET /api/camera/preview` - 获取预览图
+提交 API 相关改动前，请逐项确认：
 
-### 🔧 Debug Module (16个端点)
-- `GET /api/debug/camera/status` - 调试相机状态
-- `POST /api/debug/camera/start` - 启动调试相机
-- `POST /api/debug/camera/stop` - 停止调试相机
-- `GET /api/debug/camera/preview` - 调试相机预览
-- `POST /api/debug/camera/capture` - 拍摄照片
-- `POST /api/debug/camera/record/start` - 开始录制
-- `POST /api/debug/camera/record/stop` - 停止录制
-- `POST /api/debug/camera/settings` - 更新调试设置
-- `POST /api/debug/camera/reset` - 重置相机
-- `GET /api/debug/camera/presets` - 获取预设列表
-- `POST /api/debug/camera/presets` - 保存预设
-- `POST /api/debug/camera/presets/{name}/apply` - 应用预设
-- `DELETE /api/debug/camera/presets/{name}` - 删除预设
-- `GET /api/debug/files` - 获取文件列表
-- `GET /api/debug/files/{filename}` - 下载文件
-- `GET /api/debug/files/{filename}/info` - 获取文件信息
+1. 没有新增 `/api/debug/*`、`/api/analysis/*`、`/api/system/*` 旧前缀。
+2. 开发接口统一在 `/api/dev/*` 下。
+3. 标准接口统一在 `/api/core/v1/*` 下。
+4. 新增业务逻辑没有写进 `routes.py`。
+5. `/docs` 与 `/docs/dev` 展示分组符合预期。
+6. 相关契约文档已同步更新：
+   - `docs/contracts/core-rest-v1.md`
+   - `docs/contracts/dev-rest-v1.md`
 
-### 🎯 Alignment Module (6个端点)
-- `POST /api/polar-align/start` - 开始极轴校准
-- `POST /api/alignment/start` - 开始校准
-- `POST /api/alignment/stop` - 停止校准
-- `GET /api/alignment/status` - 获取校准状态
-- `GET /api/polar-align/status` - 获取极轴校准状态
-- `POST /api/polar-align/stop` - 停止极轴校准
+## 6) 快速验证命令
 
-### 💻 System Module (1个端点)
-- `GET /api/system/info` - 获取系统信息
-
-### 🎯 Main Module (2个端点)
-- `GET /api` - API根路径
-- `GET /api/` - API根路径（备用）
-
-## 🏗️ 架构优势
-
-### 1. 模块化设计
-- ✅ 按业务领域划分
-- ✅ 职责单一明确
-- ✅ 低耦合高内聚
-
-### 2. 分层架构
-- ✅ 路由层：HTTP处理
-- ✅ 服务层：业务逻辑
-- ✅ 模型层：数据结构
-
-### 3. 可维护性
-- ✅ 文件大小合理
-- ✅ 代码结构清晰
-- ✅ 易于定位问题
-
-### 4. 可扩展性
-- ✅ 新模块独立添加
-- ✅ 不影响现有功能
-- ✅ 遵循统一模式
-
-### 5. 可测试性
-- ✅ 模块独立测试
-- ✅ 服务层可复用
-- ✅ 测试覆盖完整
-
-## 🚀 使用示例
-
-### 启动应用
 ```bash
-poetry run python -m ogscope.web.app
+# 启动后检查 API 根
+curl http://127.0.0.1:8000/api
+
+# 核心契约示例
+curl http://127.0.0.1:8000/api/core/v1/system/status
+
+# 开发域示例
+curl http://127.0.0.1:8000/api/dev/debug/camera/status
 ```
-
-### 访问API
-```bash
-# API文档
-curl http://localhost:8000/docs
-
-# 相机状态
-curl http://localhost:8000/api/camera/status
-
-# 调试控制台
-curl http://localhost:8000/api/debug/camera/status
-```
-
-### 测试验证
-```bash
-# 重构测试
-poetry run python scripts/test_api_refactor.py
-
-# 功能测试
-poetry run python scripts/test_debug_console.py
-```
-
----
-
-**OGScope API 重构完成！** 🎉
-
-新的模块化架构为项目的长期发展奠定了坚实的基础！

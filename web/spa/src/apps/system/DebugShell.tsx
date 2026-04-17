@@ -7,14 +7,13 @@ import {
   LayoutDashboard,
   Network,
   Sparkles,
-  Telescope,
   Touchpad,
   Wifi,
 } from "lucide-react";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
 import { useI18n } from "@shared/i18n/I18nProvider";
 
-type SystemRoute = "overview" | "network" | "legacy protocol" | "sensors" | "hmi" | "power";
+type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power";
 
 const navClass = (active: boolean) =>
   `flex items-center gap-3 rounded-lg px-3 py-2.5 font-headline text-sm tracking-tight transition-colors ${
@@ -46,7 +45,6 @@ export function DebugShell({
   const routeTitle: Record<SystemRoute, string> = {
     overview: t("sys.shell.top.overview"),
     network: t("sys.shell.top.network"),
-    legacy protocol: t("sys.shell.top.legacy protocol"),
     sensors: t("sys.shell.top.sensors"),
     hmi: t("sys.shell.top.hmi"),
     power: t("sys.shell.top.power"),
@@ -103,10 +101,6 @@ export function DebugShell({
               <Sparkles className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.analysis")}</span>
             </a>
-            <button type="button" className={navClass(route === "legacy protocol")} onClick={() => onRouteChange("legacy protocol")}>
-              <Telescope className="h-4 w-4 shrink-0" />
-              <span>{t("sys.shell.nav.legacy protocol")}</span>
-            </button>
             <button type="button" className={navClass(route === "sensors")} onClick={() => onRouteChange("sensors")}>
               <Activity className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.sensors")}</span>

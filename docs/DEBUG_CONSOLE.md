@@ -141,30 +141,30 @@ python -m ogscope.web.app
 调试控制台提供以下API接口：
 
 ### 相机控制
-- `GET /api/debug/camera/status` - 获取相机状态
-- `POST /api/debug/camera/start` - 启动相机
-- `POST /api/debug/camera/stop` - 停止相机
-- `GET /api/debug/camera/preview` - 获取预览图像
+- `GET /api/dev/debug/camera/status` - 获取相机状态
+- `POST /api/dev/debug/camera/start` - 启动相机
+- `POST /api/dev/debug/camera/stop` - 停止相机
+- `GET /api/dev/debug/camera/preview` - 获取预览图像
 
 ### 拍摄功能
-- `POST /api/debug/camera/capture` - 拍摄照片
-- `POST /api/debug/camera/record/start` - 开始录制
-- `POST /api/debug/camera/record/stop` - 停止录制
+- `POST /api/dev/debug/camera/capture` - 拍摄照片
+- `POST /api/dev/debug/camera/record/start` - 开始录制
+- `POST /api/dev/debug/camera/record/stop` - 停止录制
 
 ### 参数设置
-- `POST /api/debug/camera/settings` - 更新相机设置
-- `POST /api/debug/camera/reset` - 重置到默认设置
+- `POST /api/dev/debug/camera/settings` - 更新相机设置
+- `POST /api/dev/debug/camera/reset` - 重置到默认设置
 
 ### 预设管理
-- `GET /api/debug/camera/presets` - 获取预设列表
-- `POST /api/debug/camera/presets` - 保存预设
-- `POST /api/debug/camera/presets/{name}/apply` - 应用预设
-- `DELETE /api/debug/camera/presets/{name}` - 删除预设
+- `GET /api/dev/debug/camera/presets` - 获取预设列表
+- `POST /api/dev/debug/camera/presets` - 保存预设
+- `POST /api/dev/debug/camera/presets/{name}/apply` - 应用预设
+- `DELETE /api/dev/debug/camera/presets/{name}` - 删除预设
 
 ### 文件管理
-- `GET /api/debug/files` - 获取文件列表
-- `GET /api/debug/files/{filename}` - 下载文件
-- `GET /api/debug/files/{filename}/info` - 获取文件信息
+- `GET /api/dev/debug/files` - 获取文件列表
+- `GET /api/dev/debug/files/{filename}` - 下载文件
+- `GET /api/dev/debug/files/{filename}/info` - 获取文件信息
 
 ## 🧪 测试
 

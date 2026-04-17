@@ -55,8 +55,6 @@ loguru = "^0.7.2"            # 更好的日志库
 # INDI 集成 (Phase 3)
 # pyindi-client = "^1.9.0"
 
-# legacy hardware protocol/I2C 已迁移到 external integrator 私有仓库 / legacy hardware protocol/I2C moved to external integrator private repo
-
 [tool.poetry.group.dev.dependencies]
 # 测试
 pytest = "^8.0.0"

@@ -58,10 +58,14 @@
 6. **提交更改**
    ```bash
    git add .
-   git commit -m "feat: add your feature"
+   git commit
    ```
    
-   提交信息格式：
+   提交信息格式（建议中英文双语）：
+   - 标题：`中文一句话 / English one-liner`
+   - 正文：按要点写 1~3 条中文/英文对应说明
+
+   提交类型前缀：
    - `feat:` 新功能
    - `fix:` Bug 修复
    - `docs:` 文档更新
@@ -100,6 +104,15 @@
 - 所有新功能必须有测试
 - 测试覆盖率应保持在 80% 以上
 - 使用合适的测试标记（unit/integration/hardware）
+
+### API 改动防误提规范（重要）
+
+- 标准契约固定在 `"/api/core/v1/*"`。
+- 开发接口固定在 `"/api/dev/*"`，不要再引入 `"/api/debug/*"`、`"/api/analysis/*"`、`"/api/system/*"` 旧路径。
+- `routes.py` 仅保留 HTTP 适配逻辑，业务逻辑下沉到 `domain/*` 与 `core/application/*`。
+- API 相关改动需同步更新：
+  - `docs/contracts/core-rest-v1.md`
+  - `docs/contracts/dev-rest-v1.md`
 
 ## 开发流程
 
