@@ -21,6 +21,10 @@ class MjpegStreamLimiter:
     def max_clients(self) -> int:
         return self._max
 
+    @property
+    def active_clients(self) -> int:
+        return self._count
+
     async def try_acquire(self) -> bool:
         """若未超限则占用一个名额并返回 True / Acquire one slot if under limit."""
         if self._max <= 0:
