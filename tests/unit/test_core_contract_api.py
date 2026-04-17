@@ -109,6 +109,12 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     async def _fake_video_file_info(filename: str):
         return {"success": True, "file": {"filename": filename, "type": "video"}}
 
+    async def _fake_start_camera():
+        return {"success": True, "message": "started"}
+
+    async def _fake_stop_camera():
+        return {"success": True, "message": "stopped"}
+
     async def _fake_preview(*, since_frame_id=None):  # noqa: ANN001
         _ = since_frame_id
         return Response(content=b"jpeg-bytes", media_type="image/jpeg")
@@ -117,6 +123,10 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
         core_service.core_contract_service, "get_camera_status", _fake_camera_status
     )
     monkeypatch.setattr(core_service.core_contract_service, "tune_camera", _fake_camera_tune)
+    monkeypatch.setattr(
+        core_service.core_contract_service, "start_camera", _fake_start_camera
+    )
+    monkeypatch.setattr(core_service.core_contract_service, "stop_camera", _fake_stop_camera)
     monkeypatch.setattr(
         core_service.core_contract_service, "get_stream_status", _fake_stream_status
     )
@@ -128,7 +138,7 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
         "get_video_file_info",
         _fake_video_file_info,
     )
-    monkeypatch.setattr(core_routes.DebugCameraService, "get_preview", _fake_preview)
+    monkeypatch.setattr(core_routes.camera_domain_service, "get_preview", _fake_preview)
 
     status = client.get("/api/core/v1/camera/status")
     assert status.status_code == 200
@@ -137,6 +147,14 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     tune = client.post("/api/core/v1/camera/tune", json={"fps": 10, "rotation": 180})
     assert tune.status_code == 200
     assert tune.json()["applied"]["fps"] == 10
+
+    start = client.post("/api/core/v1/camera/start")
+    assert start.status_code == 200
+    assert start.json()["success"] is True
+
+    stop = client.post("/api/core/v1/camera/stop")
+    assert stop.status_code == 200
+    assert stop.json()["success"] is True
 
     stream_status = client.get("/api/core/v1/camera/stream/status")
     assert stream_status.status_code == 200

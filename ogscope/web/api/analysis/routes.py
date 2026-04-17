@@ -2,13 +2,12 @@
 素材分析路由 / Asset analysis routes
 """
 
-import json
 import mimetypes
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from ogscope.domain.analysis.services import analysis_service
+from ogscope.domain.analysis.services import analysis_domain_service, analysis_service
 from ogscope.web.api.models.schemas import (
     AnalysisBatchSolveRequest,
     AnalysisExperimentCreate,
@@ -78,25 +77,14 @@ async def get_analysis_upload_file(
 ):
     """下载已上传文件（预览或复用）/ Serve persisted upload for preview or reuse"""
     try:
-        path = analysis_service.resolve_upload_path(filename)
+        path, media_type = analysis_domain_service.resolve_upload_file_response(filename)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="文件不存在 / File not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    suffix = path.suffix.lower()
-    media_map = {
-        ".mp4": "video/mp4",
-        ".m4v": "video/mp4",
-        ".webm": "video/webm",
-        ".mov": "video/quicktime",
-        ".avi": "video/x-msvideo",
-    }
-    media = media_map.get(suffix)
-    if not media:
-        media, _ = mimetypes.guess_type(path.name)
     return FileResponse(
         path,
-        media_type=media or "application/octet-stream",
+        media_type=media_type,
         filename=path.name,
     )
 
@@ -297,27 +285,13 @@ async def solve_uploaded_frame(
     """上传单帧 JPEG/PNG 并解算 / Solve a single uploaded frame (multipart)."""
     try:
         raw = await file.read()
-        obj = json.loads(payload)
-        if not isinstance(obj, dict):
-            raise ValueError("payload 必须为 JSON 对象 / payload must be a JSON object")
-        topn = obj.get("overlay_topn_count")
-        enable_polar = obj.get("enable_polar_guide")
-        solve_interval_ms = obj.get("solve_interval_ms")
-        obj.pop("overlay_topn_count", None)
-        obj.pop("enable_polar_guide", None)
-        obj.pop("solve_interval_ms", None)
-        # 前端调试元数据，不参与 Pydantic 模型 / Client metadata not in schema
-        obj.pop("time_sec", None)
-        obj.pop("frame_width", None)
-        obj.pop("frame_height", None)
-        obj.setdefault("input_name", "__frame_upload__.jpg")
-        data = AnalysisSolveImageRequest.model_validate(obj)
+        data, extras = analysis_domain_service.parse_frame_upload_payload(payload)
         return await analysis_service.solve_uploaded_frame(
             image_bytes=raw,
             solve_params=data,
-            overlay_topn_count=topn,
-            enable_polar_guide=enable_polar,
-            solve_interval_ms=solve_interval_ms,
+            overlay_topn_count=extras.get("overlay_topn_count"),
+            enable_polar_guide=extras.get("enable_polar_guide"),
+            solve_interval_ms=extras.get("solve_interval_ms"),
         )
     except HTTPException:
         raise

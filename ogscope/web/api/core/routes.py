@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 
 from ogscope.core.application import core_contract_service
-from ogscope.domain.camera.services import DebugCameraService
+from ogscope.domain.camera.services import camera_domain_service
 from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import ensure_safe_basename
 from ogscope.web.api.models.schemas import (
@@ -136,7 +136,7 @@ async def core_camera_preview(
 ):
     """获取单帧预览（JPEG）/ Fetch single preview frame (JPEG)."""
     try:
-        return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
+        return await camera_domain_service.get_preview(since_frame_id=since_frame_id)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001

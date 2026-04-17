@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.unit
 def test_debug_files_empty(client, temp_debug_dir):
-    response = client.get("/api/debug/files")
+    response = client.get("/api/dev/debug/files")
     assert response.status_code == 200
     assert response.json() == {"files": []}
 
@@ -25,14 +25,14 @@ def test_debug_files_list_and_info(client, temp_debug_dir):
         encoding="utf-8",
     )
 
-    files_resp = client.get("/api/debug/files")
+    files_resp = client.get("/api/dev/debug/files")
     assert files_resp.status_code == 200
     files = files_resp.json()["files"]
     assert len(files) == 1
     assert files[0]["name"] == image_name
     assert files[0]["type"] == "image"
 
-    info_resp = client.get(f"/api/debug/files/{image_name}/info")
+    info_resp = client.get(f"/api/dev/debug/files/{image_name}/info")
     assert info_resp.status_code == 200
     info = info_resp.json()
     assert info["filename"] == image_name
@@ -50,7 +50,7 @@ def test_debug_files_delete_removes_image_and_info(client, temp_debug_dir):
     image_path.write_bytes(b"fake-image-bytes")
     info_path.write_text("{}", encoding="utf-8")
 
-    delete_resp = client.delete(f"/api/debug/files/{image_name}")
+    delete_resp = client.delete(f"/api/dev/debug/files/{image_name}")
     assert delete_resp.status_code == 200
     assert "message_key" in delete_resp.json()
     assert not image_path.exists()

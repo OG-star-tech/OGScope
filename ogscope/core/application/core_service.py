@@ -4,7 +4,6 @@ Core 标准契约应用服务 / Core standard contract application service.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,10 +11,13 @@ from ogscope.__version__ import __version__
 from ogscope.config import get_settings
 from ogscope.core.capabilities import capability_map
 from ogscope.core.realtime import realtime_solve_service
-from ogscope.domain.camera.services import DebugCameraService, DebugFileService
+from ogscope.domain.camera.services import (
+    camera_domain_service,
+    file_domain_service,
+    stream_state_domain_service,
+)
 from ogscope.domain.system.services import system_info_service
 from ogscope.hardware.wifi_switch import wifi_switch_service
-from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 
 @dataclass(slots=True)
@@ -101,7 +103,7 @@ class CoreContractService:
     async def get_system_status(self) -> dict[str, Any]:
         """系统状态与能力 / System status and capability map."""
         wifi_raw = wifi_switch_service.get_status()
-        raw_camera_status = await DebugCameraService.get_camera_status()
+        raw_camera_status = await camera_domain_service.get_status()
         camera_status = self._normalize_camera_status(raw_camera_status)
         system = system_info_service.get_system_info()
         sensors = {
@@ -139,12 +141,12 @@ class CoreContractService:
 
     async def get_camera_status(self) -> dict[str, Any]:
         """获取 Core 相机状态 / Get core camera status."""
-        status = await DebugCameraService.get_camera_status()
+        status = await camera_domain_service.get_status()
         return {"success": True, **self._normalize_camera_status(status)}
 
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
-        result = await DebugCameraService.start_camera()
+        result = await camera_domain_service.start()
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
@@ -154,7 +156,7 @@ class CoreContractService:
 
     async def stop_camera(self) -> dict[str, Any]:
         """停止 Core 相机 / Stop core camera."""
-        result = await DebugCameraService.stop_camera()
+        result = await camera_domain_service.stop()
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
@@ -167,11 +169,11 @@ class CoreContractService:
         applied: dict[str, Any] = {}
         auto_exposure = payload.get("auto_exposure")
         if auto_exposure is not None:
-            await DebugCameraService.set_auto_exposure_mode(bool(auto_exposure))
+            await camera_domain_service.set_auto_exposure_mode(bool(auto_exposure))
             applied["auto_exposure"] = bool(auto_exposure)
 
         if payload.get("exposure_us") is not None:
-            await DebugCameraService.update_settings({"exposure": payload["exposure_us"]})
+            await camera_domain_service.update_settings({"exposure": payload["exposure_us"]})
             applied["exposure_us"] = int(payload["exposure_us"])
 
         if payload.get("analogue_gain") is not None:
@@ -179,25 +181,27 @@ class CoreContractService:
             if payload.get("digital_gain") is not None:
                 settings["digitalGain"] = float(payload["digital_gain"])
                 applied["digital_gain"] = float(payload["digital_gain"])
-            await DebugCameraService.update_settings(settings)
+            await camera_domain_service.update_settings(settings)
             applied["analogue_gain"] = float(payload["analogue_gain"])
         elif payload.get("digital_gain") is not None:
-            await DebugCameraService.update_settings(
+            await camera_domain_service.update_settings(
                 {"digitalGain": float(payload["digital_gain"])}
             )
             applied["digital_gain"] = float(payload["digital_gain"])
 
         if payload.get("fps") is not None:
-            await DebugCameraService.set_fps(int(payload["fps"]))
+            await camera_domain_service.set_fps(int(payload["fps"]))
             applied["fps"] = int(payload["fps"])
 
         if payload.get("width") is not None and payload.get("height") is not None:
-            await DebugCameraService.set_size(int(payload["width"]), int(payload["height"]))
+            await camera_domain_service.set_size(
+                int(payload["width"]), int(payload["height"])
+            )
             applied["width"] = int(payload["width"])
             applied["height"] = int(payload["height"])
 
         if payload.get("rotation") is not None:
-            await DebugCameraService.set_rotation(int(payload["rotation"]))
+            await camera_domain_service.set_rotation(int(payload["rotation"]))
             applied["rotation"] = int(payload["rotation"])
 
         if (
@@ -206,20 +210,20 @@ class CoreContractService:
         ):
             fh = bool(payload.get("flip_horizontal", False))
             fv = bool(payload.get("flip_vertical", False))
-            await DebugCameraService.set_mirror(fh, fv)
+            await camera_domain_service.set_mirror(fh, fv)
             applied["flip_horizontal"] = fh
             applied["flip_vertical"] = fv
 
         if payload.get("sampling_mode") is not None:
-            await DebugCameraService.set_sampling_mode(str(payload["sampling_mode"]))
+            await camera_domain_service.set_sampling_mode(str(payload["sampling_mode"]))
             applied["sampling_mode"] = str(payload["sampling_mode"])
 
         if payload.get("color_mode") is not None:
-            await DebugCameraService.set_color_mode(str(payload["color_mode"]))
+            await camera_domain_service.set_color_mode(str(payload["color_mode"]))
             applied["color_mode"] = str(payload["color_mode"])
 
         if payload.get("white_balance_mode") is not None:
-            await DebugCameraService.set_white_balance(
+            await camera_domain_service.set_white_balance(
                 str(payload["white_balance_mode"]),
                 float(payload.get("white_balance_gain_r", 1.0)),
                 float(payload.get("white_balance_gain_b", 1.0)),
@@ -231,7 +235,7 @@ class CoreContractService:
                 applied["white_balance_gain_b"] = float(payload["white_balance_gain_b"])
 
         info = {}
-        camera_status = await DebugCameraService.get_camera_status()
+        camera_status = await camera_domain_service.get_status()
         if isinstance(camera_status, dict):
             info = camera_status.get("info", {}) or {}
 
@@ -244,26 +248,22 @@ class CoreContractService:
 
     async def get_stream_status(self) -> dict[str, Any]:
         """获取流控状态 / Get stream limiter status."""
-        limiter = get_mjpeg_stream_limiter()
-        settings = get_settings()
+        stream = stream_state_domain_service.get_stream_status()
         return {
             "success": True,
-            "max_clients": int(limiter.max_clients),
-            "active_clients": int(limiter.active_clients),
-            "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
-            "target_preview_fps": int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8"),
+            **stream,
         }
 
     async def list_video_files(self) -> dict[str, Any]:
         """列出视频文件信息 / List recorded video file metadata."""
-        data = await DebugFileService.get_files()
+        data = await file_domain_service.list_files()
         files = data.get("files", [])
         videos = [f for f in files if isinstance(f, dict) and f.get("type") == "video"]
         return {"success": True, "files": videos}
 
     async def get_video_file_info(self, filename: str) -> dict[str, Any]:
         """获取视频文件详情 / Get video file detail metadata."""
-        info = await DebugFileService.get_file_info(filename)
+        info = await file_domain_service.get_file_info(filename)
         if info.get("type") != "video":
             raise ValueError("requested file is not video")
         return {"success": True, "file": info}

@@ -57,7 +57,7 @@ def test_camera_status(client):
 @pytest.mark.unit
 def test_system_info(client):
     """测试系统信息接口结构。 / Test system info endpoint schema."""
-    response = client.get("/api/system/info")
+    response = client.get("/api/dev/system/info")
     assert response.status_code == 200
     data = response.json()
     assert "platform" in data
