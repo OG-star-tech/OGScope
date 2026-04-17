@@ -20,9 +20,13 @@ router = APIRouter()
 # 注册各个模块的路由（含分组标签）/ Register routes for each module (with group tags)
 router.include_router(camera_router, tags=["Camera - 相机"])
 router.include_router(alignment_router, tags=["Alignment - 极轴校准"])
-router.include_router(system_router, tags=["System - 系统"])
 router.include_router(network_router, tags=["Network - 网络"])
 router.include_router(core_contract_router, tags=["Core - 标准契约"])
+router.include_router(
+    system_router,
+    prefix="/dev",
+    tags=["Dev - 系统状态"],
+)
 router.include_router(
     debug_router,
     prefix="/dev",
@@ -34,6 +38,7 @@ router.include_router(
     tags=["Dev - 分析实验"],
 )
 # 兼容旧路径（不出现在文档中）/ Legacy aliases kept hidden from schema.
+router.include_router(system_router, include_in_schema=False)
 router.include_router(debug_router, include_in_schema=False)
 router.include_router(analysis_router, include_in_schema=False)
 

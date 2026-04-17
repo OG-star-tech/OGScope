@@ -386,7 +386,7 @@ export type SystemInfo = {
 };
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
-  const r = await fetch("/api/system/info");
+  const r = await fetch("/api/dev/system/info");
   if (!r.ok) throw new Error(await r.text());
   return r.json() as Promise<SystemInfo>;
 }
