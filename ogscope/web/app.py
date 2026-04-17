@@ -100,8 +100,8 @@ openapi_tags = [
         "description": "极轴校准流程与状态 / Polar alignment workflow and status",
     },
     {
-        "name": "System - 系统",
-        "description": "系统信息与配置管理 / System information and configuration",
+        "name": "Dev - 系统状态",
+        "description": "开发者系统状态接口（内部使用）/ Developer system status endpoints (internal)",
     },
     {
         "name": "Dev - 调试工具",
@@ -251,7 +251,8 @@ async def api_root():
         "endpoints": {
             "camera": "/api/camera/",
             "alignment": "/api/alignment/",
-            "system": "/api/system/",
+            "system": "/api/dev/system/",
+            "system_legacy": "/api/system/",
             "network": "/api/network/",
             "analysis": "/api/dev/analysis/",
             "debug": "/api/dev/debug/",

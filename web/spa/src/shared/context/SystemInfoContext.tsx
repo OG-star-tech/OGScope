@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-/** 与 /api/system/info 对齐的宽松类型 / Loose shape aligned with system info API */
+/** 与 /api/dev/system/info 对齐的宽松类型 / Loose shape aligned with dev system info API */
 export type SystemInfoRecord = Record<string, unknown>;
 
 type Ctx = {
@@ -22,7 +22,7 @@ const SystemInfoContext = createContext<Ctx | null>(null);
 const POLL_MS = 8000;
 
 async function fetchInfo(): Promise<SystemInfoRecord> {
-  const r = await fetch("/api/system/info", { cache: "no-store" });
+  const r = await fetch("/api/dev/system/info", { cache: "no-store" });
   let data: unknown = {};
   try {
     data = await r.json();
