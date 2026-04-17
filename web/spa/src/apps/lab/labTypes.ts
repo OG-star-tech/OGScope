@@ -1,6 +1,6 @@
 /** 解算实验室路由与历史类型 / Plate-solve lab view types */
 
-import type { SolveParams } from "@shared/api";
+import type { SolveParams } from "@dev-api/analysis";
 
 export type LabView = "lab_image" | "lab_video" | "pool" | "history";
 

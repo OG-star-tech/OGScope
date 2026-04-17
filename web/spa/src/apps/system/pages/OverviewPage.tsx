@@ -9,7 +9,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
-import { fetchSystemdLogs, type SystemLogItem, type SystemLogLevel } from "@shared/systemApi";
+import { fetchSystemdLogs, type SystemLogItem, type SystemLogLevel } from "@dev-api/system";
 import { useI18n } from "@shared/i18n/I18nProvider";
 
 function formatUptime(sec: unknown): string {

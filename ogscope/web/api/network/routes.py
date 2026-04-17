@@ -21,7 +21,7 @@ from ogscope.web.api.models.schemas import (
     WifiStaConnectRequest,
     WifiStatus,
 )
-from ogscope.web.api.network import services as net_services
+from ogscope.domain.network import services as net_services
 
 router = APIRouter()
 

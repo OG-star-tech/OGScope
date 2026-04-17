@@ -5,7 +5,7 @@
 from fastapi import APIRouter
 
 from ogscope.web.api.models.schemas import SystemInfo
-from ogscope.web.api.system.services import system_info_service
+from ogscope.domain.system.services import system_info_service
 
 router = APIRouter()
 

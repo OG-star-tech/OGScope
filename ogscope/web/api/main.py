@@ -37,10 +37,6 @@ router.include_router(
     prefix="/dev",
     tags=["Dev - 分析实验"],
 )
-# 兼容旧路径（不出现在文档中）/ Legacy aliases kept hidden from schema.
-router.include_router(system_router, include_in_schema=False)
-router.include_router(debug_router, include_in_schema=False)
-router.include_router(analysis_router, include_in_schema=False)
 
 # legacy hardware protocol 为可选能力（迁移至 external integrator 后可不存在）/ legacy hardware protocol is optional and may move to external integrator.
 if detect_capabilities().legacy protocol_i2c:

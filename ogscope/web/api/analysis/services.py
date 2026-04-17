@@ -31,6 +31,13 @@ from ogscope.config import (
     effective_solver_max_stars,
     get_settings,
 )
+from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
+from ogscope.domain.shared.filesystem import (
+    DEV_CAPTURES_DIR,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    ensure_safe_basename,
+)
 from ogscope.web.api.analysis.lab_store import AnalysisLabStore
 from ogscope.web.api.models.schemas import (
     AnalysisBatchSolveRequest,
@@ -85,35 +92,7 @@ def _merge_debug_style_sidecar_into_info(
     info: dict[str, Any], capture_info: dict[str, Any]
 ) -> None:
     """将侧车 JSON 的 camera/extra 展开到顶层，与调试页 info 一致 / Match debug file info shape."""
-    cam = capture_info.get("camera")
-    if isinstance(cam, dict):
-        for k in (
-            "exposure_us",
-            "analogue_gain",
-            "digital_gain",
-            "fps",
-            "auto_exposure",
-            "rotation",
-            "flip_horizontal",
-            "flip_vertical",
-            "sampling_mode",
-            "color_mode",
-            "sensor",
-            "resolution",
-        ):
-            if k not in capture_info and k in cam:
-                capture_info[k] = cam[k]
-        if capture_info.get("resolution") is None:
-            ow = cam.get("output_width") or cam.get("width")
-            oh = cam.get("output_height") or cam.get("height")
-            if ow and oh:
-                capture_info["resolution"] = f"{ow}x{oh}"
-    extra = capture_info.get("extra")
-    if isinstance(extra, dict):
-        for k, v in extra.items():
-            if k not in capture_info:
-                capture_info[k] = v
-    info.update(capture_info)
+    merge_capture_sidecar_into_info(info, capture_info)
 
 
 @dataclass(slots=True)
@@ -436,9 +415,7 @@ class AnalysisService:
     def resolve_upload_path(self, filename: str) -> Path:
         """解析上传目录内安全路径（仅单层文件名）/ Safe path under upload_root (basename only)."""
         clean = filename.strip()
-        name = Path(clean).name
-        if not name or name != clean:
-            raise ValueError("文件名无效 / Invalid filename")
+        name = ensure_safe_basename(clean)
         path = (self.upload_root / name).resolve()
         root = self.upload_root.resolve()
         try:
@@ -449,16 +426,14 @@ class AnalysisService:
 
     def _resolve_frame_source_path(self, input_name: str) -> Path:
         """单帧视频解算源路径：优先素材池，其次调试录制目录 / Resolve frame-solve source path."""
-        name = Path(input_name.strip()).name
-        if not name or name != input_name.strip():
-            raise ValueError("文件名无效 / Invalid filename")
+        name = ensure_safe_basename(input_name.strip())
         try:
             up = self.resolve_upload_path(name)
             if up.is_file():
                 return up
         except ValueError:
             pass
-        dbg = Path.home() / "dev_captures" / name
+        dbg = DEV_CAPTURES_DIR / name
         if dbg.is_file():
             return dbg
         raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
@@ -469,22 +444,11 @@ class AnalysisService:
         if not path.is_file():
             raise FileNotFoundError("上传文件不存在 / Uploaded file not found")
         st = path.stat()
-        image_ext = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
-        video_ext = {
-            ".mp4",
-            ".avi",
-            ".mov",
-            ".mkv",
-            ".wmv",
-            ".flv",
-            ".webm",
-            ".m4v",
-        }
         suffix = path.suffix.lower()
         file_type = (
             "image"
-            if suffix in image_ext
-            else "video" if suffix in video_ext else "file"
+            if suffix in IMAGE_EXTENSIONS
+            else "video" if suffix in VIDEO_EXTENSIONS else "file"
         )
         info: dict[str, Any] = {
             "filename": path.name,

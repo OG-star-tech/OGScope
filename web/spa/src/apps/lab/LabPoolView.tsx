@@ -1,6 +1,6 @@
 import { Database, Trash2 } from "lucide-react";
 
-import type { UploadFileRow } from "@shared/api";
+import type { UploadFileRow } from "@dev-api/analysis";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { formatDateTime, formatFileSize } from "@shared/utils/format";
 

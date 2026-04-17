@@ -1,27 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, Wifi } from "lucide-react";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
-
-async function requestJson<T>(url: string, options: RequestInit & { cache?: RequestCache } = {}): Promise<T> {
-  const { cache, ...rest } = options;
-  const fetchOpts: RequestInit = {
-    headers: { "Content-Type": "application/json" },
-    ...rest,
-  };
-  if (cache !== undefined) Object.assign(fetchOpts, { cache });
-  const response = await fetch(url, fetchOpts);
-  let data: unknown = {};
-  try {
-    data = await response.json();
-  } catch {
-    // ignore
-  }
-  if (!response.ok) {
-    const d = data as { detail?: string };
-    throw new Error(d.detail || `HTTP ${response.status}`);
-  }
-  return data as T;
-}
+import { requestJson } from "@shared/transport/http";
 
 function httpPort(): number {
   return typeof window.OGSCOPE_HTTP_PORT === "number" ? window.OGSCOPE_HTTP_PORT : 8000;

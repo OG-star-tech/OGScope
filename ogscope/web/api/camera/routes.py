@@ -94,7 +94,7 @@ async def get_camera_preview(since_frame_id: int | None = Query(default=None)):
         try:
             # 与调试台共用帧总线；通过 since_frame_id 减少重复 JPEG 下发。
             # Shared frame bus with debug console; use since_frame_id to avoid duplicate payload.
-            from ogscope.web.api.debug.services import DebugCameraService
+            from ogscope.domain.camera.services import DebugCameraService
 
             return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
         except HTTPException:

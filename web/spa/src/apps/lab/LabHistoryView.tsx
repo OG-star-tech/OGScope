@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { History } from "lucide-react";
 
-import { experimentAssetUrl, exportExperiments } from "@shared/api";
+import { experimentAssetUrl, exportExperiments } from "@dev-api/analysis";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { formatDateTime } from "@shared/utils/format";
 

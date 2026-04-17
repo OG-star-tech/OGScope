@@ -12,9 +12,9 @@ from ogscope.__version__ import __version__
 from ogscope.config import get_settings
 from ogscope.core.capabilities import capability_map
 from ogscope.core.realtime import realtime_solve_service
+from ogscope.domain.camera.services import DebugCameraService, DebugFileService
+from ogscope.domain.system.services import system_info_service
 from ogscope.hardware.wifi_switch import wifi_switch_service
-from ogscope.web.api.debug.services import DebugCameraService, DebugFileService
-from ogscope.web.api.system.services import system_info_service
 from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 

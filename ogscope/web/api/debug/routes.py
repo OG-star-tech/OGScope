@@ -13,20 +13,19 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from ogscope.config import get_settings
 from ogscope.core.realtime import realtime_solve_service
-from ogscope.web.api.debug.services import (
+from ogscope.domain.camera.services import (
     DebugCameraService,
     DebugFileService,
     DebugPresetService,
 )
+from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
+from ogscope.domain.shared.filesystem import DEV_CAPTURES_DIR, ensure_safe_basename
 from ogscope.web.api.models.schemas import (
     CameraMirrorBody,
     CameraPreset,
     CameraSettings,
 )
-from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
-from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,7 +35,7 @@ _MJPEG_LIMIT_DETAIL = (
     "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
 )
 
-_DEFAULT_PREVIEW_JPEG_QUALITY = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
+_DEFAULT_PREVIEW_JPEG_QUALITY = 75
 _PREVIEW_CLIENT_LAST_TS: dict[str, float] = {}
 _DEBUG_PREVIEW_MIN_INTERVAL_SEC = max(
     0.0,
@@ -166,66 +165,13 @@ async def _streaming_response_debug_camera_mjpeg(
     image_format: str,
     quality: int,
 ) -> StreamingResponse:
-    """MJPEG 响应体：断连与单帧超时均可结束生成器并释放名额 / MJPEG body: disconnect or per-frame timeout ends generator and releases slot."""
-    limiter = get_mjpeg_stream_limiter()
-    if not await limiter.try_acquire():
-        raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
-    boundary = "frame"
-    min_emit_interval = 1.0 / max(
-        1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
-    )
-    fetch_timeout_s = get_settings().stream_mjpeg_frame_fetch_timeout_ms / 1000.0
-    ctype = "image/jpeg" if image_format.lower() == "jpeg" else "image/png"
-
-    async def frame_generator():
-        try:
-            last_snap_frame_id = -1
-            last_emit_mono = 0.0
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    code, data, snap_id = await asyncio.wait_for(
-                        DebugCameraService.get_stream_frame_bytes(
-                            image_format, quality, since_frame_id=last_snap_frame_id
-                        ),
-                        timeout=fetch_timeout_s,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "MJPEG 单帧取流超时，结束响应以释放名额 / MJPEG frame fetch timed out, closing stream"
-                    )
-                    break
-                if code == 304:
-                    if not await mjpeg_sleep_or_disconnect(request, 0.03):
-                        break
-                    continue
-                if code != 200 or data is None:
-                    if not await mjpeg_sleep_or_disconnect(request, 0.05):
-                        break
-                    continue
-                now = time.monotonic()
-                wait = last_emit_mono + min_emit_interval - now
-                if wait > 0:
-                    if not await mjpeg_sleep_or_disconnect(request, wait):
-                        break
-                last_snap_frame_id = snap_id
-                last_emit_mono = time.monotonic()
-                yield (
-                    b"--" + boundary.encode() + b"\r\n"
-                    b"Content-Type: " + ctype.encode() + b"\r\n"
-                    b"Content-Length: "
-                    + str(len(data)).encode()
-                    + b"\r\n\r\n"
-                    + data
-                    + b"\r\n"
-                )
-        finally:
-            await limiter.release()
-
-    return StreamingResponse(
-        frame_generator(),
-        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+    return await build_camera_mjpeg_stream(
+        request,
+        image_format=image_format,
+        quality=quality,
+        limit_detail=_MJPEG_LIMIT_DETAIL,
+        timeout_log_message="MJPEG 单帧取流超时，结束响应以释放名额 / MJPEG frame fetch timed out, closing stream",
+        logger=logger,
     )
 
 
@@ -271,8 +217,6 @@ async def stop_debug_camera():
 async def set_camera_rotation(rotation: int):
     """设置相机旋转角度 / Set camera rotation angle"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-
         result = await DebugCameraService.set_rotation(rotation)
         return result
     except Exception as e:
@@ -345,8 +289,6 @@ async def set_camera_size(
 ):
     """仅切换分辨率（宽高），不影响当前帧率；必要时重启预览 / Only switches the resolution (width and height) and does not affect the current frame rate; restart the preview if necessary"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-
         result = await DebugCameraService.set_size(width, height)
         return result
     except Exception as e:
@@ -359,8 +301,6 @@ async def set_camera_sampling_mode(
 ):
     """设置采样模式：supersample | native | crop"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-
         return await DebugCameraService.set_sampling_mode(mode)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -370,8 +310,6 @@ async def set_camera_sampling_mode(
 async def set_camera_fps(fps: int = Query(..., gt=0)):
     """仅设置帧率，尽量不影响当前预览 / Only set the frame rate and try not to affect the current preview"""
     try:
-        from ogscope.web.api.debug.services import DebugCameraService
-
         return await DebugCameraService.set_fps(fps)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -525,16 +463,14 @@ async def get_capture_files():
 @router.get("/debug/files/{filename}")
 async def download_capture_file(filename: str):
     """下载拍摄文件 / Download shooting files"""
-    from pathlib import Path
-
-    DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
-    file_path = DEBUG_CAPTURES_DIR / filename
+    safe_name = ensure_safe_basename(filename)
+    file_path = DEV_CAPTURES_DIR / safe_name
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
 
     return FileResponse(
-        path=str(file_path), filename=filename, media_type="application/octet-stream"
+        path=str(file_path), filename=safe_name, media_type="application/octet-stream"
     )
 
 

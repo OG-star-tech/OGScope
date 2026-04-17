@@ -8,7 +8,7 @@ import mimetypes
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from ogscope.web.api.analysis.services import analysis_service
+from ogscope.domain.analysis.services import analysis_service
 from ogscope.web.api.models.schemas import (
     AnalysisBatchSolveRequest,
     AnalysisExperimentCreate,
