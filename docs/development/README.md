@@ -377,8 +377,11 @@ curl http://localhost:8000/api
 |------|------|------|
 | Camera - 相机 | `ogscope.web.api.camera` | 相机控制与图像获取 |
 | Alignment - 极轴校准 | `ogscope.web.api.alignment` | 极轴校准流程与状态 |
-| System - 系统 | `ogscope.web.api.system` | 系统信息与配置管理 |
-| Debug - 调试 | `ogscope.web.api.debug` | 调试控制台接口 |
+| Network - 网络 | `ogscope.web.api.network` | WiFi AP/STA 与网络切换 |
+| Core - 标准契约 | `ogscope.web.api.core` | 对外稳定契约（`/api/core/v1/*`） |
+| Dev - 系统状态 | `ogscope.web.api.system` | 开发者系统状态（`/api/dev/system/*`） |
+| Dev - 调试工具 | `ogscope.web.api.debug` | 开发者调试能力（`/api/dev/debug/*`） |
+| Dev - 分析实验 | `ogscope.web.api.analysis` | 分析实验接口（`/api/dev/analysis/*`） |
 
 分组在 `ogscope/web/api/main.py` 中通过 `include_router()` 的 `tags` 参数指定，描述信息在 `ogscope/web/app.py` 的 `openapi_tags` 中定义。
 
@@ -404,6 +407,18 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 ### 9.4 ReDoc 自定义说明
 
 项目使用自定义 ReDoc 路由（固定版本 `redoc@2.1.5`），而非 FastAPI 默认的 `redoc@next`，以避免预发布版本不稳定导致页面空白。相关配置见 `ogscope/web/app.py` 中的 `custom_redoc()` 函数。
+
+### 9.5 API 变更防误提清单（提交前）
+
+为减少结构复杂化后的误提交，涉及 API 改动时请在提交前检查：
+
+1. 旧前缀 `"/api/debug/*"`, `"/api/analysis/*"`, `"/api/system/*"` 未被重新引入。
+2. 开发接口全部在 `"/api/dev/*"`；标准契约全部在 `"/api/core/v1/*"`。
+3. `routes.py` 仅保留 HTTP 适配，业务逻辑放在 `domain/*` 或 `core/application/*`。
+4. 至少跑一轮相关测试（建议 `poetry run pytest tests/unit -q`）。
+5. 同步更新契约文档：
+   - `docs/contracts/core-rest-v1.md`
+   - `docs/contracts/dev-rest-v1.md`
 
 ## 10. 常见故障排查
 

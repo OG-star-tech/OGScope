@@ -18,13 +18,6 @@ RSYNC_TARGET="${OGSCOPE_DEV_USER:+$OGSCOPE_DEV_USER@}$OGSCOPE_DEV_HOST:$OGSCOPE_
 rsync -avz --delete \
   "$ROOT/web/static/analysis-lab/" \
   "$RSYNC_TARGET/web/static/analysis-lab/"
-# legacy hardware protocol 后端（可选 extras；改协议或 API 时同步）/ legacy hardware protocol backend when changing protocol or API
-rsync -avz --delete \
-  "$ROOT/ogscope/modules/legacy protocol/" \
-  "$RSYNC_TARGET/ogscope/modules/legacy protocol/"
-rsync -avz --delete \
-  "$ROOT/ogscope/web/api/legacy protocol/" \
-  "$RSYNC_TARGET/ogscope/web/api/legacy protocol/"
 rsync -avz \
   "$ROOT/web/static/css/hud-home.css" \
   "$ROOT/web/static/css/hud-home.bundle.css" \
@@ -32,6 +25,6 @@ rsync -avz \
 rsync -avz --delete \
   "$ROOT/web/static/fonts/" \
   "$RSYNC_TARGET/web/static/fonts/"
-echo "已同步 analysis-lab、legacy hardware protocol 模块/API、主页 HUD CSS 与字体到 $RSYNC_TARGET"
-echo "Synced analysis-lab, legacy hardware protocol module/API, HUD CSS, and fonts to \$RSYNC_TARGET"
+echo "已同步 analysis-lab、主页 HUD CSS 与字体到 $RSYNC_TARGET"
+echo "Synced analysis-lab, HUD CSS, and fonts to \$RSYNC_TARGET"
 echo "可选 / Optional: ssh ${OGSCOPE_DEV_USER:+$OGSCOPE_DEV_USER@}$OGSCOPE_DEV_HOST 'sudo systemctl restart ogscope'"

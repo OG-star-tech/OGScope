@@ -10,7 +10,7 @@
 ## 主要路径组
 
 - 调试工具：`/api/dev/debug/*`
-  - 相机调试、预设、录制文件、systemd 日志、legacy hardware protocol 调试能力
+  - 相机调试、预设、录制文件、systemd 日志
 - 分析实验：`/api/dev/analysis/*`
   - 素材池、实验记录、离线/在线解算与参数试验
 

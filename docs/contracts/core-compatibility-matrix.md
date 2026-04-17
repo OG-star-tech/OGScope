@@ -1,8 +1,8 @@
 # OGScope Core Contract Compatibility Matrix
 
-| OGScope | Contract Path | external integrator Minimum |
-|---|---|---|
-| 0.1.x | `/api/core/v1/*` | 0.1.0 |
+| OGScope | Contract Path |
+|---|---|
+| 0.1.x | `/api/core/v1/*` |
 
 ## Backward Compatibility Rule
 

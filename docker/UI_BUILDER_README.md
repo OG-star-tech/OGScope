@@ -120,13 +120,7 @@ ls -lh /workspace/static/analysis-lab/
 rsync -avz web/static/analysis-lab/ \
   ogstartech@192.168.0.150:/home/ogstartech/OGScope/web/static/analysis-lab/
 
-# 3. 同步 Python 代码（如有修改）/ Sync Python code (if changed)
-rsync -avz ogscope/modules/legacy protocol/ \
-  ogstartech@192.168.0.150:/home/ogstartech/OGScope/ogscope/modules/legacy protocol/
-rsync -avz ogscope/web/api/legacy protocol/ \
-  ogstartech@192.168.0.150:/home/ogstartech/OGScope/ogscope/web/api/legacy protocol/
-
-# 4. 重启服务 / Restart service
+# 3. 重启服务 / Restart service
 ssh ogstartech@192.168.0.150 'sudo systemctl restart ogscope'
 ```
 

@@ -1,12 +1,12 @@
 # Core REST Contract v1
 
-本文档定义上层调用 OGScope 的最小稳定接口（上层调用方）。
+本文档定义上层调用 OGScope 的最小稳定接口。
 
 > 开发者调试/实验接口已隔离到 `/api/dev/*`，默认文档不展示，详见 `docs/contracts/dev-rest-v1.md`。
 
 ## 设计原则
 
-- OGScope 仅提供稳定 REST 契约，不承诺 外部集成方 私有实现细节。
+- OGScope 仅提供稳定 REST 契约，不承诺调用方私有实现细节。
 - 新增字段保持向后兼容，不删除既有稳定字段。
 - 错误语义以 HTTP 状态码 + `detail` 文本表达。
 

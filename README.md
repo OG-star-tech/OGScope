@@ -43,13 +43,13 @@
 - **处理器**: Raspberry Pi Zero 2W (ARM Cortex-A53)
 - **相机**: IMX327 传感器 (1920x1080)
 - **显示**: 2.4寸 SPI LCD (240x320)
-- **软件**: Python 3.9 + FastAPI
+- **软件**: Python 3.10+ + FastAPI
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.9+
+- Python 3.10+
 - Poetry 1.2+
 - Raspberry Pi Zero 2W (Raspberry Pi OS)
 
@@ -110,19 +110,21 @@ python -m ogscope.main
 
 ## 项目结构
 
-```
+```text
 OGScope/
-├── ogscope/           # 主应用包
-│   ├── core/         # 核心功能模块
-│   ├── hardware/     # 硬件接口层
-│   ├── web/          # FastAPI Web 服务
-│   ├── ui/           # SPI 屏幕界面
-│   ├── algorithms/   # 天文算法
-│   └── utils/        # 工具函数
-├── tests/            # 测试代码
-├── docs/             # 文档
-├── scripts/          # 部署脚本
-└── web/              # Web 前端资源
+├── ogscope/
+│   ├── domain/                # 领域层（camera/analysis/network/system/shared）
+│   ├── core/                  # 核心契约编排（core/v1）
+│   ├── web/                   # FastAPI 入口与 API 路由（core/dev）
+│   ├── adapters/              # 边界适配层
+│   ├── hardware/              # 硬件接口
+│   ├── algorithms/            # 算法模块
+│   └── utils/                 # 通用工具
+├── web/spa/                   # 前端源码（Vite + React）
+├── web/static/analysis-lab/   # 前端构建产物
+├── tests/                     # 测试
+├── docs/                      # 文档
+└── scripts/                   # 部署/运维脚本
 ```
 
 

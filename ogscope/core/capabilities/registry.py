@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +21,6 @@ class CapabilitySnapshot:
     analysis: bool
     camera: bool
     network: bool
-    legacy protocol_i2c: bool
 
     def to_dict(self) -> dict[str, bool]:
         """转为字典 / Convert to dict."""
@@ -30,18 +28,15 @@ class CapabilitySnapshot:
             "analysis": self.analysis,
             "camera": self.camera,
             "network": self.network,
-            "legacy protocol_i2c": self.legacy protocol_i2c,
         }
 
 
 def detect_capabilities() -> CapabilitySnapshot:
     """检测当前运行能力 / Detect runtime capabilities."""
-    expose_legacy protocol_debug = os.getenv("OGSCOPE_ENABLE_legacy hardware protocol_DEBUG", "0") == "1"
     return CapabilitySnapshot(
         analysis=_module_available("ogscope.domain.analysis.services"),
         camera=_module_available("ogscope.hardware.camera"),
         network=_module_available("ogscope.domain.network.services"),
-        legacy protocol_i2c=expose_legacy protocol_debug and _module_available("ogscope.modules.legacy protocol"),
     )
 
 

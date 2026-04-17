@@ -117,11 +117,7 @@ openapi_tags = [
     },
     {
         "name": "Core - 标准契约",
-        "description": "对外稳定 REST 契约（供上层调用方调用）/ Stable REST contract for external callers",
-    },
-    {
-        "name": "legacy hardware protocol - 赤道仪控制",
-        "description": "legacy hardware protocol 协议赤道仪控制调试 / legacy hardware protocol protocol mount control debugging",
+        "description": "对外稳定 REST 契约 / Stable REST contract for external callers",
     },
 ]
 

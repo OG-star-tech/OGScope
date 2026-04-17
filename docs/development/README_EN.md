@@ -382,8 +382,11 @@ All endpoints are grouped by module in the documentation. Grouping is controlled
 |-------|--------|-------------|
 | Camera - 相机 | `ogscope.web.api.camera` | Camera control and image capture |
 | Alignment - 极轴校准 | `ogscope.web.api.alignment` | Polar alignment workflow and status |
-| System - 系统 | `ogscope.web.api.system` | System information and configuration |
-| Debug - 调试 | `ogscope.web.api.debug` | Debug console endpoints |
+| Network - 网络 | `ogscope.web.api.network` | WiFi AP/STA and network switching |
+| Core - 标准契约 | `ogscope.web.api.core` | Stable external contract (`/api/core/v1/*`) |
+| Dev - 系统状态 | `ogscope.web.api.system` | Developer system status (`/api/dev/system/*`) |
+| Dev - 调试工具 | `ogscope.web.api.debug` | Developer debugging endpoints (`/api/dev/debug/*`) |
+| Dev - 分析实验 | `ogscope.web.api.analysis` | Analysis lab endpoints (`/api/dev/analysis/*`) |
 
 Tags are specified in `ogscope/web/api/main.py` via the `tags` parameter of `include_router()`. Group descriptions are defined in the `openapi_tags` list in `ogscope/web/app.py`.
 
@@ -409,6 +412,18 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 ### 9.4 Custom ReDoc Configuration
 
 The project uses a custom ReDoc route with a pinned version (`redoc@2.1.5`) instead of FastAPI's default `redoc@next`, to avoid blank pages caused by unstable pre-release builds. See the `custom_redoc()` function in `ogscope/web/app.py`.
+
+### 9.5 API Change Guardrails (Before Commit)
+
+To reduce mistaken submissions as the architecture grows, verify all items below before submitting API changes:
+
+1. Legacy prefixes `"/api/debug/*"`, `"/api/analysis/*"`, and `"/api/system/*"` are not reintroduced.
+2. Developer endpoints stay under `"/api/dev/*"`; stable contract endpoints stay under `"/api/core/v1/*"`.
+3. `routes.py` contains HTTP adapter logic only; business logic lives in `domain/*` or `core/application/*`.
+4. Run at least one relevant test pass (recommended: `poetry run pytest tests/unit -q`).
+5. Update contract docs together with code changes:
+   - `docs/contracts/core-rest-v1.md`
+   - `docs/contracts/dev-rest-v1.md`
 
 ## 10. Troubleshooting Checklist
 
