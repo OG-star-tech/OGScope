@@ -3,24 +3,21 @@
 """
 
 import asyncio
-import datetime as dt
-import json
 import logging
-import os
-import subprocess
-import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.domain.camera.services import (
+    camera_domain_service,
     DebugCameraService,
     DebugFileService,
     DebugPresetService,
 )
 from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import DEV_CAPTURES_DIR, ensure_safe_basename
+from ogscope.domain.system.services import read_systemd_logs
 from ogscope.web.api.models.schemas import (
     CameraMirrorBody,
     CameraPreset,
@@ -36,79 +33,6 @@ _MJPEG_LIMIT_DETAIL = (
 )
 
 _DEFAULT_PREVIEW_JPEG_QUALITY = 75
-_PREVIEW_CLIENT_LAST_TS: dict[str, float] = {}
-_DEBUG_PREVIEW_MIN_INTERVAL_SEC = max(
-    0.0,
-    float(os.getenv("OGSCOPE_DEBUG_PREVIEW_MIN_INTERVAL_MS", "150") or "150") / 1000.0,
-)
-
-
-def _journal_priority_to_level(priority: str | int | None) -> str:
-    try:
-        p = int(priority) if priority is not None else 6
-    except (TypeError, ValueError):
-        p = 6
-    if p <= 3:
-        return "ERROR"
-    if p == 4:
-        return "WARN"
-    return "INFO"
-
-
-def _read_journal_logs(
-    service: str,
-    since_seconds: int,
-    limit: int,
-) -> list[dict[str, str | int | None]]:
-    cmd = [
-        "journalctl",
-        "--no-pager",
-        "-o",
-        "json",
-        "-u",
-        service,
-        "--since",
-        f"{since_seconds} seconds ago",
-        "-n",
-        str(limit),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or "journalctl failed")
-    rows: list[dict[str, str | int | None]] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        msg = str(item.get("MESSAGE", "")).strip()
-        if not msg:
-            continue
-        priority = item.get("PRIORITY")
-        level = _journal_priority_to_level(priority)
-        ts_iso: str | None = None
-        rt = item.get("__REALTIME_TIMESTAMP")
-        try:
-            if rt is not None:
-                ts = dt.datetime.fromtimestamp(
-                    int(str(rt)) / 1_000_000, tz=dt.timezone.utc
-                )
-                ts_iso = ts.isoformat()
-        except (ValueError, TypeError):
-            ts_iso = None
-        rows.append(
-            {
-                "ts": ts_iso,
-                "level": level,
-                "message": msg,
-                "source": str(item.get("_SYSTEMD_UNIT", service)),
-                "priority": int(priority) if str(priority).isdigit() else None,
-            }
-        )
-    return rows
 
 
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
@@ -242,14 +166,9 @@ async def get_debug_camera_preview(
 ):
     """获取调试相机预览 / Get debug camera preview"""
     try:
-        if _DEBUG_PREVIEW_MIN_INTERVAL_SEC > 0:
-            client_host = request.client.host if request.client else "unknown"
-            now = time.monotonic()
-            last = _PREVIEW_CLIENT_LAST_TS.get(client_host, 0.0)
-            if now - last < _DEBUG_PREVIEW_MIN_INTERVAL_SEC:
-                return Response(status_code=304)
-            _PREVIEW_CLIENT_LAST_TS[client_host] = now
-        return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
+        return await camera_domain_service.get_rate_limited_preview(
+            request, since_frame_id=since_frame_id
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -512,7 +431,7 @@ async def get_systemd_logs(
         level_set = {"INFO", "WARN", "ERROR"}
     try:
         rows = await asyncio.to_thread(
-            _read_journal_logs,
+            read_systemd_logs,
             service,
             since_seconds,
             limit,

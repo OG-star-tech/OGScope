@@ -43,7 +43,7 @@ def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve)
     monkeypatch.setattr(CameraManager, "get_raw_frame", _fake_get_raw_frame)
 
     start_resp = client.post(
-        "/api/debug/analysis/realtime/start",
+        "/api/dev/debug/analysis/realtime/start",
         params={"hint_ra_deg": 15.0, "hint_dec_deg": 85.0},
     )
     assert start_resp.status_code == 200
@@ -51,12 +51,12 @@ def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve)
 
     asyncio.run(asyncio.sleep(0.05))
 
-    status_resp = client.get("/api/debug/analysis/realtime/status")
+    status_resp = client.get("/api/dev/debug/analysis/realtime/status")
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert "running" in status_data
     assert "frame_count" in status_data
 
-    stop_resp = client.post("/api/debug/analysis/realtime/stop")
+    stop_resp = client.post("/api/dev/debug/analysis/realtime/stop")
     assert stop_resp.status_code == 200
     assert stop_resp.json()["success"] is True

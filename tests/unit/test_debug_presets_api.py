@@ -29,7 +29,7 @@ def _sample_preset(name: str = "night-sky") -> dict:
 
 @pytest.mark.unit
 def test_debug_presets_empty(client, temp_debug_dir):
-    response = client.get("/api/debug/camera/presets")
+    response = client.get("/api/dev/debug/camera/presets")
     assert response.status_code == 200
     assert response.json() == {"presets": []}
 
@@ -37,11 +37,11 @@ def test_debug_presets_empty(client, temp_debug_dir):
 @pytest.mark.unit
 def test_debug_presets_save_and_get(client, temp_debug_dir):
     payload = _sample_preset()
-    save_resp = client.post("/api/debug/camera/presets", json=payload)
+    save_resp = client.post("/api/dev/debug/camera/presets", json=payload)
     assert save_resp.status_code == 200
     assert save_resp.json()["success"] is True
 
-    get_resp = client.get("/api/debug/camera/presets")
+    get_resp = client.get("/api/dev/debug/camera/presets")
     assert get_resp.status_code == 200
     presets = get_resp.json()["presets"]
     assert len(presets) == 1
@@ -54,10 +54,10 @@ def test_debug_presets_update_same_name(client, temp_debug_dir):
     second = _sample_preset("deep-sky")
     second["exposure_us"] = 30000
 
-    assert client.post("/api/debug/camera/presets", json=first).status_code == 200
-    assert client.post("/api/debug/camera/presets", json=second).status_code == 200
+    assert client.post("/api/dev/debug/camera/presets", json=first).status_code == 200
+    assert client.post("/api/dev/debug/camera/presets", json=second).status_code == 200
 
-    get_resp = client.get("/api/debug/camera/presets")
+    get_resp = client.get("/api/dev/debug/camera/presets")
     presets = get_resp.json()["presets"]
     assert len(presets) == 1
     assert presets[0]["exposure_us"] == 30000
@@ -66,12 +66,12 @@ def test_debug_presets_update_same_name(client, temp_debug_dir):
 @pytest.mark.unit
 def test_debug_presets_delete(client, temp_debug_dir):
     payload = _sample_preset("to-delete")
-    assert client.post("/api/debug/camera/presets", json=payload).status_code == 200
+    assert client.post("/api/dev/debug/camera/presets", json=payload).status_code == 200
 
-    delete_resp = client.delete("/api/debug/camera/presets/to-delete")
+    delete_resp = client.delete("/api/dev/debug/camera/presets/to-delete")
     assert delete_resp.status_code == 200
     assert delete_resp.json()["success"] is True
 
-    get_resp = client.get("/api/debug/camera/presets")
+    get_resp = client.get("/api/dev/debug/camera/presets")
     assert get_resp.status_code == 200
     assert get_resp.json()["presets"] == []

@@ -14,9 +14,9 @@ from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 
 from ogscope.config import get_settings
-from ogscope.web.api.debug.services import DebugCameraService
+from ogscope.domain.camera.services import camera_domain_service
+from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
-from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 
 async def build_camera_mjpeg_stream(
@@ -48,7 +48,7 @@ async def build_camera_mjpeg_stream(
                     break
                 try:
                     code, data, snap_id = await asyncio.wait_for(
-                        DebugCameraService.get_stream_frame_bytes(
+                        camera_domain_service.get_stream_frame_bytes(
                             image_format, quality, since_frame_id=last_snap_frame_id
                         ),
                         timeout=fetch_timeout_s,

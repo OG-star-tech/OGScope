@@ -145,7 +145,7 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
 
 @pytest.mark.unit
 def test_debug_camera_status_with_fake_camera(client, fake_camera_env):
-    response = client.get("/api/debug/camera/status")
+    response = client.get("/api/dev/debug/camera/status")
     assert response.status_code == 200
     data = response.json()
     assert data["connected"] is True
@@ -155,18 +155,18 @@ def test_debug_camera_status_with_fake_camera(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_start_and_stop(client, fake_camera_env):
-    start_resp = client.post("/api/debug/camera/start")
+    start_resp = client.post("/api/dev/debug/camera/start")
     assert start_resp.status_code == 200
     assert start_resp.json()["success"] is True
 
-    stop_resp = client.post("/api/debug/camera/stop")
+    stop_resp = client.post("/api/dev/debug/camera/stop")
     assert stop_resp.status_code == 200
     assert stop_resp.json()["success"] is True
 
 
 @pytest.mark.unit
 def test_debug_camera_rotation(client, fake_camera_env):
-    response = client.post("/api/debug/camera/rotation/90")
+    response = client.post("/api/dev/debug/camera/rotation/90")
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -175,13 +175,13 @@ def test_debug_camera_rotation(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_fps_validation(client):
-    response = client.post("/api/debug/camera/fps", params={"fps": 0})
+    response = client.post("/api/dev/debug/camera/fps", params={"fps": 0})
     assert response.status_code == 422
 
 
 @pytest.mark.unit
 def test_debug_camera_fps_success(client, fake_camera_env):
-    response = client.post("/api/debug/camera/fps", params={"fps": 12})
+    response = client.post("/api/dev/debug/camera/fps", params={"fps": 12})
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -190,7 +190,7 @@ def test_debug_camera_fps_success(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_sampling_mode_success(client, fake_camera_env):
-    response = client.post("/api/debug/camera/sampling", params={"mode": "native"})
+    response = client.post("/api/dev/debug/camera/sampling", params={"mode": "native"})
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -199,7 +199,7 @@ def test_debug_camera_sampling_mode_success(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_image_quality_success(client, fake_camera_env):
-    response = client.get("/api/debug/camera/image-quality")
+    response = client.get("/api/dev/debug/camera/image-quality")
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -225,7 +225,7 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
         "colorMode": "color",
     }
 
-    response = client.post("/api/debug/camera/settings", json=payload)
+    response = client.post("/api/dev/debug/camera/settings", json=payload)
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -234,7 +234,7 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_auto_exposure_switch_success(client, fake_camera_env):
-    response = client.post("/api/debug/camera/auto-exposure", params={"enabled": False})
+    response = client.post("/api/dev/debug/camera/auto-exposure", params={"enabled": False})
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
@@ -245,7 +245,7 @@ def test_debug_camera_auto_exposure_switch_success(client, fake_camera_env):
 @pytest.mark.unit
 def test_debug_camera_white_balance_switch_success(client, fake_camera_env):
     response = client.post(
-        "/api/debug/camera/white-balance",
+        "/api/dev/debug/camera/white-balance",
         params={"mode": "night", "gain_r": 1.0, "gain_b": 1.0},
     )
     assert response.status_code == 200
