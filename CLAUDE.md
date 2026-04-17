@@ -218,5 +218,9 @@ chore: 构建/工具变更 / Build/tool changes
   4. 双仓测试通过后再提交
 - 禁止在 OGScope 中重新引入旧路径：`/api/debug/*`、`/api/analysis/*`、`/api/system/*`。
 - 联动开发详细流程见：`docs/development/CROSS_PROJECT_COLLAB.md`。
+- Cursor 联动建议：
+  - 同一会话挂载双项目根（OGScope + external integrator）
+  - 指令中明确“分别在两个仓执行改动、测试、提交”
+  - 每次提交前先核对当前仓 `git status` 与 `git remote -v`
 
 
