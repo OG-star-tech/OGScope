@@ -113,6 +113,10 @@ openapi_tags = [
         "description": "WiFi AP/STA 切换 / WiFi AP vs STA switching",
     },
     {
+        "name": "Core - 标准契约",
+        "description": "对外稳定 REST 契约（供上层调用方调用）/ Stable REST contract for external callers",
+    },
+    {
         "name": "legacy hardware protocol - 赤道仪控制",
         "description": "legacy hardware protocol 协议赤道仪控制调试 / legacy hardware protocol protocol mount control debugging",
     },
@@ -249,6 +253,7 @@ async def api_root():
             "system": "/api/system/",
             "network": "/api/network/",
             "analysis": "/api/analysis/",
+            "core": "/api/core/v1/",
         },
     }
 
