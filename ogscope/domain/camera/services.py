@@ -14,8 +14,8 @@ from fastapi import HTTPException
 from fastapi.responses import Response, StreamingResponse
 from starlette.requests import Request
 
+from ogscope.adapters.debug_services import get_debug_services_module
 from ogscope.config import get_settings
-from ogscope.web.api.debug.services import DebugCameraService, DebugFileService, DebugPresetService
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,167 @@ class StreamStateDomainService:
 camera_domain_service = CameraDomainService()
 file_domain_service = FileDomainService()
 stream_state_domain_service = StreamStateDomainService()
+
+
+def _debug_services_module():
+    """延迟加载调试实现，避免 domain 层静态反向依赖 web.api。"""
+    return get_debug_services_module()
+
+
+class DebugCameraService:
+    @staticmethod
+    def get_camera_instance():
+        return _debug_services_module().DebugCameraService.get_camera_instance()
+
+    @staticmethod
+    async def get_camera_status():
+        return await _debug_services_module().DebugCameraService.get_camera_status()
+
+    @staticmethod
+    async def get_runtime_overrides():
+        return await _debug_services_module().DebugCameraService.get_runtime_overrides()
+
+    @staticmethod
+    async def clear_runtime_overrides():
+        return await _debug_services_module().DebugCameraService.clear_runtime_overrides()
+
+    @staticmethod
+    async def apply_runtime_overrides_as_defaults():
+        return await _debug_services_module().DebugCameraService.apply_runtime_overrides_as_defaults()
+
+    @staticmethod
+    async def start_camera():
+        return await _debug_services_module().DebugCameraService.start_camera()
+
+    @staticmethod
+    async def stop_camera():
+        return await _debug_services_module().DebugCameraService.stop_camera()
+
+    @staticmethod
+    async def set_rotation(rotation: int):
+        return await _debug_services_module().DebugCameraService.set_rotation(rotation)
+
+    @staticmethod
+    async def set_mirror(flip_horizontal: bool, flip_vertical: bool):
+        return await _debug_services_module().DebugCameraService.set_mirror(
+            flip_horizontal, flip_vertical
+        )
+
+    @staticmethod
+    async def get_preview(*, since_frame_id: int | None = None):
+        return await _debug_services_module().DebugCameraService.get_preview(
+            since_frame_id=since_frame_id
+        )
+
+    @staticmethod
+    async def capture_image():
+        return await _debug_services_module().DebugCameraService.capture_image()
+
+    @staticmethod
+    async def start_recording():
+        return await _debug_services_module().DebugCameraService.start_recording()
+
+    @staticmethod
+    async def stop_recording():
+        return await _debug_services_module().DebugCameraService.stop_recording()
+
+    @staticmethod
+    async def set_size(width: int, height: int):
+        return await _debug_services_module().DebugCameraService.set_size(width, height)
+
+    @staticmethod
+    async def set_sampling_mode(mode: str):
+        return await _debug_services_module().DebugCameraService.set_sampling_mode(mode)
+
+    @staticmethod
+    async def set_fps(fps: int):
+        return await _debug_services_module().DebugCameraService.set_fps(fps)
+
+    @staticmethod
+    async def update_settings(settings: dict[str, Any]):
+        return await _debug_services_module().DebugCameraService.update_settings(settings)
+
+    @staticmethod
+    async def set_auto_exposure_mode(enabled: bool):
+        return await _debug_services_module().DebugCameraService.set_auto_exposure_mode(
+            enabled
+        )
+
+    @staticmethod
+    async def reset_camera():
+        return await _debug_services_module().DebugCameraService.reset_camera()
+
+    @staticmethod
+    async def set_night_mode(enabled: bool):
+        return await _debug_services_module().DebugCameraService.set_night_mode(enabled)
+
+    @staticmethod
+    async def get_image_quality():
+        return await _debug_services_module().DebugCameraService.get_image_quality()
+
+    @staticmethod
+    async def apply_night_mode_preset():
+        return await _debug_services_module().DebugCameraService.apply_night_mode_preset()
+
+    @staticmethod
+    async def save_current_settings_backup():
+        return await _debug_services_module().DebugCameraService.save_current_settings_backup()
+
+    @staticmethod
+    async def restore_settings_backup():
+        return await _debug_services_module().DebugCameraService.restore_settings_backup()
+
+    @staticmethod
+    async def set_color_mode(color_mode: str):
+        return await _debug_services_module().DebugCameraService.set_color_mode(color_mode)
+
+    @staticmethod
+    async def set_white_balance(mode: str, gain_r: float, gain_b: float):
+        return await _debug_services_module().DebugCameraService.set_white_balance(
+            mode, gain_r, gain_b
+        )
+
+    @staticmethod
+    async def get_stream_frame_bytes(
+        image_format: str, quality: int, *, since_frame_id: int
+    ):
+        return await _debug_services_module().DebugCameraService.get_stream_frame_bytes(
+            image_format,
+            quality,
+            since_frame_id=since_frame_id,
+        )
+
+
+class DebugFileService:
+    @staticmethod
+    async def get_files():
+        return await _debug_services_module().DebugFileService.get_files()
+
+    @staticmethod
+    async def get_file_info(filename: str):
+        return await _debug_services_module().DebugFileService.get_file_info(filename)
+
+    @staticmethod
+    async def delete_file(filename: str):
+        return await _debug_services_module().DebugFileService.delete_file(filename)
+
+
+class DebugPresetService:
+    @staticmethod
+    async def get_presets():
+        return await _debug_services_module().DebugPresetService.get_presets()
+
+    @staticmethod
+    async def save_preset(payload: dict[str, Any]):
+        return await _debug_services_module().DebugPresetService.save_preset(payload)
+
+    @staticmethod
+    async def apply_preset(preset_name: str):
+        return await _debug_services_module().DebugPresetService.apply_preset(preset_name)
+
+    @staticmethod
+    async def delete_preset(preset_name: str):
+        return await _debug_services_module().DebugPresetService.delete_preset(preset_name)
 
 __all__ = [
     "DebugCameraService",

@@ -33,7 +33,7 @@ def test_read_wifi_metrics_link_not_status_column(
             return _W()
         return real_path(arg)
 
-    monkeypatch.setattr(system_services, "Path", path_new)
+    monkeypatch.setattr("ogscope.domain.system.services.Path", path_new)
     svc = SystemInfoService(cache_ttl_seconds=0.0)
     q, sig, iface = svc._read_wifi_metrics()
     assert iface == "wlan0"

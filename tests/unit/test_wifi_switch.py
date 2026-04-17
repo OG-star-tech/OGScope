@@ -97,21 +97,29 @@ def test_network_api(client, monkeypatch) -> None:
     from ogscope.web.api.network import routes as network_routes
 
     monkeypatch.setattr(
-        network_routes.wifi_switch_service, "is_configured", lambda: True
-    )
-    monkeypatch.setattr(
-        network_routes.wifi_switch_service,
-        "get_status",
+        network_routes.wifi_domain_service,
+        "build_wifi_status",
         lambda: {
-            "MODE": "ap",
-            "ACTIVE_CONNECTION": "OGScope-AP",
-            "WIRELESS_INTERFACE": "wlan0",
-            "STA_CONNECTION": "HOME-STA",
-            "AP_CONNECTION": "OGScope-AP",
-            "AP_IPV4": "192.168.4.1/24",
+            "mode": "ap",
+            "active_connection": "OGScope-AP",
+            "wireless_interface": "wlan0",
+            "sta_connection": "HOME-STA",
+            "ap_connection": "OGScope-AP",
+            "ap_ipv4": "192.168.4.1/24",
+            "ap_url_hint": None,
+            "configured": True,
+            "message": None,
+            "device_id_suffix": None,
+            "ap_ssid": None,
+            "mdns_hostname_hint": None,
         },
     )
-    monkeypatch.setattr(network_routes.wifi_switch_service, "switch", lambda mode: None)
+
+    async def _fake_switch_mode(mode: str):
+        _ = mode
+        return network_routes.wifi_domain_service.build_wifi_status()
+
+    monkeypatch.setattr(network_routes.wifi_domain_service, "switch_mode", _fake_switch_mode)
 
     response = client.get("/api/network/wifi")
     assert response.status_code == 200
@@ -126,13 +134,12 @@ def test_network_api(client, monkeypatch) -> None:
 @pytest.mark.unit
 def test_network_wifi_scan_api(client, monkeypatch) -> None:
     """WiFi 扫描 API / WiFi scan API."""
-    from ogscope.web.api.network import services as net_services
+    from ogscope.web.api.network import routes as network_routes
 
-    monkeypatch.setattr(
-        net_services,
-        "nmcli_wifi_scan",
-        lambda iface: ([{"ssid": "Home", "signal": 80, "security": "WPA2"}], None),
-    )
+    async def _fake_scan_wifi():
+        return [{"ssid": "Home", "signal": 80, "security": "WPA2"}], None
+
+    monkeypatch.setattr(network_routes.wifi_domain_service, "scan_wifi", _fake_scan_wifi)
 
     response = client.get("/api/network/wifi/scan")
     assert response.status_code == 200
@@ -145,9 +152,9 @@ def test_network_wifi_scan_api(client, monkeypatch) -> None:
 @pytest.mark.unit
 def test_network_profiles_api(client, monkeypatch) -> None:
     """WiFi profiles API / WiFi profiles API."""
-    from ogscope.web.api.network import services as net_services
+    from ogscope.web.api.network import routes as network_routes
 
-    def _fake_profiles(_settings):
+    async def _fake_profiles():
         return [
             {
                 "connection_name": "OGScope-STA",
@@ -156,7 +163,7 @@ def test_network_profiles_api(client, monkeypatch) -> None:
             }
         ]
 
-    monkeypatch.setattr(net_services, "nmcli_wifi_profiles", _fake_profiles)
+    monkeypatch.setattr(network_routes.wifi_domain_service, "list_profiles", _fake_profiles)
     response = client.get("/api/network/wifi/profiles")
     assert response.status_code == 200
     data = response.json()
