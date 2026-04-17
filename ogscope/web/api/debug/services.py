@@ -21,6 +21,9 @@ from ogscope.domain.shared.filesystem import (
 )
 from ogscope.web.camera_shared import get_camera_manager
 
+# 兼容旧命名，测试与遗留调用仍可能引用 / Backward-compatible alias.
+DEBUG_CAPTURES_DIR = DEV_CAPTURES_DIR
+
 # 全局变量存储相机状态（相机单例在 CameraManager）/ Global state (camera singleton lives in CameraManager).
 is_recording = False
 recording_task = None

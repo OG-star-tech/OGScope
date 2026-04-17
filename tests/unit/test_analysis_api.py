@@ -45,13 +45,13 @@ def test_analysis_upload_and_single_image_solve(
     _build_star_image(image_path)
     with image_path.open("rb") as f:
         upload_resp = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("stars.jpg", f, "image/jpeg")},
         )
     assert upload_resp.status_code == 200
     assert upload_resp.json()["filename"] == "stars.jpg"
 
-    list_resp = client.get("/api/analysis/uploads")
+    list_resp = client.get("/api/dev/analysis/uploads")
     assert list_resp.status_code == 200
     payload = list_resp.json()
     assert "upload_dir" in payload
@@ -60,13 +60,13 @@ def test_analysis_upload_and_single_image_solve(
     assert "stars.jpg" in names
 
     file_resp = client.get(
-        "/api/analysis/uploads/file", params={"filename": "stars.jpg"}
+        "/api/dev/analysis/uploads/file", params={"filename": "stars.jpg"}
     )
     assert file_resp.status_code == 200
     assert len(file_resp.content) > 0
 
     solve_resp = client.post(
-        "/api/analysis/solve/image",
+        "/api/dev/analysis/solve/image",
         json={
             "input_name": "stars.jpg",
             "hint_ra_deg": 45.0,
@@ -92,7 +92,7 @@ def test_analysis_extract_preview(
     _build_star_image(image_path)
     with image_path.open("rb") as f:
         upload_resp = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("stars2.jpg", f, "image/jpeg")},
         )
     assert upload_resp.status_code == 200
@@ -114,7 +114,7 @@ def test_analysis_extract_preview(
         _fake_preview,
     )
     prev_resp = client.post(
-        "/api/analysis/extract/preview",
+        "/api/dev/analysis/extract/preview",
         json={"input_name": "stars2.jpg", "max_image_side": 2048},
     )
     assert prev_resp.status_code == 200
@@ -134,13 +134,13 @@ def test_analysis_video_job(
     _build_test_video(video_path)
     with video_path.open("rb") as f:
         upload_resp = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("stars.mp4", f, "video/mp4")},
         )
     assert upload_resp.status_code == 200
 
     job_resp = client.post(
-        "/api/analysis/jobs",
+        "/api/dev/analysis/jobs",
         json={
             "input_name": "stars.mp4",
             "input_type": "video",
@@ -154,11 +154,11 @@ def test_analysis_video_job(
     job_data = job_resp.json()
     assert job_data["status"] == "succeeded"
 
-    status_resp = client.get(f"/api/analysis/jobs/{job_data['job_id']}")
+    status_resp = client.get(f"/api/dev/analysis/jobs/{job_data['job_id']}")
     assert status_resp.status_code == 200
     assert status_resp.json()["status"] == "succeeded"
 
-    result_resp = client.get(f"/api/analysis/jobs/{job_data['job_id']}/result")
+    result_resp = client.get(f"/api/dev/analysis/jobs/{job_data['job_id']}/result")
     assert result_resp.status_code == 200
     result_data = result_resp.json()
     assert result_data["job_id"] == job_data["job_id"]
@@ -174,17 +174,17 @@ def test_analysis_list_presets_and_batch(
     _build_star_image(image_path)
     with image_path.open("rb") as f:
         up = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("batch.jpg", f, "image/jpeg")},
         )
     assert up.status_code == 200
 
-    pr = client.get("/api/analysis/presets", params={"scope": "user"})
+    pr = client.get("/api/dev/analysis/presets", params={"scope": "user"})
     assert pr.status_code == 200
     assert "presets" in pr.json()
 
     create = client.post(
-        "/api/analysis/presets",
+        "/api/dev/analysis/presets",
         json={
             "name": "test-preset",
             "params": {"fov_estimate": 16.0, "solve_timeout_ms": 8000},
@@ -194,7 +194,7 @@ def test_analysis_list_presets_and_batch(
     pid = create.json()["id"]
 
     batch = client.post(
-        "/api/analysis/solve/batch",
+        "/api/dev/analysis/solve/batch",
         json={
             "input_name": "batch.jpg",
             "runs": [
@@ -209,7 +209,7 @@ def test_analysis_list_presets_and_batch(
     assert len(bj["results"]) == 2
 
     exp = client.post(
-        "/api/analysis/experiments",
+        "/api/dev/analysis/experiments",
         json={
             "input_name": "batch.jpg",
             "preset_label": "A",
@@ -219,11 +219,11 @@ def test_analysis_list_presets_and_batch(
     )
     assert exp.status_code == 200
 
-    el = client.get("/api/analysis/experiments", params={"page": 1, "page_size": 10})
+    el = client.get("/api/dev/analysis/experiments", params={"page": 1, "page_size": 10})
     assert el.status_code == 200
     assert el.json()["total"] >= 1
 
-    dl = client.delete(f"/api/analysis/presets/{pid}")
+    dl = client.delete(f"/api/dev/analysis/presets/{pid}")
     assert dl.status_code == 200
 
 
@@ -234,7 +234,7 @@ def test_analysis_upload_file_info_sidecar(client, temp_analysis_dir, tmp_path: 
     _build_star_image(image_path)
     with image_path.open("rb") as f:
         up = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("cap.jpg", f, "image/jpeg")},
         )
     assert up.status_code == 200
@@ -243,7 +243,7 @@ def test_analysis_upload_file_info_sidecar(client, temp_analysis_dir, tmp_path: 
         '{"camera": {"exposure_us": 5000, "output_width": 640, "output_height": 480}}',
         encoding="utf-8",
     )
-    info_resp = client.get("/api/analysis/uploads/cap.jpg/info")
+    info_resp = client.get("/api/dev/analysis/uploads/cap.jpg/info")
     assert info_resp.status_code == 200
     data = info_resp.json()
     assert data.get("exposure_us") == 5000
@@ -259,18 +259,18 @@ def test_analysis_delete_upload_and_experiment(
     _build_star_image(image_path)
     with image_path.open("rb") as f:
         up = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("del.jpg", f, "image/jpeg")},
         )
     assert up.status_code == 200
     assert (temp_analysis_dir / "uploads" / "del.jpg").is_file()
 
-    dr = client.delete("/api/analysis/uploads/del.jpg")
+    dr = client.delete("/api/dev/analysis/uploads/del.jpg")
     assert dr.status_code == 200
     assert not (temp_analysis_dir / "uploads" / "del.jpg").is_file()
 
     exp = client.post(
-        "/api/analysis/experiments",
+        "/api/dev/analysis/experiments",
         json={
             "input_name": "x.jpg",
             "preset_label": "t",
@@ -280,7 +280,7 @@ def test_analysis_delete_upload_and_experiment(
     )
     assert exp.status_code == 200
     eid = exp.json()["id"]
-    er = client.delete(f"/api/analysis/experiments/{eid}")
+    er = client.delete(f"/api/dev/analysis/experiments/{eid}")
     assert er.status_code == 200
     assert not (temp_analysis_dir / "experiments" / f"{eid}.json").is_file()
 
@@ -294,13 +294,13 @@ def test_analysis_solve_video_frame_overlay_ext(
     _build_test_video(video_path)
     with video_path.open("rb") as f:
         up = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("frame_ext.mp4", f, "video/mp4")},
         )
     assert up.status_code == 200
 
     resp = client.post(
-        "/api/analysis/solve/frame",
+        "/api/dev/analysis/solve/frame",
         json={
             "source": "file",
             "input_name": "frame_ext.mp4",
@@ -331,10 +331,13 @@ def test_analysis_solve_video_frame_from_debug_capture(
     video_path = tmp_path / "dev_captures" / "debug_cam.mp4"
     video_path.parent.mkdir(parents=True, exist_ok=True)
     _build_test_video(video_path)
-    monkeypatch.setattr("ogscope.web.api.analysis.services.Path.home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "ogscope.web.api.analysis.services.DEV_CAPTURES_DIR",
+        tmp_path / "dev_captures",
+    )
 
     resp = client.post(
-        "/api/analysis/solve/frame",
+        "/api/dev/analysis/solve/frame",
         json={
             "source": "file",
             "input_name": "debug_cam.mp4",
@@ -364,7 +367,7 @@ def test_analysis_solve_frame_upload_endpoint(
     }
     with image_path.open("rb") as f:
         resp = client.post(
-            "/api/analysis/solve/frame_upload",
+            "/api/dev/analysis/solve/frame_upload",
             files={"file": ("frame.jpg", f, "image/jpeg")},
             data={"payload": json.dumps(payload)},
         )
@@ -386,13 +389,13 @@ def test_analysis_realtime_gate_skips_by_interval(
     _build_test_video(video_path)
     with video_path.open("rb") as f:
         up = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("gate_interval.mp4", f, "video/mp4")},
         )
     assert up.status_code == 200
 
     first = client.post(
-        "/api/analysis/solve/frame",
+        "/api/dev/analysis/solve/frame",
         json={
             "source": "file",
             "input_name": "gate_interval.mp4",
@@ -404,7 +407,7 @@ def test_analysis_realtime_gate_skips_by_interval(
     assert first.json().get("gate_status") == "SOLVED"
 
     second = client.post(
-        "/api/analysis/solve/frame",
+        "/api/dev/analysis/solve/frame",
         json={
             "source": "file",
             "input_name": "gate_interval.mp4",
@@ -467,7 +470,7 @@ def test_analysis_realtime_timeout_releases_gate(
     monkeypatch.setattr(type(analysis_service), "_solve_bgr_to_row", _slow)
     with image_path.open("rb") as f:
         resp = client.post(
-            "/api/analysis/solve/frame_upload",
+            "/api/dev/analysis/solve/frame_upload",
             files={"file": ("frame.jpg", f, "image/jpeg")},
             data={"payload": json.dumps({"solve_interval_ms": 50})},
         )
@@ -491,7 +494,7 @@ def test_analysis_realtime_timeout_releases_gate(
     monkeypatch.setattr(type(analysis_service), "_solve_bgr_to_row", _fast)
     with image_path.open("rb") as f:
         resp2 = client.post(
-            "/api/analysis/solve/frame_upload",
+            "/api/dev/analysis/solve/frame_upload",
             files={"file": ("frame.jpg", f, "image/jpeg")},
             data={"payload": json.dumps({"solve_interval_ms": 50})},
         )
@@ -508,7 +511,7 @@ def test_analysis_camera_solve_skipped_when_recording_active(
         "ogscope.web.api.debug.services.is_recording_active", lambda: True
     )
     resp = client.post(
-        "/api/analysis/solve/frame",
+        "/api/dev/analysis/solve/frame",
         json={"source": "camera"},
     )
     assert resp.status_code == 200
@@ -528,13 +531,13 @@ def test_analysis_replace_transcoded_video_updates_sidecar(
     mp4_path.write_bytes(b"MP4")
     with avi_path.open("rb") as f:
         up_avi = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("raw.avi", f, "video/x-msvideo")},
         )
     assert up_avi.status_code == 200
     with mp4_path.open("rb") as f:
         up_mp4 = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("out.mp4", f, "video/mp4")},
         )
     assert up_mp4.status_code == 200
@@ -552,7 +555,7 @@ def test_analysis_replace_transcoded_video_updates_sidecar(
     )
 
     resp = client.post(
-        "/api/analysis/uploads/replace_video",
+        "/api/dev/analysis/uploads/replace_video",
         json={
             "old_filename": "raw.avi",
             "new_filename": "out.mp4",

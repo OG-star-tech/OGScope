@@ -9,15 +9,14 @@ import subprocess
 
 from ogscope.config import get_settings
 from ogscope.hardware.wifi_switch import wifi_switch_service
-from ogscope.web.api.models.schemas import WifiStatus
-from ogscope.web.api.network import services as net_impl
+from ogscope.domain.network import nmcli_services as net_impl
 
 
 class WifiDomainService:
     """网络域门面 / Network domain facade."""
 
     @staticmethod
-    def build_wifi_status() -> WifiStatus:
+    def build_wifi_status() -> dict:
         settings = get_settings()
         configured = wifi_switch_service.is_configured()
         data = wifi_switch_service.get_status()
@@ -34,22 +33,22 @@ class WifiDomainService:
         suffix = settings.device_id_suffix or None
         ap_ssid = settings.wifi_ap_ssid or None
         mdns_hint = f"ogscope-{suffix}.local" if suffix else None
-        return WifiStatus(
-            mode=mode if mode in {"ap", "sta"} else "unknown",
-            active_connection=active_connection,
-            wireless_interface=wireless_interface,
-            sta_connection=sta_connection,
-            ap_connection=ap_connection,
-            ap_ipv4=ap_ipv4,
-            ap_url_hint=ap_url_hint,
-            configured=configured,
-            message=message,
-            device_id_suffix=suffix,
-            ap_ssid=ap_ssid,
-            mdns_hostname_hint=mdns_hint,
-        )
+        return {
+            "mode": mode if mode in {"ap", "sta"} else "unknown",
+            "active_connection": active_connection,
+            "wireless_interface": wireless_interface,
+            "sta_connection": sta_connection,
+            "ap_connection": ap_connection,
+            "ap_ipv4": ap_ipv4,
+            "ap_url_hint": ap_url_hint,
+            "configured": configured,
+            "message": message,
+            "device_id_suffix": suffix,
+            "ap_ssid": ap_ssid,
+            "mdns_hostname_hint": mdns_hint,
+        }
 
-    async def switch_mode(self, mode: str) -> WifiStatus:
+    async def switch_mode(self, mode: str) -> dict:
         if mode == "ap":
             net_impl.cancel_sta_rollback_watch()
         wifi_switch_service.switch(mode)
@@ -65,7 +64,7 @@ class WifiDomainService:
         settings = get_settings()
         return await asyncio.to_thread(net_impl.nmcli_wifi_profiles, settings)
 
-    async def connect_sta(self, ssid: str, password: str) -> WifiStatus:
+    async def connect_sta(self, ssid: str, password: str) -> dict:
         settings = get_settings()
         if not wifi_switch_service.is_configured():
             raise RuntimeError("wifi_not_configured")
@@ -74,7 +73,7 @@ class WifiDomainService:
         net_impl.schedule_sta_rollback_watch()
         return self.build_wifi_status()
 
-    async def activate_profile(self, connection_name: str) -> WifiStatus:
+    async def activate_profile(self, connection_name: str) -> dict:
         settings = get_settings()
         if not wifi_switch_service.is_configured():
             raise RuntimeError("wifi_not_configured")
