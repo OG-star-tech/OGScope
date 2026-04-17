@@ -5,6 +5,7 @@
 本文档面向项目成员与协作者，说明 OGScope 在 **Raspberry Pi Zero 2W** 等开发板环境中的实际运行方式、依赖要求与标准调试流程。
 
 测试实践请见：[测试指南](testing-guide.md)。
+提交前架构自检请见：[Architecture Quick Checklist](ARCHITECTURE_QUICK_CHECKLIST.md)。
 
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。

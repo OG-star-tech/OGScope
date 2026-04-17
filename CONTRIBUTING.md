@@ -54,6 +54,7 @@
    poetry run ruff check ogscope tests
    poetry run mypy ogscope
    ```
+   同时建议按 [Architecture Quick Checklist](docs/development/ARCHITECTURE_QUICK_CHECKLIST.md) 做一次提交前自检，尤其是 API/架构改动。
 
 6. **提交更改**
    ```bash
