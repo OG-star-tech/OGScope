@@ -148,7 +148,7 @@ export default function AnalysisLabApp() {
   const [cameraPreviewNatural, setCameraPreviewNatural] = useState({ w: 0, h: 0 });
   /** 视频台：文件预览或设备相机 / Video lab: pool file vs device camera */
   const [videoPreviewMode, setVideoPreviewMode] = useState<"file" | "camera">("file");
-  /** MJPEG 流时间戳参数，与相机调试台 /api/debug/camera/stream 一致 / Same stream URL as debug console */
+  /** MJPEG 流时间戳参数，与相机调试台 /api/dev/debug/camera/stream 一致 / Same stream URL as debug console */
   const [cameraStreamNonce, setCameraStreamNonce] = useState(() => Date.now());
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [cameraSolveRunning, setCameraSolveRunning] = useState(false);
@@ -861,7 +861,7 @@ export default function AnalysisLabApp() {
         img.removeAttribute("src");
       }
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      await fetch("/api/debug/camera/stop", { method: "POST" });
+      await fetch("/api/dev/debug/camera/stop", { method: "POST" });
       setCameraStreamNonce(Date.now());
       if (videoPreviewMode === "camera") {
         setVideoPreviewMode("file");
@@ -1284,7 +1284,7 @@ export default function AnalysisLabApp() {
                           src={
                             isFrozen && frozenImageUrl
                               ? frozenImageUrl
-                              : `/api/debug/camera/stream?t=${cameraStreamNonce}`
+                              : `/api/dev/debug/camera/stream?t=${cameraStreamNonce}`
                           }
                           alt=""
                           className="max-h-[70vh] w-full min-h-[120px] object-contain"

@@ -94,7 +94,17 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
         }
 
     async def _fake_list_video_files():
-        return {"success": True, "files": [{"name": "VID_001.avi", "type": "video"}]}
+        return {
+            "success": True,
+            "files": [
+                {
+                    "name": "VID_001.avi",
+                    "type": "video",
+                    "size": 1024,
+                    "modified": "2026-01-01T00:00:00",
+                }
+            ],
+        }
 
     async def _fake_video_file_info(filename: str):
         return {"success": True, "file": {"filename": filename, "type": "video"}}
@@ -143,3 +153,33 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     preview = client.get("/api/core/v1/camera/preview")
     assert preview.status_code == 200
     assert preview.headers["content-type"] == "image/jpeg"
+
+
+@pytest.mark.unit
+def test_core_video_info_rejects_invalid_filename(client) -> None:
+    """视频详情接口应拒绝危险文件名 / Reject unsafe filename for video detail."""
+    resp = client.get("/api/core/v1/camera/videos/..%5Csecret.txt")
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid filename"
+
+
+@pytest.mark.unit
+def test_docs_are_split_between_core_and_dev(client) -> None:
+    """文档默认 core，dev 单独入口 / Docs split into core default and dev page."""
+    docs = client.get("/docs")
+    assert docs.status_code == 200
+    assert "/openapi-core.json" in docs.text
+
+    docs_dev = client.get("/docs/dev")
+    assert docs_dev.status_code == 200
+    assert "/openapi-dev.json" in docs_dev.text
+
+    core_schema = client.get("/openapi-core.json")
+    assert core_schema.status_code == 200
+    core_paths = core_schema.json()["paths"]
+    assert all(path.startswith("/api/core/v1/") for path in core_paths.keys())
+
+    dev_schema = client.get("/openapi-dev.json")
+    assert dev_schema.status_code == 200
+    dev_paths = dev_schema.json()["paths"]
+    assert any(path.startswith("/api/dev/analysis/") for path in dev_paths.keys())

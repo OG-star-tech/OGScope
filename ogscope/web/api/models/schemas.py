@@ -492,6 +492,7 @@ class CoreCameraStatusResponse(BaseModel):
     recording: bool
     info: dict[str, Any] = Field(default_factory=dict)
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
 
 
 class CoreStreamStatusResponse(BaseModel):
@@ -502,3 +503,26 @@ class CoreStreamStatusResponse(BaseModel):
     active_clients: int
     frame_fetch_timeout_ms: int
     target_preview_fps: int
+
+
+class CoreVideoFileEntry(BaseModel):
+    """Core 视频文件条目 / Core video file entry."""
+
+    name: str
+    size: int
+    modified: str
+    type: Literal["video"]
+
+
+class CoreVideoListResponse(BaseModel):
+    """Core 视频列表响应 / Core video list response."""
+
+    success: bool
+    files: list[CoreVideoFileEntry] = Field(default_factory=list)
+
+
+class CoreVideoDetailResponse(BaseModel):
+    """Core 视频详情响应 / Core video detail response."""
+
+    success: bool
+    file: dict[str, Any] = Field(default_factory=dict)

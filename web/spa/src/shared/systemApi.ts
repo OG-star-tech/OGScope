@@ -54,7 +54,7 @@ export async function fetchSystemdLogs(params?: {
   if (params?.levels?.length) q.set("levels", params.levels.join(","));
   const qs = q.toString();
   return await requestJson<SystemLogsPayload>(
-    `/api/debug/logs/systemd${qs ? `?${qs}` : ""}`,
+    `/api/dev/debug/logs/systemd${qs ? `?${qs}` : ""}`,
     { cache: "no-store" },
   );
 }

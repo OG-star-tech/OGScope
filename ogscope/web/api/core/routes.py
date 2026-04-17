@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import PurePath
 
 from fastapi import APIRouter, HTTPException
 from fastapi import Query
@@ -24,6 +25,8 @@ from ogscope.web.api.models.schemas import (
     CoreStartAnalysisRequest,
     CoreStreamStatusResponse,
     CoreSystemStatusResponse,
+    CoreVideoDetailResponse,
+    CoreVideoListResponse,
 )
 from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
@@ -32,6 +35,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 _MJPEG_LIMIT_DETAIL = "mjpeg_stream_limit_reached"
 _DEFAULT_PREVIEW_JPEG_QUALITY = 75
+
+
+def _validate_capture_filename(filename: str) -> str:
+    """仅允许相对 basename 文件名 / Allow basename-only capture filename."""
+    safe_name = PurePath(filename).name
+    if not safe_name or safe_name != filename or safe_name in {".", ".."}:
+        raise ValueError("invalid filename")
+    if "/" in safe_name or "\\" in safe_name:
+        raise ValueError("invalid filename")
+    return safe_name
 
 
 @router.post(
@@ -253,20 +266,23 @@ async def core_camera_stream_status() -> CoreStreamStatusResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/core/v1/camera/videos")
-async def core_camera_videos():
+@router.get("/core/v1/camera/videos", response_model=CoreVideoListResponse)
+async def core_camera_videos() -> CoreVideoListResponse:
     """录制视频列表（Core 标准契约）/ Recorded videos list (Core contract)."""
     try:
-        return await core_contract_service.list_video_files()
+        return CoreVideoListResponse(**(await core_contract_service.list_video_files()))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/core/v1/camera/videos/{filename}")
-async def core_camera_video_info(filename: str):
+@router.get("/core/v1/camera/videos/{filename}", response_model=CoreVideoDetailResponse)
+async def core_camera_video_info(filename: str) -> CoreVideoDetailResponse:
     """录制视频详情（Core 标准契约）/ Recorded video detail (Core contract)."""
     try:
-        return await core_contract_service.get_video_file_info(filename)
+        safe_name = _validate_capture_filename(filename)
+        return CoreVideoDetailResponse(
+            **(await core_contract_service.get_video_file_info(safe_name))
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
