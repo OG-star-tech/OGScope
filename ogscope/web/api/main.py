@@ -22,9 +22,20 @@ router.include_router(camera_router, tags=["Camera - 相机"])
 router.include_router(alignment_router, tags=["Alignment - 极轴校准"])
 router.include_router(system_router, tags=["System - 系统"])
 router.include_router(network_router, tags=["Network - 网络"])
-router.include_router(debug_router, tags=["Debug - 调试"])
-router.include_router(analysis_router, tags=["Analysis - 分析"])
 router.include_router(core_contract_router, tags=["Core - 标准契约"])
+router.include_router(
+    debug_router,
+    prefix="/dev",
+    tags=["Dev - 调试工具"],
+)
+router.include_router(
+    analysis_router,
+    prefix="/dev",
+    tags=["Dev - 分析实验"],
+)
+# 兼容旧路径（不出现在文档中）/ Legacy aliases kept hidden from schema.
+router.include_router(debug_router, include_in_schema=False)
+router.include_router(analysis_router, include_in_schema=False)
 
 # legacy hardware protocol 为可选能力（迁移至 external integrator 后可不存在）/ legacy hardware protocol is optional and may move to external integrator.
 if detect_capabilities().legacy protocol_i2c:

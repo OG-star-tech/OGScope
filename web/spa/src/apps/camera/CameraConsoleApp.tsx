@@ -18,7 +18,23 @@ import {
 } from "lucide-react";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
-import { requestJson } from "@shared/systemApi";
+import { requestJson as rawRequestJson } from "@shared/systemApi";
+
+const DEV_DEBUG_API_BASE = "/api/dev/debug";
+
+function debugApi(path: string): string {
+  return `${DEV_DEBUG_API_BASE}${path}`;
+}
+
+async function requestJson<T>(
+  url: string,
+  options: RequestInit & { cache?: RequestCache } = {},
+): Promise<T> {
+  const normalizedUrl = url.startsWith("/api/debug/")
+    ? url.replace("/api/debug/", "/api/dev/debug/")
+    : url;
+  return rawRequestJson<T>(normalizedUrl, options);
+}
 
 type CameraInfo = {
   exposure_us?: number;
@@ -301,7 +317,7 @@ export function CameraConsoleApp() {
         await requestJson("/api/debug/camera/start", { method: "POST" });
       }
       const nonce = Date.now();
-      const streamUrl = `/api/debug/camera/stream?t=${nonce}`;
+      const streamUrl = `${debugApi("/camera/stream")}?t=${nonce}`;
       const probe = await probeMjpegStream(streamUrl);
       if (probe === "busy") {
         setPreviewStreamHint(t("cam.err.streamBusy"));
@@ -682,16 +698,16 @@ export function CameraConsoleApp() {
       a.click();
       document.body.removeChild(a);
     };
-    triggerDownload(name, `/api/debug/files/${encodeURIComponent(name)}`);
+    triggerDownload(name, `${debugApi("/files")}/${encodeURIComponent(name)}`);
     const mediaMatch = name.match(/\.(jpe?g|png|bmp|tiff?|webp|mp4|avi|mov|mkv|wmv|flv|webm|m4v)$/i);
     if (mediaMatch) {
       const stem = name.slice(0, -mediaMatch[0].length);
       const sidecar = `${stem}.txt`;
       void (async () => {
         try {
-          const res = await fetch(`/api/debug/files/${encodeURIComponent(sidecar)}`);
+          const res = await fetch(`${debugApi("/files")}/${encodeURIComponent(sidecar)}`);
           if (!res.ok) return;
-          triggerDownload(sidecar, `/api/debug/files/${encodeURIComponent(sidecar)}`);
+          triggerDownload(sidecar, `${debugApi("/files")}/${encodeURIComponent(sidecar)}`);
           setNotice(t("cam.notice.downloadWithSidecar", { name, sidecar }));
         } catch {
           setNotice(t("cam.notice.download", { name }));
@@ -938,7 +954,7 @@ export function CameraConsoleApp() {
     }
   }, [files.length, filePage]);
 
-  const streamSrc = previewActive ? `/api/debug/camera/stream?t=${streamNonce}` : "";
+  const streamSrc = previewActive ? `${debugApi("/camera/stream")}?t=${streamNonce}` : "";
   const exposureLocked = form.autoExposure;
   const wbManual = form.whiteBalanceMode === "manual";
   const nightModeEnabled = Boolean(status?.info?.night_mode);

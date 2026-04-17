@@ -32,6 +32,18 @@ class CoreContractService:
     def __init__(self) -> None:
         self._session = CoreAnalysisSession()
 
+    @staticmethod
+    def _normalize_camera_status(status: dict[str, Any]) -> dict[str, Any]:
+        """统一 Core 相机状态形状 / Normalize camera status payload shape."""
+        return {
+            "connected": bool(status.get("connected", False)),
+            "streaming": bool(status.get("streaming", False)),
+            "recording": bool(status.get("recording", False)),
+            "info": status.get("info", {}) or {},
+            "runtime_overrides": status.get("runtime_overrides", {}) or {},
+            "error": status.get("error"),
+        }
+
     async def start_analysis(
         self,
         *,
@@ -89,7 +101,8 @@ class CoreContractService:
     async def get_system_status(self) -> dict[str, Any]:
         """系统状态与能力 / System status and capability map."""
         wifi_raw = wifi_switch_service.get_status()
-        camera_status = await DebugCameraService.get_camera_status()
+        raw_camera_status = await DebugCameraService.get_camera_status()
+        camera_status = self._normalize_camera_status(raw_camera_status)
         system = system_info_service.get_system_info()
         sensors = {
             "temperature_c": system.get("temperature"),
@@ -108,13 +121,18 @@ class CoreContractService:
             "ap_ipv4": wifi_raw.get("AP_IPV4"),
             "error": wifi_raw.get("error"),
         }
+        health = "healthy"
+        if network.get("error"):
+            health = "degraded"
+        if not camera_status.get("connected", False):
+            health = "degraded"
         return {
             "success": True,
-            "health": "healthy",
+            "health": health,
             "version": __version__,
             "capabilities": capability_map(),
             "system": system,
-            "camera": camera_status,
+            "camera": {"success": True, **camera_status},
             "network": network,
             "sensors": sensors,
         }
@@ -122,7 +140,7 @@ class CoreContractService:
     async def get_camera_status(self) -> dict[str, Any]:
         """获取 Core 相机状态 / Get core camera status."""
         status = await DebugCameraService.get_camera_status()
-        return {"success": True, **status}
+        return {"success": True, **self._normalize_camera_status(status)}
 
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
@@ -163,6 +181,11 @@ class CoreContractService:
                 applied["digital_gain"] = float(payload["digital_gain"])
             await DebugCameraService.update_settings(settings)
             applied["analogue_gain"] = float(payload["analogue_gain"])
+        elif payload.get("digital_gain") is not None:
+            await DebugCameraService.update_settings(
+                {"digitalGain": float(payload["digital_gain"])}
+            )
+            applied["digital_gain"] = float(payload["digital_gain"])
 
         if payload.get("fps") is not None:
             await DebugCameraService.set_fps(int(payload["fps"]))

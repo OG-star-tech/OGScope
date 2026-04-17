@@ -1,6 +1,6 @@
 /** OGScope Analysis Lab API client / 星空解算控制台 API */
 
-const API = "/api";
+const API = "/api/dev";
 
 export type UploadFileRow = {
   filename: string;
@@ -386,7 +386,7 @@ export type SystemInfo = {
 };
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
-  const r = await fetch(`${API}/system/info`);
+  const r = await fetch("/api/system/info");
   if (!r.ok) throw new Error(await r.text());
   return r.json() as Promise<SystemInfo>;
 }

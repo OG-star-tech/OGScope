@@ -3,13 +3,16 @@ FastAPI Web 应用
 """
 
 import asyncio
+from copy import deepcopy
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -101,12 +104,12 @@ openapi_tags = [
         "description": "系统信息与配置管理 / System information and configuration",
     },
     {
-        "name": "Debug - 调试",
-        "description": "调试控制台接口 / Debug console endpoints",
+        "name": "Dev - 调试工具",
+        "description": "开发者调试接口（内部使用）/ Developer debugging endpoints (internal)",
     },
     {
-        "name": "Analysis - 分析",
-        "description": "素材分析与任务管理 / Asset analysis and job management",
+        "name": "Dev - 分析实验",
+        "description": "开发者分析实验接口（内部使用）/ Developer analysis lab endpoints (internal)",
     },
     {
         "name": "Network - 网络",
@@ -120,10 +123,6 @@ openapi_tags = [
         "name": "legacy hardware protocol - 赤道仪控制",
         "description": "legacy hardware protocol 协议赤道仪控制调试 / legacy hardware protocol protocol mount control debugging",
     },
-    {
-        "name": "Catalog - 星表",
-        "description": "星表下载、索引与状态 / Catalog download, indexing, and status",
-    },
 ]
 
 # 创建 FastAPI 应用（禁用默认 ReDoc，使用自定义稳定版本）
@@ -134,6 +133,7 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
     openapi_tags=openapi_tags,
+    docs_url=None,
     redoc_url=None,
 )
 
@@ -247,22 +247,148 @@ async def api_root():
         "version": __version__,
         "status": "running",
         "docs": "/docs",
+        "docs_dev": "/docs/dev",
         "endpoints": {
             "camera": "/api/camera/",
             "alignment": "/api/alignment/",
             "system": "/api/system/",
             "network": "/api/network/",
-            "analysis": "/api/analysis/",
+            "analysis": "/api/dev/analysis/",
+            "debug": "/api/dev/debug/",
             "core": "/api/core/v1/",
         },
     }
+
+
+def _iter_component_refs(node: Any) -> set[str]:
+    """递归提取本地 components 引用 / Recursively extract local component refs."""
+    refs: set[str] = set()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/components/"):
+            refs.add(ref)
+        for value in node.values():
+            refs.update(_iter_component_refs(value))
+    elif isinstance(node, list):
+        for item in node:
+            refs.update(_iter_component_refs(item))
+    return refs
+
+
+def _prune_openapi_components(raw: dict, filtered_paths: dict[str, dict]) -> None:
+    """按路径实际引用裁剪 components / Prune components by actual refs in filtered paths."""
+    components = raw.get("components")
+    if not isinstance(components, dict):
+        return
+    used: dict[str, set[str]] = {}
+    pending_refs = list(_iter_component_refs(filtered_paths))
+    while pending_refs:
+        ref = pending_refs.pop()
+        parts = ref.split("/")
+        if len(parts) != 4:
+            continue
+        _, _, section, name = parts
+        if section not in components or not isinstance(components.get(section), dict):
+            continue
+        section_used = used.setdefault(section, set())
+        if name in section_used:
+            continue
+        section_used.add(name)
+        target = components[section].get(name)
+        pending_refs.extend(_iter_component_refs(target))
+
+    pruned_components: dict[str, dict] = {}
+    for section, values in components.items():
+        if not isinstance(values, dict):
+            continue
+        keep_names = used.get(section, set())
+        if not keep_names:
+            continue
+        kept = {name: data for name, data in values.items() if name in keep_names}
+        if kept:
+            pruned_components[section] = kept
+    raw["components"] = pruned_components
+
+
+def _filtered_openapi_schema(*, mode: str) -> dict:
+    """按路径过滤 OpenAPI schema / Build filtered OpenAPI schema by path domain."""
+    raw = deepcopy(app.openapi())
+    paths = raw.get("paths", {})
+    filtered_paths: dict[str, dict] = {}
+    if mode == "core":
+        filtered_paths = {
+            path: data for path, data in paths.items() if path.startswith("/api/core/v1/")
+        }
+    elif mode == "dev":
+        filtered_paths = {
+            path: data for path, data in paths.items() if path.startswith("/api/dev/")
+        }
+    else:
+        filtered_paths = paths
+    raw["paths"] = filtered_paths
+    if mode in {"core", "dev"}:
+        _prune_openapi_components(raw, filtered_paths)
+    used_tags: set[str] = set()
+    for item in filtered_paths.values():
+        for op in item.values():
+            if isinstance(op, dict):
+                for tag in op.get("tags", []):
+                    used_tags.add(str(tag))
+    tags = raw.get("tags", [])
+    raw["tags"] = [tag for tag in tags if tag.get("name") in used_tags]
+    return raw
+
+
+@app.get("/openapi-core.json", include_in_schema=False)
+async def openapi_core_json() -> JSONResponse:
+    """标准契约 OpenAPI / Core-only OpenAPI."""
+    return JSONResponse(_filtered_openapi_schema(mode="core"))
+
+
+@app.get("/openapi-dev.json", include_in_schema=False)
+async def openapi_dev_json() -> JSONResponse:
+    """开发者 OpenAPI / Dev-only OpenAPI."""
+    return JSONResponse(_filtered_openapi_schema(mode="dev"))
+
+
+@app.get("/openapi-all.json", include_in_schema=False)
+async def openapi_all_json() -> JSONResponse:
+    """全量 OpenAPI / Full OpenAPI."""
+    return JSONResponse(_filtered_openapi_schema(mode="all"))
+
+
+@app.get("/docs", include_in_schema=False)
+async def docs_core() -> HTMLResponse:
+    """默认文档：标准契约 / Default docs: core contract."""
+    return get_swagger_ui_html(
+        openapi_url="/openapi-core.json",
+        title=f"{app.title} - Core API Docs",
+    )
+
+
+@app.get("/docs/dev", include_in_schema=False)
+async def docs_dev() -> HTMLResponse:
+    """开发者文档 / Developer docs."""
+    return get_swagger_ui_html(
+        openapi_url="/openapi-dev.json",
+        title=f"{app.title} - Dev API Docs",
+    )
+
+
+@app.get("/docs/all", include_in_schema=False)
+async def docs_all() -> HTMLResponse:
+    """全量文档 / Full docs."""
+    return get_swagger_ui_html(
+        openapi_url="/openapi-all.json",
+        title=f"{app.title} - Full API Docs",
+    )
 
 
 @app.get("/redoc", include_in_schema=False)
 async def custom_redoc():
     """自定义 ReDoc 页面，使用固定稳定版本 / Custom ReDoc page with pinned stable version"""
     return get_redoc_html(
-        openapi_url=app.openapi_url,
+        openapi_url="/openapi-core.json",
         title=f"{app.title} - ReDoc",
         redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js",
     )
