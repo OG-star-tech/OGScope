@@ -38,12 +38,8 @@ import {
   type LabPublicSettings,
   type SolveParams,
   type UploadFileRow,
-} from "@shared/api";
-import {
-  drawSolveOverlay,
-  drawSolveOverlayVideo,
-  type SolveOverlay,
-} from "@shared/drawOverlay";
+} from "@dev-api/analysis";
+import { drawSolveOverlay, drawSolveOverlayVideo, type SolveOverlay } from "@shared/drawOverlay";
 import { transcodeAviToMp4 } from "@shared/utils/transcode";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { buildMetaCaptionRows } from "@shared/utils/metaCaption";

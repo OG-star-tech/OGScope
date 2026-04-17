@@ -38,9 +38,9 @@ def detect_capabilities() -> CapabilitySnapshot:
     """检测当前运行能力 / Detect runtime capabilities."""
     expose_legacy protocol_debug = os.getenv("OGSCOPE_ENABLE_legacy hardware protocol_DEBUG", "0") == "1"
     return CapabilitySnapshot(
-        analysis=_module_available("ogscope.web.api.analysis.services"),
+        analysis=_module_available("ogscope.domain.analysis.services"),
         camera=_module_available("ogscope.hardware.camera"),
-        network=_module_available("ogscope.web.api.network.services"),
+        network=_module_available("ogscope.domain.network.services"),
         legacy protocol_i2c=expose_legacy protocol_debug and _module_available("ogscope.modules.legacy protocol"),
     )
 

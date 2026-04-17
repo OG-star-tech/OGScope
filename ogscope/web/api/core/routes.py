@@ -2,11 +2,7 @@
 Core v1 标准契约路由 / Core v1 standard contract routes.
 """
 
-import asyncio
 import logging
-import os
-import time
-from pathlib import PurePath
 
 from fastapi import APIRouter, HTTPException
 from fastapi import Query
@@ -14,8 +10,9 @@ from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 
 from ogscope.core.application import core_contract_service
-from ogscope.config import get_settings
-from ogscope.web.api.debug.services import DebugCameraService
+from ogscope.domain.camera.services import DebugCameraService
+from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
+from ogscope.domain.shared.filesystem import ensure_safe_basename
 from ogscope.web.api.models.schemas import (
     CoreAnalysisControlResponse,
     CoreAnalysisResultResponse,
@@ -28,23 +25,11 @@ from ogscope.web.api.models.schemas import (
     CoreVideoDetailResponse,
     CoreVideoListResponse,
 )
-from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
-from ogscope.web.mjpeg_stream_limiter import get_mjpeg_stream_limiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _MJPEG_LIMIT_DETAIL = "mjpeg_stream_limit_reached"
 _DEFAULT_PREVIEW_JPEG_QUALITY = 75
-
-
-def _validate_capture_filename(filename: str) -> str:
-    """仅允许相对 basename 文件名 / Allow basename-only capture filename."""
-    safe_name = PurePath(filename).name
-    if not safe_name or safe_name != filename or safe_name in {".", ".."}:
-        raise ValueError("invalid filename")
-    if "/" in safe_name or "\\" in safe_name:
-        raise ValueError("invalid filename")
-    return safe_name
 
 
 @router.post(
@@ -164,66 +149,13 @@ async def _streaming_response_core_camera_mjpeg(
     image_format: str,
     quality: int,
 ) -> StreamingResponse:
-    limiter = get_mjpeg_stream_limiter()
-    if not await limiter.try_acquire():
-        raise HTTPException(status_code=503, detail=_MJPEG_LIMIT_DETAIL)
-    boundary = "frame"
-    min_emit_interval = 1.0 / max(
-        1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
-    )
-    fetch_timeout_s = get_settings().stream_mjpeg_frame_fetch_timeout_ms / 1000.0
-    content_type = "image/jpeg" if image_format.lower() == "jpeg" else "image/png"
-
-    async def frame_generator():
-        try:
-            last_snap_frame_id = -1
-            last_emit_mono = 0.0
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    code, data, snap_id = await asyncio.wait_for(
-                        DebugCameraService.get_stream_frame_bytes(
-                            image_format, quality, since_frame_id=last_snap_frame_id
-                        ),
-                        timeout=fetch_timeout_s,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("core mjpeg frame fetch timeout, closing stream")
-                    break
-                if code == 304:
-                    if not await mjpeg_sleep_or_disconnect(request, 0.03):
-                        break
-                    continue
-                if code != 200 or data is None:
-                    if not await mjpeg_sleep_or_disconnect(request, 0.05):
-                        break
-                    continue
-                now = time.monotonic()
-                wait = last_emit_mono + min_emit_interval - now
-                if wait > 0 and not await mjpeg_sleep_or_disconnect(request, wait):
-                    break
-                last_snap_frame_id = snap_id
-                last_emit_mono = time.monotonic()
-                yield (
-                    b"--"
-                    + boundary.encode()
-                    + b"\r\n"
-                    + b"Content-Type: "
-                    + content_type.encode()
-                    + b"\r\n"
-                    + b"Content-Length: "
-                    + str(len(data)).encode()
-                    + b"\r\n\r\n"
-                    + data
-                    + b"\r\n"
-                )
-        finally:
-            await limiter.release()
-
-    return StreamingResponse(
-        frame_generator(),
-        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+    return await build_camera_mjpeg_stream(
+        request,
+        image_format=image_format,
+        quality=quality,
+        limit_detail=_MJPEG_LIMIT_DETAIL,
+        timeout_log_message="core mjpeg frame fetch timeout, closing stream",
+        logger=logger,
     )
 
 
@@ -279,7 +211,7 @@ async def core_camera_videos() -> CoreVideoListResponse:
 async def core_camera_video_info(filename: str) -> CoreVideoDetailResponse:
     """录制视频详情（Core 标准契约）/ Recorded video detail (Core contract)."""
     try:
-        safe_name = _validate_capture_filename(filename)
+        safe_name = ensure_safe_basename(filename)
         return CoreVideoDetailResponse(
             **(await core_contract_service.get_video_file_info(safe_name))
         )

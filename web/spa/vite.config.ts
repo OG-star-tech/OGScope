@@ -20,6 +20,10 @@ export default defineConfig({
       "@i18n": path.resolve(__dirname, "../static/i18n"),
       "@shared": path.resolve(__dirname, "src/shared"),
       "@apps": path.resolve(__dirname, "src/apps"),
+      "@core-ui": path.resolve(__dirname, "src/core-ui"),
+      "@dev-ui": path.resolve(__dirname, "src/dev-ui"),
+      "@core-api": path.resolve(__dirname, "src/coreApi"),
+      "@dev-api": path.resolve(__dirname, "src/devApi"),
     },
   },
   build: {

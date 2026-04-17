@@ -12,11 +12,14 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
+from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
+from ogscope.domain.shared.filesystem import (
+    DEV_CAPTURES_DIR,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    ensure_safe_basename,
+)
 from ogscope.web.camera_shared import get_camera_manager
-
-# 调试控制台相关 / Debug console related
-DEBUG_CAPTURES_DIR = Path.home() / "dev_captures"
-DEBUG_CAPTURES_DIR.mkdir(exist_ok=True)
 
 # 全局变量存储相机状态（相机单例在 CameraManager）/ Global state (camera singleton lives in CameraManager).
 is_recording = False
@@ -1462,33 +1465,11 @@ class DebugFileService:
     async def get_files():
         """获取拍摄文件列表 / Get shooting file list"""
         try:
-            # 支持的图片格式 / Supported image formats
-            image_extensions = {
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".bmp",
-                ".tiff",
-                ".tif",
-                ".webp",
-            }
-            # 支持的视频格式 / Supported video formats
-            video_extensions = {
-                ".mp4",
-                ".avi",
-                ".mov",
-                ".mkv",
-                ".wmv",
-                ".flv",
-                ".webm",
-                ".m4v",
-            }
-
             files = []
             for file_path in DEBUG_CAPTURES_DIR.iterdir():
                 if file_path.is_file():
                     suffix = file_path.suffix.lower()
-                    if suffix in image_extensions or suffix in video_extensions:
+                    if suffix in IMAGE_EXTENSIONS or suffix in VIDEO_EXTENSIONS:
                         files.append(
                             {
                                 "name": file_path.name,
@@ -1497,7 +1478,7 @@ class DebugFileService:
                                     file_path.stat().st_mtime
                                 ).isoformat(),
                                 "type": (
-                                    "image" if suffix in image_extensions else "video"
+                                    "image" if suffix in IMAGE_EXTENSIONS else "video"
                                 ),
                             }
                         )
@@ -1513,27 +1494,16 @@ class DebugFileService:
     @staticmethod
     async def get_file_info(filename: str):
         """获取文件信息 / Get file information"""
-        file_path = DEBUG_CAPTURES_DIR / filename
+        safe_name = ensure_safe_basename(filename)
+        file_path = DEBUG_CAPTURES_DIR / safe_name
         info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
 
         if not file_path.exists():
             raise Exception("文件不存在")
 
         try:
-            # 支持的图片格式 / Supported image formats
-            image_extensions = {
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".bmp",
-                ".tiff",
-                ".tif",
-                ".webp",
-            }
-            # 支持的视频格式 / Supported video formats
-
             suffix = file_path.suffix.lower()
-            file_type = "image" if suffix in image_extensions else "video"
+            file_type = "image" if suffix in IMAGE_EXTENSIONS else "video"
 
             info = {
                 "filename": filename,
@@ -1549,35 +1519,7 @@ class DebugFileService:
                 with open(info_path, encoding="utf-8") as f:
                     capture_info = json.load(f)
                     if isinstance(capture_info, dict):
-                        cam = capture_info.get("camera")
-                        if isinstance(cam, dict):
-                            for k in (
-                                "exposure_us",
-                                "analogue_gain",
-                                "digital_gain",
-                                "fps",
-                                "auto_exposure",
-                                "rotation",
-                                "flip_horizontal",
-                                "flip_vertical",
-                                "sampling_mode",
-                                "color_mode",
-                                "sensor",
-                                "resolution",
-                            ):
-                                if k not in capture_info and k in cam:
-                                    capture_info[k] = cam[k]
-                            if capture_info.get("resolution") is None:
-                                ow = cam.get("output_width") or cam.get("width")
-                                oh = cam.get("output_height") or cam.get("height")
-                                if ow and oh:
-                                    capture_info["resolution"] = f"{ow}x{oh}"
-                        extra = capture_info.get("extra")
-                        if isinstance(extra, dict):
-                            for k, v in extra.items():
-                                if k not in capture_info:
-                                    capture_info[k] = v
-                    info.update(capture_info)
+                        merge_capture_sidecar_into_info(info, capture_info)
 
             return info
 
@@ -1588,7 +1530,8 @@ class DebugFileService:
     async def delete_file(filename: str):
         """删除文件 / Delete files"""
         try:
-            file_path = DEBUG_CAPTURES_DIR / filename
+            safe_name = ensure_safe_basename(filename)
+            file_path = DEBUG_CAPTURES_DIR / safe_name
             info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
 
             if not file_path.exists():
@@ -1603,8 +1546,8 @@ class DebugFileService:
 
             return i18n_payload(
                 "server.fileDeleted",
-                f"文件 {filename} 删除成功",
-                {"filename": filename},
+                f"文件 {safe_name} 删除成功",
+                {"filename": safe_name},
             )
 
         except Exception as e:

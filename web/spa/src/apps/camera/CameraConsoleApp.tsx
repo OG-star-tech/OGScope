@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
-import { requestJson as rawRequestJson } from "@shared/systemApi";
+import { requestJson as rawRequestJson } from "@shared/transport/http";
 
 const DEV_DEBUG_API_BASE = "/api/dev/debug";
 
