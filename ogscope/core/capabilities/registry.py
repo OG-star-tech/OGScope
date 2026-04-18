@@ -8,6 +8,8 @@ import importlib.util
 from dataclasses import dataclass
 from typing import Any
 
+from ogscope.hardware_plane.runtime import get_hardware_plane_client
+
 
 def _module_available(module_name: str) -> bool:
     """判断模块可用性 / Whether module can be imported."""
@@ -43,3 +45,16 @@ def detect_capabilities() -> CapabilitySnapshot:
 def capability_map() -> dict[str, Any]:
     """能力字典（兼容序列化）/ Serializable capability map."""
     return detect_capabilities().to_dict()
+
+
+async def capability_inventory() -> list[dict[str, Any]]:
+    """返回硬件平面能力清单 / Return hardware-plane capability inventory."""
+    client = get_hardware_plane_client()
+    resp = await client.capability_list()
+    if not resp.get("success"):
+        return []
+    data = resp.get("data", {})
+    caps = data.get("capabilities", [])
+    if isinstance(caps, list):
+        return caps
+    return []

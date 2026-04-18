@@ -22,6 +22,29 @@ def test_dev_system_info_available(client) -> None:
 
 
 @pytest.mark.unit
+def test_dev_hardware_plane_status_available(client) -> None:
+    resp = client.get("/api/dev/system/hardware-plane/status")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert "services" in payload["data"]
+
+
+@pytest.mark.unit
+def test_dev_hardware_plane_sensor_read(client) -> None:
+    resp = client.get("/api/dev/system/hardware-plane/sensors/gyroscope")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert payload["data"]["sensor"]["state"] in {
+        "planned",
+        "available",
+        "degraded",
+        "unavailable",
+    }
+
+
+@pytest.mark.unit
 def test_legacy_debug_path_not_exposed(client) -> None:
     resp = client.get("/api/debug/camera/status")
     assert resp.status_code in {404, 405}
