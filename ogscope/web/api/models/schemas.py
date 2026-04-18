@@ -441,6 +441,7 @@ class CoreSystemStatusResponse(BaseModel):
     camera: dict[str, Any] = Field(default_factory=dict)
     network: dict[str, Any] = Field(default_factory=dict)
     sensors: dict[str, Any] = Field(default_factory=dict)
+    hardware_plane: dict[str, Any] = Field(default_factory=dict)
 
 
 class CoreCameraTuneRequest(BaseModel):

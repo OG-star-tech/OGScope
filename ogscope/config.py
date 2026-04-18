@@ -22,6 +22,26 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="Web 服务端口")
     reload: bool = Field(default=True, description="代码变更时自动重载")
 
+    # 硬件平面配置 / Hardware plane configuration
+    hardware_plane_enabled: bool = Field(
+        default=True,
+        description="启用共享硬件平面 / Enable shared hardware plane",
+    )
+    hardware_plane_rpc_timeout_ms: int = Field(
+        default=800,
+        ge=50,
+        le=10000,
+        description="硬件平面 RPC 超时（毫秒）/ Hardware plane RPC timeout in ms",
+    )
+    hardware_plane_uds_socket: Path = Field(
+        default=Path("/tmp/ogscope-hardware-plane.sock"),
+        description="硬件平面 UDS 套接字路径 / Hardware plane UDS socket path",
+    )
+    hardware_plane_camera_autostart: bool = Field(
+        default=False,
+        description="开机阶段自动启动相机服务 / Auto-start camera service during boot phases",
+    )
+
     # 日志配置 / Log configuration
     log_level: str = Field(default="INFO", description="日志级别")
     log_file: Optional[Path] = Field(default=None, description="日志文件路径")

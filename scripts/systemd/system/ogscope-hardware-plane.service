@@ -1,0 +1,16 @@
+[Unit]
+Description=OGScope Hardware Plane Service
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/OGScope
+Environment=OGSCOPE_RELOAD=false
+Environment=OGSCOPE_LOG_LEVEL=INFO
+ExecStart=/usr/bin/env python -m ogscope.main
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

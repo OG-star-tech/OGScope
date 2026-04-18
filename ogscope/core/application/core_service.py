@@ -17,6 +17,7 @@ from ogscope.domain.camera.services import (
     stream_state_domain_service,
 )
 from ogscope.domain.system.services import system_info_service
+from ogscope.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.hardware.wifi_switch import wifi_switch_service
 
 
@@ -103,8 +104,23 @@ class CoreContractService:
     async def get_system_status(self) -> dict[str, Any]:
         """系统状态与能力 / System status and capability map."""
         wifi_raw = wifi_switch_service.get_status()
+        hardware_client = get_hardware_plane_client()
+        hw_status_resp = await hardware_client.status_get()
+        hw_status_data = hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
+        camera_service_status = (
+            hw_status_data.get("services", {}).get("camera", {})
+            if isinstance(hw_status_data, dict)
+            else {}
+        )
         raw_camera_status = await camera_domain_service.get_status()
         camera_status = self._normalize_camera_status(raw_camera_status)
+        if camera_service_status:
+            camera_status["connected"] = bool(
+                camera_service_status.get("connected", camera_status["connected"])
+            )
+            camera_status["streaming"] = bool(
+                camera_service_status.get("streaming", camera_status["streaming"])
+            )
         system = system_info_service.get_system_info()
         sensors = {
             "temperature_c": system.get("temperature"),
@@ -133,6 +149,17 @@ class CoreContractService:
             "health": health,
             "version": __version__,
             "capabilities": capability_map(),
+            "hardware_plane": {
+                "started": bool(hw_status_data.get("started", False))
+                if isinstance(hw_status_data, dict)
+                else False,
+                "metrics": hw_status_data.get("metrics", {})
+                if isinstance(hw_status_data, dict)
+                else {},
+                "services": hw_status_data.get("services", {})
+                if isinstance(hw_status_data, dict)
+                else {},
+            },
             "system": system,
             "camera": {"success": True, **camera_status},
             "network": network,
@@ -141,27 +168,49 @@ class CoreContractService:
 
     async def get_camera_status(self) -> dict[str, Any]:
         """获取 Core 相机状态 / Get core camera status."""
+        hardware_client = get_hardware_plane_client()
+        hp_status = await hardware_client.status_get()
+        hp_camera = (
+            hp_status.get("data", {}).get("services", {}).get("camera", {})
+            if hp_status.get("success")
+            else {}
+        )
         status = await camera_domain_service.get_status()
-        return {"success": True, **self._normalize_camera_status(status)}
+        normalized = self._normalize_camera_status(status)
+        if hp_camera:
+            normalized["connected"] = bool(hp_camera.get("connected", normalized["connected"]))
+            normalized["streaming"] = bool(hp_camera.get("streaming", normalized["streaming"]))
+            normalized["recording"] = bool(hp_camera.get("recording", normalized["recording"]))
+        return {"success": True, **normalized}
 
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
+        hardware_client = get_hardware_plane_client()
+        hp_result = await hardware_client.device_command("camera", "start")
         result = await camera_domain_service.start()
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
             "info": {},
-            "applied": {"action": "start"},
+            "applied": {
+                "action": "start",
+                "hardware_plane_ok": bool(hp_result.get("success", False)),
+            },
         }
 
     async def stop_camera(self) -> dict[str, Any]:
         """停止 Core 相机 / Stop core camera."""
+        hardware_client = get_hardware_plane_client()
+        hp_result = await hardware_client.device_command("camera", "stop")
         result = await camera_domain_service.stop()
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
             "info": {},
-            "applied": {"action": "stop"},
+            "applied": {
+                "action": "stop",
+                "hardware_plane_ok": bool(hp_result.get("success", False)),
+            },
         }
 
     async def tune_camera(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -18,6 +18,8 @@ def test_core_system_status(client) -> None:
     assert "version" in data
     assert "capabilities" in data
     assert "system" in data
+    assert "hardware_plane" in data
+    assert "hardware_plane" in data
 
 
 @pytest.mark.unit

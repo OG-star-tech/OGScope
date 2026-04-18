@@ -18,6 +18,11 @@ from loguru import logger
 
 from ogscope.__version__ import __version__
 from ogscope.config import get_settings
+from ogscope.hardware_plane.runtime import (
+    get_hardware_plane_daemon,
+    start_hardware_plane,
+    stop_hardware_plane,
+)
 from ogscope.web.api.main import router as api_router
 
 
@@ -26,6 +31,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     """应用生命周期管理 / Application life cycle management"""
     # 启动时执行 / Execute at startup
     logger.info("初始化 Web 应用...")
+    settings = get_settings()
+    phase_p0_started = asyncio.get_running_loop().time()
 
     # 真实硬件下后台预热相机：不阻塞 Uvicorn 就绪；首次请求仍可在锁内完成初始化
     # Background warm-up on real hardware: do not block server readiness; first request can still init under lock.
@@ -56,10 +63,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 f"启动时解算器预热失败，将在首次解算时重试 / Solver warm-up failed, retry on first solve: {e}"
             )
 
+    await start_hardware_plane(settings)
+    daemon = get_hardware_plane_daemon()
+    daemon.begin_phase("P0", "api gateway ready")
     asyncio.create_task(_warm_camera())
     # 解算器预热改为启动阶段阻塞完成，避免首个解算请求与后台预热竞态导致“第一次明显变慢”
     # Warm the solver synchronously during startup to avoid first-request cold-start race.
     await _warm_solver()
+    daemon.begin_phase("P2", "sensor and hmi services ready")
+    if settings.hardware_plane_camera_autostart:
+        try:
+            await daemon.handle_call(
+                "device.command",
+                {"target": "camera", "action": "start", "payload": {}},
+            )
+            daemon.begin_phase("P3", "camera service auto-started")
+        except Exception as e:
+            logger.warning(
+                "相机自动启动失败，将按需延迟启动 / Camera auto-start failed, fallback to lazy start: {}",
+                e,
+            )
+    phase_elapsed_ms = int((asyncio.get_running_loop().time() - phase_p0_started) * 1000)
+    logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
 
     try:
         from ogscope.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
@@ -87,6 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
             await get_camera_manager().stop()
     except Exception as e:
         logger.warning(f"关闭相机失败 / Failed to stop camera on shutdown: {e}")
+    await stop_hardware_plane()
 
 
 # API 文档分组标签 / API documentation group tags
@@ -248,6 +274,7 @@ async def api_root():
             "camera": "/api/camera/",
             "alignment": "/api/alignment/",
             "system": "/api/dev/system/",
+            "hardware_plane": "/api/dev/system/hardware-plane/status",
             "system_legacy": "/api/system/",
             "network": "/api/network/",
             "analysis": "/api/dev/analysis/",
@@ -394,7 +421,20 @@ async def custom_redoc():
 @app.get("/health")
 async def health_check():
     """健康检查 / health check"""
+    hardware_started = False
+    metrics: dict[str, Any] = {}
+    try:
+        daemon = get_hardware_plane_daemon()
+        status = await daemon.status()
+        hardware_started = bool(status.get("started", False))
+        metrics = status.get("metrics", {}) or {}
+    except Exception:
+        hardware_started = False
     return {
         "status": "healthy",
         "version": __version__,
+        "hardware_plane": {
+            "started": hardware_started,
+            "metrics": metrics,
+        },
     }
