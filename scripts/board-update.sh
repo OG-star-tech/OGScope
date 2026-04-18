@@ -15,6 +15,7 @@
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
 #   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，同步 ogscope.service.d MemoryMax / Optional MemoryMax drop-in
 #   OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1 — 内存≤512MiB 时不同步 ogscope-low-ram.conf / Skip low-RAM solver drop-in sync
+#   OGSCOPE_SKIP_HARDWARE_PLANE_DROPIN=1 — 不同步 ogscope.service.d/ogscope-hardware-plane.conf / Skip hardware-plane drop-in sync
 
 set -euo pipefail
 
@@ -140,6 +141,17 @@ elif [ "${_mem_total_kb_board}" -le 524288 ]; then
     sudo install -m 0644 "${LOW_RAM_DROPIN_SRC}" /etc/systemd/system/ogscope.service.d/ogscope-low-ram.conf
 else
     echo "ℹ️  MemTotal≈$((_mem_total_kb_board / 1024)) MiB — 未同步 ogscope-low-ram.conf / Skipping low-RAM drop-in on this host"
+fi
+
+HARDWARE_PLANE_DROPIN_SRC="${SCRIPT_DIR}/systemd/system/ogscope.service.d/ogscope-hardware-plane.conf"
+if [ "${OGSCOPE_SKIP_HARDWARE_PLANE_DROPIN:-}" = "1" ]; then
+    echo "⏭️  跳过硬件平面 drop-in（OGSCOPE_SKIP_HARDWARE_PLANE_DROPIN=1）/ Skipping hardware-plane drop-in sync"
+elif [ ! -f "${HARDWARE_PLANE_DROPIN_SRC}" ]; then
+    echo "⚠️  未找到 ${HARDWARE_PLANE_DROPIN_SRC}，跳过 / Hardware-plane drop-in missing; skipping"
+else
+    echo "📝 同步硬件平面环境 drop-in / Syncing hardware-plane environment drop-in..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    sudo install -m 0644 "${HARDWARE_PLANE_DROPIN_SRC}" /etc/systemd/system/ogscope.service.d/ogscope-hardware-plane.conf
 fi
 
 echo "🔄 重启服务 / Restarting service..."
