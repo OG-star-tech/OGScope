@@ -1,13 +1,14 @@
 # OGScope System Architecture (Bilingual)
 
-> 本文档给出 OGScope 的“系统级”架构视图（区别于 API 路由分层），强调核心边界、用户层与开发者工具层隔离、以及运维层的横切属性。  
-> This document provides the system-level architecture view of OGScope (different from API route layering), emphasizing core boundary, separation between user and developer surfaces, and the cross-cutting nature of operations.
+> 本文档给出 OGScope 的“系统级”架构视图（区别于 API 路由分层），强调核心边界、用户层与开发者工具层隔离、运维层横切属性，以及与 subordinate co-deployment时的共享硬件平面。  
+> This document provides OGScope system-level architecture (different from API route layering), emphasizing core boundary, user/developer surface separation, cross-cutting operations, and a shared hardware plane for subordinate co-deploymentment.
 
 ## Architecture Diagram / 架构图
 
 ```mermaid
 flowchart TD
   externalCaller["外部调用方 / External Caller<br/>external integrator or Other Clients"]
+  externalLeader["外部服务（联部署） / 外部集成方 Leader Service (Co-deploy)"]
 
   subgraph interfaceLayer["接口与契约层 / Interface and Contract Layer"]
     restContract["REST契约入口 / REST Contract Entry<br/>/api/core/v1/*"]
@@ -28,9 +29,18 @@ flowchart TD
   end
 
   subgraph infraLayer["基础设施与适配层 / Infrastructure and Adapter Layer"]
-    hwAdapter["硬件适配 / Hardware Adapters"]
+    hwClient["硬件平面客户端 / Hardware Plane Client"]
     sysAdapter["系统适配 / System Adapters"]
     dataAdapter["数据读写适配 / Data IO Adapters"]
+  end
+
+  subgraph sharedHardwarePlane["共享硬件平面（单实例） / Shared Hardware Plane (Single Instance)"]
+    leaderLease["主导租约 / Leader Lease<br/>external-led or ogscope-led"]
+    capabilityRegistry["能力注册中心 / Capability Registry"]
+    controlPlane["控制面 / Control Plane<br/>UDS + gRPC or JSON-RPC"]
+    dataPlane["数据面 / Data Plane<br/>Ring Buffer + UDS Notify"]
+    eventPlane["事件面 / Event Plane<br/>D-Bus Signals Optional"]
+    profileConfig["环境配置档 / Environment Profiles"]
   end
 
   subgraph dataAlgoLayer["数据与算法资源层 / Data and Algorithm Resource Layer"]
@@ -58,6 +68,8 @@ flowchart TD
   end
 
   externalCaller --> restContract
+  externalLeader --> restContract
+  externalLeader --> leaderLease
   userSurface --> webGateway
   devSurface --> webGateway
   webGateway --> restContract
@@ -69,7 +81,7 @@ flowchart TD
   appLayer --> domainLayer
   domainLayer --> corePolicy
 
-  corePolicy --> hwAdapter
+  corePolicy --> hwClient
   corePolicy --> sysAdapter
   corePolicy --> dataAdapter
 
@@ -78,14 +90,21 @@ flowchart TD
   domainLayer --> algoEngine
   algoEngine --> solveDb
 
-  hwAdapter --> cameraHw
-  hwAdapter --> wifiHw
-  hwAdapter --> gpioHw
-  hwAdapter -.-> magnetometerHw
-  hwAdapter -.-> gpsHw
-  hwAdapter -.-> gyroHw
-  hwAdapter -.-> accelHw
-  hwAdapter -.-> displayHw
+  profileConfig --> capabilityRegistry
+  leaderLease --> controlPlane
+  capabilityRegistry --> controlPlane
+  hwClient --> controlPlane
+  hwClient --> dataPlane
+  hwClient --> eventPlane
+
+  controlPlane --> cameraHw
+  controlPlane --> wifiHw
+  controlPlane --> gpioHw
+  controlPlane -.-> magnetometerHw
+  controlPlane -.-> gpsHw
+  controlPlane -.-> gyroHw
+  controlPlane -.-> accelHw
+  controlPlane -.-> displayHw
 
   serviceManager --> webGateway
   envBootstrap --> serviceManager
@@ -94,7 +113,7 @@ flowchart TD
   serviceManager --> observability
   observability --> webGateway
   observability --> appLayer
-  observability --> hwAdapter
+  observability --> hwClient
 
   boundaryNote["架构硬约束 / Hard Rule<br/>核心层不对外暴露，不允许被外部直接调用<br/>Core layer is not public and cannot be invoked directly by external callers"]
   boundaryNote -.-> coreBoundary
@@ -114,4 +133,10 @@ flowchart TD
 `Plate Solve Database` 被归入“数据与算法资源层”，与实体硬件层解耦。
 - **Runtime/Ops is cross-cutting / 运维层是横切层**  
 运维能力同时作用于网关层、核心层和基础设施层，不是单一依赖于接口层。
+- **Shared Hardware Plane for co-deploy / 联部署共享硬件平面**  
+当 OGScope 与外部集成方同机部署时，外围硬件服务仅运行一份，并由 `Leader Lease` 决定主导写控制权。
+- **Registerable capabilities and profile switch / 能力可注册且配置可切换**  
+传感器与人机交互硬件通过 `Capability Registry` 与 `Environment Profiles` 管理，支持不同环境装配不同驱动逻辑。
+- **Unified hardware contract / 统一硬件契约**  
+OGScope 通过 `Hardware Plane Client` 使用统一能力接口（status/read/command/subscribe），以支持与外部集成方的交叉调用和职责隔离。
 
