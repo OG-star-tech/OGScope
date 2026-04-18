@@ -17,8 +17,8 @@ from ogscope.domain.camera.services import (
     stream_state_domain_service,
 )
 from ogscope.domain.system.services import system_info_service
-from ogscope.hardware_plane.runtime import get_hardware_plane_client
-from ogscope.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 
 
 @dataclass(slots=True)

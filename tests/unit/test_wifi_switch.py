@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ogscope.config import Settings
-from ogscope.hardware.wifi_switch import WifiSwitchService, _parse_status_output
+from ogscope.platform.hardware.wifi_switch import WifiSwitchService, _parse_status_output
 
 
 @pytest.mark.unit

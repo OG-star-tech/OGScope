@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.responses import Response, StreamingResponse
 from starlette.requests import Request
 
-from ogscope.adapters.debug_services import get_debug_services_module
+from ogscope.platform.adapters.debug_services import get_debug_services_module
 from ogscope.config import get_settings
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 

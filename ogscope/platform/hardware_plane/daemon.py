@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from ogscope.hardware_plane.contracts import (
+from ogscope.platform.hardware_plane.contracts import (
     CapabilityKind,
     CapabilityState,
     PlaneErrorCode,
@@ -17,11 +17,11 @@ from ogscope.hardware_plane.contracts import (
     error_payload,
     ok_payload,
 )
-from ogscope.hardware_plane.registry import CapabilityRecord, CapabilityRegistry
-from ogscope.hardware_plane.services.base import HardwareService
-from ogscope.hardware_plane.services.camera_service import CameraPlaneService
-from ogscope.hardware_plane.services.hmi import HmiService
-from ogscope.hardware_plane.services.sensor_hub import SensorHubService
+from ogscope.platform.hardware_plane.registry import CapabilityRecord, CapabilityRegistry
+from ogscope.platform.hardware_plane.services.base import HardwareService
+from ogscope.platform.hardware_plane.services.camera_service import CameraPlaneService
+from ogscope.platform.hardware_plane.services.hmi import HmiService
+from ogscope.platform.hardware_plane.services.sensor_hub import SensorHubService
 
 
 @dataclass(slots=True)

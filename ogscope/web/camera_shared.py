@@ -87,7 +87,7 @@ class CameraManager:
         return {**base, **self._runtime_overrides}
 
     def _create_camera_sync(self):
-        from ogscope.hardware.camera import create_camera
+        from ogscope.platform.hardware.camera import create_camera
 
         config = self._build_base_config()
         camera = create_camera(config)

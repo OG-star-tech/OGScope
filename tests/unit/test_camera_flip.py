@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from ogscope.hardware.camera import IMX327MIPICamera
+from ogscope.platform.hardware.camera import IMX327MIPICamera
 
 
 def _minimal_config(**extra: object) -> dict:

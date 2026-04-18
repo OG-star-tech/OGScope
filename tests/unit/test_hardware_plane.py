@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ogscope.hardware_plane.daemon import HardwarePlaneDaemon
+from ogscope.platform.hardware_plane.daemon import HardwarePlaneDaemon
 
 
 @pytest.mark.unit

@@ -116,8 +116,12 @@ OGScope/
 │   ├── domain/                # 领域层（camera/analysis/network/system/shared）
 │   ├── core/                  # 核心契约编排（core/v1）
 │   ├── web/                   # FastAPI 入口与 API 路由（core/dev）
-│   ├── adapters/              # 边界适配层
-│   ├── hardware/              # 硬件接口
+│   ├── platform/              # 平台与基础设施
+│   │   ├── hardware/          # 设备驱动（相机、WiFi、GPIO 等）
+│   │   ├── hardware_plane/    # 共享硬件平面（契约与编排）
+│   │   ├── adapters/          # 边界适配层
+│   │   ├── ui/                # SPI 屏本地界面（预留）
+│   │   └── indi/              # INDI 集成（预留）
 │   ├── algorithms/            # 算法模块
 │   └── utils/                 # 通用工具
 ├── web/spa/                   # 前端源码（Vite + React）

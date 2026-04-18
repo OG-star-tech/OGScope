@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from ogscope.config import Settings, get_settings
-from ogscope.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 
 _nm_lock = threading.Lock()
 

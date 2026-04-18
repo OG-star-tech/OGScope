@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ogscope.hardware_plane.contracts import PlaneMethod
-from ogscope.hardware_plane.daemon import HardwarePlaneDaemon
+from ogscope.platform.hardware_plane.contracts import PlaneMethod
+from ogscope.platform.hardware_plane.daemon import HardwarePlaneDaemon
 
 
 class HardwarePlaneClient:
