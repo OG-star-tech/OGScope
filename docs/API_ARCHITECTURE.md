@@ -2,6 +2,9 @@
 
 本文档描述当前生效的 API 分层与目录约定，供后续开发者快速对齐，避免把业务逻辑重新塞回路由层。
 
+系统级架构（含核心边界、用户/开发者分层、运维横切层）请见：
+`docs/architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md`
+
 ## 1) 目录分层（当前）
 
 ```text
