@@ -113,12 +113,17 @@ The current recommended workflow is documented in the
 ```
 OGScope/
 ├── ogscope/           # Main application package
-│   ├── core/         # Core functionality modules
-│   ├── hardware/     # Hardware interface layer
-│   ├── web/          # FastAPI web service
-│   ├── ui/           # SPI screen interface
-│   ├── algorithms/   # Astronomical algorithms
-│   └── utils/        # Utility functions
+│   ├── core/          # Core contract orchestration
+│   ├── domain/        # Domain services
+│   ├── web/           # FastAPI web service
+│   ├── platform/      # Platform & infrastructure
+│   │   ├── hardware/       # Device drivers (camera, WiFi, GPIO, etc.)
+│   │   ├── hardware_plane/ # Shared hardware plane (contracts & orchestration)
+│   │   ├── adapters/       # Boundary adapters
+│   │   ├── ui/             # SPI screen UI (placeholder)
+│   │   └── indi/           # INDI integration (placeholder)
+│   ├── algorithms/    # Astronomical algorithms
+│   └── utils/         # Utility functions
 ├── tests/            # Test code
 ├── docs/             # Documentation
 ├── scripts/          # Deployment scripts

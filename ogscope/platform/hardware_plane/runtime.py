@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from ogscope.config import Settings, get_settings
-from ogscope.hardware_plane.client import HardwarePlaneClient
-from ogscope.hardware_plane.daemon import HardwarePlaneDaemon
+from ogscope.platform.hardware_plane.client import HardwarePlaneClient
+from ogscope.platform.hardware_plane.daemon import HardwarePlaneDaemon
 
 _daemon: HardwarePlaneDaemon | None = None
 _client: HardwarePlaneClient | None = None

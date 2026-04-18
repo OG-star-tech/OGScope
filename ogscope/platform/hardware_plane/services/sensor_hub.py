@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ogscope.hardware_plane.contracts import CapabilityState
+from ogscope.platform.hardware_plane.contracts import CapabilityState
 
 
 class SensorHubService:

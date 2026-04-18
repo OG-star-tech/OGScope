@@ -8,7 +8,7 @@ import asyncio
 import subprocess
 
 from ogscope.config import get_settings
-from ogscope.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 from ogscope.domain.network import nmcli_services as net_impl
 
 

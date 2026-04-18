@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from ogscope.domain.system.services import system_info_service
-from ogscope.hardware_plane.runtime import get_hardware_plane_client
+from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.web.api.models.schemas import SystemInfo
 
 router = APIRouter()

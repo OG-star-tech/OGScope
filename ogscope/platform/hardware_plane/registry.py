@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
-from ogscope.hardware_plane.contracts import CapabilityKind, CapabilityState
+from ogscope.platform.hardware_plane.contracts import CapabilityKind, CapabilityState
 
 
 @dataclass(slots=True)

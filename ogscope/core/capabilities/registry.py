@@ -8,7 +8,7 @@ import importlib.util
 from dataclasses import dataclass
 from typing import Any
 
-from ogscope.hardware_plane.runtime import get_hardware_plane_client
+from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 
 
 def _module_available(module_name: str) -> bool:
@@ -37,7 +37,7 @@ def detect_capabilities() -> CapabilitySnapshot:
     """检测当前运行能力 / Detect runtime capabilities."""
     return CapabilitySnapshot(
         analysis=_module_available("ogscope.domain.analysis.services"),
-        camera=_module_available("ogscope.hardware.camera"),
+        camera=_module_available("ogscope.platform.hardware.camera"),
         network=_module_available("ogscope.domain.network.services"),
     )
 

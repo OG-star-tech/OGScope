@@ -15,7 +15,7 @@
 # Environment=PYTHONPATH=...
 # Environment=LD_LIBRARY_PATH=...
 # EnvironmentFile=-/etc/ogscope/network.env
-# ExecStart=/path/to/OGScope/.venv/bin/python -m ogscope.hardware_plane  # 若未来提供独立入口
+# ExecStart=/path/to/OGScope/.venv/bin/python -m ogscope.platform.hardware_plane  # 若未来提供独立入口
 # Restart=on-failure
 #
 # [Install]

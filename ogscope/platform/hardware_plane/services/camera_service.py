@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ogscope.hardware_plane.data_plane import FrameRingBuffer
+from ogscope.platform.hardware_plane.data_plane import FrameRingBuffer
 
 
 class CameraPlaneService:

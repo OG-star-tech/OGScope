@@ -18,7 +18,7 @@ from loguru import logger
 
 from ogscope.__version__ import __version__
 from ogscope.config import get_settings
-from ogscope.hardware_plane.runtime import (
+from ogscope.platform.hardware_plane.runtime import (
     get_hardware_plane_daemon,
     start_hardware_plane,
     stop_hardware_plane,
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
 
     try:
-        from ogscope.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+        from ogscope.platform.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
 
         wifi_emergency_gpio_monitor.start()
     except Exception as e:
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
     try:
-        from ogscope.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+        from ogscope.platform.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
 
         wifi_emergency_gpio_monitor.stop()
     except Exception as e:
