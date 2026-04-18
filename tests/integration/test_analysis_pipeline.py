@@ -26,13 +26,13 @@ def test_end_to_end_image_analysis(
     _make_frame(image)
     with image.open("rb") as f:
         resp_upload = client.post(
-            "/api/analysis/upload",
+            "/api/dev/analysis/upload",
             files={"file": ("integration_stars.jpg", f, "image/jpeg")},
         )
     assert resp_upload.status_code == 200
 
     resp_solve = client.post(
-        "/api/analysis/solve/image",
+        "/api/dev/analysis/solve/image",
         json={
             "input_name": "integration_stars.jpg",
             "hint_ra_deg": 31.0,
