@@ -1,0 +1,22 @@
+# 示例：将来若将硬件平面拆为独立进程时可参考（当前 install.sh 不安装此文件）
+# Example for a future split hardware-plane process (not installed by install.sh today)
+#
+# 复制为 /etc/systemd/system/ogscope-hardware-plane.service 后按需修改路径与用户：
+# Copy to /etc/systemd/system/ogscope-hardware-plane.service and adjust paths/user:
+#
+# [Unit]
+# Description=OGScope Hardware Plane (standalone, future)
+# After=network.target
+#
+# [Service]
+# Type=simple
+# User=YOUR_USER
+# WorkingDirectory=/path/to/OGScope
+# Environment=PYTHONPATH=...
+# Environment=LD_LIBRARY_PATH=...
+# EnvironmentFile=-/etc/ogscope/network.env
+# ExecStart=/path/to/OGScope/.venv/bin/python -m ogscope.hardware_plane  # 若未来提供独立入口
+# Restart=on-failure
+#
+# [Install]
+# WantedBy=multi-user.target

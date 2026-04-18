@@ -1,6 +1,6 @@
 #!/bin/bash
 # OGScope 卸载脚本 / OGScope uninstall script
-# 从本机移除 systemd 主服务、开机网络单元（若存在）与 drop-in，以及（可选）项目虚拟环境；不卸载 apt 包与全局 Poetry / Removes main service, ogscope-network-boot unit (if any), drop-in, and optional venv; does not remove apt packages or global Poetry
+# 从本机移除 systemd 主服务、开机网络单元（若存在）与 drop-in（含 network.env、硬件平面环境片段），可选移除独立 ogscope-hardware-plane.service，以及（可选）项目虚拟环境；不卸载 apt 包与全局 Poetry / Removes main service, boot WiFi unit, drop-ins (network.env, hardware-plane env snippet), optional standalone hardware-plane unit, and optional venv; does not remove apt packages or global Poetry
 #
 # 环境变量 / Environment:
 #   OGSCOPE_UNINSTALL_CONFIRM=1 — 必须设置，否则脚本退出（防误删）/ Must be set to proceed (safety)
@@ -22,6 +22,8 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 BOOT_SERVICE_NAME="ogscope-network-boot"
 BOOT_SERVICE_PATH="/etc/systemd/system/${BOOT_SERVICE_NAME}.service"
 NETWORK_DROPIN="/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf"
+HARDWARE_PLANE_DROPIN="/etc/systemd/system/ogscope.service.d/ogscope-hardware-plane.conf"
+HW_PLANE_STANDALONE_UNIT="/etc/systemd/system/ogscope-hardware-plane.service"
 
 echo "======================================"
 echo "  OGScope 卸载 / OGScope uninstall"
@@ -77,8 +79,18 @@ fi
 if [ -f "${NETWORK_DROPIN}" ]; then
     echo "🗑️  移除 systemd drop-in ${NETWORK_DROPIN} ..."
     sudo rm -f "${NETWORK_DROPIN}"
-    sudo rmdir /etc/systemd/system/ogscope.service.d 2>/dev/null || true
 fi
+if [ -f "${HARDWARE_PLANE_DROPIN}" ]; then
+    echo "🗑️  移除 systemd drop-in ${HARDWARE_PLANE_DROPIN} ..."
+    sudo rm -f "${HARDWARE_PLANE_DROPIN}"
+fi
+if [ -f "${HW_PLANE_STANDALONE_UNIT}" ]; then
+    echo "🛑 禁用并移除独立硬件平面 unit（旧版或手动安装）/ Disabling standalone hardware-plane unit if present..."
+    sudo systemctl stop ogscope-hardware-plane.service 2>/dev/null || true
+    sudo systemctl disable ogscope-hardware-plane.service 2>/dev/null || true
+    sudo rm -f "${HW_PLANE_STANDALONE_UNIT}"
+fi
+sudo rmdir /etc/systemd/system/ogscope.service.d 2>/dev/null || true
 
 sudo systemctl daemon-reload
 echo "✅ systemd 已更新 / systemd reloaded"
