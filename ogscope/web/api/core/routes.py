@@ -2,16 +2,9 @@
 Core v1 标准契约路由 / Core v1 standard contract routes.
 """
 
-import logging
-
 from fastapi import APIRouter, HTTPException
-from fastapi import Query
-from fastapi.responses import StreamingResponse
-from starlette.requests import Request
 
 from ogscope.core.application import core_contract_service
-from ogscope.domain.camera.services import camera_domain_service
-from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import ensure_safe_basename
 from ogscope.web.api.models.schemas import (
     CoreAnalysisControlResponse,
@@ -20,16 +13,12 @@ from ogscope.web.api.models.schemas import (
     CoreCameraStatusResponse,
     CoreCameraTuneRequest,
     CoreStartAnalysisRequest,
-    CoreStreamStatusResponse,
     CoreSystemStatusResponse,
     CoreVideoDetailResponse,
     CoreVideoListResponse,
 )
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
-_MJPEG_LIMIT_DETAIL = "mjpeg_stream_limit_reached"
-_DEFAULT_PREVIEW_JPEG_QUALITY = 75
 
 
 @router.post(
@@ -126,74 +115,6 @@ async def core_camera_tune(payload: CoreCameraTuneRequest) -> CoreCameraControlR
     try:
         data = await core_contract_service.tune_camera(payload.model_dump(exclude_none=True))
         return CoreCameraControlResponse(**data)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.get("/core/v1/camera/preview")
-async def core_camera_preview(
-    since_frame_id: int | None = Query(default=None),
-):
-    """获取单帧预览（JPEG）/ Fetch single preview frame (JPEG)."""
-    try:
-        return await camera_domain_service.get_preview(since_frame_id=since_frame_id)
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-async def _streaming_response_core_camera_mjpeg(
-    request: Request,
-    *,
-    image_format: str,
-    quality: int,
-) -> StreamingResponse:
-    return await build_camera_mjpeg_stream(
-        request,
-        image_format=image_format,
-        quality=quality,
-        limit_detail=_MJPEG_LIMIT_DETAIL,
-        timeout_log_message="core mjpeg frame fetch timeout, closing stream",
-        logger=logger,
-    )
-
-
-@router.get("/core/v1/camera/stream")
-async def core_camera_stream(
-    request: Request,
-    quality: int = Query(_DEFAULT_PREVIEW_JPEG_QUALITY, ge=10, le=100),
-):
-    """MJPEG 实时流（压缩）/ MJPEG live stream (compressed)."""
-    try:
-        return await _streaming_response_core_camera_mjpeg(
-            request, image_format="jpeg", quality=quality
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.get("/core/v1/camera/stream-lossless")
-async def core_camera_stream_lossless(request: Request):
-    """MJPEG 实时流（无损）/ MJPEG live stream (lossless)."""
-    try:
-        return await _streaming_response_core_camera_mjpeg(
-            request, image_format="png", quality=100
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.get("/core/v1/camera/stream/status", response_model=CoreStreamStatusResponse)
-async def core_camera_stream_status() -> CoreStreamStatusResponse:
-    """流控状态（Core 标准契约）/ Stream limiter status (Core contract)."""
-    try:
-        data = await core_contract_service.get_stream_status()
-        return CoreStreamStatusResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

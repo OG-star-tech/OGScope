@@ -224,7 +224,7 @@ class Settings(BaseSettings):
         ge=0,
         le=32,
         description=(
-            "同时允许的 MJPEG 长连接数（/api/debug/camera/stream 与 stream-lossless）；"
+            "同时允许的 MJPEG 长连接数（GET /api/dev/debug/camera/stream）；"
             "0=不限制 / Max concurrent MJPEG streams; 0=unlimited"
         ),
     )

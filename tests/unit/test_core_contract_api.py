@@ -5,9 +5,6 @@ Core 标准契约 API 测试 / Core standard contract API tests.
 from __future__ import annotations
 
 import pytest
-from fastapi.responses import Response
-
-
 @pytest.mark.unit
 def test_core_system_status(client) -> None:
     """系统状态接口返回稳定字段 / System status endpoint returns stable fields."""
@@ -66,7 +63,6 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
 def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     """Core 相机接口可按契约返回 / Core camera endpoints respond by contract."""
     from ogscope.core.application import core_service
-    from ogscope.web.api.core import routes as core_routes
 
     async def _fake_camera_status():
         return {
@@ -117,10 +113,6 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     async def _fake_stop_camera():
         return {"success": True, "message": "stopped"}
 
-    async def _fake_preview(*, since_frame_id=None):  # noqa: ANN001
-        _ = since_frame_id
-        return Response(content=b"jpeg-bytes", media_type="image/jpeg")
-
     monkeypatch.setattr(
         core_service.core_contract_service, "get_camera_status", _fake_camera_status
     )
@@ -140,7 +132,6 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
         "get_video_file_info",
         _fake_video_file_info,
     )
-    monkeypatch.setattr(core_routes.camera_domain_service, "get_preview", _fake_preview)
 
     status = client.get("/api/core/v1/camera/status")
     assert status.status_code == 200
@@ -158,7 +149,7 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     assert stop.status_code == 200
     assert stop.json()["success"] is True
 
-    stream_status = client.get("/api/core/v1/camera/stream/status")
+    stream_status = client.get("/api/dev/debug/camera/stream/status")
     assert stream_status.status_code == 200
     assert stream_status.json()["active_clients"] == 1
 
@@ -169,10 +160,6 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     video = client.get("/api/core/v1/camera/videos/VID_001.avi")
     assert video.status_code == 200
     assert video.json()["file"]["filename"] == "VID_001.avi"
-
-    preview = client.get("/api/core/v1/camera/preview")
-    assert preview.status_code == 200
-    assert preview.headers["content-type"] == "image/jpeg"
 
 
 @pytest.mark.unit
@@ -203,3 +190,5 @@ def test_docs_are_split_between_core_and_dev(client) -> None:
     assert dev_schema.status_code == 200
     dev_paths = dev_schema.json()["paths"]
     assert any(path.startswith("/api/dev/analysis/") for path in dev_paths.keys())
+    assert "/api/dev/debug/camera/stream" in dev_paths
+    assert "/api/dev/debug/camera/stream/status" in dev_paths

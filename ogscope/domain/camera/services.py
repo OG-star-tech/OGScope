@@ -4,14 +4,13 @@
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import time
 from typing import Any
 
 from fastapi import HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from starlette.requests import Request
 
 from ogscope.platform.adapters.debug_services import get_debug_services_module
@@ -124,44 +123,6 @@ class CameraDomainService:
             "mode": "real",
             "runtime_overrides": status.get("runtime_overrides", {}),
         }
-
-    async def get_product_camera_preview(
-        self,
-        *,
-        simulation_mode: bool,
-        is_streaming: bool,
-        virtual_stream: Any,
-        since_frame_id: int | None = None,
-    ):
-        if simulation_mode:
-            if not is_streaming:
-                placeholder_image = io.BytesIO()
-                placeholder_image.write(
-                    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x90\x00\x00\x00\xf0\x08\x02\x00\x00\x00"
-                )
-                placeholder_image.seek(0)
-                return StreamingResponse(
-                    placeholder_image,
-                    media_type="image/png",
-                    headers={"Cache-Control": "no-cache"},
-                )
-            try:
-                frame_data = virtual_stream.generate_frame()
-                return StreamingResponse(
-                    io.BytesIO(frame_data),
-                    media_type="image/jpeg",
-                    headers={"Cache-Control": "no-cache"},
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.error(f"生成虚拟视频帧失败: {exc}")
-                raise HTTPException(status_code=500, detail="生成视频帧失败") from exc
-        try:
-            return await self.get_preview(since_frame_id=since_frame_id)
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"获取真实相机预览失败: {exc}")
-            raise HTTPException(status_code=500, detail="获取预览失败") from exc
 
 
 class FileDomainService:

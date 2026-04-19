@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+from ogscope.core.application import core_contract_service
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.domain.camera.services import (
     camera_domain_service,
@@ -22,6 +23,7 @@ from ogscope.web.api.models.schemas import (
     CameraMirrorBody,
     CameraPreset,
     CameraSettings,
+    CoreStreamStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,17 +117,14 @@ async def stream_debug_camera(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/debug/camera/stream-lossless")
-async def stream_debug_camera_lossless(request: Request):
-    """无损质量实时流 - 使用PNG格式展示超采样效果 / Lossless quality live streaming - using PNG format to demonstrate supersampling effects"""
+@router.get("/debug/camera/stream/status", response_model=CoreStreamStatusResponse)
+async def debug_camera_stream_status() -> CoreStreamStatusResponse:
+    """MJPEG 并发名额与取帧参数（与 Core 原契约字段一致）/ MJPEG limiter and frame fetch settings."""
     try:
-        return await _streaming_response_debug_camera_mjpeg(
-            request, image_format="png", quality=100
-        )
-    except HTTPException:
-        raise
+        data = await core_contract_service.get_stream_status()
+        return CoreStreamStatusResponse(**data)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/debug/camera/stop")
