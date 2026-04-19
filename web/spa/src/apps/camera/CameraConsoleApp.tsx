@@ -241,6 +241,8 @@ export function CameraConsoleApp() {
   const [histStats, setHistStats] = useState({ mean: 0, std: 0, over: 0 });
   /** 最近约 1s 内画面像素变化次数（rAF 采样）/ ~1s sliding window from pixel deltas */
   const [liveFps, setLiveFps] = useState(0);
+  /** 与 OGSCOPE_SHARED_PREVIEW_FPS 一致：共享抓帧与 MJPEG 最小帧间隔 / Env stream pacing cap */
+  const [streamPacingFps, setStreamPacingFps] = useState<number | null>(null);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [rotationValue, setRotationValue] = useState(180);
   const [flipHorizontal, setFlipHorizontal] = useState(false);
@@ -947,6 +949,34 @@ export function CameraConsoleApp() {
   }, [previewActive]);
 
   useEffect(() => {
+    if (!previewActive) {
+      setStreamPacingFps(null);
+      return;
+    }
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res = await fetch(`${debugApi("/camera/stream/status")}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!res.ok || cancelled) return;
+        const j = (await res.json()) as { target_preview_fps?: number };
+        const v = Number(j.target_preview_fps ?? 0);
+        if (!cancelled) setStreamPacingFps(Number.isFinite(v) && v >= 0 ? v : null);
+      } catch {
+        if (!cancelled) setStreamPacingFps(null);
+      }
+    };
+    void pull();
+    const id = window.setInterval(pull, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [previewActive]);
+
+  useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timer);
@@ -1238,6 +1268,15 @@ export function CameraConsoleApp() {
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.targetFps")}: </span>
                 <span className="font-mono text-on-surface">{Number(status?.info?.fps ?? 0).toFixed(2)}</span>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.streamPacingFps")}: </span>
+                <span className="font-mono text-on-surface">
+                  {streamPacingFps != null ? String(streamPacingFps) : "—"}
+                </span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {t("cam.stats.streamPacingHint")}
+                </p>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.uptime")}: </span>

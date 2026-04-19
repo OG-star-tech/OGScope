@@ -94,6 +94,29 @@ function buildLabGateHint(
   return `${gateStatus ?? "?"}${gateReason ? `: ${String(gateReason)}` : ""}${extra}`;
 }
 
+/** 调试相机 MJPEG 名额（仅 JSON，不占长连接）/ MJPEG limiter via JSON only */
+async function fetchDebugCameraMjpegGate(): Promise<"ok" | "busy" | "fail"> {
+  try {
+    const res = await fetch("/api/dev/debug/camera/stream/status", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!res.ok) return "fail";
+    const j = (await res.json()) as {
+      success?: boolean;
+      max_clients?: number;
+      active_clients?: number;
+    };
+    if (j.success === false) return "fail";
+    const maxC = Number(j.max_clients ?? 0);
+    const active = Number(j.active_clients ?? 0);
+    if (maxC > 0 && active >= maxC) return "busy";
+    return "ok";
+  } catch {
+    return "fail";
+  }
+}
+
 export default function AnalysisLabApp() {
   const { t, locale } = useI18n();
   const [view, setView] = useState<LabView>("lab_image");
@@ -180,6 +203,8 @@ export default function AnalysisLabApp() {
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
+  /** MJPEG <img> onError 重连次数（防死循环）/ Reconnect attempts after img error */
+  const cameraMjpegImgRetryRef = useRef(0);
   const cameraSolveTimeoutRef = useRef<number | null>(null);
   /** 视频连续解算：setTimeout 链式调度（与后端门禁对齐）/ Chained timeouts for gate alignment */
   const fileSolveTimeoutRef = useRef<number | null>(null);
@@ -460,23 +485,18 @@ export default function AnalysisLabApp() {
     setCameraMjpegGate("unknown");
     void (async () => {
       try {
-        const res = await fetch("/api/dev/debug/camera/stream/status", {
-          cache: "no-store",
-          credentials: "same-origin",
-        });
+        const g = await fetchDebugCameraMjpegGate();
         if (cancelled) return;
-        if (!res.ok) {
+        if (g === "fail") {
           setCameraMjpegGate("fail");
           return;
         }
-        const j = (await res.json()) as { max_clients?: number; active_clients?: number };
-        const maxC = Number(j.max_clients ?? 0);
-        const active = Number(j.active_clients ?? 0);
-        if (maxC > 0 && active >= maxC) {
+        if (g === "busy") {
           setCameraMjpegGate("busy");
           return;
         }
         setCameraMjpegGate("ok");
+        cameraMjpegImgRetryRef.current = 0;
         setCameraStreamNonce(Date.now());
       } catch {
         if (!cancelled) setCameraMjpegGate("fail");
@@ -1356,6 +1376,25 @@ export default function AnalysisLabApp() {
                               h: e.currentTarget.naturalHeight,
                             })
                           }
+                          onError={() => {
+                            void (async () => {
+                              const g = await fetchDebugCameraMjpegGate();
+                              if (g === "busy") {
+                                setCameraMjpegGate("busy");
+                                return;
+                              }
+                              if (g === "fail") {
+                                setCameraMjpegGate("fail");
+                                return;
+                              }
+                              if (cameraMjpegImgRetryRef.current >= 6) {
+                                setCameraMjpegGate("fail");
+                                return;
+                              }
+                              cameraMjpegImgRetryRef.current += 1;
+                              window.setTimeout(() => setCameraStreamNonce(Date.now()), 400);
+                            })();
+                          }}
                         />
                       )}
                       <canvas
