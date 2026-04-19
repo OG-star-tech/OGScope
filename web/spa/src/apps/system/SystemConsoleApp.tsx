@@ -3,6 +3,7 @@ import { DebugShell } from "./DebugShell";
 import { OverviewPage } from "./pages/OverviewPage";
 import { NetworkPage } from "./pages/NetworkPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { SensorsPage } from "./pages/SensorsPage";
 
 type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power";
 
@@ -29,7 +30,7 @@ export function SystemConsoleApp() {
 
   const page = useMemo(() => {
     if (route === "network") return <NetworkPage />;
-    if (route === "sensors") return <PlaceholderPage scope="sensors" />;
+    if (route === "sensors") return <SensorsPage />;
     if (route === "hmi") return <PlaceholderPage scope="hmi" />;
     if (route === "power") return <PlaceholderPage scope="power" />;
     return <OverviewPage />;

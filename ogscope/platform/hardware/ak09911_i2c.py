@@ -1,0 +1,238 @@
+"""
+AK09911 / AK09911C 磁力计 I2C 访问（Linux `/dev/i2c-*`）/ AK09911 family magnetometer over I2C.
+
+引脚由设备树绑定到 i2c 总线；本模块只负责总线号与 7-bit 从地址 / Pins are bound by DT; this module only uses bus id and 7-bit address.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import subprocess
+import time
+from dataclasses import dataclass
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# AK09911 系列寄存器（AK09911C 兼容）/ AK09911-class register map
+REG_WIA1 = 0x00
+REG_WIA2 = 0x01
+REG_HXL = 0x03
+REG_ST1 = 0x10
+REG_ST2 = 0x18
+REG_CNTL2 = 0x31
+
+EXPECTED_WIA1 = 0x48
+EXPECTED_WIA2 = 0x09  # AK09911；若读数不同仍以原始值回报 / AK09911; raw values still reported if different
+
+# 数据手册典型灵敏度（单测模式 16bit）/ Typical sensitivity from datasheet (µT/LSB)
+AK09911_UT_PER_LSB = 0.4915
+
+
+@dataclass(slots=True)
+class Ak09911ProbeResult:
+    """一次探测结果 / Single probe outcome."""
+
+    wia1: int | None
+    wia2: int | None
+    present: bool
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class Ak09911Measurement:
+    """单次测量原始值 / Single measurement (raw + scaled)."""
+
+    hx: int
+    hy: int
+    hz: int
+    ut_x: float
+    ut_y: float
+    ut_z: float
+
+
+def i2c_dev_path(bus: int) -> str:
+    return f"/dev/i2c-{int(bus)}"
+
+
+def ensure_i2c_dev_node(bus: int) -> str | None:
+    """若节点不存在则返回 None / Missing char dev (e.g. i2c-dev not loaded)."""
+    path = i2c_dev_path(bus)
+    return path if os.path.exists(path) else None
+
+
+def scan_i2c_bus(bus: int, *, timeout_sec: float = 3.0) -> dict[str, Any]:
+    """
+    调用系统 `i2cdetect` 扫描总线 / Run i2cdetect -y <bus>.
+
+    返回地址列表（十六进制字符串）与原始文本 / Returns hex strings and raw text.
+    """
+    exe = "/usr/sbin/i2cdetect"
+    if not os.path.isfile(exe):
+        exe = "i2cdetect"
+    try:
+        proc = subprocess.run(
+            [exe, "-y", str(int(bus))],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        return {"success": False, "addresses": [], "raw": "", "error": str(e)}
+    raw = (proc.stdout or "") + (proc.stderr or "")
+    addrs: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not re.match(r"^[0-9a-f]{2}:", line):
+            continue
+        for token in line.split()[1:]:
+            t = token.lower()
+            if len(t) == 2 and re.match(r"^[0-9a-f]{2}$", t) and t not in ("--", "uu"):
+                addrs.append(t)
+    return {
+        "success": proc.returncode == 0,
+        "addresses": sorted(set(addrs), key=lambda x: int(x, 16)),
+        "raw": raw.strip(),
+        "error": None if proc.returncode == 0 else f"i2cdetect exit {proc.returncode}",
+    }
+
+
+def _read_wia_smbus(bus: int, addr7: int) -> Ak09911ProbeResult:
+    from smbus2 import SMBus
+
+    try:
+        with SMBus(bus) as smbus:
+            wia1 = smbus.read_byte_data(addr7, REG_WIA1)
+            wia2 = smbus.read_byte_data(addr7, REG_WIA2)
+    except OSError as e:
+        return Ak09911ProbeResult(None, None, False, str(e))
+    present = wia1 == EXPECTED_WIA1 and wia2 == EXPECTED_WIA2
+    return Ak09911ProbeResult(wia1, wia2, present, None)
+
+
+def probe_ak09911(bus: int, addr7: int) -> Ak09911ProbeResult:
+    """读 WIA1/WIA2 / Read WHO_AM_I bytes."""
+    path = ensure_i2c_dev_node(bus)
+    if path is None:
+        return Ak09911ProbeResult(
+            None, None, False, f"missing {i2c_dev_path(bus)} (load i2c-dev?)"
+        )
+    return _read_wia_smbus(bus, addr7)
+
+
+def _combine_hxl_6(b: list[int]) -> tuple[int, int, int]:
+    def s16(lo: int, hi: int) -> int:
+        v = lo | (hi << 8)
+        return v - 0x10000 if v & 0x8000 else v
+
+    if len(b) < 6:
+        raise ValueError("need 6 bytes")
+    return s16(b[0], b[1]), s16(b[2], b[3]), s16(b[4], b[5])
+
+
+def measure_single_smbus(bus: int, addr7: int) -> Ak09911Measurement | None:
+    """单次测量模式读磁场（原始 + µT）/ Single-shot measurement."""
+    from smbus2 import SMBus
+
+    with SMBus(bus) as smbus:
+        smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
+        deadline = time.monotonic() + 0.2
+        st1 = 0
+        while time.monotonic() < deadline:
+            st1 = smbus.read_byte_data(addr7, REG_ST1)
+            if st1 & 0x01:
+                break
+            time.sleep(0.002)
+        if not (st1 & 0x01):
+            logger.warning("AK09911 DRDY timeout bus=%s addr=0x%02x st1=0x%02x", bus, addr7, st1)
+        data = smbus.read_i2c_block_data(addr7, REG_HXL, 6)
+        _ = smbus.read_byte_data(addr7, REG_ST2)
+    hx, hy, hz = _combine_hxl_6(list(data))
+    s = AK09911_UT_PER_LSB
+    return Ak09911Measurement(
+        hx,
+        hy,
+        hz,
+        round(hx * s, 3),
+        round(hy * s, 3),
+        round(hz * s, 3),
+    )
+
+
+def measure_single(bus: int, addr7: int) -> tuple[Ak09911Measurement | None, str | None]:
+    path = ensure_i2c_dev_node(bus)
+    if path is None:
+        return None, f"missing {i2c_dev_path(bus)}"
+    try:
+        return measure_single_smbus(bus, addr7), None
+    except OSError as e:
+        return None, str(e)
+    except Exception as e:
+        logger.exception("AK09911 measure failed")
+        return None, str(e)
+
+
+def run_ak09911c_self_test(bus: int, addr7: int) -> dict[str, Any]:
+    """
+    汇总探测：扫描、WIA、可选单次测量 / Combined probe for debug API.
+
+    `addr7` 为 7-bit 地址（如 0x0C）/ 7-bit slave address (e.g. 0x0C).
+    """
+    bus = int(bus)
+    addr7 = int(addr7)
+    out: dict[str, Any] = {
+        "bus": bus,
+        "address": addr7,
+        "address_hex": f"0x{addr7:02x}",
+        "dev_path": i2c_dev_path(bus),
+        "dev_exists": ensure_i2c_dev_node(bus) is not None,
+        "scan": None,
+        "probe": None,
+        "measurement": None,
+        "success": False,
+        "error": None,
+    }
+    if not out["dev_exists"]:
+        out["error"] = (
+            f"设备节点不存在: {out['dev_path']}。"
+            "请确认已启用 dtparam=i2c_arm=on 且已加载 i2c-dev（例如 /etc/modules-load.d/）。"
+        )
+        return out
+
+    out["scan"] = scan_i2c_bus(bus)
+    probe = probe_ak09911(bus, addr7)
+    out["probe"] = {
+        "wia1": probe.wia1,
+        "wia2": probe.wia2,
+        "wia1_hex": None if probe.wia1 is None else f"0x{probe.wia1:02x}",
+        "wia2_hex": None if probe.wia2 is None else f"0x{probe.wia2:02x}",
+        "expected_wia": f"0x{EXPECTED_WIA1:02x} / 0x{EXPECTED_WIA2:02x}",
+        "match": probe.present,
+        "error": probe.error,
+    }
+    if probe.error:
+        out["error"] = probe.error
+        out["success"] = False
+        return out
+
+    meas, merr = measure_single(bus, addr7)
+    if meas:
+        out["measurement"] = {
+            "raw": {"x": meas.hx, "y": meas.hy, "z": meas.hz},
+            "ut": {"x": meas.ut_x, "y": meas.ut_y, "z": meas.ut_z},
+            "scale_note": f"µT ≈ raw × {AK09911_UT_PER_LSB} (AK09911 典型值)",
+        }
+    else:
+        out["measurement"] = None
+        if merr:
+            out["error"] = merr
+
+    out["success"] = bool(probe.wia1 is not None and probe.wia2 is not None and meas)
+    if out["success"]:
+        out["error"] = None
+    elif out["error"] is None and not meas:
+        out["error"] = "已读到 WIA 但单次测量失败 / WIA ok but measurement failed"
+    return out

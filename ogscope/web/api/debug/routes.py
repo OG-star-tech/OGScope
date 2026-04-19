@@ -11,14 +11,16 @@ from fastapi.responses import FileResponse, StreamingResponse
 from ogscope.core.application import core_contract_service
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.domain.camera.services import (
-    camera_domain_service,
     DebugCameraService,
     DebugFileService,
     DebugPresetService,
+    camera_domain_service,
 )
 from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import DEV_CAPTURES_DIR, ensure_safe_basename
 from ogscope.domain.system.services import read_systemd_logs
+from ogscope.web.api.debug.magnetometer_service import MagnetometerDebugService
+from ogscope.web.api.debug.mpu6050_service import MPU6050DebugService
 from ogscope.web.api.models.schemas import (
     CameraMirrorBody,
     CameraPreset,
@@ -488,3 +490,66 @@ async def get_realtime_solving_status():
         return await realtime_solve_service.get_status()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 传感器自检 ==================== / ==================== Sensor self-test ====================
+
+
+@router.get("/debug/sensors/magnetometer/selftest")
+async def magnetometer_selftest(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(
+        default=12,
+        ge=1,
+        le=127,
+        description="7-bit I²C address (12 = 0x0C when CAD is tied to GND)",
+    ),
+    i2cdetect: bool = Query(default=True),
+):
+    """AK09911 系列磁力计 I²C 自检（WIA 寄存器）/ AK09911 family I²C self-test via WIA."""
+    try:
+        return await MagnetometerDebugService.selftest(
+            bus=bus,
+            addr7=addr,
+            run_i2cdetect=i2cdetect,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/debug/sensors/magnetometer/probe-buses")
+async def magnetometer_probe_buses(
+    addr: int = Query(
+        default=12,
+        ge=1,
+        le=127,
+        description="7-bit I²C address to probe on each discovered bus",
+    ),
+):
+    """在已发现的各 I²C 总线上尝试读取 WIA / Try WIA on each discovered I²C bus."""
+    try:
+        return await MagnetometerDebugService.probe_address_on_buses(addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/debug/sensors/mpu6050/selftest")
+async def mpu6050_selftest(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(
+        default=104,
+        ge=1,
+        le=127,
+        description="7-bit I²C address (104 = 0x68 when AD0 is low)",
+    ),
+    i2cdetect: bool = Query(default=True),
+):
+    """MPU-6050 I²C 自检（WHO_AM_I 寄存器 0x75）/ MPU-6050 I²C self-test via WHO_AM_I."""
+    try:
+        return await MPU6050DebugService.selftest(
+            bus=bus,
+            addr7=addr,
+            run_i2cdetect=i2cdetect,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
