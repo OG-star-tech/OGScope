@@ -151,13 +151,21 @@ function formatSize(bytes: number): string {
   return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
-/** 探测 MJPEG 是否可连：503=名额被占；ok 则立即取消 body 释放名额 / Probe stream; 503 = busy; cancel body to release slot */
-async function probeMjpegStream(url: string): Promise<"busy" | "ok" | "fail"> {
+/**
+ * 用 stream/status 探测是否还有 MJPEG 名额（勿 fetch MJPEG URL，否则会额外占用 try_acquire 与长连接重叠）。
+ * Check limiter via JSON; never fetch the MJPEG URL for probe (that consumes a slot and overlaps with <img>).
+ */
+async function probeMjpegSlotsAvailable(): Promise<"busy" | "ok" | "fail"> {
   try {
-    const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
-    if (res.status === 503) return "busy";
+    const res = await fetch(`${debugApi("/camera/stream/status")}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
     if (!res.ok) return "fail";
-    await res.body?.cancel().catch(() => {});
+    const j = (await res.json()) as { max_clients?: number; active_clients?: number };
+    const maxC = Number(j.max_clients ?? 0);
+    const active = Number(j.active_clients ?? 0);
+    if (maxC > 0 && active >= maxC) return "busy";
     return "ok";
   } catch {
     return "fail";
@@ -317,8 +325,7 @@ export function CameraConsoleApp() {
         await requestJson("/api/debug/camera/start", { method: "POST" });
       }
       const nonce = Date.now();
-      const streamUrl = `${debugApi("/camera/stream")}?t=${nonce}`;
-      const probe = await probeMjpegStream(streamUrl);
+      const probe = await probeMjpegSlotsAvailable();
       if (probe === "busy") {
         setPreviewStreamHint(t("cam.err.streamBusy"));
         setPreviewStreamIsBusy(true);
@@ -1158,7 +1165,7 @@ export function CameraConsoleApp() {
                     const src = imgRef.current?.src;
                     void (async () => {
                       if (!previewActiveRef.current || !src) return;
-                      const p = await probeMjpegStream(src);
+                      const p = await probeMjpegSlotsAvailable();
                       if (p === "busy") {
                         setPreviewStreamHint(t("cam.err.streamBusy"));
                         setPreviewStreamIsBusy(true);

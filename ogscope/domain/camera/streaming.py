@@ -31,6 +31,13 @@ async def build_camera_mjpeg_stream(
     """构建 MJPEG 流响应 / Build MJPEG stream response."""
     limiter = get_mjpeg_stream_limiter()
     if not await limiter.try_acquire():
+        _path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        logger.warning(
+            "mjpeg_try_acquire_rejected active=%s max=%s path=%s",
+            limiter.active_clients,
+            limiter.max_clients,
+            _path,
+        )
         raise HTTPException(status_code=503, detail=limit_detail)
     boundary = "frame"
     min_emit_interval = 1.0 / max(
