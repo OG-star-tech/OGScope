@@ -287,7 +287,7 @@ class OGScopeHomeApp {
     refreshStreamSource() {
         const streamImg = document.getElementById("video-stream");
         if (!streamImg) return;
-        streamImg.src = `/api/debug/camera/stream?quality=${this.streamQuality}&t=${Date.now()}`;
+        streamImg.src = `/api/dev/debug/camera/stream?quality=${this.streamQuality}&t=${Date.now()}`;
         this.applyStreamLayer();
     }
 

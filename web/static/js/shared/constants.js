@@ -31,7 +31,7 @@ const APP_CONSTANTS = {
     
     // API端点 / API endpoint
     API_ENDPOINTS: {
-        CAMERA_PREVIEW: '/api/camera/preview',
+        CAMERA_PREVIEW: '/api/dev/debug/camera/preview',
         ALIGNMENT_STATUS: '/api/alignment/status',
         SYSTEM_INFO: '/api/system/info'
     },

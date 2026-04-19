@@ -565,7 +565,7 @@
     cb.addEventListener("change", () => {
       if (cb.checked) {
         container.hidden = false;
-        img.src = "/api/debug/camera/stream?quality=60";
+        img.src = "/api/dev/debug/camera/stream?quality=60";
       } else {
         container.hidden = true;
         img.removeAttribute("src");

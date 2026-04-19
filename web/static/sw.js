@@ -19,15 +19,18 @@ const STATIC_ASSETS = [
 
 // 需要缓存的API路径模式 / API path patterns that need to be cached
 const API_CACHE_PATTERNS = [
-  /^\/api\/camera\/preview/,
   /^\/api\/camera\/config/,
   /^\/api\/status/
 ];
 
 // 不需要缓存的路径 / No cached path is required
+// MJPEG（multipart/x-mixed-replace）为长连接无限流，禁止走 networkFirst 的 cache.put，
+// 否则第二路流可能黑屏/异常且不易报错（与打开顺序相关）/ Infinite MJPEG must bypass SW cache.put.
 const NO_CACHE_PATTERNS = [
+  /^\/api\/websocket/,
   /^\/api\/camera\/stream/,
-  /^\/api\/websocket/
+  /^\/api\/debug\/camera\/stream/,
+  /^\/api\/dev\/debug\/camera\/stream/,
 ];
 
 /**
@@ -149,8 +152,11 @@ async function networkFirst(request) {
     const networkResponse = await fetch(request);
     
     if (networkResponse.ok) {
-      const cache = await caches.open(DYNAMIC_CACHE);
-      cache.put(request, networkResponse.clone());
+      const ct = (networkResponse.headers.get('content-type') || '').toLowerCase();
+      if (!ct.includes('multipart/x-mixed-replace')) {
+        const cache = await caches.open(DYNAMIC_CACHE);
+        cache.put(request, networkResponse.clone());
+      }
     }
     
     return networkResponse;

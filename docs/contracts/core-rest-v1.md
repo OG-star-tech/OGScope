@@ -61,20 +61,18 @@
   - `network: object`（WiFi 模式/信号/连接态）
   - `sensors: object`（温度/CPU/内存等核心传感状态）
 
-### 5) Camera Runtime & Stream
+### 5) Camera Runtime & Preview (MJPEG / single-frame)
 
 - `GET /api/core/v1/camera/status`
   - 返回相机连接状态、流状态与 runtime overrides
 - `POST /api/core/v1/camera/start`
 - `POST /api/core/v1/camera/stop`
-- `GET /api/core/v1/camera/preview`
-  - 单帧 JPEG，支持 `since_frame_id` 以减少重复下发
-- `GET /api/core/v1/camera/stream?quality=75`
-  - MJPEG 压缩流（JPEG）
-- `GET /api/core/v1/camera/stream-lossless`
-  - MJPEG 无损流（PNG）
-- `GET /api/core/v1/camera/stream/status`
-  - 返回 `max_clients`、`active_clients`、取帧超时、目标预览帧率
+
+MJPEG 连续视频流与流控状态、单帧 JPEG 预览（轮询、`since_frame_id`、调试限频）**仅**暴露于开发路径（不再在 `/api/core/v1/` 重复）：
+
+- `GET /api/dev/debug/camera/stream?quality=75` — MJPEG 压缩流（JPEG）
+- `GET /api/dev/debug/camera/stream/status` — `max_clients`、`active_clients`、取帧超时、目标预览帧率
+- `GET /api/dev/debug/camera/preview` — 单帧预览
 
 ### 6) Camera Tuning
 

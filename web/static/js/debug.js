@@ -1583,7 +1583,7 @@ class DebugConsole {
                     const retryDelay = Math.min(2000, 300 + consecutiveFailures * 300);
                     this.previewTimer = setTimeout(attachStream, retryDelay);
                 };
-                previewImg.src = `/api/debug/camera/stream?t=${Date.now()}`;
+                previewImg.src = `/api/dev/debug/camera/stream?t=${Date.now()}`;
             } catch (_e) {
                 consecutiveFailures++;
                 const retryDelay = Math.min(2000, 300 + consecutiveFailures * 300);
