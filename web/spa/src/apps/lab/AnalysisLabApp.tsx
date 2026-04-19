@@ -146,6 +146,10 @@ export default function AnalysisLabApp() {
   const [videoPreviewMode, setVideoPreviewMode] = useState<"file" | "camera">("file");
   /** MJPEG 流时间戳参数，与相机调试台 /api/dev/debug/camera/stream 一致 / Same stream URL as debug console */
   const [cameraStreamNonce, setCameraStreamNonce] = useState(() => Date.now());
+  /** 拉 MJPEG 前用 stream/status 检查名额，避免与调试台重叠占满 / Gate before MJPEG using stream/status */
+  const [cameraMjpegGate, setCameraMjpegGate] = useState<"unknown" | "ok" | "busy" | "fail">(
+    "unknown",
+  );
   const [videoPreviewError, setVideoPreviewError] = useState<string | null>(null);
   const [cameraSolveRunning, setCameraSolveRunning] = useState(false);
   const [fileSolveRunning, setFileSolveRunning] = useState(false);
@@ -442,11 +446,46 @@ export default function AnalysisLabApp() {
     else img.onload = draw;
   }, [overlay, layers, view, videoPreviewMode, lastResult, cameraStreamNonce, isFrozen]);
 
-  /** 进入设备相机模式时重连 MJPEG（与相机调试台同一路径）/ Reconnect MJPEG like debug console */
+  /** 进入设备相机模式：先查 stream/status 再设 nonce，避免多余 MJPEG 连接占满名额 / Check limiter before MJPEG */
   useEffect(() => {
-    if (view !== "lab_video" || videoPreviewMode !== "camera") return;
-    setCameraStreamNonce(Date.now());
-  }, [view, videoPreviewMode]);
+    if (view !== "lab_video" || videoPreviewMode !== "camera") {
+      setCameraMjpegGate("unknown");
+      return;
+    }
+    if (isFrozen) {
+      setCameraMjpegGate("ok");
+      return;
+    }
+    let cancelled = false;
+    setCameraMjpegGate("unknown");
+    void (async () => {
+      try {
+        const res = await fetch("/api/dev/debug/camera/stream/status", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setCameraMjpegGate("fail");
+          return;
+        }
+        const j = (await res.json()) as { max_clients?: number; active_clients?: number };
+        const maxC = Number(j.max_clients ?? 0);
+        const active = Number(j.active_clients ?? 0);
+        if (maxC > 0 && active >= maxC) {
+          setCameraMjpegGate("busy");
+          return;
+        }
+        setCameraMjpegGate("ok");
+        setCameraStreamNonce(Date.now());
+      } catch {
+        if (!cancelled) setCameraMjpegGate("fail");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, videoPreviewMode, isFrozen]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -1274,14 +1313,10 @@ export default function AnalysisLabApp() {
                 {view === "lab_video" && videoPreviewMode === "camera" ? (
                   <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
                     <div className="relative inline-block max-h-[70vh] max-w-full">
-                      {!isFrozen || frozenImageUrl ? (
+                      {isFrozen && frozenImageUrl ? (
                         <img
                           ref={cameraPreviewImgRef}
-                          src={
-                            isFrozen && frozenImageUrl
-                              ? frozenImageUrl
-                              : `/api/dev/debug/camera/stream?t=${cameraStreamNonce}`
-                          }
+                          src={frozenImageUrl}
                           alt=""
                           className="max-h-[70vh] w-full min-h-[120px] object-contain"
                           onLoad={(e) =>
@@ -1291,11 +1326,37 @@ export default function AnalysisLabApp() {
                             })
                           }
                         />
-                      ) : (
+                      ) : isFrozen && !frozenImageUrl ? (
                         <div className="flex min-h-[200px] w-full min-w-[280px] flex-col items-center justify-center gap-2 text-[11px] text-on-surface-variant">
                           <Loader2 className="h-8 w-8 animate-spin text-primary" />
                           <span>{t("lab.cameraPreviewLoading")}</span>
                         </div>
+                      ) : cameraMjpegGate === "busy" ? (
+                        <div className="flex min-h-[200px] max-w-md flex-col items-center justify-center gap-2 px-4 text-center text-[11px] text-on-surface-variant">
+                          <span className="text-error">{t("lab.videoMjpegHint")}</span>
+                        </div>
+                      ) : cameraMjpegGate === "fail" ? (
+                        <div className="flex min-h-[200px] max-w-md flex-col items-center justify-center gap-2 px-4 text-center text-[11px] text-on-surface-variant">
+                          <span className="text-error">{t("lab.cameraStreamStatusFail")}</span>
+                        </div>
+                      ) : cameraMjpegGate === "unknown" ? (
+                        <div className="flex min-h-[200px] w-full min-w-[280px] flex-col items-center justify-center gap-2 text-[11px] text-on-surface-variant">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          <span>{t("lab.cameraPreviewLoading")}</span>
+                        </div>
+                      ) : (
+                        <img
+                          ref={cameraPreviewImgRef}
+                          src={`/api/dev/debug/camera/stream?t=${cameraStreamNonce}`}
+                          alt=""
+                          className="max-h-[70vh] w-full min-h-[120px] object-contain"
+                          onLoad={(e) =>
+                            setCameraPreviewNatural({
+                              w: e.currentTarget.naturalWidth,
+                              h: e.currentTarget.naturalHeight,
+                            })
+                          }
+                        />
                       )}
                       <canvas
                         ref={cvRef}

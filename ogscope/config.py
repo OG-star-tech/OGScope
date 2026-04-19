@@ -220,12 +220,13 @@ class Settings(BaseSettings):
         description="实时解算慢请求阈值（毫秒）/ Slow realtime solve threshold in ms",
     )
     stream_max_mjpeg_clients: int = Field(
-        default=2,
+        default=4,
         ge=0,
         le=32,
         description=(
             "同时允许的 MJPEG 长连接数（GET /api/dev/debug/camera/stream）；"
-            "0=不限制 / Max concurrent MJPEG streams; 0=unlimited"
+            "默认 4 以容纳多标签页与短暂重叠；0=不限制 / "
+            "Max concurrent MJPEG streams; default 4 for multi-tab overlap; 0=unlimited"
         ),
     )
     stream_mjpeg_frame_fetch_timeout_ms: int = Field(
