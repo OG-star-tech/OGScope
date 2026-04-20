@@ -81,14 +81,16 @@ class RaspberryPiZero2WGPIO:
     }
 
     # 显示屏 SPI 配置 / Display SPI configuration
+    # ST7796 320×320（如 1.54 寸 IPS）；DC=BCM24（物理脚 18）；CS=CE0/BCM8（物理脚 24）
     DISPLAY_SPI_CONFIG = {
         "bus": 0,
         "device": 0,
-        "dc_pin": 25,  # 数据 / data
-        "rst_pin": 27,  # 复位引脚 / reset pin
-        "cs_pin": 8,  # 片选引脚 / Chip select pin
-        "backlight_pin": 18,  # 背光控制 (PWM) / Backlight control (PWM)
-        "width": 240,
+        "type": "st7796",
+        "dc_pin": 24,  # 数据/命令 / Data–command (physical pin 18)
+        "rst_pin": 27,  # 复位（模块无 RST 线时可不接，由驱动软复位）/ Reset if wired
+        "cs_pin": 8,  # CE0 / Chip select (physical pin 24)
+        "backlight_pin": 18,  # 背光 PWM（若 BL 接 3V3 常亮则不用）/ Backlight PWM if wired
+        "width": 320,
         "height": 320,
         "rotation": 0,
     }
@@ -245,12 +247,12 @@ class GPIOConfig:
 DEFAULT_GPIO_CONFIG = {
     "display": {
         "enabled": False,
-        "type": "st7789",
-        "dc_pin": 25,
+        "type": "st7796",
+        "dc_pin": 24,
         "rst_pin": 27,
         "cs_pin": 8,
         "backlight_pin": 18,
-        "width": 240,
+        "width": 320,
         "height": 320,
         "rotation": 0,
     },
