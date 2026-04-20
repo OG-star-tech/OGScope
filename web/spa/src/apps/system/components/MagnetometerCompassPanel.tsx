@@ -17,16 +17,24 @@ const TAPE_CYCLES = 7;
 /** 中间周期索引，航向落在该段附近便于左右滚动 / Center cycle index for anchoring. */
 const CENTER_CYCLE = 3;
 
-function cardinalLabel(deg: number): string | null {
+/** 正方位刻度键，用于 i18n（中文显示北/东/南/西）/ Cardinal keys for i18n. */
+function cardinalKey(deg: number): "cardN" | "cardE" | "cardS" | "cardW" | null {
   const d = ((deg % 360) + 360) % 360;
-  if (d < 1 || d > 359) return "N";
-  if (Math.abs(d - 90) < 1) return "E";
-  if (Math.abs(d - 180) < 1) return "S";
-  if (Math.abs(d - 270) < 1) return "W";
+  if (d < 1 || d > 359) return "cardN";
+  if (Math.abs(d - 90) < 1) return "cardE";
+  if (Math.abs(d - 180) < 1) return "cardS";
+  if (Math.abs(d - 270) < 1) return "cardW";
   return null;
 }
 
-type TapeTick = { x: number; deg: number; h: "maj" | "mid" | "min"; label?: string };
+type TapeTick = {
+  x: number;
+  deg: number;
+  h: "maj" | "mid" | "min";
+  /** 非正方位的主刻度角度数（30、60…）/ Degree label on major ticks. */
+  degLabel?: number;
+  cardKey?: "cardN" | "cardE" | "cardS" | "cardW";
+};
 
 function buildTapeTicks(): TapeTick[] {
   const ticks: TapeTick[] = [];
@@ -35,15 +43,14 @@ function buildTapeTicks(): TapeTick[] {
     const degMod = g % 360;
     const maj = g % 30 === 0;
     const mid = !maj && g % 10 === 0;
-    const card = cardinalLabel(degMod);
-    const label =
-      card ??
-      (maj && degMod % 90 !== 0 ? String(degMod) : undefined);
+    const ck = cardinalKey(degMod);
+    const degLabel = !ck && maj && degMod % 90 !== 0 ? degMod : undefined;
     ticks.push({
       x: g * PX_PER_DEG,
       deg: g,
       h: maj ? "maj" : mid ? "mid" : "min",
-      label,
+      degLabel,
+      cardKey: ck ?? undefined,
     });
   }
   return ticks;
@@ -225,16 +232,16 @@ export function MagnetometerCompassPanel(props: { bus: number; addr: number }) {
                     className="absolute flex flex-col items-center"
                     style={{ left: tk.x, transform: "translateX(-50%)", top }}
                   >
-                    {tk.label && (
+                    {(tk.cardKey || tk.degLabel != null) && (
                       <span
                         className={`mb-0.5 whitespace-nowrap font-mono ${
-                          ["N", "E", "S", "W"].includes(tk.label)
+                          tk.cardKey
                             ? "text-[13px] font-bold text-sky-200"
                             : "text-[10px] font-medium text-slate-400"
                         }`}
                         style={{ marginTop: -18 }}
                       >
-                        {tk.label}
+                        {tk.cardKey ? t(`sys.sensors.compass.${tk.cardKey}`) : String(tk.degLabel)}
                       </span>
                     )}
                     <div
