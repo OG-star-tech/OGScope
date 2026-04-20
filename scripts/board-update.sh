@@ -12,6 +12,7 @@
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
+#   OGSCOPE_SKIP_BOOT_I2C=1 — 不写入 /boot 中 dtparam=i2c_arm=on（仍会安装 i2c-tools、仍将用户加入 i2c 组）/ Skip I2C boot dtparam; still installs i2c-tools and adds user to i2c group
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
 #   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，同步 ogscope.service.d MemoryMax / Optional MemoryMax drop-in
 #   OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1 — 内存≤512MiB 时不同步 ogscope-low-ram.conf / Skip low-RAM solver drop-in sync
@@ -30,6 +31,8 @@ cd "${PROJECT_DIR}"
 source "${SCRIPT_DIR}/mirror.sh"
 # shellcheck source=boot-config-camera.sh
 source "${SCRIPT_DIR}/boot-config-camera.sh"
+# shellcheck source=boot-config-i2c.sh
+source "${SCRIPT_DIR}/boot-config-i2c.sh"
 ogscope_prompt_mirror_if_needed
 OGSCOPE_MIRROR_RESOLVED="$(ogscope_resolve_mirror)"
 echo "🌐 镜像模式 / Mirror: ${OGSCOPE_MIRROR_RESOLVED}（OGSCOPE_MIRROR=${OGSCOPE_MIRROR:-auto}）"
@@ -92,6 +95,10 @@ if ! ogscope_verify_numpy_scipy; then
     exit 1
 fi
 echo "✅ numpy/scipy 已就绪 / numpy & scipy OK"
+
+echo "📦 I²C 主机依赖（与 install.sh 对齐）/ I2C host setup (aligned with install.sh)..."
+sudo apt update -qq
+ogscope_i2c_host_setup_full 1
 
 VENV_PYTHON="$(poetry env info --path)/bin/python"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -162,6 +169,12 @@ sleep 2
 sudo systemctl --no-pager status "${SERVICE_NAME}" || true
 
 echo ""
+if [ "${OGSCOPE_I2C_GROUP_ADDED:-0}" = "1" ]; then
+    echo "ℹ️  I²C：已加入 i2c 组，请重新登录 SSH 后 \`groups\` 可见 / Re-login SSH for i2c group"
+fi
+if [ "${OGSCOPE_I2C_BOOT_CHANGED:-0}" = "1" ]; then
+    echo "⚠️  已写入 dtparam=i2c_arm=on，请重启树莓派以使 I²C 生效 / Reboot Pi for I2C device nodes"
+fi
 echo "✅ 更新完成 / Update done. 日志 / Logs: sudo journalctl -u ${SERVICE_NAME} -f"
 if [ "${OGSCOPE_SKIP_JOURNALD_PERSISTENT:-}" != "1" ] && [ -f "${JOURNALD_DROPIN_DST:-}" ]; then
     echo "上次启动排查 / Previous boot: sudo journalctl -b -1 -e  |  errors: sudo journalctl -b -1 -p err..alert --no-pager"
