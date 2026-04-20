@@ -9,10 +9,9 @@ import glob
 import math
 import os
 import re
-import subprocess
 from typing import Any
 
-from ogscope.platform.hardware.ak09911_i2c import measure_single
+from ogscope.platform.hardware.ak09911_i2c import measure_single, scan_i2c_bus
 
 # WIA：与 Linux ak09911 驱动及数据手册一致 / Matches upstream ak09911 driver & datasheets.
 _AKM_WIA1 = 0x48
@@ -23,27 +22,6 @@ _KNOWN_WIA2 = frozenset({0x05, 0x09})
 def _list_i2c_device_nodes() -> list[str]:
     paths = sorted(glob.glob("/dev/i2c-[0-9]*"))
     return [p for p in paths if os.path.exists(p)]
-
-
-def _run_i2cdetect(bus: int) -> tuple[str | None, str | None]:
-    """调用系统 i2cdetect（若存在）/ Run system i2cdetect when available."""
-    for bin_name in ("/usr/sbin/i2cdetect", "/sbin/i2cdetect"):
-        if os.path.isfile(bin_name):
-            try:
-                proc = subprocess.run(
-                    [bin_name, "-y", str(bus)],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    check=False,
-                )
-                out = (proc.stdout or "") + (proc.stderr or "")
-                if proc.returncode == 0:
-                    return out.strip(), None
-                return None, out.strip() or f"exit {proc.returncode}"
-            except (OSError, subprocess.SubprocessError) as exc:
-                return None, str(exc)
-    return None, "i2cdetect not found"
 
 
 def _smbus_read_wia(bus: int, addr7: int) -> dict[str, Any]:
@@ -109,14 +87,20 @@ class MagnetometerDebugService:
         nodes = _list_i2c_device_nodes()
         i2c_text: str | None = None
         i2c_err: str | None = None
+        addresses_seen: list[str] | None = None
         if run_i2cdetect:
-            i2c_text, i2c_err = await asyncio.to_thread(_run_i2cdetect, bus)
+            scan = await asyncio.to_thread(scan_i2c_bus, bus)
+            i2c_text = (scan.get("raw") or "").strip() or None
+            addresses_seen = list(scan.get("addresses") or [])
+            if not scan.get("success"):
+                i2c_err = scan.get("error") or "i2cdetect failed"
 
         wia = await asyncio.to_thread(_smbus_read_wia, bus, addr7)
 
         overall_ok = bool(wia.get("ok") and wia.get("matches_ak099xx"))
 
         hint: str | None = None
+        addr_hex = f"{int(addr7):02x}"
         if not nodes:
             hint = (
                 "未找到 /dev/i2c-*：请确认已启用 I²C（config.txt 中 dtparam=i2c_arm=on）"
@@ -124,10 +108,22 @@ class MagnetometerDebugService:
                 " / No /dev/i2c-*: enable I²C in firmware and load i2c-dev."
             )
         elif not wia.get("ok"):
+            bus_missing = ""
+            if (
+                run_i2cdetect
+                and addresses_seen is not None
+                and addr_hex not in addresses_seen
+            ):
+                bus_missing = (
+                    f"当前总线 {bus} 的 i2cdetect 未列出 {addr_hex}（模块可能未接好、无 3.3V、SDA/SCL 接反，"
+                    "或 CAD 未接 GND 时地址不是 0x0C）。"
+                    " / i2cdetect does not list this address (wiring, power, SDA/SCL, or CAD pin)."
+                )
             hint = (
-                "无法在总线上读取芯片 ID：检查接线、地址（CAD→GND=0x0C）、"
-                "以及运行服务的用户是否在 i2c 组。"
-                " / Cannot read chip ID: wiring, address, or i2c group membership."
+                "无法在总线上读取芯片 ID。"
+                + bus_missing
+                + " 亦请核对：CAD→GND=0x0C、运行用户是否在 i2c 组（本机 ogscope 进程通常已含 i2c 附加组）。"
+                " / Cannot read chip ID; check CAD, wiring, and i2c group."
             )
         elif not wia.get("matches_ak099xx"):
             hint = (
@@ -144,7 +140,14 @@ class MagnetometerDebugService:
             "bus": int(bus),
             "addr_7bit": int(addr7),
             "addr_7bit_hex": f"0x{int(addr7):02x}",
-            "i2cdetect": {"stdout": i2c_text, "stderr_or_note": i2c_err},
+            "i2cdetect": {
+                "stdout": i2c_text,
+                "stderr_or_note": i2c_err,
+                "addresses_parsed": addresses_seen,
+                "target_addr_seen": bool(
+                    addresses_seen is not None and addr_hex in addresses_seen
+                ),
+            },
             "wia": {
                 "wia1": wia.get("wia1"),
                 "wia2": wia.get("wia2"),
