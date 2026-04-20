@@ -87,6 +87,18 @@ class Settings(BaseSettings):
     display_width: int = Field(default=320, description="屏幕宽度")
     display_height: int = Field(default=320, description="屏幕高度")
     display_rotation: int = Field(default=0, description="屏幕旋转角度")
+    display_dc_pin: int = Field(
+        default=24,
+        ge=2,
+        le=40,
+        description="SPI DC 引脚（BCM）/ SPI DC GPIO (BCM)",
+    )
+    display_spi_max_speed_hz: int = Field(
+        default=16_000_000,
+        ge=500_000,
+        le=62_000_000,
+        description="SPI 屏幕总线最高速率 Hz / SPI bus max Hz for LCD",
+    )
 
     # 极轴校准配置 / Polar calibration configuration
     polar_align_timeout: int = Field(default=300, description="校准超时时间(秒)")
