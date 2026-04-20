@@ -83,8 +83,8 @@ class Settings(BaseSettings):
 
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")
-    display_type: str = Field(default="st7789", description="显示屏类型")
-    display_width: int = Field(default=240, description="屏幕宽度")
+    display_type: str = Field(default="st7796", description="显示屏类型（如 st7796）")
+    display_width: int = Field(default=320, description="屏幕宽度")
     display_height: int = Field(default=320, description="屏幕高度")
     display_rotation: int = Field(default=0, description="屏幕旋转角度")
 
