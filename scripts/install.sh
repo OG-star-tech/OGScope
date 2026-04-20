@@ -14,6 +14,7 @@
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
+#   OGSCOPE_SKIP_BOOT_I2C=1 — 不写入 /boot 中 dtparam=i2c_arm=on（仍会 apt 装 i2c-tools、仍将用户加入 i2c 组）/ Skip appending I2C dtparam; still installs i2c-tools and adds user to i2c group
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不安装 journald 持久化 drop-in（默认安装）/ Skip persistent journald config
 #   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，写入 ogscope.service.d MemoryMax（cgroup 内存上限；过小会提前 SIGKILL）/ Optional cgroup MemoryMax
 #   低内存解算保护另见环境变量 OGSCOPE_SOLVER_MAX_STARS_HARD_CAP、OGSCOPE_SOLVER_MAX_IMAGE_SIDE_HARD_CAP（见 config.py）/ Low-RAM solve caps
@@ -50,6 +51,8 @@ cd "${PROJECT_DIR}"
 source "${SCRIPT_DIR}/mirror.sh"
 # shellcheck source=boot-config-camera.sh
 source "${SCRIPT_DIR}/boot-config-camera.sh"
+# shellcheck source=boot-config-i2c.sh
+source "${SCRIPT_DIR}/boot-config-i2c.sh"
 
 # 交互式选择 apt/PyPI 镜像（未显式指定 cn|international 时）/ Interactive mirror selection when not preset
 ogscope_prompt_mirror_if_needed
@@ -108,8 +111,12 @@ sudo apt install -y \
     curl \
     build-essential \
     network-manager \
-    avahi-daemon
+    avahi-daemon \
+    i2c-tools
 _apt_pause
+
+# I²C：用户组 + 固件 dtparam（i2c-tools 已随上表安装）/ I2C group + boot dtparam (i2c-tools installed above)
+ogscope_i2c_host_setup_full 0
 
 echo "📦 安装图像基础库（jpeg/png/freetype）/ Installing image base dev libraries..."
 sudo apt install -y \
@@ -357,6 +364,13 @@ echo "服务 / Service: ${SERVICE_NAME}"
 echo "虚拟环境 / venv: ${VENV_PATH}"
 echo "PYTHONPATH: ${PYTHONPATH_VALUE}"
 echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH_VALUE}"
+echo ""
+if [ "${OGSCOPE_I2C_GROUP_ADDED:-0}" = "1" ]; then
+    echo "ℹ️  I²C：已加入 i2c 组，请重新登录 SSH 后 \`groups\` 可见；当前会话内可能仍无 / Re-login SSH for i2c group in shell"
+fi
+if [ "${OGSCOPE_I2C_BOOT_CHANGED:-0}" = "1" ]; then
+    echo "⚠️  已写入 dtparam=i2c_arm=on，请重启树莓派以使 /dev/i2c-1 等生效 / Reboot the Pi for I2C device nodes"
+fi
 echo ""
 ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
 echo ""
