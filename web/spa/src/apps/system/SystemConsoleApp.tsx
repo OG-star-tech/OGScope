@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DebugShell } from "./DebugShell";
 import { OverviewPage } from "./pages/OverviewPage";
 import { NetworkPage } from "./pages/NetworkPage";
+import { HmiPage } from "./pages/HmiPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SensorsPage } from "./pages/SensorsPage";
 
@@ -31,7 +32,7 @@ export function SystemConsoleApp() {
   const page = useMemo(() => {
     if (route === "network") return <NetworkPage />;
     if (route === "sensors") return <SensorsPage />;
-    if (route === "hmi") return <PlaceholderPage scope="hmi" />;
+    if (route === "hmi") return <HmiPage />;
     if (route === "power") return <PlaceholderPage scope="power" />;
     return <OverviewPage />;
   }, [route]);

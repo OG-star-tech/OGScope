@@ -49,10 +49,13 @@ class HardwarePlaneClient:
         target: str,
         action: str,
         payload: dict[str, Any] | None = None,
+        *,
+        timeout_ms: int | None = None,
     ) -> dict[str, Any]:
         return await self._call(
             PlaneMethod.DEVICE_COMMAND,
             {"target": target, "action": action, "payload": payload or {}},
+            timeout_ms=timeout_ms,
         )
 
     async def event_subscribe(self, topic: str) -> dict[str, Any]:
