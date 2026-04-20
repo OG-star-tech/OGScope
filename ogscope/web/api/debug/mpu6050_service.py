@@ -8,11 +8,16 @@ import asyncio
 import glob
 import os
 import subprocess
+import time
 from typing import Any
 
 # InvenSense MPU-6000/6050 数据手册 / Per InvenSense datasheet.
 _REG_WHO_AM_I = 0x75
 _EXPECT_WHO_AM_I = 0x68
+_REG_PWR_MGMT_1 = 0x6B
+_REG_GYRO_XOUT_H = 0x43
+# 默认 GYRO_CONFIG=0 → ±250°/s，灵敏度 131 LSB/(°/s) / Default ±250 °/s, 131 LSB per °/s.
+_DEFAULT_LSB_PER_DPS = 131.0
 
 
 def _list_i2c_device_nodes() -> list[str]:
@@ -38,6 +43,62 @@ def _run_i2cdetect(bus: int) -> tuple[str | None, str | None]:
             except (OSError, subprocess.SubprocessError) as exc:
                 return None, str(exc)
     return None, "i2cdetect not found"
+
+
+def _signed16(hi: int, lo: int) -> int:
+    v = (int(hi) << 8) | int(lo)
+    return v - 0x10000 if v >= 0x8000 else v
+
+
+def _read_gyro_sample(bus: int, addr7: int) -> dict[str, Any]:
+    """唤醒芯片并读陀螺仪原始值，换算为 °/s / Wake and read gyro, scaled to °/s."""
+    try:
+        from smbus2 import SMBus
+    except ImportError:
+        return {"ok": False, "error": "smbus2 not installed"}
+
+    path = f"/dev/i2c-{bus}"
+    if not os.path.exists(path):
+        return {
+            "ok": False,
+            "error": f"missing {path} (enable dtparam=i2c_arm=on & load i2c-dev)",
+        }
+
+    def _io() -> dict[str, Any]:
+        with SMBus(bus) as bus_obj:
+            who = int(bus_obj.read_byte_data(addr7, _REG_WHO_AM_I))
+            if who != _EXPECT_WHO_AM_I:
+                return {
+                    "ok": False,
+                    "error": f"WHO_AM_I=0x{who:02x}, expected 0x{_EXPECT_WHO_AM_I:02x}",
+                }
+            # 退出睡眠（默认 0x6B 常为 0x40）/ Exit sleep (register often powers up sleeping).
+            bus_obj.write_byte_data(addr7, _REG_PWR_MGMT_1, 0x01)
+            time.sleep(0.02)
+            block = bus_obj.read_i2c_block_data(addr7, _REG_GYRO_XOUT_H, 6)
+        gx = _signed16(block[0], block[1])
+        gy = _signed16(block[2], block[3])
+        gz = _signed16(block[4], block[5])
+        scale = _DEFAULT_LSB_PER_DPS
+        return {
+            "ok": True,
+            "error": None,
+            "gyro_raw": {"x": gx, "y": gy, "z": gz},
+            "gyro_dps": {
+                "x": round(gx / scale, 4),
+                "y": round(gy / scale, 4),
+                "z": round(gz / scale, 4),
+            },
+            "full_scale_dps": 250,
+            "lsb_per_dps": scale,
+        }
+
+    try:
+        return _io()
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _read_who_am_i(bus: int, addr7: int) -> dict[str, Any]:
@@ -123,3 +184,22 @@ class MPU6050DebugService:
             "smbus": smbus,
             "hint": hint,
         }
+
+    @staticmethod
+    async def gyro_sample(*, bus: int = 1, addr7: int = 0x68) -> dict[str, Any]:
+        """读取陀螺仪角速度（°/s）/ Read gyroscope angular rate in °/s."""
+        sample = await asyncio.to_thread(_read_gyro_sample, bus, addr7)
+        ok = bool(sample.get("ok"))
+        body: dict[str, Any] = {
+            "success": ok,
+            "bus": int(bus),
+            "addr_7bit": int(addr7),
+            "addr_7bit_hex": f"0x{int(addr7):02x}",
+            "sample": sample,
+        }
+        if ok:
+            body["gyro_dps"] = sample.get("gyro_dps")
+            body["gyro_raw"] = sample.get("gyro_raw")
+        else:
+            body["error"] = sample.get("error")
+        return body

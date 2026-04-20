@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { GyroscopeMpu6050Panel } from "../components/GyroscopeMpu6050Panel";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { requestDevDebugJson } from "@shared/transport/http";
 
@@ -225,6 +226,8 @@ export function SensorsPage() {
             {formatJson(mpuResult)}
           </pre>
         )}
+
+        <GyroscopeMpu6050Panel bus={mpuBus} addr={mpuAddr} />
       </section>
     </div>
   );
