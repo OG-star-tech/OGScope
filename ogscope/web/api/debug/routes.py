@@ -517,6 +517,23 @@ async def magnetometer_selftest(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/debug/sensors/magnetometer/sample")
+async def magnetometer_sample(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(
+        default=12,
+        ge=1,
+        le=127,
+        description="7-bit I²C address (12 = 0x0C when CAD is GND)",
+    ),
+):
+    """AK09911 单次采样与水平航向角（指北调试）/ AK09911 sample + horizontal heading for north debug."""
+    try:
+        return await MagnetometerDebugService.sample_heading(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.get("/debug/sensors/magnetometer/probe-buses")
 async def magnetometer_probe_buses(
     addr: int = Query(
@@ -568,5 +585,22 @@ async def mpu6050_gyro_sample(
     """MPU-6050 陀螺仪角速度采样（°/s）/ MPU-6050 gyro angular rate sample in °/s."""
     try:
         return await MPU6050DebugService.gyro_sample(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/debug/sensors/mpu6050/imu-sample")
+async def mpu6050_imu_sample(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(
+        default=104,
+        ge=1,
+        le=127,
+        description="7-bit I²C address (104 = 0x68 when AD0 is low)",
+    ),
+):
+    """MPU-6050 加速度计+陀螺仪采样，含横滚/俯仰（°）/ Accel + gyro incl. roll/pitch from gravity."""
+    try:
+        return await MPU6050DebugService.imu_sample(bus=bus, addr7=addr)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

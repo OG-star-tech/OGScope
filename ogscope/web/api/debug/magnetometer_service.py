@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import math
 import os
 import re
 import subprocess
 from typing import Any
+
+from ogscope.platform.hardware.ak09911_i2c import measure_single
 
 # WIA：与 Linux ak09911 驱动及数据手册一致 / Matches upstream ak09911 driver & datasheets.
 _AKM_WIA1 = 0x48
@@ -177,5 +180,47 @@ class MagnetometerDebugService:
             "success": any_ok,
             "addr_7bit": int(addr7),
             "per_bus": results,
+        }
+
+    @staticmethod
+    async def sample_heading(*, bus: int = 1, addr7: int = 0x0C) -> dict[str, Any]:
+        """
+        单次测量并估算水平面内「指北」方位角（用于调试）/ Single shot + horizontal heading for debug.
+
+        航向角定义为 atan2(Hx, Hy)（度，0–360），近似表示传感器 XY 平面内磁场水平分量指向与 +Y 的夹角关系，
+        便于罗盘可视化；实际安装需校准或软铁补偿 / Heading uses atan2(Hx, Hy); calibrate for your mount.
+        """
+        meas, err = await asyncio.to_thread(measure_single, int(bus), int(addr7))
+        if err or meas is None:
+            return {
+                "success": False,
+                "error": err or "measurement failed",
+                "heading_deg": None,
+                "field_ut": None,
+                "field_raw": None,
+            }
+        hx, hy = float(meas.hx), float(meas.hy)
+        heading_rad = math.atan2(hx, hy)
+        heading_deg = (math.degrees(heading_rad) + 360.0) % 360.0
+        return {
+            "success": True,
+            "error": None,
+            "bus": int(bus),
+            "addr_7bit": int(addr7),
+            "addr_7bit_hex": f"0x{int(addr7):02x}",
+            "heading_deg": round(heading_deg, 2),
+            "heading_note_zh": (
+                "水平磁场在 XY 平面内的方向角（0°–360°），用于指北调试；安装姿态不同需换算或校准。"
+            ),
+            "heading_note_en": (
+                "Horizontal-plane field direction (0°–360°) for north-pointing debug; "
+                "mounting affects interpretation."
+            ),
+            "field_ut": {
+                "x": meas.ut_x,
+                "y": meas.ut_y,
+                "z": meas.ut_z,
+            },
+            "field_raw": {"x": meas.hx, "y": meas.hy, "z": meas.hz},
         }
 
