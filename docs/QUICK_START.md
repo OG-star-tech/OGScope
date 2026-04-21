@@ -2,7 +2,7 @@
 
 本指南将帮助你快速搭建 OGScope 开发环境。
 
-English | [中文](QUICK_START.md)
+中文 | [English](QUICK_START_EN.md)
 
 ## 🎯 目标
 

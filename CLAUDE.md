@@ -6,6 +6,8 @@
 
 OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于天文摄影中的精确极轴校准。
 
+人类可读文档按主题分组（入门、板上运维、API/契约、跨仓、工具）见 [docs/README.md](docs/README.md)（[English](docs/README_EN.md)）；下文仅保留 AI 常用要点与路径。
+
 ## 技术栈
 
 - **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
@@ -135,7 +137,7 @@ WantedBy=multi-user.target
 
 ### WiFi 与网络（NetworkManager）
 
-- **唯一详解**见 `[docs/development/wifi-nm.md](docs/development/wifi-nm.md)`：热点默认密码、`network.env`、`/debug/system`、Web API、sudoers（`ogscope-wifi` / `ogscope-nmcli`）等。
+- **唯一详解**见 [docs/development/wifi-nm.md](docs/development/wifi-nm.md)（English: [wifi-nm_EN.md](docs/development/wifi-nm_EN.md)）：热点默认密码、`network.env`、`/debug/system`、Web API、sudoers（`ogscope-wifi` / `ogscope-nmcli`）等。
 - **开机引导**：`ogscope-network-boot.service`（root oneshot，`Before=ogscope.service`）在冷启动时若 STA 长时间无可用 IPv4 则切 **AP**，不依赖 Python 进程。
 - **运行时 STA 回滚**：用户通过 Web/API 切 STA 成功后，应用内按 `wifi_sta_rollback_`* 超时无 IPv4 再切回 AP；与开机引导**分工不同、不冲突**（先 boot 完成再启动 `ogscope`）。
 - 二者均可能最终执行「切 AP」，行为**幂等**；不建议删除运行时回滚，否则仅冷启动有保障，**运行中**切 STA 失败后需手动恢复。
@@ -235,7 +237,7 @@ chore: 构建/工具变更 / Build/tool changes
   3. 同步 external integrator 适配层与上层逻辑
   4. 双仓测试通过后再提交
 - 禁止在 OGScope 中重新引入旧路径：`/api/debug/`*、`/api/analysis/*`、`/api/system/*`。
-- 联动开发详细流程见：`docs/development/CROSS_PROJECT_COLLAB.md`。
+- 联动开发详细流程见 [docs/development/CROSS_PROJECT_COLLAB.md](docs/development/CROSS_PROJECT_COLLAB.md)（English: [CROSS_PROJECT_COLLAB_EN.md](docs/development/CROSS_PROJECT_COLLAB_EN.md)）。
 - Cursor 联动建议：
   - 同一会话挂载双项目根（OGScope + external integrator）
   - 指令中明确“分别在两个仓执行改动、测试、提交”

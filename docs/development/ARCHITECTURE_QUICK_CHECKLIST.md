@@ -1,5 +1,7 @@
 # Architecture Quick Checklist
 
+中文 | [English](ARCHITECTURE_QUICK_CHECKLIST_EN.md)
+
 提交 API 或架构相关改动前，请快速自检以下项目（建议 2 分钟内完成）。
 
 ## 1) 路由与分域
@@ -19,16 +21,17 @@
 ## 3) 文档同步
 
 - [ ] 已同步更新契约文档：
-  - `docs/contracts/core-rest-v1.md`
-  - `docs/contracts/dev-rest-v1.md`
+  - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
+  - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
+  - `docs/contracts/core-compatibility-matrix.md`（段内中英）
 - [ ] 若接口分组或标签变更，已同步检查：
   - `ogscope/web/api/main.py`
   - `ogscope/web/app.py`
 - [ ] 若目录结构或开发约定变更，已同步更新：
-  - `docs/API_ARCHITECTURE.md`
+  - `docs/API_ARCHITECTURE.md`、`docs/API_ARCHITECTURE_EN.md`
   - `docs/development/README.md`
   - `docs/development/README_EN.md`
-  - `CONTRIBUTING.md`
+  - `CONTRIBUTING.md`、`CONTRIBUTING_EN.md`
 
 ## 4) 基础验证
 
