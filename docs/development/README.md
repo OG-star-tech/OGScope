@@ -2,10 +2,17 @@
 
 中文 | [English](README_EN.md)
 
+完整 `docs/` 中英索引（A–E 分组）见：[文档索引](../README.md) | [English](../README_EN.md)。
+
 本文档面向项目成员与协作者，说明 OGScope 在 **Raspberry Pi Zero 2W** 等开发板环境中的实际运行方式、依赖要求与标准调试流程。
 
-测试实践请见：[测试指南](testing-guide.md)。
-提交前架构自检请见：[Architecture Quick Checklist](ARCHITECTURE_QUICK_CHECKLIST.md)。
+### 文档地图（与索引分组一致）
+
+- **A 入门与总览**：本页为主指南；[快速开始](../QUICK_START.md) | [English](../QUICK_START_EN.md)
+- **B 板上运维**：[WiFi](wifi-nm.md) | [English](wifi-nm_EN.md)；[星库](plate-solve-data.md)；[稳定性](ogscope-service-hardening.md)；[BOM](../hardware/bom.md) | [English](../hardware/bom_EN.md)
+- **C API/契约/测试**：[API 架构（含 FastAPI 入口）](../API_ARCHITECTURE.md) | [English](../API_ARCHITECTURE_EN.md)；[系统架构](../architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md)；[Core 契约](../contracts/core-rest-v1.md) | [English](../contracts/core-rest-v1_EN.md)；[Dev 契约](../contracts/dev-rest-v1.md) | [English](../contracts/dev-rest-v1_EN.md)；[兼容矩阵](../contracts/core-compatibility-matrix.md)；[自检](ARCHITECTURE_QUICK_CHECKLIST.md) | [English](ARCHITECTURE_QUICK_CHECKLIST_EN.md)；[测试](testing-guide.md) | [English](testing-guide_EN.md)
+- **D 跨仓**：[CROSS_PROJECT_COLLAB.md](CROSS_PROJECT_COLLAB.md) | [English](CROSS_PROJECT_COLLAB_EN.md)；[外部集成契约](OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md) | [English](OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md)
+- **E 工具与贡献**：[调试控制台](../DEBUG_CONSOLE.md) | [English](../DEBUG_CONSOLE_EN.md)；[贡献指南](../../CONTRIBUTING.md) | [English](../../CONTRIBUTING_EN.md)
 
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。
@@ -418,8 +425,9 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 3. `routes.py` 仅保留 HTTP 适配，业务逻辑放在 `domain/*` 或 `core/application/*`。
 4. 至少跑一轮相关测试（建议 `poetry run pytest tests/unit -q`）。
 5. 同步更新契约文档：
-   - `docs/contracts/core-rest-v1.md`
-   - `docs/contracts/dev-rest-v1.md`
+   - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
+   - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
+   - `docs/contracts/core-compatibility-matrix.md`（段内中英，单文件）
 
 ## 10. 常见故障排查
 

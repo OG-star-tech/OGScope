@@ -1,5 +1,7 @@
 # Dev REST Domain v1
 
+中文 | [English](dev-rest-v1_EN.md)
+
 本文档定义 OGScope 开发者域接口（内部使用），不属于对客户承诺的稳定契约。
 
 ## 域划分
