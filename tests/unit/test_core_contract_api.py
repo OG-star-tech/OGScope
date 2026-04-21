@@ -5,6 +5,8 @@ Core 标准契约 API 测试 / Core standard contract API tests.
 from __future__ import annotations
 
 import pytest
+
+
 @pytest.mark.unit
 def test_core_system_status(client) -> None:
     """系统状态接口返回稳定字段 / System status endpoint returns stable fields."""
@@ -192,3 +194,20 @@ def test_docs_are_split_between_core_and_dev(client) -> None:
     assert any(path.startswith("/api/dev/analysis/") for path in dev_paths.keys())
     assert "/api/dev/debug/camera/stream" in dev_paths
     assert "/api/dev/debug/camera/stream/status" in dev_paths
+
+
+@pytest.mark.unit
+def test_core_openapi_contains_external_required_business_endpoints(client) -> None:
+    """Zenit 协作要求的核心 REST 入口必须稳定存在 / Required Zenit-facing endpoints remain stable."""
+    resp = client.get("/openapi-core.json")
+    assert resp.status_code == 200
+    paths = set(resp.json()["paths"].keys())
+    required = {
+        "/api/core/v1/system/status",
+        "/api/core/v1/analysis/start",
+        "/api/core/v1/analysis/result",
+        "/api/core/v1/analysis/stop",
+        "/api/core/v1/camera/status",
+    }
+    assert required.issubset(paths)
+    assert all(path.startswith("/api/core/v1/") for path in paths)

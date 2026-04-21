@@ -78,27 +78,16 @@ python -m ogscope.main
 
 ## 文档
 
-### 用户文档
-- [快速开始](docs/QUICK_START.md)
-- [用户手册](docs/user_guide/user-manual.md)
-- [常见问题](docs/user_guide/faq.md)
+- **[文档索引（按主题 A–E 分组）](docs/README.md)** | [English](docs/README_EN.md) — 板上运维、API/契约、跨仓协作、调试与贡献等全部入口
+- [快速开始](docs/QUICK_START.md) | [English](docs/QUICK_START_EN.md)
+- [开发指南（部署与调试）](docs/development/README.md) | [English](docs/development/README_EN.md)
 
-### 硬件文档
-- [硬件清单 (BOM)](docs/hardware/bom.md)
-- [组装指南](docs/hardware/assembly-guide.md)
-- [硬件调试](docs/hardware/hardware-debug.md)
-
-### 开发文档
-- [开发指南（中文）](docs/development/README.md)
-- [开发指南（English）](docs/development/README_EN.md)
-- [树莓派 WiFi / AP / STA / 调试页（NetworkManager）](docs/development/wifi-nm.md)
-- [FastAPI 开发](docs/development/fastapi-guide.md)
-- [测试指南](docs/development/testing-guide.md)
+> 用户手册、组装指南等扩展文档尚未纳入仓库；请以 [文档索引](docs/README.md) 为准。
 
 ## 开发
 
-详见 [开发文档（中文）](docs/development/README.md) /
-[Development Guide (English)](docs/development/README_EN.md)
+详见 [开发指南（中文）](docs/development/README.md) /
+[Development Guide (English)](docs/development/README_EN.md)；其他主题见 [文档索引](docs/README.md)。
 
 ### 远程开发配置
 

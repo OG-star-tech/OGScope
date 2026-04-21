@@ -1,5 +1,7 @@
 # Core REST Contract v1
 
+中文 | [English](core-rest-v1_EN.md)
+
 本文档定义上层调用 OGScope 的最小稳定接口。
 
 > 开发者调试/实验接口已隔离到 `/api/dev/*`，默认文档不展示，详见 `docs/contracts/dev-rest-v1.md`。

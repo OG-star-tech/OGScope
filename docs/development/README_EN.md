@@ -2,12 +2,19 @@
 
 [中文](README.md) | English
 
+Full documentation index (groups A–E): [Documentation index](../README_EN.md) | [中文](../README.md).
+
 This document explains how OGScope is actually run on development boards
 (primarily **Raspberry Pi Zero 2W**), including dependency requirements, service startup,
 and the team-standard debug workflow.
 
-For testing workflow, see [Testing Guide](testing-guide.md).
-For pre-commit architecture guardrails, see [Architecture Quick Checklist](ARCHITECTURE_QUICK_CHECKLIST.md).
+### Documentation map (same groups as the index)
+
+- **A Getting started**: this guide; [Quick Start](../QUICK_START_EN.md) | [中文](../QUICK_START.md)
+- **B Board ops**: [WiFi](wifi-nm_EN.md) | [中文](wifi-nm.md); [plate-solve data](plate-solve-data.md); [stability / memory](ogscope-service-hardening.md); [BOM](../hardware/bom_EN.md) | [中文](../hardware/bom.md)
+- **C API and quality**: [API architecture (includes FastAPI entry)](../API_ARCHITECTURE_EN.md) | [中文](../API_ARCHITECTURE.md); [system architecture](../architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md); [Core contract](../contracts/core-rest-v1_EN.md) | [中文](../contracts/core-rest-v1.md); [Dev contract](../contracts/dev-rest-v1_EN.md) | [中文](../contracts/dev-rest-v1.md); [compatibility matrix](../contracts/core-compatibility-matrix.md); [checklist](ARCHITECTURE_QUICK_CHECKLIST_EN.md) | [中文](ARCHITECTURE_QUICK_CHECKLIST.md); [testing](testing-guide_EN.md) | [中文](testing-guide.md)
+- **D Cross-repo**: [CROSS_PROJECT_COLLAB_EN.md](CROSS_PROJECT_COLLAB_EN.md) | [中文](CROSS_PROJECT_COLLAB.md); [外部集成方 contract](OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md) | [中文](OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md)
+- **E Tools and contributing**: [Debug console](../DEBUG_CONSOLE_EN.md) | [中文](../DEBUG_CONSOLE.md); [Contributing](../../CONTRIBUTING_EN.md) | [中文](../../CONTRIBUTING.md)
 
 Recommended workflow: **edit locally -> upload to board -> restart with
 `systemd` -> verify**.  
@@ -423,8 +430,9 @@ To reduce mistaken submissions as the architecture grows, verify all items below
 3. `routes.py` contains HTTP adapter logic only; business logic lives in `domain/*` or `core/application/*`.
 4. Run at least one relevant test pass (recommended: `poetry run pytest tests/unit -q`).
 5. Update contract docs together with code changes:
-   - `docs/contracts/core-rest-v1.md`
-   - `docs/contracts/dev-rest-v1.md`
+   - `docs/contracts/core-rest-v1.md` / `docs/contracts/core-rest-v1_EN.md`
+   - `docs/contracts/dev-rest-v1.md` / `docs/contracts/dev-rest-v1_EN.md`
+   - `docs/contracts/core-compatibility-matrix.md` (inline bilingual, single file)
 
 ## 10. Troubleshooting Checklist
 

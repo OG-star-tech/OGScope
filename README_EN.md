@@ -78,26 +78,15 @@ After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
 
 ## Documentation
 
-### User Documentation
-- [Quick Start](docs/QUICK_START_EN.md)
-- [User Manual](docs/user_guide/user-manual.md)
-- [FAQ](docs/user_guide/faq.md)
+- **[Documentation index (topics A–E)](docs/README_EN.md)** | [中文](docs/README.md) — board ops, API/contracts, cross-repo, debug, contributing
+- [Quick Start](docs/QUICK_START_EN.md) | [中文](docs/QUICK_START.md)
+- [Development Guide](docs/development/README_EN.md) | [中文](docs/development/README.md)
 
-### Hardware Documentation
-- [Bill of Materials (BOM)](docs/hardware/bom.md)
-- [Assembly Guide](docs/hardware/assembly-guide.md)
-- [Hardware Debugging](docs/hardware/hardware-debug.md)
-
-### Development Documentation
-- [Development Guide (English)](docs/development/README_EN.md)
-- [Development Guide (中文)](docs/development/README.md)
-- [Raspberry Pi WiFi / AP / STA (NetworkManager)](docs/development/wifi-nm.md)
-- [FastAPI Development](docs/development/fastapi-guide.md)
-- [Testing Guide](docs/development/testing-guide.md)
+> User manual, assembly guide, and similar extras are not in the repo yet; use the [documentation index](docs/README_EN.md).
 
 ## Development
 
-See [Development Guide (English)](docs/development/README_EN.md) for details.
+See the [Development Guide](docs/development/README_EN.md) | [中文](docs/development/README.md); all other topics are grouped in the [documentation index](docs/README_EN.md).
 
 ### Remote Development Configuration
 

@@ -27,6 +27,13 @@ class Settings(BaseSettings):
         default=True,
         description="启用共享硬件平面 / Enable shared hardware plane",
     )
+    hardware_plane_role: str = Field(
+        default="standalone",
+        description=(
+            "硬件平面角色：standalone 或 subordinate / "
+            "Hardware plane role: standalone or subordinate"
+        ),
+    )
     hardware_plane_rpc_timeout_ms: int = Field(
         default=800,
         ge=50,
@@ -37,9 +44,28 @@ class Settings(BaseSettings):
         default=Path("/tmp/ogscope-hardware-plane.sock"),
         description="硬件平面 UDS 套接字路径 / Hardware plane UDS socket path",
     )
+    hardware_plane_remote_uds_socket: Path = Field(
+        default=Path("/tmp/external-sensor-plane.sock"),
+        description=(
+            "外部传感器 UDS 套接字路径（仅 subordinate 使用） / "
+            "External sensor UDS socket path (used in subordinate)"
+        ),
+    )
     hardware_plane_camera_autostart: bool = Field(
         default=False,
         description="开机阶段自动启动相机服务 / Auto-start camera service during boot phases",
+    )
+    enable_local_sensors: bool = Field(
+        default=True,
+        description="启用 OGScope 本地传感器服务 / Enable OGScope local sensor services",
+    )
+    enable_hmi: bool = Field(
+        default=True,
+        description="启用 OGScope HMI 服务 / Enable OGScope HMI services",
+    )
+    enable_ui: bool = Field(
+        default=True,
+        description="启用 OGScope 用户界面路由 / Enable OGScope UI routes",
     )
 
     # 日志配置 / Log configuration
@@ -83,10 +109,22 @@ class Settings(BaseSettings):
 
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")
-    display_type: str = Field(default="st7789", description="显示屏类型")
-    display_width: int = Field(default=240, description="屏幕宽度")
+    display_type: str = Field(default="st7796", description="显示屏类型（如 st7796）")
+    display_width: int = Field(default=320, description="屏幕宽度")
     display_height: int = Field(default=320, description="屏幕高度")
     display_rotation: int = Field(default=0, description="屏幕旋转角度")
+    display_dc_pin: int = Field(
+        default=24,
+        ge=2,
+        le=40,
+        description="SPI DC 引脚（BCM）/ SPI DC GPIO (BCM)",
+    )
+    display_spi_max_speed_hz: int = Field(
+        default=16_000_000,
+        ge=500_000,
+        le=62_000_000,
+        description="SPI 屏幕总线最高速率 Hz / SPI bus max Hz for LCD",
+    )
 
     # 极轴校准配置 / Polar calibration configuration
     polar_align_timeout: int = Field(default=300, description="校准超时时间(秒)")

@@ -42,6 +42,7 @@ class PlaneErrorCode(str, Enum):
     BAD_REQUEST = "bad_request"
     NOT_FOUND = "not_found"
     TIMEOUT = "timeout"
+    UNAVAILABLE = "unavailable"
     INTERNAL_ERROR = "internal_error"
     UNSUPPORTED = "unsupported"
 

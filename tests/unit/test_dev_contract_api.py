@@ -28,6 +28,7 @@ def test_dev_hardware_plane_status_available(client) -> None:
     payload = resp.json()
     assert payload["success"] is True
     assert "services" in payload["data"]
+    assert "profile" in payload["data"]
 
 
 @pytest.mark.unit
@@ -42,6 +43,15 @@ def test_dev_hardware_plane_sensor_read(client) -> None:
         "degraded",
         "unavailable",
     }
+
+
+@pytest.mark.unit
+def test_dev_hardware_plane_metrics_include_profile(client) -> None:
+    resp = client.get("/api/dev/system/hardware-plane/metrics")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert "profile" in payload["data"]
 
 
 @pytest.mark.unit

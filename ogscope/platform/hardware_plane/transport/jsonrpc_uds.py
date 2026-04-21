@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 JsonCallHandler = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -62,4 +63,46 @@ class JsonRpcUdsServer:
             await writer.drain()
         writer.close()
         await writer.wait_closed()
+
+
+class JsonRpcUdsClient:
+    """基于 Unix Domain Socket 的最小 JSON-RPC 客户端 / Minimal JSON-RPC over UDS client."""
+
+    def __init__(self, socket_path: str) -> None:
+        self._socket_path = Path(socket_path)
+
+    @property
+    def socket_path(self) -> Path:
+        return self._socket_path
+
+    async def call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout_ms: int = 800,
+    ) -> dict[str, Any]:
+        budget_s = max(50, int(timeout_ms)) / 1000.0
+        reader: asyncio.StreamReader
+        writer: asyncio.StreamWriter
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path=str(self._socket_path)),
+            timeout=budget_s,
+        )
+        try:
+            request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": method,
+                "params": params or {},
+            }
+            writer.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+            await asyncio.wait_for(writer.drain(), timeout=budget_s)
+            line = await asyncio.wait_for(reader.readline(), timeout=budget_s)
+            if not line:
+                return {"success": False, "error": {"message": "empty response"}, "data": {}}
+            return json.loads(line.decode("utf-8", errors="ignore"))
+        finally:
+            writer.close()
+            await writer.wait_closed()
 

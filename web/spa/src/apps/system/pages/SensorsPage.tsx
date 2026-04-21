@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import { GyroscopeMpu6050Panel } from "../components/GyroscopeMpu6050Panel";
+import { MagnetometerCompassPanel } from "../components/MagnetometerCompassPanel";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { requestDevDebugJson } from "@shared/transport/http";
 
@@ -134,7 +136,9 @@ export function SensorsPage() {
           </label>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <MagnetometerCompassPanel bus={bus} addr={addr} />
+
+        <div className="mt-6 flex flex-wrap gap-2">
           <button
             type="button"
             disabled={loading}
@@ -160,9 +164,14 @@ export function SensorsPage() {
         )}
 
         {result && (
-          <pre className="mt-4 max-h-[480px] overflow-auto rounded border border-outline-variant/30 bg-surface-container/80 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
-            {formatJson(result)}
-          </pre>
+          <details className="mt-4 rounded-lg border border-outline-variant/30 bg-surface-container/50">
+            <summary className="cursor-pointer px-3 py-2 text-[11px] text-on-surface-variant">
+              {t("sys.sensors.jsonToggle")}
+            </summary>
+            <pre className="max-h-[320px] overflow-auto border-t border-outline-variant/20 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+              {formatJson(result)}
+            </pre>
+          </details>
         )}
       </section>
 
@@ -203,6 +212,8 @@ export function SensorsPage() {
           </label>
         </div>
 
+        <GyroscopeMpu6050Panel bus={mpuBus} addr={mpuAddr} />
+
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
@@ -221,9 +232,14 @@ export function SensorsPage() {
         )}
 
         {mpuResult && (
-          <pre className="mt-4 max-h-[480px] overflow-auto rounded border border-outline-variant/30 bg-surface-container/80 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
-            {formatJson(mpuResult)}
-          </pre>
+          <details className="mt-4 rounded-lg border border-outline-variant/30 bg-surface-container/50">
+            <summary className="cursor-pointer px-3 py-2 text-[11px] text-on-surface-variant">
+              {t("sys.sensors.jsonToggle")}
+            </summary>
+            <pre className="max-h-[320px] overflow-auto border-t border-outline-variant/20 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+              {formatJson(mpuResult)}
+            </pre>
+          </details>
         )}
       </section>
     </div>
