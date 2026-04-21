@@ -1,5 +1,7 @@
 # 贡献指南
 
+中文 | [English](CONTRIBUTING_EN.md)
+
 感谢你对 OGScope 项目的关注！我们欢迎任何形式的贡献。
 
 ## 如何贡献
@@ -54,7 +56,7 @@
    poetry run ruff check ogscope tests
    poetry run mypy ogscope
    ```
-   同时建议按 [Architecture Quick Checklist](docs/development/ARCHITECTURE_QUICK_CHECKLIST.md) 做一次提交前自检，尤其是 API/架构改动。
+   同时建议按 [Architecture Quick Checklist](docs/development/ARCHITECTURE_QUICK_CHECKLIST.md)（[English](docs/development/ARCHITECTURE_QUICK_CHECKLIST_EN.md)）做一次提交前自检，尤其是 API/架构改动。
 
 6. **提交更改**
    ```bash
@@ -112,8 +114,9 @@
 - 开发接口固定在 `"/api/dev/*"`，不要再引入 `"/api/debug/*"`、`"/api/analysis/*"`、`"/api/system/*"` 旧路径。
 - `routes.py` 仅保留 HTTP 适配逻辑，业务逻辑下沉到 `domain/*` 与 `core/application/*`。
 - API 相关改动需同步更新：
-  - `docs/contracts/core-rest-v1.md`
-  - `docs/contracts/dev-rest-v1.md`
+  - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
+  - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
+  - `docs/contracts/core-compatibility-matrix.md`（段内中英）
 
 ## 开发流程
 
@@ -142,7 +145,7 @@
 
 如果你在贡献过程中遇到问题：
 
-- 查看 [开发文档](docs/development/README.md)
+- 查看 [文档索引](docs/README.md)（[English](docs/README_EN.md)）与 [开发文档](docs/development/README.md)
 - 在 [Discussions](https://github.com/OG-star-tech/OGScope/discussions) 提问
 - 联系维护者
 

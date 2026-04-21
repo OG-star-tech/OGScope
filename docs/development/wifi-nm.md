@@ -1,5 +1,7 @@
 # WiFi：STA / AP 与 NetworkManager
 
+中文 | [English](wifi-nm_EN.md)
+
 本文档为 **Raspberry Pi OS** 上 OGScope **网络能力的唯一详解**：热点/STA 密码与访问、`network.env`、sudoers、`/debug/system`、Web API，以及 **开机网络引导**（`ogscope-network-boot`）与 **运行时 STA 回滚**（`wifi_sta_rollback_*`）的分工。开发板 **Poetry、`install.sh` / `board-update.sh` 总流程**见 [开发指南（部署速查）](README.md) **§0.2**、**§0.5**；以下按「用户说明 → 初始化 → 环境变量 → sudoers → API → 验证」展开。
 
 ## 用户操作说明（密码、访问与安全）

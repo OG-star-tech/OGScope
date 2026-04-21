@@ -18,6 +18,12 @@ class HardwareCommandBody(BaseModel):
     target: str
     action: str
     payload: dict = Field(default_factory=dict)
+    timeout_ms: int | None = Field(
+        default=None,
+        ge=100,
+        le=10000,
+        description="可选 RPC 超时（毫秒），大屏刷新等可加长 / Optional RPC timeout for slow ops",
+    )
 
 
 @router.get("/system/info", response_model=SystemInfo)
@@ -47,6 +53,7 @@ async def get_hardware_plane_metrics() -> dict:
             "metrics": data.get("metrics", {}),
             "services": list((data.get("services", {}) or {}).keys()),
             "started": bool(data.get("started", False)),
+            "profile": data.get("profile", {}),
         },
         "error": None,
     }
@@ -67,4 +74,5 @@ async def post_hardware_command(body: HardwareCommandBody) -> dict:
         target=body.target,
         action=body.action,
         payload=dict(body.payload),
+        timeout_ms=body.timeout_ms,
     )

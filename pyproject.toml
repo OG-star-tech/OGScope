@@ -56,6 +56,10 @@ loguru = "^0.7.2"            # 更好的日志库
 # pyindi-client = "^1.9.0"
 smbus2 = "^0.5.0"
 
+# SPI 屏幕（仅 Linux / 树莓派；开发机 macOS 不安装）/ SPI LCD (Linux/Pi only)
+spidev = { version = "^3.6", markers = "sys_platform == 'linux'" }
+"RPi.GPIO" = { version = "^0.7.1", markers = "sys_platform == 'linux'" }
+
 [tool.poetry.group.dev.dependencies]
 # 测试
 pytest = "^8.0.0"

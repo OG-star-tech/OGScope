@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ogscope.platform.hardware_plane.contracts import (
@@ -17,7 +17,10 @@ from ogscope.platform.hardware_plane.contracts import (
     error_payload,
     ok_payload,
 )
-from ogscope.platform.hardware_plane.registry import CapabilityRecord, CapabilityRegistry
+from ogscope.platform.hardware_plane.registry import (
+    CapabilityRecord,
+    CapabilityRegistry,
+)
 from ogscope.platform.hardware_plane.services.base import HardwareService
 from ogscope.platform.hardware_plane.services.camera_service import CameraPlaneService
 from ogscope.platform.hardware_plane.services.hmi import HmiService
@@ -68,17 +71,25 @@ class HardwarePlaneMetrics:
 class HardwarePlaneDaemon:
     """硬件平面守护进程 / Hardware plane daemon."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        enable_local_sensors: bool = True,
+        enable_hmi: bool = True,
+        profile: dict[str, Any] | None = None,
+    ) -> None:
         self._started = False
         self._started_at: float | None = None
         self._registry = CapabilityRegistry()
         self._metrics = HardwarePlaneMetrics()
         self._phases: list[StartupPhase] = []
-        self._services: dict[str, HardwareService] = {
-            "camera": CameraPlaneService(),
-            "sensor-hub": SensorHubService(),
-            "hmi": HmiService(),
-        }
+        self._profile = dict(profile or {})
+        self._sensor_source = str(self._profile.get("sensor_source", "local"))
+        self._services: dict[str, HardwareService] = {"camera": CameraPlaneService()}
+        if enable_local_sensors:
+            self._services["sensor-hub"] = SensorHubService()
+        if enable_hmi:
+            self._services["hmi"] = HmiService()
         self._register_defaults()
 
     def _register_defaults(self) -> None:
@@ -88,6 +99,7 @@ class HardwarePlaneDaemon:
                 kind=CapabilityKind.CAMERA,
                 state=CapabilityState.AVAILABLE,
                 writable=True,
+                metadata={"source": "local"},
             )
         )
         self._registry.register(
@@ -96,6 +108,7 @@ class HardwarePlaneDaemon:
                 kind=CapabilityKind.SENSOR,
                 state=CapabilityState.AVAILABLE,
                 writable=False,
+                metadata={"source": self._sensor_source},
             )
         )
         self._registry.register(
@@ -104,6 +117,7 @@ class HardwarePlaneDaemon:
                 kind=CapabilityKind.SENSOR,
                 state=CapabilityState.AVAILABLE,
                 writable=False,
+                metadata={"source": self._sensor_source},
             )
         )
         self._registry.register(
@@ -112,6 +126,7 @@ class HardwarePlaneDaemon:
                 kind=CapabilityKind.SENSOR,
                 state=CapabilityState.PLANNED,
                 writable=False,
+                metadata={"source": self._sensor_source},
             )
         )
         self._registry.register(
@@ -120,16 +135,19 @@ class HardwarePlaneDaemon:
                 kind=CapabilityKind.SENSOR,
                 state=CapabilityState.PLANNED,
                 writable=False,
+                metadata={"source": self._sensor_source},
             )
         )
-        self._registry.register(
-            CapabilityRecord(
-                name="hmi.display",
-                kind=CapabilityKind.HMI,
-                state=CapabilityState.AVAILABLE,
-                writable=True,
+        if "hmi" in self._services:
+            self._registry.register(
+                CapabilityRecord(
+                    name="hmi.display",
+                    kind=CapabilityKind.HMI,
+                    state=CapabilityState.AVAILABLE,
+                    writable=True,
+                    metadata={"source": "local"},
+                )
             )
-        )
 
     def begin_phase(self, phase_id: str, detail: str = "") -> StartupPhase:
         phase = StartupPhase(phase_id=phase_id, started_at=time.time(), detail=detail)
@@ -145,8 +163,10 @@ class HardwarePlaneDaemon:
         self._started = True
         self._started_at = time.time()
         phase_p1 = self.begin_phase("P1", "hardware plane ready")
-        await self._services["sensor-hub"].start()
-        await self._services["hmi"].start()
+        if "sensor-hub" in self._services:
+            await self._services["sensor-hub"].start()
+        if "hmi" in self._services:
+            await self._services["hmi"].start()
         self.end_phase(phase_p1)
 
     async def stop(self) -> None:
@@ -169,8 +189,14 @@ class HardwarePlaneDaemon:
                 return ok_payload({"capabilities": self._registry.as_dict_list()})
             if method == PlaneMethod.SENSOR_READ.value:
                 sensor_name = str(params.get("name", ""))
+                sensor_hub = self._services.get("sensor-hub")
+                if sensor_hub is None:
+                    return error_payload(
+                        code=PlaneErrorCode.UNAVAILABLE,
+                        message="local sensor service is disabled; use delegated sensor backend",
+                    )
                 return ok_payload(
-                    {"sensor": await self._services["sensor-hub"].read(sensor_name)}
+                    {"sensor": await sensor_hub.read(sensor_name)}
                 )
             if method == PlaneMethod.DEVICE_COMMAND.value:
                 target = str(params.get("target", ""))
@@ -226,6 +252,7 @@ class HardwarePlaneDaemon:
             "services": service_status,
             "capabilities": self._registry.as_dict_list(),
             "metrics": self._metrics.to_dict(),
+            "profile": dict(self._profile),
         }
 
     def metrics(self) -> dict[str, Any]:
