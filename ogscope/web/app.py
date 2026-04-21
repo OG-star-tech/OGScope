@@ -3,15 +3,14 @@ FastAPI Web 应用
 """
 
 import asyncio
-from copy import deepcopy
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.docs import get_redoc_html
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -19,6 +18,8 @@ from loguru import logger
 from ogscope.__version__ import __version__
 from ogscope.config import get_settings
 from ogscope.platform.hardware_plane.runtime import (
+    describe_hardware_plane_profile,
+    get_hardware_plane_client,
     get_hardware_plane_daemon,
     start_hardware_plane,
     stop_hardware_plane,
@@ -32,6 +33,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # 启动时执行 / Execute at startup
     logger.info("初始化 Web 应用...")
     settings = get_settings()
+    hp_profile = describe_hardware_plane_profile(settings)
+    logger.info(
+        "硬件角色={} 传感器来源={} 本地传感器={} HMI={} UI={} 远端UDS={}",
+        hp_profile["role"],
+        hp_profile["sensor_source"],
+        hp_profile["enable_local_sensors"],
+        hp_profile["enable_hmi"],
+        hp_profile["enable_ui"],
+        hp_profile["remote_uds_socket"],
+    )
     phase_p0_started = asyncio.get_running_loop().time()
 
     # 真实硬件下后台预热相机：不阻塞 Uvicorn 就绪；首次请求仍可在锁内完成初始化
@@ -87,7 +98,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
 
     try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+        from ogscope.platform.hardware.wifi_emergency_gpio import (
+            wifi_emergency_gpio_monitor,
+        )
 
         wifi_emergency_gpio_monitor.start()
     except Exception as e:
@@ -98,7 +111,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
     try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import wifi_emergency_gpio_monitor
+        from ogscope.platform.hardware.wifi_emergency_gpio import (
+            wifi_emergency_gpio_monitor,
+        )
 
         wifi_emergency_gpio_monitor.stop()
     except Exception as e:
@@ -160,6 +175,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+hardware_profile = describe_hardware_plane_profile(settings)
 
 
 def _spa_unavailable_html(title: str, detail: str) -> HTMLResponse:
@@ -186,7 +202,7 @@ app.add_middleware(
 )
 
 # 挂载静态文件 / Mount static files
-if settings.static_dir.exists():
+if bool(hardware_profile["enable_ui"]) and settings.static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
 # 注册路由 / Register route
@@ -206,6 +222,8 @@ async def web_manifest():
 async def root(request: Request):
     """根路径：用户 HUD（Vite home 入口构建产物）/ Root: user HUD from Vite home entry."""
     _ = request
+    if not bool(hardware_profile["enable_ui"]):
+        return HTMLResponse("UI disabled in subordinate mode", status_code=404)
     home_index = settings.static_dir / "analysis-lab" / "home.html"
     if home_index.is_file():
         return FileResponse(home_index)
@@ -219,6 +237,8 @@ async def root(request: Request):
 async def debug_console(request: Request):
     """统一调试后台入口 / Unified debug admin entry."""
     _ = request
+    if not bool(hardware_profile["enable_ui"]):
+        return HTMLResponse("UI disabled in subordinate mode", status_code=404)
     admin_index = settings.static_dir / "analysis-lab" / "system.html"
     if admin_index.is_file():
         return FileResponse(admin_index)
@@ -232,6 +252,8 @@ async def debug_console(request: Request):
 async def debug_system_console(request: Request):
     """兼容旧系统调试入口，重定向到新后台 / Legacy system debug entry."""
     _ = request
+    if not bool(hardware_profile["enable_ui"]):
+        return HTMLResponse("UI disabled in subordinate mode", status_code=404)
     return RedirectResponse(url="/debug", status_code=307)
 
 
@@ -239,6 +261,8 @@ async def debug_system_console(request: Request):
 async def debug_camera_console(request: Request):
     """相机调试页（Vite camera 入口）/ Camera debug SPA."""
     _ = request
+    if not bool(hardware_profile["enable_ui"]):
+        return HTMLResponse("UI disabled in subordinate mode", status_code=404)
     camera_index = settings.static_dir / "analysis-lab" / "camera.html"
     if camera_index.is_file():
         return FileResponse(camera_index)
@@ -252,6 +276,8 @@ async def debug_camera_console(request: Request):
 async def debug_analysis_console(request: Request):
     """星空解算控制台（Vite analysis 入口）/ Plate solve lab SPA."""
     _ = request
+    if not bool(hardware_profile["enable_ui"]):
+        return HTMLResponse("UI disabled in subordinate mode", status_code=404)
     lab_index = settings.static_dir / "analysis-lab" / "index.html"
     if lab_index.is_file():
         return FileResponse(lab_index)
@@ -268,6 +294,8 @@ async def api_root():
         "name": "OGScope",
         "version": __version__,
         "status": "running",
+        "role": hardware_profile["role"],
+        "sensor_source": hardware_profile["sensor_source"],
         "docs": "/docs",
         "docs_dev": "/docs/dev",
         "endpoints": {
@@ -423,11 +451,14 @@ async def health_check():
     """健康检查 / health check"""
     hardware_started = False
     metrics: dict[str, Any] = {}
+    profile: dict[str, Any] = {}
     try:
-        daemon = get_hardware_plane_daemon()
-        status = await daemon.status()
-        hardware_started = bool(status.get("started", False))
-        metrics = status.get("metrics", {}) or {}
+        client = get_hardware_plane_client()
+        payload = await client.status_get()
+        data = payload.get("data", {}) if payload.get("success") else {}
+        hardware_started = bool(data.get("started", False))
+        metrics = data.get("metrics", {}) or {}
+        profile = data.get("profile", {}) or client.runtime_profile()
     except Exception:
         hardware_started = False
     return {
@@ -436,5 +467,6 @@ async def health_check():
         "hardware_plane": {
             "started": hardware_started,
             "metrics": metrics,
+            "profile": profile,
         },
     }
