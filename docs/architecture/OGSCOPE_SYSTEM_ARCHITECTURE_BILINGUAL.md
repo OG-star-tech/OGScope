@@ -139,4 +139,8 @@ flowchart TD
 传感器与人机交互硬件通过 `Capability Registry` 与 `Environment Profiles` 管理，支持不同环境装配不同驱动逻辑。
 - **Unified hardware contract / 统一硬件契约**  
 OGScope 通过 `Hardware Plane Client` 使用统一能力接口（status/read/command/subscribe），以支持与外部集成方的交叉调用和职责隔离。
+- **subordinate co-deployment minimal boundary / subordinate co-deployment最小边界**  
+在 `subordinate` 角色下，`外部集成方 -> OGScope` 业务协作固定走 `REST /api/core/v1/*`（状态、分析、视频流）；  
+`OGScope -> 外部集成方` 仅通过本机 `UDS JSON-RPC` 读取传感器（GPS、磁力计等）。OGScope 本地 UI/HMI/本地传感器默认禁用，摄像头仍由 OGScope 维护。  
+In `subordinate`, `外部集成方 -> OGScope` business integration stays on `REST /api/core/v1/*` (status, analysis, video stream), while `OGScope -> 外部集成方` uses local `UDS JSON-RPC` only for sensor reads (GPS, magnetometer, etc). OGScope local UI/HMI/local sensors are disabled by default, and camera ownership remains in OGScope.
 

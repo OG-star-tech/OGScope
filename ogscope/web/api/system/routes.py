@@ -53,6 +53,7 @@ async def get_hardware_plane_metrics() -> dict:
             "metrics": data.get("metrics", {}),
             "services": list((data.get("services", {}) or {}).keys()),
             "started": bool(data.get("started", False)),
+            "profile": data.get("profile", {}),
         },
         "error": None,
     }

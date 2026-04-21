@@ -27,6 +27,13 @@ class Settings(BaseSettings):
         default=True,
         description="启用共享硬件平面 / Enable shared hardware plane",
     )
+    hardware_plane_role: str = Field(
+        default="standalone",
+        description=(
+            "硬件平面角色：standalone 或 subordinate / "
+            "Hardware plane role: standalone or subordinate"
+        ),
+    )
     hardware_plane_rpc_timeout_ms: int = Field(
         default=800,
         ge=50,
@@ -37,9 +44,28 @@ class Settings(BaseSettings):
         default=Path("/tmp/ogscope-hardware-plane.sock"),
         description="硬件平面 UDS 套接字路径 / Hardware plane UDS socket path",
     )
+    hardware_plane_remote_uds_socket: Path = Field(
+        default=Path("/tmp/external-sensor-plane.sock"),
+        description=(
+            "外部传感器 UDS 套接字路径（仅 subordinate 使用） / "
+            "External sensor UDS socket path (used in subordinate)"
+        ),
+    )
     hardware_plane_camera_autostart: bool = Field(
         default=False,
         description="开机阶段自动启动相机服务 / Auto-start camera service during boot phases",
+    )
+    enable_local_sensors: bool = Field(
+        default=True,
+        description="启用 OGScope 本地传感器服务 / Enable OGScope local sensor services",
+    )
+    enable_hmi: bool = Field(
+        default=True,
+        description="启用 OGScope HMI 服务 / Enable OGScope HMI services",
+    )
+    enable_ui: bool = Field(
+        default=True,
+        description="启用 OGScope 用户界面路由 / Enable OGScope UI routes",
     )
 
     # 日志配置 / Log configuration
