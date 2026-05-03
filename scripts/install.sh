@@ -11,6 +11,7 @@
 #   OGSCOPE_SKIP_NETWORK_BOOT=1 — 不安装开机 WiFi 引导单元 / Skip ogscope-network-boot.service
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不自动复制 default_database.npz 到 data/plate_solve/ / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 若目标已存在仍覆盖 / Overwrite data/plate_solve/default_database.npz if present
+#   OGSCOPE_DEVELOPMENT_MODE=1 — 启用开发模式（默认 OGSCOPE_LOG_LEVEL=DEBUG；也可显式设置 OGSCOPE_LOG_LEVEL）/ Dev mode (default DEBUG log level)
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
 #   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
@@ -244,6 +245,19 @@ if [ -z "${LD_LIBRARY_PATH_VALUE}" ]; then
     echo "⚠️ 未检测到标准库目录，使用默认 ${LD_LIBRARY_PATH_VALUE} / No lib dir found; using default aarch64 path"
 fi
 
+# 开发模式：更详细日志（与 ogscope.config.Settings.development_mode 对齐）/ Dev mode: richer logs
+OGSCOPE_DEVELOPMENT_MODE_VALUE="${OGSCOPE_DEVELOPMENT_MODE:-0}"
+if [ "${OGSCOPE_DEVELOPMENT_MODE_VALUE}" = "1" ]; then
+    echo "🧪 启用开发模式（OGSCOPE_DEVELOPMENT_MODE=1）/ Development mode enabled"
+    if [ -z "${OGSCOPE_LOG_LEVEL:-}" ]; then
+        OGSCOPE_LOG_LEVEL_VALUE="DEBUG"
+    else
+        OGSCOPE_LOG_LEVEL_VALUE="${OGSCOPE_LOG_LEVEL}"
+    fi
+else
+    OGSCOPE_LOG_LEVEL_VALUE="${OGSCOPE_LOG_LEVEL:-INFO}"
+fi
+
 # ExecStart 使用 poetry env info --path（与 virtualenvs.in-project=true 时即项目 .venv），勿手写 ~/.virtualenvs/
 # ExecStart uses poetry env path (project .venv when in-project=true); do not hardcode ~/.virtualenvs/
 echo "⚙️ 写入 systemd: ${SERVICE_PATH}"
@@ -259,7 +273,8 @@ WorkingDirectory=${PROJECT_DIR}
 Environment=PYTHONPATH=${PYTHONPATH_VALUE}
 Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH_VALUE}
 Environment=OGSCOPE_RELOAD=false
-Environment=OGSCOPE_LOG_LEVEL=INFO
+Environment=OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE_VALUE}
+Environment=OGSCOPE_LOG_LEVEL=${OGSCOPE_LOG_LEVEL_VALUE}
 EnvironmentFile=-/etc/ogscope/network.env
 ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure

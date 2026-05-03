@@ -15,18 +15,21 @@
 ## 功能特性
 
 ### Phase 1 - 基础功能 (MVP)
+
 - ✅ 实时视频预览
 - ✅ Web 远程控制
 - ✅ 基础极轴校准
 - ✅ 相机参数调整
 
 ### Phase 2 - 完整功能
+
 - ⏳ SPI 屏幕显示
 - ⏳ 自动板块求解
 - ⏳ 移动 App 控制
 - ⏳ 校准数据管理
 
 ### Phase 3 - 生态集成
+
 - ⏳ INDI 驱动支持
 - ⏳ 赤道仪控制
 - ⏳ 多设备联动
@@ -70,11 +73,11 @@ poetry shell
 python -m ogscope.main
 ```
 
-开发板一键部署、WiFi 热点与 **`/debug/system`** 等以 [docs/development/wifi-nm.md](docs/development/wifi-nm.md) 与 [docs/development/README.md](docs/development/README.md) 为准。
+开发板一键部署、WiFi 热点与 `**/debug/system**` 等以 [docs/development/wifi-nm.md](docs/development/wifi-nm.md) 与 [docs/development/README.md](docs/development/README.md) 为准。
 
 ### Web 界面访问
 
-启动后访问: http://raspberrypi.local:8000 或 http://<IP>:8000
+启动后访问: [http://raspberrypi.local:8000](http://raspberrypi.local:8000) 或 http://:8000
 
 ## 文档
 
@@ -120,7 +123,6 @@ OGScope/
 └── scripts/                   # 部署/运维脚本
 ```
 
-
 ## 许可证
 
 本项目采用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 许可证
@@ -140,4 +142,3 @@ OGScope/
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！详见 [贡献指南](CONTRIBUTING.md)
-

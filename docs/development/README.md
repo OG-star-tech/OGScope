@@ -36,18 +36,18 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-说明摘要：默认 `poetry install --only main`；国内网络可 **`export OGSCOPE_MIRROR=cn`**；低配板可 **`OGSCOPE_APT_SLOW=1`**。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
+说明摘要：默认 `poetry install --only main`；国内网络可 `**export OGSCOPE_MIRROR=cn**`；低配板可 `**OGSCOPE_APT_SLOW=1**`。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
 
 ### 0.3 网络与 WiFi（AP/STA）
 
-- **`install.sh`** 会安装 `network-manager`、`avahi-daemon`，并执行 **`ogscope-network-init.sh init`**（NM 连接、`/etc/ogscope/network.env`、sudoers、主机名与 `hosts` 等），除非 **`OGSCOPE_SKIP_NETWORK_INIT=1`**。
-- 同次安装会写入 **`ogscope-network-boot.service`**（开机无线网络引导：无可用 STA 则回 AP），除非 **`OGSCOPE_SKIP_NETWORK_BOOT=1`**。
-- **日常仅同步代码与依赖**优先 **`./scripts/board-update.sh`**；全量重装或改系统级依赖时再跑 **`install.sh`**（见 **§0.5**）。
-- 热点 SSID/密码、调试页 **`/debug/system`**、API、**开机引导与运行时 STA 回滚** 的分工：**唯一详解**见 **[wifi-nm.md](wifi-nm.md)**。
+- `**install.sh`** 会安装 `network-manager`、`avahi-daemon`，并执行 `**ogscope-network-init.sh init**`（NM 连接、`/etc/ogscope/network.env`、sudoers、主机名与 `hosts` 等），除非 `**OGSCOPE_SKIP_NETWORK_INIT=1**`。
+- 同次安装会写入 `**ogscope-network-boot.service**`（开机无线网络引导：无可用 STA 则回 AP），除非 `**OGSCOPE_SKIP_NETWORK_BOOT=1**`。
+- **日常仅同步代码与依赖**优先 `**./scripts/board-update.sh`**；全量重装或改系统级依赖时再跑 `**install.sh**`（见 **§0.5**）。
+- 热点 SSID/密码、调试页 `**/debug/system`**、API、**开机引导与运行时 STA 回滚** 的分工：**唯一详解**见 **[wifi-nm.md](wifi-nm.md)**。
 
 ### 0.4 星图解算数据
 
-将 **`default_database.npz`** 放到 **`data/plate_solve/`**（不随仓库分发）。放置与配置见 [plate-solve-data.md](plate-solve-data.md)。
+将 `**default_database.npz`** 放到 `**data/plate_solve/**`（不随仓库分发）。放置与配置见 [plate-solve-data.md](plate-solve-data.md)。
 
 ### 0.5 日常更新
 
@@ -55,6 +55,7 @@ chmod +x scripts/install.sh
 cd /path/to/OGScope
 chmod +x scripts/board-update.sh
 # 可选：OGSCOPE_GIT_PULL=1  OGSCOPE_MIRROR=cn
+# 开发模式（更详细日志）：OGSCOPE_DEVELOPMENT_MODE=1 ./scripts/board-update.sh
 ./scripts/board-update.sh
 ```
 
@@ -73,11 +74,13 @@ sudo journalctl -u ogscope -f
 
 ### 0.7 常见故障（简表）
 
-| 现象 | 处理方向 |
-|------|----------|
-| `ImportError: picamera2` | 用 `apt` 装相机栈；venv 由 `install.sh` 配置（**§1.2、§3**） |
-| PEP 668 / 系统 pip 被拒 | 只用项目 `.venv`，勿在系统 Python 上混装（**§1.2**） |
-| 服务无法启动 | 查 `WorkingDirectory`、`ExecStart`、`journalctl`（**§10**） |
+
+| 现象                       | 处理方向                                                   |
+| ------------------------ | ------------------------------------------------------ |
+| `ImportError: picamera2` | 用 `apt` 装相机栈；venv 由 `install.sh` 配置（**§1.2、§3**）       |
+| PEP 668 / 系统 pip 被拒      | 只用项目 `.venv`，勿在系统 Python 上混装（**§1.2**）                 |
+| 服务无法启动                   | 查 `WorkingDirectory`、`ExecStart`、`journalctl`（**§10**） |
+
 
 ## 1. Python 版本与项目依赖
 
@@ -90,7 +93,7 @@ sudo journalctl -u ogscope -f
 ### 1.2 Poetry、PEP 668 与虚拟环境（必读）
 
 - **必须使用 Poetry 创建的项目内虚拟环境**（`.venv`），**禁止**全局设置 `virtualenvs.create false` 后在系统 Python 上混装依赖；否则易触发 **PEP 668**（发行版保护系统 site-packages，`pip`/`poetry` 无法改写系统包）。
-- 开发板推荐由 `scripts/install.sh` 统一写入：`virtualenvs.create true`、`virtualenvs.in-project true`，并尽量启用 **`virtualenvs.options.system-site-packages true`**，使 venv 能解析通过 `apt` 安装的 `picamera2` 等系统包。
+- 开发板推荐由 `scripts/install.sh` 统一写入：`virtualenvs.create true`、`virtualenvs.in-project true`，并尽量启用 `**virtualenvs.options.system-site-packages true`**，使 venv 能解析通过 `apt` 安装的 `picamera2` 等系统包。
 - **生产/板端**默认仅安装运行时依赖：`poetry install --only main`（脚本默认）。若需 pytest、类型检查等，在开发机或板上设置 `OGSCOPE_INSTALL_DEV=1` 后重装。
 
 ### 1.3 安装 Poetry 与 Python 依赖
@@ -119,7 +122,7 @@ poetry install
 - 配置 Poetry 使用项目 `.venv` 与 `system-site-packages`（Poetry 版本支持时）
 - 默认执行 `poetry install --only main`（设 `OGSCOPE_INSTALL_DEV=1` 可装 dev）
 - 可选 `OGSCOPE_APT_SLOW=1`：分批 `apt` 并在批次间暂停，减轻低配板内存压力
-- **`OGSCOPE_MIRROR`**：`auto`（默认，按 `LANG`/`LC_*` 与系统时区启发）、`cn`（中国大陆镜像：apt 清华源 + PyPI 清华）、`international`（不替换 apt，PyPI 走默认）。在国内但语言为英文时，请显式 `export OGSCOPE_MIRROR=cn`。
+- `**OGSCOPE_MIRROR`**：`auto`（默认，按 `LANG`/`LC_*` 与系统时区启发）、`cn`（中国大陆镜像：apt 清华源 + PyPI 清华）、`international`（不替换 apt，PyPI 走默认）。在国内但语言为英文时，请显式 `export OGSCOPE_MIRROR=cn`。
 - 创建 `logs`、`uploads`、`data/plate_solve` 等目录
 - 生成/更新 `systemd` 服务（`ogscope.service`）
 - 注入 `PYTHONPATH` 与 `LD_LIBRARY_PATH`（按实际存在的路径）
@@ -261,6 +264,7 @@ cd /path/to/OGScope
 chmod +x scripts/board-update.sh
 # 若需先拉取远端代码（仅 git 仓库）：OGSCOPE_GIT_PULL=1 ./scripts/board-update.sh
 # 中国大陆：OGSCOPE_MIRROR=cn ./scripts/board-update.sh
+# 开发模式（更详细日志）：OGSCOPE_DEVELOPMENT_MODE=1 ./scripts/board-update.sh
 ./scripts/board-update.sh
 ```
 
@@ -285,20 +289,20 @@ sudo journalctl -u ogscope -f
 
 - 若仅前端模板/静态文件变更，通常不需要 `poetry install`
 - 若服务文件配置有改动，需先 `sudo systemctl daemon-reload`
-- 脚本会同步主服务 `ExecStart` 与已安装的 **`ogscope-network-boot.service`** 内 `ExecStart`（项目目录变更时）；未安装开机单元则跳过
+- 脚本会同步主服务 `ExecStart` 与已安装的 `**ogscope-network-boot.service**` 内 `ExecStart`（项目目录变更时）；未安装开机单元则跳过
 
 ### 6.3 卸载服务与本地环境（`scripts/uninstall.sh`）
 
-在需要**移除 systemd 服务**、清理项目内 **`.venv`**，或换目录重装时使用 `scripts/uninstall.sh`。脚本**不会**卸载系统已通过 `apt` 安装的包（如 `python3-picamera2`），也**不会**卸载用户级全局 **Poetry**；仅处理 OGScope 服务单元与项目目录内可选内容。
+在需要**移除 systemd 服务**、清理项目内 `**.venv`**，或换目录重装时使用 `scripts/uninstall.sh`。脚本**不会**卸载系统已通过 `apt` 安装的包（如 `python3-picamera2`），也**不会**卸载用户级全局 **Poetry**；仅处理 OGScope 服务单元与项目目录内可选内容。
 
 **会执行的操作 / What it does**
 
 - `systemctl stop` / `disable` `ogscope`
 - 删除 `/etc/systemd/system/ogscope.service`（若存在）
-- 若存在 **`ogscope-network-boot.service`**：`stop` / `disable` 并删除该 unit（与 `install.sh` 安装的引导一致）
-- 若存在 **`/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf`**：删除该 drop-in（空目录会尝试 `rmdir`）
+- 若存在 `**ogscope-network-boot.service`**：`stop` / `disable` 并删除该 unit（与 `install.sh` 安装的引导一致）
+- 若存在 `**/etc/systemd/system/ogscope.service.d/ogscope-network-env.conf**`：删除该 drop-in（空目录会尝试 `rmdir`）
 - `daemon-reload`
-- 默认删除项目根目录下的 **`.venv`**（可用环境变量保留，见下）
+- 默认删除项目根目录下的 `**.venv**`（可用环境变量保留，见下）
 
 **默认保留 / Kept by default**
 
@@ -306,13 +310,15 @@ sudo journalctl -u ogscope -f
 
 **环境变量 / Environment**
 
-| 变量 | 含义 |
-|------|------|
-| `OGSCOPE_UNINSTALL_CONFIRM=1` | **非交互场景必须设置**（如 CI、脚本），否则脚本在非 TTY 下直接退出 |
-| `OGSCOPE_UNINSTALL_KEEP_VENV=1` | 保留 `.venv`，不删除虚拟环境 |
+
+| 变量                                | 含义                                             |
+| --------------------------------- | ---------------------------------------------- |
+| `OGSCOPE_UNINSTALL_CONFIRM=1`     | **非交互场景必须设置**（如 CI、脚本），否则脚本在非 TTY 下直接退出        |
+| `OGSCOPE_UNINSTALL_KEEP_VENV=1`   | 保留 `.venv`，不删除虚拟环境                             |
 | `OGSCOPE_UNINSTALL_REMOVE_DATA=1` | **危险**：删除 `logs/`、`uploads/`、`data/`（含星库等用户数据） |
 
-**交互确认 / Interactive**：在终端前台运行时，若未设置 `OGSCOPE_UNINSTALL_CONFIRM=1`，需输入全大写 **`YES`** 才会继续。
+
+**交互确认 / Interactive**：在终端前台运行时，若未设置 `OGSCOPE_UNINSTALL_CONFIRM=1`，需输入全大写 `**YES`** 才会继续。
 
 ```bash
 cd /path/to/OGScope
@@ -371,25 +377,29 @@ curl http://localhost:8000/api
 
 服务启动后，FastAPI 自动提供交互式 API 文档：
 
-| 地址 | 说明 |
-|------|------|
-| `http://<host>:8000/docs` | Swagger UI — 交互式接口测试 |
-| `http://<host>:8000/redoc` | ReDoc — 结构化接口文档 |
+
+| 地址                                | 说明                    |
+| --------------------------------- | --------------------- |
+| `http://<host>:8000/docs`         | Swagger UI — 交互式接口测试  |
+| `http://<host>:8000/redoc`        | ReDoc — 结构化接口文档       |
 | `http://<host>:8000/openapi.json` | OpenAPI Schema (JSON) |
+
 
 ### 9.2 API 分组（Tags）
 
 所有接口在文档中按模块分组展示，分组通过路由注册时的 `tags` 参数控制：
 
-| 分组 | 模块 | 说明 |
-|------|------|------|
-| Camera - 相机 | `ogscope.web.api.camera` | 相机控制与图像获取 |
-| Alignment - 极轴校准 | `ogscope.web.api.alignment` | 极轴校准流程与状态 |
-| Network - 网络 | `ogscope.web.api.network` | WiFi AP/STA 与网络切换 |
-| Core - 标准契约 | `ogscope.web.api.core` | 对外稳定契约（`/api/core/v1/*`） |
-| Dev - 系统状态 | `ogscope.web.api.system` | 开发者系统状态（`/api/dev/system/*`） |
-| Dev - 调试工具 | `ogscope.web.api.debug` | 开发者调试能力（`/api/dev/debug/*`） |
-| Dev - 分析实验 | `ogscope.web.api.analysis` | 分析实验接口（`/api/dev/analysis/*`） |
+
+| 分组               | 模块                          | 说明                            |
+| ---------------- | --------------------------- | ----------------------------- |
+| Camera - 相机      | `ogscope.web.api.camera`    | 相机控制与图像获取                     |
+| Alignment - 极轴校准 | `ogscope.web.api.alignment` | 极轴校准流程与状态                     |
+| Network - 网络     | `ogscope.web.api.network`   | WiFi AP/STA 与网络切换             |
+| Core - 标准契约      | `ogscope.web.api.core`      | 对外稳定契约（`/api/core/v1/*`）      |
+| Dev - 系统状态       | `ogscope.web.api.system`    | 开发者系统状态（`/api/dev/system/*`）  |
+| Dev - 调试工具       | `ogscope.web.api.debug`     | 开发者调试能力（`/api/dev/debug/*`）   |
+| Dev - 分析实验       | `ogscope.web.api.analysis`  | 分析实验接口（`/api/dev/analysis/*`） |
+
 
 分组在 `ogscope/web/api/main.py` 中通过 `include_router()` 的 `tags` 参数指定，描述信息在 `ogscope/web/app.py` 的 `openapi_tags` 中定义。
 
@@ -397,7 +407,7 @@ curl http://localhost:8000/api
 
 新增一个 API 模块后，需在两处添加配置，以确保文档正确分组：
 
-1. **`ogscope/web/app.py`** — 在 `openapi_tags` 列表中添加分组描述：
+1. `**ogscope/web/app.py**` — 在 `openapi_tags` 列表中添加分组描述：
 
 ```python
 {
@@ -406,7 +416,7 @@ curl http://localhost:8000/api
 },
 ```
 
-2. **`ogscope/web/api/main.py`** — 注册路由时指定 `tags`：
+1. `**ogscope/web/api/main.py**` — 注册路由时指定 `tags`：
 
 ```python
 router.include_router(new_router, tags=["NewModule - 新模块"])
@@ -425,9 +435,9 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 3. `routes.py` 仅保留 HTTP 适配，业务逻辑放在 `domain/*` 或 `core/application/*`。
 4. 至少跑一轮相关测试（建议 `poetry run pytest tests/unit -q`）。
 5. 同步更新契约文档：
-   - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
-   - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
-   - `docs/contracts/core-compatibility-matrix.md`（段内中英，单文件）
+  - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
+  - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
+  - `docs/contracts/core-compatibility-matrix.md`（段内中英，单文件）
 
 ## 10. 常见故障排查
 
@@ -438,7 +448,7 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
 - `PYTHONPATH` 是否包含系统 `dist-packages`
 - `LD_LIBRARY_PATH` 是否包含 `libcamera` 相关库路径
 - 最近代码上传是否完整，依赖是否已重新安装
-- **`No module named 'scipy'`**：`board-update.sh` / `install.sh` 会在 `poetry install` 后校验并自动 `--no-cache` 重试与 pip 补装；若仍失败，删除 `.venv` 后执行 `OGSCOPE_MIRROR=cn ./scripts/board-update.sh`（或重装 `./scripts/install.sh`）
+- `**No module named 'scipy'**`：`board-update.sh` / `install.sh` 会在 `poetry install` 后校验并自动 `--no-cache` 重试与 pip 补装；若仍失败，删除 `.venv` 后执行 `OGSCOPE_MIRROR=cn ./scripts/board-update.sh`（或重装 `./scripts/install.sh`）
 
 ## 11. 常用命令速查
 
@@ -458,3 +468,4 @@ sudo journalctl -u ogscope -f
 # ./scripts/uninstall.sh
 # OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```
+

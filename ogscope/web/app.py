@@ -9,11 +9,18 @@ from copy import deepcopy
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.exceptions import WebSocketException as StarletteWebSocketException
 
 from ogscope.__version__ import __version__
 from ogscope.config import get_settings
@@ -176,6 +183,25 @@ app = FastAPI(
 
 settings = get_settings()
 hardware_profile = describe_hardware_plane_profile(settings)
+
+
+@app.exception_handler(Exception)
+async def _verbose_exception_handler(request: Request, exc: Exception):
+    """开发模式下记录未处理异常栈 / Log unhandled exceptions in development mode."""
+    if isinstance(exc, StarletteHTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+    if isinstance(exc, StarletteWebSocketException):
+        # WebSocket 异常交给 Starlette 默认处理 / Delegate websocket errors to Starlette defaults
+        raise exc
+    if get_settings().development_mode:
+        logger.exception(
+            "未处理异常 / Unhandled exception: {} {}",
+            request.method,
+            request.url.path,
+        )
+    raise exc
 
 
 def _spa_unavailable_html(title: str, detail: str) -> HTMLResponse:
