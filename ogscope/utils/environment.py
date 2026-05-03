@@ -164,6 +164,12 @@ def should_use_simulation_mode() -> bool:
     return not is_raspberry_pi()
 
 
+def is_development_mode_enabled() -> bool:
+    """是否启用开发模式（更详细日志与异常栈）/ Whether development mode is enabled."""
+    raw = os.environ.get("OGSCOPE_DEVELOPMENT_MODE", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def get_simulation_config() -> dict:
     """
     获取模拟模式配置

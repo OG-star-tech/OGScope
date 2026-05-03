@@ -2,6 +2,7 @@
 日志配置模块
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -12,6 +13,8 @@ from loguru import logger
 def setup_logging(
     level: str = "INFO",
     log_file: Optional[Path] = None,
+    *,
+    development_mode: bool = False,
 ) -> None:
     """
     配置 Loguru 日志系统
@@ -19,6 +22,7 @@ def setup_logging(
     Args:
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: 日志文件路径，None 表示不输出到文件
+        development_mode: 开发模式：同步提升标准库 logging（第三方库常用）/ Dev mode: bump stdlib logging too
     """
     # 移除默认的 handler / Remove default handler
     logger.remove()
@@ -51,3 +55,25 @@ def setup_logging(
         )
 
         logger.info(f"日志文件: {log_file.absolute()}")
+
+    # 第三方库（libcamera/picamera2/tetra3 等）通常走标准库 logging；开发模式下同步提升根 logger
+    # Third-party stacks (libcamera/picamera2/tetra3, …) often use stdlib logging; align root logger in dev mode.
+    if development_mode:
+        lvl = str(level).upper()
+        py_level = getattr(logging, lvl, logging.INFO)
+        # Python 3.8+：force 重新初始化，避免重复启动时 handler 叠加 / force re-init to avoid duplicate handlers
+        try:
+            logging.basicConfig(
+                level=py_level,
+                format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+                force=True,
+            )
+        except TypeError:
+            logging.basicConfig(
+                level=py_level,
+                format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            )
+        logging.captureWarnings(True)
+        # Tetra3 使用 logging.getLogger('tetra3.Tetra3')；显式对齐，避免仍停留在 INFO / Align Tetra3 logger explicitly
+        logging.getLogger("tetra3").setLevel(py_level)
+        logging.getLogger("tetra3.Tetra3").setLevel(py_level)

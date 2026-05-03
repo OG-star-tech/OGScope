@@ -19,10 +19,15 @@ def setup_environment() -> Settings:
     settings = get_settings()
 
     # 配置日志 / Configuration log
-    setup_logging(settings.log_level, settings.log_file)
+    setup_logging(
+        settings.log_level,
+        settings.log_file,
+        development_mode=bool(settings.development_mode),
+    )
 
     logger.info(f"OGScope v{__version__} 启动中...")
     logger.info(f"运行环境: {settings.environment}")
+    logger.info(f"开发模式: {'ON' if settings.development_mode else 'OFF'}")
     logger.info(f"日志级别: {settings.log_level}")
 
     return settings

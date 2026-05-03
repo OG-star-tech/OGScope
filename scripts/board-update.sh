@@ -17,6 +17,7 @@
 #   OGSCOPE_SYSTEMD_MEMORY_MAX=380M — 可选，同步 ogscope.service.d MemoryMax / Optional MemoryMax drop-in
 #   OGSCOPE_SKIP_LOW_RAM_DEFAULTS=1 — 内存≤512MiB 时不同步 ogscope-low-ram.conf / Skip low-RAM solver drop-in sync
 #   OGSCOPE_SKIP_HARDWARE_PLANE_DROPIN=1 — 不同步 ogscope.service.d/ogscope-hardware-plane.conf / Skip hardware-plane drop-in sync
+#   OGSCOPE_DEVELOPMENT_MODE=1 — 同步开发模式 drop-in（更详细日志；可选 OGSCOPE_LOG_LEVEL 覆盖）/ Dev-mode drop-in for richer logs
 
 set -euo pipefail
 
@@ -159,6 +160,27 @@ else
     echo "📝 同步硬件平面环境 drop-in / Syncing hardware-plane environment drop-in..."
     sudo install -d /etc/systemd/system/ogscope.service.d
     sudo install -m 0644 "${HARDWARE_PLANE_DROPIN_SRC}" /etc/systemd/system/ogscope.service.d/ogscope-hardware-plane.conf
+fi
+
+DEV_DROPIN_DST="/etc/systemd/system/ogscope.service.d/ogscope-development.conf"
+if [ "${OGSCOPE_DEVELOPMENT_MODE:-0}" = "1" ]; then
+    echo "🧪 同步开发模式 drop-in（OGSCOPE_DEVELOPMENT_MODE=1）/ Syncing development-mode drop-in..."
+    sudo install -d /etc/systemd/system/ogscope.service.d
+    if [ -z "${OGSCOPE_LOG_LEVEL:-}" ]; then
+        _dev_log_level="DEBUG"
+    else
+        _dev_log_level="${OGSCOPE_LOG_LEVEL}"
+    fi
+    sudo tee "${DEV_DROPIN_DST}" >/dev/null <<EOF
+[Service]
+Environment=OGSCOPE_DEVELOPMENT_MODE=1
+Environment=OGSCOPE_LOG_LEVEL=${_dev_log_level}
+EOF
+else
+    if [ -f "${DEV_DROPIN_DST}" ]; then
+        echo "🧹 移除开发模式 drop-in（OGSCOPE_DEVELOPMENT_MODE!=1）/ Removing development-mode drop-in..."
+        sudo rm -f "${DEV_DROPIN_DST}"
+    fi
 fi
 
 echo "🔄 重启服务 / Restarting service..."

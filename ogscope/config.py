@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     # 基础配置 / Basic configuration
     environment: str = Field(default="development", description="运行环境")
     debug: bool = Field(default=True, description="调试模式")
+    development_mode: bool = Field(
+        default=False,
+        description=(
+            "开发模式：更详细日志与更完整异常栈（部署时谨慎开启）/ "
+            "Development mode: richer logs and fuller exception traces (use carefully in prod)"
+        ),
+    )
 
     # Web 服务配置 / Web service configuration
     host: str = Field(default="0.0.0.0", description="Web 服务地址")
@@ -361,6 +368,15 @@ class Settings(BaseSettings):
         env_prefix="OGSCOPE_",
         case_sensitive=False,
     )
+
+    @model_validator(mode="after")
+    def _apply_development_mode_defaults(self) -> "Settings":
+        """开发模式默认提升日志级别（避免与显式 WARNING/ERROR 冲突）/ Dev mode bumps log level unless explicitly quiet."""
+        if not bool(self.development_mode):
+            return self
+        if str(self.log_level).upper() == "INFO":
+            object.__setattr__(self, "log_level", "DEBUG")
+        return self
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
