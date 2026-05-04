@@ -1,10 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { GyroscopeMpu6050Panel } from "../components/GyroscopeMpu6050Panel";
 import { MagnetometerCompassPanel } from "../components/MagnetometerCompassPanel";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { requestDevDebugJson } from "@shared/transport/http";
 
 type JsonRecord = Record<string, unknown>;
+type MagCalStatus = {
+  success?: boolean;
+  mode?: string;
+  samples?: number;
+  span_xyz?: { x?: number; y?: number; z?: number };
+  locked?: {
+    axes_pair?: string;
+    sign?: number;
+    samples?: number;
+  } | null;
+};
 
 function formatJson(data: unknown): string {
   try {
@@ -22,6 +33,8 @@ export function SensorsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<JsonRecord | null>(null);
+  const [magCalStatus, setMagCalStatus] = useState<MagCalStatus | null>(null);
+  const [magCalHint, setMagCalHint] = useState<string | null>(null);
 
   const [mpuBus, setMpuBus] = useState(1);
   const [mpuAddr, setMpuAddr] = useState(104);
@@ -67,6 +80,125 @@ export function SensorsPage() {
       setLoading(false);
     }
   }, [addr]);
+
+  const runMagCalStart = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+      const data = await requestDevDebugJson<JsonRecord>(
+        `/api/debug/sensors/magnetometer/calibration/start?${qs.toString()}`,
+        { method: "POST" },
+      );
+      setResult(data);
+      setMagCalHint("已开始方向校准，请缓慢旋转设备 5-15 秒。");
+      const status = await requestDevDebugJson<MagCalStatus>(
+        `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+      );
+      setMagCalStatus(status);
+    } catch (e) {
+      setResult(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [addr, bus]);
+
+  const runMagCalCommit = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+      const data = await requestDevDebugJson<JsonRecord>(
+        `/api/debug/sensors/magnetometer/calibration/commit?${qs.toString()}`,
+        { method: "POST" },
+      );
+      setResult(data);
+      setMagCalHint("已保存并锁定方向校准。");
+      const status = await requestDevDebugJson<MagCalStatus>(
+        `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+      );
+      setMagCalStatus(status);
+    } catch (e) {
+      setResult(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [addr, bus]);
+
+  const runMagCalReset = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+      const data = await requestDevDebugJson<JsonRecord>(
+        `/api/debug/sensors/magnetometer/calibration/reset?${qs.toString()}`,
+        { method: "POST" },
+      );
+      setResult(data);
+      setMagCalHint("已重置到自动模式。");
+      const status = await requestDevDebugJson<MagCalStatus>(
+        `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+      );
+      setMagCalStatus(status);
+    } catch (e) {
+      setResult(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [addr, bus]);
+
+  const runMagCalStatus = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+      const data = await requestDevDebugJson<JsonRecord>(
+        `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+      );
+      setResult(data);
+      setMagCalStatus(data as MagCalStatus);
+    } catch (e) {
+      setResult(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [addr, bus]);
+
+  useEffect(() => {
+    const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+    void requestDevDebugJson<MagCalStatus>(
+      `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+    )
+      .then((s) => setMagCalStatus(s))
+      .catch(() => undefined);
+  }, [addr, bus]);
+
+  useEffect(() => {
+    if (magCalStatus?.mode !== "recording") return;
+    const t = setInterval(() => {
+      const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
+      void requestDevDebugJson<MagCalStatus>(
+        `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
+      )
+        .then((s) => setMagCalStatus(s))
+        .catch(() => undefined);
+    }, 900);
+    return () => clearInterval(t);
+  }, [magCalStatus?.mode, bus, addr]);
+
+  const calModeLabel = useMemo(() => {
+    const m = magCalStatus?.mode ?? "auto";
+    if (m === "recording") return t("sys.sensors.mag.calModeRecording");
+    if (m === "locked") return t("sys.sensors.mag.calModeLocked");
+    return t("sys.sensors.mag.calModeAuto");
+  }, [magCalStatus?.mode, t]);
+
+  const calSamples = Number(magCalStatus?.samples ?? 0);
+  const calCanCommit = magCalStatus?.mode === "recording" && calSamples >= 10;
 
   const runMpuSelftest = useCallback(async () => {
     setMpuLoading(true);
@@ -155,6 +287,67 @@ export function SensorsPage() {
           >
             {t("sys.sensors.mag.btnProbe")}
           </button>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={loading || magCalStatus?.mode === "recording"}
+            className="rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs text-on-surface hover:bg-amber-500/10 disabled:opacity-50"
+            onClick={() => void runMagCalStart()}
+          >
+            {t("sys.sensors.mag.btnCalStart")}
+          </button>
+          <button
+            type="button"
+            disabled={loading || !calCanCommit}
+            className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-on-surface hover:bg-emerald-500/10 disabled:opacity-50"
+            onClick={() => void runMagCalCommit()}
+          >
+            {t("sys.sensors.mag.btnCalCommit")}
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-on-surface hover:bg-rose-500/10 disabled:opacity-50"
+            onClick={() => void runMagCalReset()}
+          >
+            {t("sys.sensors.mag.btnCalReset")}
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            className="rounded-lg border border-outline-variant/40 px-3 py-1.5 text-xs text-on-surface hover:bg-surface-container/80 disabled:opacity-50"
+            onClick={() => void runMagCalStatus()}
+          >
+            {t("sys.sensors.mag.btnCalStatus")}
+          </button>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-outline-variant/30 bg-surface-container/60 px-3 py-2 text-[11px] text-on-surface">
+          <p className="font-medium">
+            {t("sys.sensors.mag.calStatusPrefix")} {calModeLabel}
+          </p>
+          <p className="mt-1 text-on-surface-variant">
+            {t("sys.sensors.mag.calSamplesPrefix")} {calSamples}
+            {magCalStatus?.mode === "recording" ? ` / 10+` : ""}
+          </p>
+          {magCalStatus?.span_xyz && (
+            <p className="mt-1 font-mono text-[10px] text-on-surface-variant">
+              span xyz: {Number(magCalStatus.span_xyz.x ?? 0).toFixed(1)} /{" "}
+              {Number(magCalStatus.span_xyz.y ?? 0).toFixed(1)} /{" "}
+              {Number(magCalStatus.span_xyz.z ?? 0).toFixed(1)}
+            </p>
+          )}
+          {magCalStatus?.mode === "recording" && (
+            <p className="mt-1 text-amber-200">{t("sys.sensors.mag.calRecordingHint")}</p>
+          )}
+          {magCalStatus?.mode === "locked" && magCalStatus.locked && (
+            <p className="mt-1 text-emerald-200">
+              {t("sys.sensors.mag.calLockedHint")} axes={String(magCalStatus.locked.axes_pair ?? "xy")}
+            </p>
+          )}
+          {magCalHint && <p className="mt-1 text-sky-200">{magCalHint}</p>}
         </div>
 
         {error && (

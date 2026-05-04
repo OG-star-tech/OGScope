@@ -258,6 +258,10 @@
   "sys.sensors.mag.i2cdetect": "附带运行 i2cdetect",
   "sys.sensors.mag.btnSelftest": "运行自检",
   "sys.sensors.mag.btnProbe": "扫描各总线",
+  "sys.sensors.mag.btnCalStart": "开始方向校准",
+  "sys.sensors.mag.btnCalCommit": "保存并锁定方向",
+  "sys.sensors.mag.btnCalReset": "重置到自动模式",
+  "sys.sensors.mag.btnCalStatus": "查看校准状态",
   "sys.sensors.mag.running": "执行中…",
   "sys.sensors.mpu.section": "IMU（MPU-6050 / I²C）",
   "sys.sensors.mpu.note": "默认总线 1、地址 104（0x68，AD0 接 GND）。含陀螺仪角速度采样（MPU 内集成加速度计与陀螺仪）。",
@@ -491,5 +495,12 @@
   "cam.notice.needManualForAutoAdjust": "请先切换为手动曝光再进行智能调整",
   "cam.notice.autoAdjusted": "智能调整已完成并生效",
   "cam.confirm.deletePreset": "确定删除预设 {name} 吗？",
-  "cam.confirm.deleteFile": "确定删除文件 {name} 吗？"
+  "cam.confirm.deleteFile": "确定删除文件 {name} 吗？",
+  "sys.sensors.mag.calStatusPrefix": "校准状态：",
+  "sys.sensors.mag.calModeAuto": "自动模式（未锁定）",
+  "sys.sensors.mag.calModeRecording": "录制中（请旋转设备）",
+  "sys.sensors.mag.calModeLocked": "已锁定（使用保存方向）",
+  "sys.sensors.mag.calSamplesPrefix": "录制样本：",
+  "sys.sensors.mag.calRecordingHint": "操作提示：保持水平，缓慢旋转设备，建议累计 10+ 样本后保存。",
+  "sys.sensors.mag.calLockedHint": "已锁定方向参数："
 }

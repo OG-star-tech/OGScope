@@ -550,6 +550,54 @@ async def magnetometer_probe_buses(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/debug/sensors/magnetometer/calibration/start")
+async def magnetometer_calibration_start(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(default=12, ge=1, le=127),
+):
+    """开始方向校准采样 / Start heading calibration recording."""
+    try:
+        return await MagnetometerDebugService.calibration_start(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/debug/sensors/magnetometer/calibration/commit")
+async def magnetometer_calibration_commit(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(default=12, ge=1, le=127),
+):
+    """提交并锁定方向校准 / Commit and lock heading calibration."""
+    try:
+        return await MagnetometerDebugService.calibration_commit(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/debug/sensors/magnetometer/calibration/reset")
+async def magnetometer_calibration_reset(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(default=12, ge=1, le=127),
+):
+    """重置方向校准到 auto / Reset heading calibration to auto mode."""
+    try:
+        return await MagnetometerDebugService.calibration_reset(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/debug/sensors/magnetometer/calibration/status")
+async def magnetometer_calibration_status(
+    bus: int = Query(default=1, ge=0, le=32),
+    addr: int = Query(default=12, ge=1, le=127),
+):
+    """查询方向校准状态 / Query heading calibration status."""
+    try:
+        return await MagnetometerDebugService.calibration_status(bus=bus, addr7=addr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.get("/debug/sensors/mpu6050/selftest")
 async def mpu6050_selftest(
     bus: int = Query(default=1, ge=0, le=32),
