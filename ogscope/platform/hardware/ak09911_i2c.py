@@ -26,6 +26,9 @@ REG_CNTL2 = 0x31
 
 EXPECTED_WIA1 = 0x48
 EXPECTED_WIA2 = 0x09  # AK09911；若读数不同仍以原始值回报 / AK09911; raw values still reported if different
+# 与调试层一致：AK09911C 等变体 WIA2 可能为 0x05 / Same as debug layer for AK09911C WIA2.
+_KNOWN_WIA2_FAMILY: frozenset[int] = frozenset({0x05, 0x09})
+_AK09911_ADDR7_CAD: tuple[int, int] = (0x0C, 0x0D)
 
 # 数据手册典型灵敏度（单测模式 16bit）/ Typical sensitivity from datasheet (µT/LSB)
 AK09911_UT_PER_LSB = 0.4915
@@ -100,6 +103,11 @@ def scan_i2c_bus(bus: int, *, timeout_sec: float = 3.0) -> dict[str, Any]:
     }
 
 
+def wia_matches_ak099xx_family(wia1: int, wia2: int) -> bool:
+    """是否为 AK09911 系 WIA 组合 / Whether WIA matches AK09911-class pattern."""
+    return wia1 == EXPECTED_WIA1 and int(wia2) in _KNOWN_WIA2_FAMILY
+
+
 def _read_wia_smbus(bus: int, addr7: int) -> Ak09911ProbeResult:
     from smbus2 import SMBus
 
@@ -109,7 +117,7 @@ def _read_wia_smbus(bus: int, addr7: int) -> Ak09911ProbeResult:
             wia2 = smbus.read_byte_data(addr7, REG_WIA2)
     except OSError as e:
         return Ak09911ProbeResult(None, None, False, str(e))
-    present = wia1 == EXPECTED_WIA1 and wia2 == EXPECTED_WIA2
+    present = wia_matches_ak099xx_family(wia1, wia2)
     return Ak09911ProbeResult(wia1, wia2, present, None)
 
 
@@ -133,23 +141,20 @@ def _combine_hxl_6(b: list[int]) -> tuple[int, int, int]:
     return s16(b[0], b[1]), s16(b[2], b[3]), s16(b[4], b[5])
 
 
-def measure_single_smbus(bus: int, addr7: int) -> Ak09911Measurement | None:
-    """单次测量模式读磁场（原始 + µT）/ Single-shot measurement."""
-    from smbus2 import SMBus
-
-    with SMBus(bus) as smbus:
-        smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
-        deadline = time.monotonic() + 0.2
-        st1 = 0
-        while time.monotonic() < deadline:
-            st1 = smbus.read_byte_data(addr7, REG_ST1)
-            if st1 & 0x01:
-                break
-            time.sleep(0.002)
-        if not (st1 & 0x01):
-            logger.warning("AK09911 DRDY timeout bus=%s addr=0x%02x st1=0x%02x", bus, addr7, st1)
-        data = smbus.read_i2c_block_data(addr7, REG_HXL, 6)
-        _ = smbus.read_byte_data(addr7, REG_ST2)
+def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
+    """单次测量（已打开 SMBus）/ Single-shot read with an open SMBus handle."""
+    smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
+    deadline = time.monotonic() + 0.2
+    st1 = 0
+    while time.monotonic() < deadline:
+        st1 = smbus.read_byte_data(addr7, REG_ST1)
+        if st1 & 0x01:
+            break
+        time.sleep(0.002)
+    if not (st1 & 0x01):
+        logger.warning("AK09911 DRDY timeout addr=0x%02x st1=0x%02x", addr7, st1)
+    data = smbus.read_i2c_block_data(addr7, REG_HXL, 6)
+    _ = smbus.read_byte_data(addr7, REG_ST2)
     hx, hy, hz = _combine_hxl_6(list(data))
     s = AK09911_UT_PER_LSB
     return Ak09911Measurement(
@@ -160,6 +165,54 @@ def measure_single_smbus(bus: int, addr7: int) -> Ak09911Measurement | None:
         round(hy * s, 3),
         round(hz * s, 3),
     )
+
+
+def measure_single_smbus(bus: int, addr7: int) -> Ak09911Measurement | None:
+    """单次测量模式读磁场（原始 + µT）/ Single-shot measurement."""
+    from smbus2 import SMBus
+
+    with SMBus(bus) as smbus:
+        return _measure_body_smbus(smbus, addr7)
+
+
+def measure_heading_with_cad_fallback(
+    bus: int,
+    preferred: int = 0x0C,
+    *,
+    bus_retries: int = 3,
+) -> tuple[Ak09911Measurement | None, int | None, str | None]:
+    """
+    同一 SMBus 会话内先校验 WIA 再测量，并在 0x0C/0x0D 与总线重试间切换。
+    / One SMBus session per try: WIA then measure; alternate CAD addrs and retries for EREMOTEIO.
+    """
+    from smbus2 import SMBus
+
+    path = ensure_i2c_dev_node(bus)
+    if path is None:
+        return None, None, f"missing {i2c_dev_path(bus)}"
+
+    pref = int(preferred)
+    if pref in _AK09911_ADDR7_CAD:
+        order: list[int] = [pref] + [a for a in _AK09911_ADDR7_CAD if a != pref]
+    else:
+        order = [pref]
+
+    last_err: str | None = None
+    for _ in range(max(1, int(bus_retries))):
+        for addr7 in order:
+            try:
+                with SMBus(bus) as smbus:
+                    w1 = smbus.read_byte_data(addr7, REG_WIA1)
+                    w2 = smbus.read_byte_data(addr7, REG_WIA2)
+                    if not wia_matches_ak099xx_family(w1, w2):
+                        continue
+                    meas = _measure_body_smbus(smbus, addr7)
+                    return meas, addr7, None
+            except OSError as e:
+                last_err = str(e)
+                continue
+        time.sleep(0.012)
+    return None, None, last_err or "AK09911 WIA/measure failed on bus"
 
 
 def measure_single(bus: int, addr7: int) -> tuple[Ak09911Measurement | None, str | None]:
