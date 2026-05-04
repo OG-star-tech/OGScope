@@ -15,6 +15,7 @@ from ogscope.platform.hardware.ak09911_i2c import (
     measure_heading_with_cad_fallback,
     scan_i2c_bus,
 )
+from ogscope.web.api.debug.i2c_debug_bus_lock import i2c_debug_bus_lock
 
 # WIA：与 Linux ak09911 驱动及数据手册一致 / Matches upstream ak09911 driver & datasheets.
 _AKM_WIA1 = 0x48
@@ -112,95 +113,96 @@ class MagnetometerDebugService:
             run_i2cdetect: 是否尝试执行 i2cdetect / Whether to run i2cdetect.
         """
         nodes = _list_i2c_device_nodes()
-        i2c_text: str | None = None
-        i2c_err: str | None = None
-        addresses_seen: list[str] | None = None
-        if run_i2cdetect:
-            scan = await asyncio.to_thread(scan_i2c_bus, bus)
-            i2c_text = (scan.get("raw") or "").strip() or None
-            addresses_seen = list(scan.get("addresses") or [])
-            if not scan.get("success"):
-                i2c_err = scan.get("error") or "i2cdetect failed"
+        async with i2c_debug_bus_lock(bus):
+            i2c_text: str | None = None
+            i2c_err: str | None = None
+            addresses_seen: list[str] | None = None
+            if run_i2cdetect:
+                scan = await asyncio.to_thread(scan_i2c_bus, bus)
+                i2c_text = (scan.get("raw") or "").strip() or None
+                addresses_seen = list(scan.get("addresses") or [])
+                if not scan.get("success"):
+                    i2c_err = scan.get("error") or "i2cdetect failed"
 
-        requested_addr = int(addr7)
-        resolved_addr, wia = await asyncio.to_thread(
-            _smbus_read_wia_first_matching, bus, requested_addr
-        )
-        addr_auto_fallback = bool(
-            resolved_addr != requested_addr
-            and wia.get("ok")
-            and wia.get("matches_ak099xx")
-        )
-
-        overall_ok = bool(wia.get("ok") and wia.get("matches_ak099xx"))
-
-        hint: str | None = None
-        addr_hex = f"{int(resolved_addr):02x}"
-        if not nodes:
-            hint = (
-                "未找到 /dev/i2c-*：请确认已启用 I²C（config.txt 中 dtparam=i2c_arm=on）"
-                "并已加载 i2c-dev（例如 /etc/modules-load.d/i2c-dev.conf）。"
-                " / No /dev/i2c-*: enable I²C in firmware and load i2c-dev."
+            requested_addr = int(addr7)
+            resolved_addr, wia = await asyncio.to_thread(
+                _smbus_read_wia_first_matching, bus, requested_addr
             )
-        elif not wia.get("ok"):
-            bus_missing = ""
-            if (
-                run_i2cdetect
-                and addresses_seen is not None
-                and addr_hex not in addresses_seen
-            ):
-                bus_missing = (
-                    f"当前总线 {bus} 的 i2cdetect 未列出 {addr_hex}（模块可能未接好、无 3.3V、SDA/SCL 接反，"
-                    "或 CAD 决定地址与预期不符）。"
-                    " / i2cdetect does not list this address (wiring, power, SDA/SCL, or CAD pin)."
+            addr_auto_fallback = bool(
+                resolved_addr != requested_addr
+                and wia.get("ok")
+                and wia.get("matches_ak099xx")
+            )
+
+            overall_ok = bool(wia.get("ok") and wia.get("matches_ak099xx"))
+
+            hint: str | None = None
+            addr_hex = f"{int(resolved_addr):02x}"
+            if not nodes:
+                hint = (
+                    "未找到 /dev/i2c-*：请确认已启用 I²C（config.txt 中 dtparam=i2c_arm=on）"
+                    "并已加载 i2c-dev（例如 /etc/modules-load.d/i2c-dev.conf）。"
+                    " / No /dev/i2c-*: enable I²C in firmware and load i2c-dev."
                 )
-            hint = (
-                "无法在总线上读取芯片 ID。"
-                + bus_missing
-                + " 亦请核对：AK09911/C 常见为 0x0C 或 0x0D（CAD）、运行用户是否在 i2c 组"
-                "（本机 ogscope 进程通常已含 i2c 附加组）。"
-                " / Cannot read chip ID; check CAD (0x0C vs 0x0D), wiring, and i2c group."
-            )
-        elif not wia.get("matches_ak099xx"):
-            hint = (
-                f"读到了 WIA1=0x{int(wia.get('wia1') or 0):02x} WIA2=0x{int(wia.get('wia2') or 0):02x}，"
-                "与 AK09911 系列常见值不完全一致；仍可作为原始数据供排查。"
-                " / WIA bytes do not match expected AK09911 family pattern."
-            )
-        elif addr_auto_fallback:
-            hint = (
-                f"已在 0x{requested_addr:02X} 与 0x{resolved_addr:02X} 间自动选用后者"
-                "（CAD 决定 I²C 地址；与 i2cdetect 中 0x0D/0x0C 一致即可）。"
-                " / Auto-selected I²C address via CAD (0x0C vs 0x0D)."
-            )
+            elif not wia.get("ok"):
+                bus_missing = ""
+                if (
+                    run_i2cdetect
+                    and addresses_seen is not None
+                    and addr_hex not in addresses_seen
+                ):
+                    bus_missing = (
+                        f"当前总线 {bus} 的 i2cdetect 未列出 {addr_hex}（模块可能未接好、无 3.3V、SDA/SCL 接反，"
+                        "或 CAD 决定地址与预期不符）。"
+                        " / i2cdetect does not list this address (wiring, power, SDA/SCL, or CAD pin)."
+                    )
+                hint = (
+                    "无法在总线上读取芯片 ID。"
+                    + bus_missing
+                    + " 亦请核对：AK09911/C 常见为 0x0C 或 0x0D（CAD）、运行用户是否在 i2c 组"
+                    "（本机 ogscope 进程通常已含 i2c 附加组）。"
+                    " / Cannot read chip ID; check CAD (0x0C vs 0x0D), wiring, and i2c group."
+                )
+            elif not wia.get("matches_ak099xx"):
+                hint = (
+                    f"读到了 WIA1=0x{int(wia.get('wia1') or 0):02x} WIA2=0x{int(wia.get('wia2') or 0):02x}，"
+                    "与 AK09911 系列常见值不完全一致；仍可作为原始数据供排查。"
+                    " / WIA bytes do not match expected AK09911 family pattern."
+                )
+            elif addr_auto_fallback:
+                hint = (
+                    f"已在 0x{requested_addr:02X} 与 0x{resolved_addr:02X} 间自动选用后者"
+                    "（CAD 决定 I²C 地址；与 i2cdetect 中 0x0D/0x0C 一致即可）。"
+                    " / Auto-selected I²C address via CAD (0x0C vs 0x0D)."
+                )
 
-        return {
-            "success": overall_ok,
-            "chip_detected_as_ak099xx": bool(wia.get("matches_ak099xx")),
-            "platform": os.name,
-            "i2c_dev_nodes": nodes,
-            "bus": int(bus),
-            "addr_7bit_requested": int(requested_addr),
-            "addr_7bit": int(resolved_addr),
-            "addr_7bit_hex": f"0x{int(resolved_addr):02x}",
-            "addr_auto_fallback": addr_auto_fallback,
-            "i2cdetect": {
-                "stdout": i2c_text,
-                "stderr_or_note": i2c_err,
-                "addresses_parsed": addresses_seen,
-                "target_addr_seen": bool(
-                    addresses_seen is not None and addr_hex in addresses_seen
-                ),
-            },
-            "wia": {
-                "wia1": wia.get("wia1"),
-                "wia2": wia.get("wia2"),
-                "expected_wia1": f"0x{_AKM_WIA1:02x}",
-                "expected_wia2_note": "0x05 or 0x09 typical for AK09911/C family",
-            },
-            "smbus": wia,
-            "hint": hint,
-        }
+            return {
+                "success": overall_ok,
+                "chip_detected_as_ak099xx": bool(wia.get("matches_ak099xx")),
+                "platform": os.name,
+                "i2c_dev_nodes": nodes,
+                "bus": int(bus),
+                "addr_7bit_requested": int(requested_addr),
+                "addr_7bit": int(resolved_addr),
+                "addr_7bit_hex": f"0x{int(resolved_addr):02x}",
+                "addr_auto_fallback": addr_auto_fallback,
+                "i2cdetect": {
+                    "stdout": i2c_text,
+                    "stderr_or_note": i2c_err,
+                    "addresses_parsed": addresses_seen,
+                    "target_addr_seen": bool(
+                        addresses_seen is not None and addr_hex in addresses_seen
+                    ),
+                },
+                "wia": {
+                    "wia1": wia.get("wia1"),
+                    "wia2": wia.get("wia2"),
+                    "expected_wia1": f"0x{_AKM_WIA1:02x}",
+                    "expected_wia2_note": "0x05 or 0x09 typical for AK09911/C family",
+                },
+                "smbus": wia,
+                "hint": hint,
+            }
 
     @staticmethod
     async def probe_address_on_buses(
@@ -218,7 +220,10 @@ class MagnetometerDebugService:
             buses = sorted(set(buses)) or [0, 1, 2]
         results: list[dict[str, Any]] = []
         for b in buses:
-            used, w = await asyncio.to_thread(_smbus_read_wia_first_matching, b, addr7)
+            async with i2c_debug_bus_lock(b):
+                used, w = await asyncio.to_thread(
+                    _smbus_read_wia_first_matching, b, addr7
+                )
             results.append({"bus": b, "addr_7bit_used": int(used), **w})
         any_ok = any(
             r.get("ok") and r.get("matches_ak099xx") for r in results
@@ -237,9 +242,10 @@ class MagnetometerDebugService:
         航向角定义为 atan2(Hx, Hy)（度，0–360），近似表示传感器 XY 平面内磁场水平分量指向与 +Y 的夹角关系，
         便于罗盘可视化；实际安装需校准或软铁补偿 / Heading uses atan2(Hx, Hy); calibrate for your mount.
         """
-        meas, resolved, err = await asyncio.to_thread(
-            measure_heading_with_cad_fallback, int(bus), int(addr7)
-        )
+        async with i2c_debug_bus_lock(bus):
+            meas, resolved, err = await asyncio.to_thread(
+                measure_heading_with_cad_fallback, int(bus), int(addr7)
+            )
         if err or meas is None or resolved is None:
             return {
                 "success": False,

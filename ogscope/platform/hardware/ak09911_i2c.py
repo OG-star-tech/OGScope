@@ -6,6 +6,7 @@ AK09911 / AK09911C 磁力计 I2C 访问（Linux `/dev/i2c-*`）/ AK09911 family 
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import re
@@ -144,7 +145,7 @@ def _combine_hxl_6(b: list[int]) -> tuple[int, int, int]:
 def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
     """单次测量（已打开 SMBus）/ Single-shot read with an open SMBus handle."""
     smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
-    deadline = time.monotonic() + 0.2
+    deadline = time.monotonic() + 0.35
     st1 = 0
     while time.monotonic() < deadline:
         st1 = smbus.read_byte_data(addr7, REG_ST1)
@@ -153,9 +154,34 @@ def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
         time.sleep(0.002)
     if not (st1 & 0x01):
         logger.warning("AK09911 DRDY timeout addr=0x%02x st1=0x%02x", addr7, st1)
-    data = smbus.read_i2c_block_data(addr7, REG_HXL, 6)
-    _ = smbus.read_byte_data(addr7, REG_ST2)
-    hx, hy, hz = _combine_hxl_6(list(data))
+    data: list[int] | None = None
+    last_io: OSError | None = None
+    for read_try in range(4):
+        try:
+            data = list(smbus.read_i2c_block_data(addr7, REG_HXL, 6))
+            break
+        except OSError as exc:
+            last_io = exc
+            en = getattr(exc, "errno", None)
+            if read_try >= 3 or en not in (
+                errno.EREMOTEIO,
+                errno.EIO,
+                errno.ENXIO,
+            ):
+                raise
+            time.sleep(0.006 * (read_try + 1))
+    if data is None:
+        raise last_io  # type: ignore[misc]
+    try:
+        _ = smbus.read_byte_data(addr7, REG_ST2)
+    except OSError as exc:
+        en = getattr(exc, "errno", None)
+        if en in (errno.EREMOTEIO, errno.EIO, errno.ENXIO):
+            time.sleep(0.004)
+            _ = smbus.read_byte_data(addr7, REG_ST2)
+        else:
+            raise
+    hx, hy, hz = _combine_hxl_6(data)
     s = AK09911_UT_PER_LSB
     return Ak09911Measurement(
         hx,
@@ -179,7 +205,7 @@ def measure_heading_with_cad_fallback(
     bus: int,
     preferred: int = 0x0C,
     *,
-    bus_retries: int = 3,
+    bus_retries: int = 8,
 ) -> tuple[Ak09911Measurement | None, int | None, str | None]:
     """
     同一 SMBus 会话内先校验 WIA 再测量，并在 0x0C/0x0D 与总线重试间切换。
@@ -198,7 +224,7 @@ def measure_heading_with_cad_fallback(
         order = [pref]
 
     last_err: str | None = None
-    for _ in range(max(1, int(bus_retries))):
+    for attempt in range(max(1, int(bus_retries))):
         for addr7 in order:
             try:
                 with SMBus(bus) as smbus:
@@ -206,12 +232,13 @@ def measure_heading_with_cad_fallback(
                     w2 = smbus.read_byte_data(addr7, REG_WIA2)
                     if not wia_matches_ak099xx_family(w1, w2):
                         continue
+                    time.sleep(0.004)
                     meas = _measure_body_smbus(smbus, addr7)
                     return meas, addr7, None
             except OSError as e:
                 last_err = str(e)
                 continue
-        time.sleep(0.012)
+        time.sleep(min(0.06, 0.018 * (attempt + 1)))
     return None, None, last_err or "AK09911 WIA/measure failed on bus"
 
 

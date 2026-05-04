@@ -82,6 +82,8 @@ export function MagnetometerCompassPanel(props: { bus: number; addr: number }) {
   const [fieldUt, setFieldUt] = useState<{ x: number; y: number; z: number } | null>(null);
   const [live, setLive] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 丢弃过期 fetch 结果，避免慢请求覆盖快请求 / Drop stale fetch so slow responses cannot overwrite newer success. */
+  const sampleSeqRef = useRef(0);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewW, setViewW] = useState(320);
@@ -105,30 +107,39 @@ export function MagnetometerCompassPanel(props: { bus: number; addr: number }) {
   }, [bus, addr]);
 
   const fetchSample = useCallback(async () => {
+    const seq = ++sampleSeqRef.current;
     setLoading(true);
-    setError(null);
     try {
       const qs = new URLSearchParams({ bus: String(bus), addr: String(addr) });
       const data = await requestDevDebugJson<SampleResponse>(
         `/api/debug/sensors/magnetometer/sample?${qs.toString()}`,
       );
+      if (seq !== sampleSeqRef.current) {
+        return;
+      }
       if (!data.success) {
         setUnwrappedDeg(null);
         setFieldUt(null);
         setError(data.error || t("sys.sensors.compass.err"));
         return;
       }
+      setError(null);
       const h = data.heading_deg ?? null;
       if (h != null) {
         setUnwrappedDeg((u) => (u == null ? CENTER_CYCLE * 360 + h : addShortest(u, h)));
       }
       setFieldUt(data.field_ut ?? null);
     } catch (e) {
+      if (seq !== sampleSeqRef.current) {
+        return;
+      }
       setUnwrappedDeg(null);
       setFieldUt(null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (seq === sampleSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [addr, bus, t]);
 
@@ -142,7 +153,7 @@ export function MagnetometerCompassPanel(props: { bus: number; addr: number }) {
     }
     tickRef.current = setInterval(() => {
       void fetchSample();
-    }, 550);
+    }, 850);
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
     };
