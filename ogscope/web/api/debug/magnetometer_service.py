@@ -17,6 +17,8 @@ from ogscope.platform.hardware.ak09911_i2c import measure_single, scan_i2c_bus
 _AKM_WIA1 = 0x48
 # AK09911 WIA2=0x09；部分变体（如 AK09911C）可能为 0x05 / AK09911 uses 0x09; some variants use 0x05.
 _KNOWN_WIA2 = frozenset({0x05, 0x09})
+# CAD 脚决定 I²C 地址：常见为 0x0C 或 0x0D / CAD pin selects slave address.
+_AK09911_ADDR7_CANDIDATES: tuple[int, ...] = (0x0C, 0x0D)
 
 
 def _list_i2c_device_nodes() -> list[str]:
@@ -66,6 +68,28 @@ def _smbus_read_wia(bus: int, addr7: int) -> dict[str, Any]:
     }
 
 
+def _smbus_read_wia_first_matching(
+    bus: int, preferred: int = 0x0C
+) -> tuple[int, dict[str, Any]]:
+    """
+    在 AK09911 常见地址上读 WIA，优先 preferred；另一地址为 CAD 备选。
+    / Read WIA on typical AK09911/C addresses (CAD selects 0x0C vs 0x0D).
+    """
+    pref = int(preferred)
+    if pref in _AK09911_ADDR7_CANDIDATES:
+        order = [pref] + [a for a in _AK09911_ADDR7_CANDIDATES if a != pref]
+    else:
+        order = [pref]
+    last_addr = pref
+    last: dict[str, Any] = {}
+    for addr7 in order:
+        last = _smbus_read_wia(bus, addr7)
+        last_addr = addr7
+        if last.get("ok") and last.get("matches_ak099xx"):
+            return addr7, last
+    return last_addr, last
+
+
 class MagnetometerDebugService:
     """AK09911 系列探针与总线扫描 / AK09911 family probe and bus scan."""
 
@@ -81,7 +105,7 @@ class MagnetometerDebugService:
 
         Args:
             bus: Linux I²C 总线号（树莓派 GPIO 头一般为 1）/ Linux I²C bus number.
-            addr7: 7-bit 从机地址（CAD 接 GND 时为 0x0C）/ 7-bit slave address.
+            addr7: 7-bit 从机地址（默认 0x0C；若为 0x0D 会自动尝试另一地址）/ 7-bit slave; auto-fallback.
             run_i2cdetect: 是否尝试执行 i2cdetect / Whether to run i2cdetect.
         """
         nodes = _list_i2c_device_nodes()
@@ -95,12 +119,20 @@ class MagnetometerDebugService:
             if not scan.get("success"):
                 i2c_err = scan.get("error") or "i2cdetect failed"
 
-        wia = await asyncio.to_thread(_smbus_read_wia, bus, addr7)
+        requested_addr = int(addr7)
+        resolved_addr, wia = await asyncio.to_thread(
+            _smbus_read_wia_first_matching, bus, requested_addr
+        )
+        addr_auto_fallback = bool(
+            resolved_addr != requested_addr
+            and wia.get("ok")
+            and wia.get("matches_ak099xx")
+        )
 
         overall_ok = bool(wia.get("ok") and wia.get("matches_ak099xx"))
 
         hint: str | None = None
-        addr_hex = f"{int(addr7):02x}"
+        addr_hex = f"{int(resolved_addr):02x}"
         if not nodes:
             hint = (
                 "未找到 /dev/i2c-*：请确认已启用 I²C（config.txt 中 dtparam=i2c_arm=on）"
@@ -116,20 +148,27 @@ class MagnetometerDebugService:
             ):
                 bus_missing = (
                     f"当前总线 {bus} 的 i2cdetect 未列出 {addr_hex}（模块可能未接好、无 3.3V、SDA/SCL 接反，"
-                    "或 CAD 未接 GND 时地址不是 0x0C）。"
+                    "或 CAD 决定地址与预期不符）。"
                     " / i2cdetect does not list this address (wiring, power, SDA/SCL, or CAD pin)."
                 )
             hint = (
                 "无法在总线上读取芯片 ID。"
                 + bus_missing
-                + " 亦请核对：CAD→GND=0x0C、运行用户是否在 i2c 组（本机 ogscope 进程通常已含 i2c 附加组）。"
-                " / Cannot read chip ID; check CAD, wiring, and i2c group."
+                + " 亦请核对：AK09911/C 常见为 0x0C 或 0x0D（CAD）、运行用户是否在 i2c 组"
+                "（本机 ogscope 进程通常已含 i2c 附加组）。"
+                " / Cannot read chip ID; check CAD (0x0C vs 0x0D), wiring, and i2c group."
             )
         elif not wia.get("matches_ak099xx"):
             hint = (
                 f"读到了 WIA1=0x{int(wia.get('wia1') or 0):02x} WIA2=0x{int(wia.get('wia2') or 0):02x}，"
                 "与 AK09911 系列常见值不完全一致；仍可作为原始数据供排查。"
                 " / WIA bytes do not match expected AK09911 family pattern."
+            )
+        elif addr_auto_fallback:
+            hint = (
+                f"已在 0x{requested_addr:02X} 与 0x{resolved_addr:02X} 间自动选用后者"
+                "（CAD 决定 I²C 地址；与 i2cdetect 中 0x0D/0x0C 一致即可）。"
+                " / Auto-selected I²C address via CAD (0x0C vs 0x0D)."
             )
 
         return {
@@ -138,8 +177,10 @@ class MagnetometerDebugService:
             "platform": os.name,
             "i2c_dev_nodes": nodes,
             "bus": int(bus),
-            "addr_7bit": int(addr7),
-            "addr_7bit_hex": f"0x{int(addr7):02x}",
+            "addr_7bit_requested": int(requested_addr),
+            "addr_7bit": int(resolved_addr),
+            "addr_7bit_hex": f"0x{int(resolved_addr):02x}",
+            "addr_auto_fallback": addr_auto_fallback,
             "i2cdetect": {
                 "stdout": i2c_text,
                 "stderr_or_note": i2c_err,
@@ -174,8 +215,8 @@ class MagnetometerDebugService:
             buses = sorted(set(buses)) or [0, 1, 2]
         results: list[dict[str, Any]] = []
         for b in buses:
-            w = await asyncio.to_thread(_smbus_read_wia, b, addr7)
-            results.append({"bus": b, **w})
+            used, w = await asyncio.to_thread(_smbus_read_wia_first_matching, b, addr7)
+            results.append({"bus": b, "addr_7bit_used": int(used), **w})
         any_ok = any(
             r.get("ok") and r.get("matches_ak099xx") for r in results
         )
@@ -193,7 +234,19 @@ class MagnetometerDebugService:
         航向角定义为 atan2(Hx, Hy)（度，0–360），近似表示传感器 XY 平面内磁场水平分量指向与 +Y 的夹角关系，
         便于罗盘可视化；实际安装需校准或软铁补偿 / Heading uses atan2(Hx, Hy); calibrate for your mount.
         """
-        meas, err = await asyncio.to_thread(measure_single, int(bus), int(addr7))
+        resolved, wia = await asyncio.to_thread(
+            _smbus_read_wia_first_matching, int(bus), int(addr7)
+        )
+        if not (wia.get("ok") and wia.get("matches_ak099xx")):
+            return {
+                "success": False,
+                "error": wia.get("error")
+                or "WIA probe failed (not AK09911 family at 0x0C/0x0D)",
+                "heading_deg": None,
+                "field_ut": None,
+                "field_raw": None,
+            }
+        meas, err = await asyncio.to_thread(measure_single, int(bus), int(resolved))
         if err or meas is None:
             return {
                 "success": False,
@@ -209,8 +262,8 @@ class MagnetometerDebugService:
             "success": True,
             "error": None,
             "bus": int(bus),
-            "addr_7bit": int(addr7),
-            "addr_7bit_hex": f"0x{int(addr7):02x}",
+            "addr_7bit": int(resolved),
+            "addr_7bit_hex": f"0x{int(resolved):02x}",
             "heading_deg": round(heading_deg, 2),
             "heading_note_zh": (
                 "水平磁场在 XY 平面内的方向角（0°–360°），用于指北调试；安装姿态不同需换算或校准。"

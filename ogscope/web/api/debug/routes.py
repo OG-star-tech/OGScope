@@ -502,7 +502,7 @@ async def magnetometer_selftest(
         default=12,
         ge=1,
         le=127,
-        description="7-bit I²C address (12 = 0x0C when CAD is tied to GND)",
+        description="7-bit I²C (12=0x0C, 13=0x0D per CAD); selftest auto-tries both",
     ),
     i2cdetect: bool = Query(default=True),
 ):
@@ -524,7 +524,7 @@ async def magnetometer_sample(
         default=12,
         ge=1,
         le=127,
-        description="7-bit I²C address (12 = 0x0C when CAD is GND)",
+        description="7-bit I²C (12=0x0C, 13=0x0D); sample auto-tries both CAD addresses",
     ),
 ):
     """AK09911 单次采样与水平航向角（指北调试）/ AK09911 sample + horizontal heading for north debug."""
@@ -540,7 +540,7 @@ async def magnetometer_probe_buses(
         default=12,
         ge=1,
         le=127,
-        description="7-bit I²C address to probe on each discovered bus",
+        description="Preferred 7-bit addr; each bus tries 0x0C then 0x0D when applicable",
     ),
 ):
     """在已发现的各 I²C 总线上尝试读取 WIA / Try WIA on each discovered I²C bus."""
