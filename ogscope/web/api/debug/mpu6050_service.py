@@ -12,6 +12,8 @@ import subprocess
 import time
 from typing import Any
 
+from ogscope.web.api.debug.i2c_debug_bus_lock import i2c_debug_bus_lock
+
 # InvenSense MPU-6000/6050 数据手册 / Per InvenSense datasheet.
 _REG_WHO_AM_I = 0x75
 _EXPECT_WHO_AM_I = 0x68
@@ -225,12 +227,13 @@ class MPU6050DebugService:
         run_i2cdetect: bool = True,
     ) -> dict[str, Any]:
         nodes = _list_i2c_device_nodes()
-        i2c_text: str | None = None
-        i2c_err: str | None = None
-        if run_i2cdetect:
-            i2c_text, i2c_err = await asyncio.to_thread(_run_i2cdetect, bus)
+        async with i2c_debug_bus_lock(bus):
+            i2c_text: str | None = None
+            i2c_err: str | None = None
+            if run_i2cdetect:
+                i2c_text, i2c_err = await asyncio.to_thread(_run_i2cdetect, bus)
 
-        smbus = await asyncio.to_thread(_read_who_am_i, bus, addr7)
+            smbus = await asyncio.to_thread(_read_who_am_i, bus, addr7)
         overall = bool(smbus.get("ok") and smbus.get("matches_mpu6050"))
 
         hint: str | None = None
@@ -270,7 +273,8 @@ class MPU6050DebugService:
     @staticmethod
     async def gyro_sample(*, bus: int = 1, addr7: int = 0x68) -> dict[str, Any]:
         """读取陀螺仪角速度（°/s）/ Read gyroscope angular rate in °/s."""
-        sample = await asyncio.to_thread(_read_gyro_sample, bus, addr7)
+        async with i2c_debug_bus_lock(bus):
+            sample = await asyncio.to_thread(_read_gyro_sample, bus, addr7)
         ok = bool(sample.get("ok"))
         body: dict[str, Any] = {
             "success": ok,
@@ -289,7 +293,8 @@ class MPU6050DebugService:
     @staticmethod
     async def imu_sample(*, bus: int = 1, addr7: int = 0x68) -> dict[str, Any]:
         """加速度计 + 陀螺仪同次采样，并给出横滚/俯仰（度）/ Accel + gyro; roll/pitch from gravity."""
-        sample = await asyncio.to_thread(_read_imu_sample, bus, addr7)
+        async with i2c_debug_bus_lock(bus):
+            sample = await asyncio.to_thread(_read_imu_sample, bus, addr7)
         ok = bool(sample.get("ok"))
         body: dict[str, Any] = {
             "success": ok,
