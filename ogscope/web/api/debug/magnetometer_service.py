@@ -11,7 +11,10 @@ import os
 import re
 from typing import Any
 
-from ogscope.platform.hardware.ak09911_i2c import measure_single, scan_i2c_bus
+from ogscope.platform.hardware.ak09911_i2c import (
+    measure_heading_with_cad_fallback,
+    scan_i2c_bus,
+)
 
 # WIA：与 Linux ak09911 驱动及数据手册一致 / Matches upstream ak09911 driver & datasheets.
 _AKM_WIA1 = 0x48
@@ -234,23 +237,14 @@ class MagnetometerDebugService:
         航向角定义为 atan2(Hx, Hy)（度，0–360），近似表示传感器 XY 平面内磁场水平分量指向与 +Y 的夹角关系，
         便于罗盘可视化；实际安装需校准或软铁补偿 / Heading uses atan2(Hx, Hy); calibrate for your mount.
         """
-        resolved, wia = await asyncio.to_thread(
-            _smbus_read_wia_first_matching, int(bus), int(addr7)
+        meas, resolved, err = await asyncio.to_thread(
+            measure_heading_with_cad_fallback, int(bus), int(addr7)
         )
-        if not (wia.get("ok") and wia.get("matches_ak099xx")):
+        if err or meas is None or resolved is None:
             return {
                 "success": False,
-                "error": wia.get("error")
-                or "WIA probe failed (not AK09911 family at 0x0C/0x0D)",
-                "heading_deg": None,
-                "field_ut": None,
-                "field_raw": None,
-            }
-        meas, err = await asyncio.to_thread(measure_single, int(bus), int(resolved))
-        if err or meas is None:
-            return {
-                "success": False,
-                "error": err or "measurement failed",
+                "error": err
+                or "WIA/measure failed (not AK09911 family at 0x0C/0x0D or bus error)",
                 "heading_deg": None,
                 "field_ut": None,
                 "field_raw": None,
@@ -258,12 +252,15 @@ class MagnetometerDebugService:
         hx, hy = float(meas.hx), float(meas.hy)
         heading_rad = math.atan2(hx, hy)
         heading_deg = (math.degrees(heading_rad) + 360.0) % 360.0
+        addr_req = int(addr7)
         return {
             "success": True,
             "error": None,
             "bus": int(bus),
+            "addr_7bit_requested": addr_req,
             "addr_7bit": int(resolved),
             "addr_7bit_hex": f"0x{int(resolved):02x}",
+            "addr_auto_fallback": bool(int(resolved) != addr_req),
             "heading_deg": round(heading_deg, 2),
             "heading_note_zh": (
                 "水平磁场在 XY 平面内的方向角（0°–360°），用于指北调试；安装姿态不同需换算或校准。"
