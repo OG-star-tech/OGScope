@@ -257,6 +257,10 @@
   "sys.sensors.mag.i2cdetect": "Run i2cdetect",
   "sys.sensors.mag.btnSelftest": "Run self-test",
   "sys.sensors.mag.btnProbe": "Probe all buses",
+  "sys.sensors.mag.btnCalStart": "Start heading calibration",
+  "sys.sensors.mag.btnCalCommit": "Save & lock heading",
+  "sys.sensors.mag.btnCalReset": "Reset to auto mode",
+  "sys.sensors.mag.btnCalStatus": "Calibration status",
   "sys.sensors.mag.running": "Running…",
   "sys.sensors.mpu.section": "IMU (MPU-6050 / I²C)",
   "sys.sensors.mpu.note": "Defaults: bus 1, address 104 (0x68 with AD0 low). Includes gyro angular-rate sampling (MPU integrates accel + gyro).",
@@ -490,5 +494,12 @@
   "cam.notice.needManualForAutoAdjust": "Switch to manual exposure before auto-adjust",
   "cam.notice.autoAdjusted": "Auto-adjust completed and applied",
   "cam.confirm.deletePreset": "Delete preset {name}?",
-  "cam.confirm.deleteFile": "Delete file {name}?"
+  "cam.confirm.deleteFile": "Delete file {name}?",
+  "sys.sensors.mag.calStatusPrefix": "Calibration mode:",
+  "sys.sensors.mag.calModeAuto": "Auto (not locked)",
+  "sys.sensors.mag.calModeRecording": "Recording (rotate device)",
+  "sys.sensors.mag.calModeLocked": "Locked (saved heading)",
+  "sys.sensors.mag.calSamplesPrefix": "Recorded samples:",
+  "sys.sensors.mag.calRecordingHint": "Tip: keep level and rotate slowly; save after 10+ samples.",
+  "sys.sensors.mag.calLockedHint": "Locked heading params:"
 }

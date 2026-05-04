@@ -96,6 +96,197 @@ def _smbus_read_wia_first_matching(
 
 class MagnetometerDebugService:
     """AK09911 系列探针与总线扫描 / AK09911 family probe and bus scan."""
+    _xy_calib: dict[tuple[int, int], dict[str, Any]] = {}
+    _heading_mode: dict[tuple[int, int], str] = {}
+    _heading_locked: dict[tuple[int, int], dict[str, Any]] = {}
+
+    @staticmethod
+    def _pair_values(axes: str, x: float, y: float, z: float) -> tuple[float, float]:
+        if axes == "yz":
+            return y, z
+        if axes == "zx":
+            return z, x
+        return x, y
+
+    @staticmethod
+    def _calc_axis_spans(st: dict[str, Any]) -> tuple[float, float, float]:
+        hx_hist = list(st.get("hist_x", []))
+        hy_hist = list(st.get("hist_y", []))
+        hz_hist = list(st.get("hist_z", []))
+        if not hx_hist or not hy_hist or not hz_hist:
+            return 0.0, 0.0, 0.0
+        return (
+            float(max(hx_hist) - min(hx_hist)),
+            float(max(hy_hist) - min(hy_hist)),
+            float(max(hz_hist) - min(hz_hist)),
+        )
+
+    @staticmethod
+    def _auto_axes_from_spans(span_x: float, span_y: float, span_z: float) -> str:
+        axis_pairs = [
+            ("xy", span_x + span_y),
+            ("yz", span_y + span_z),
+            ("zx", span_z + span_x),
+        ]
+        return str(max(axis_pairs, key=lambda it: float(it[1]))[0])
+
+    @staticmethod
+    def _resolve_record_key(bus: int, addr7: int) -> tuple[int, int]:
+        """优先匹配在线地址，其次退回请求地址 / Prefer detected addr then requested addr."""
+        b = int(bus)
+        req = int(addr7)
+        candidates: list[int] = [req]
+        if req in _AK09911_ADDR7_CANDIDATES:
+            candidates = [req] + [a for a in _AK09911_ADDR7_CANDIDATES if a != req]
+        for a in candidates:
+            if (b, a) in MagnetometerDebugService._xy_calib:
+                return (b, a)
+        return (b, req)
+
+    @staticmethod
+    async def calibration_start(*, bus: int = 1, addr7: int = 0x0C) -> dict[str, Any]:
+        """开始方向校准采样窗口 / Start heading calibration recording window."""
+        async with i2c_debug_bus_lock(bus):
+            resolved, wia = await asyncio.to_thread(
+                _smbus_read_wia_first_matching, int(bus), int(addr7)
+            )
+        if not (wia.get("ok") and wia.get("matches_ak099xx")):
+            return {
+                "success": False,
+                "error": wia.get("error") or "WIA probe failed",
+                "mode": "auto",
+                "bus": int(bus),
+                "addr_7bit_requested": int(addr7),
+            }
+        k = (int(bus), int(resolved))
+        MagnetometerDebugService._xy_calib[k] = {
+            "hist_x": [],
+            "hist_y": [],
+            "hist_z": [],
+            "samples": 0.0,
+        }
+        MagnetometerDebugService._heading_mode[k] = "recording"
+        return {
+            "success": True,
+            "mode": "recording",
+            "bus": int(bus),
+            "addr_7bit_requested": int(addr7),
+            "addr_7bit": int(resolved),
+            "addr_7bit_hex": f"0x{int(resolved):02x}",
+            "hint": "请在 5-15 秒内水平缓慢旋转设备（建议超过 180°）。",
+        }
+
+    @staticmethod
+    async def calibration_commit(*, bus: int = 1, addr7: int = 0x0C) -> dict[str, Any]:
+        """提交方向校准并锁定 / Commit heading calibration and lock parameters."""
+        k = MagnetometerDebugService._resolve_record_key(int(bus), int(addr7))
+        st = MagnetometerDebugService._xy_calib.get(k)
+        if not st:
+            return {
+                "success": False,
+                "error": "no calibration buffer, call calibration/start first",
+                "mode": "auto",
+                "bus": int(bus),
+                "addr_7bit_requested": int(addr7),
+            }
+        samples = int(float(st.get("samples", 0.0)))
+        if samples < 10:
+            return {
+                "success": False,
+                "error": f"insufficient samples: {samples} (<10)",
+                "mode": MagnetometerDebugService._heading_mode.get(k, "auto"),
+                "bus": int(k[0]),
+                "addr_7bit": int(k[1]),
+            }
+
+        hx_hist = list(st.get("hist_x", []))
+        hy_hist = list(st.get("hist_y", []))
+        hz_hist = list(st.get("hist_z", []))
+        min_x, max_x = min(hx_hist), max(hx_hist)
+        min_y, max_y = min(hy_hist), max(hy_hist)
+        min_z, max_z = min(hz_hist), max(hz_hist)
+        cx, cy, cz = (min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5
+        span_x, span_y, span_z = (max_x - min_x), (max_y - min_y), (max_z - min_z)
+        axes = MagnetometerDebugService._auto_axes_from_spans(span_x, span_y, span_z)
+
+        # 以采样轨迹趋势决定方向符号（让序列更趋于增大）/ Infer sign from recording trend.
+        prev_u: float | None = None
+        unwrapped = 0.0
+        for i in range(samples):
+            x = float(hx_hist[i]) - cx
+            y = float(hy_hist[i]) - cy
+            z = float(hz_hist[i]) - cz
+            a, b = MagnetometerDebugService._pair_values(axes, x, y, z)
+            deg = (math.degrees(math.atan2(a, b)) + 360.0) % 360.0
+            if prev_u is None:
+                prev_u = deg
+                unwrapped = deg
+            else:
+                d = deg - (prev_u % 360.0)
+                d = ((d + 180.0) % 360.0) - 180.0
+                unwrapped += d
+                prev_u = unwrapped
+        trend = unwrapped - ((math.degrees(math.atan2(
+            *MagnetometerDebugService._pair_values(
+                axes,
+                float(hx_hist[0]) - cx,
+                float(hy_hist[0]) - cy,
+                float(hz_hist[0]) - cz,
+            )
+        )) + 360.0) % 360.0)
+        sign = 1 if trend >= 0 else -1
+
+        locked = {
+            "axes_pair": axes,
+            "sign": int(sign),
+            "offset_deg": 0.0,
+            "center": {"x": cx, "y": cy, "z": cz},
+            "span": {"x": span_x, "y": span_y, "z": span_z},
+            "samples": samples,
+        }
+        MagnetometerDebugService._heading_locked[k] = locked
+        MagnetometerDebugService._heading_mode[k] = "locked"
+        return {
+            "success": True,
+            "mode": "locked",
+            "bus": int(k[0]),
+            "addr_7bit": int(k[1]),
+            "addr_7bit_hex": f"0x{int(k[1]):02x}",
+            "locked": locked,
+        }
+
+    @staticmethod
+    async def calibration_reset(*, bus: int = 1, addr7: int = 0x0C) -> dict[str, Any]:
+        """重置方向校准，回到 auto / Reset calibration and return to auto mode."""
+        k = MagnetometerDebugService._resolve_record_key(int(bus), int(addr7))
+        MagnetometerDebugService._heading_locked.pop(k, None)
+        MagnetometerDebugService._heading_mode[k] = "auto"
+        return {
+            "success": True,
+            "mode": "auto",
+            "bus": int(k[0]),
+            "addr_7bit": int(k[1]),
+            "addr_7bit_hex": f"0x{int(k[1]):02x}",
+        }
+
+    @staticmethod
+    async def calibration_status(*, bus: int = 1, addr7: int = 0x0C) -> dict[str, Any]:
+        """查询方向校准状态 / Query heading calibration mode and lock."""
+        k = MagnetometerDebugService._resolve_record_key(int(bus), int(addr7))
+        st = MagnetometerDebugService._xy_calib.get(k) or {}
+        mode = MagnetometerDebugService._heading_mode.get(k, "auto")
+        locked = MagnetometerDebugService._heading_locked.get(k)
+        span_x, span_y, span_z = MagnetometerDebugService._calc_axis_spans(st)
+        return {
+            "success": True,
+            "mode": mode,
+            "bus": int(k[0]),
+            "addr_7bit": int(k[1]),
+            "addr_7bit_hex": f"0x{int(k[1]):02x}",
+            "samples": int(float(st.get("samples", 0.0))),
+            "span_xyz": {"x": round(span_x, 3), "y": round(span_y, 3), "z": round(span_z, 3)},
+            "locked": locked,
+        }
 
     @staticmethod
     async def selftest(
@@ -243,7 +434,7 @@ class MagnetometerDebugService:
         便于罗盘可视化；实际安装需校准或软铁补偿 / Heading uses atan2(Hx, Hy); calibrate for your mount.
         """
         async with i2c_debug_bus_lock(bus):
-            meas, resolved, err = await asyncio.to_thread(
+            meas, resolved, err, err_stage = await asyncio.to_thread(
                 measure_heading_with_cad_fallback, int(bus), int(addr7)
             )
         if err or meas is None or resolved is None:
@@ -251,23 +442,116 @@ class MagnetometerDebugService:
                 "success": False,
                 "error": err
                 or "WIA/measure failed (not AK09911 family at 0x0C/0x0D or bus error)",
+                "error_stage": err_stage or "unknown",
                 "heading_deg": None,
                 "field_ut": None,
                 "field_raw": None,
             }
-        hx, hy = float(meas.hx), float(meas.hy)
-        heading_rad = math.atan2(hx, hy)
-        heading_deg = (math.degrees(heading_rad) + 360.0) % 360.0
         addr_req = int(addr7)
+        k = (int(bus), int(resolved))
+        hx, hy, hz = float(meas.hx), float(meas.hy), float(meas.hz)
+        st = MagnetometerDebugService._xy_calib.get(k)
+        if st is None:
+            st = {
+                "hist_x": [hx],
+                "hist_y": [hy],
+                "hist_z": [hz],
+                "samples": 1.0,
+            }
+            MagnetometerDebugService._xy_calib[k] = st
+        else:
+            hx_hist = list(st.get("hist_x", []))
+            hy_hist = list(st.get("hist_y", []))
+            hz_hist = list(st.get("hist_z", []))
+            hx_hist.append(hx)
+            hy_hist.append(hy)
+            hz_hist.append(hz)
+            # 保留最近窗口，避免早期极值长期污染 / Keep sliding window to avoid stale extremes.
+            if len(hx_hist) > 160:
+                hx_hist = hx_hist[-160:]
+            if len(hy_hist) > 160:
+                hy_hist = hy_hist[-160:]
+            if len(hz_hist) > 160:
+                hz_hist = hz_hist[-160:]
+            st["hist_x"] = hx_hist
+            st["hist_y"] = hy_hist
+            st["hist_z"] = hz_hist
+            st["samples"] = float(st.get("samples", 0.0)) + 1.0
+
+        hx_hist = list(st.get("hist_x", []))
+        hy_hist = list(st.get("hist_y", []))
+        hz_hist = list(st.get("hist_z", []))
+        min_x = min(hx_hist) if hx_hist else hx
+        max_x = max(hx_hist) if hx_hist else hx
+        min_y = min(hy_hist) if hy_hist else hy
+        max_y = max(hy_hist) if hy_hist else hy
+        min_z = min(hz_hist) if hz_hist else hz
+        max_z = max(hz_hist) if hz_hist else hz
+        cx = (min_x + max_x) * 0.5
+        cy = (min_y + max_y) * 0.5
+        cz = (min_z + max_z) * 0.5
+        hx_corr = hx - cx
+        hy_corr = hy - cy
+        hz_corr = hz - cz
+        span_x = max_x - min_x
+        span_y = max_y - min_y
+        span_z = max_z - min_z
+
+        # 原始角 + 校准角都算，便于前端/日志诊断 / Compute both raw and calibrated heading for diagnosis.
+        heading_raw_deg = (math.degrees(math.atan2(hx, hy)) + 360.0) % 360.0
+        heading_cal_deg = (math.degrees(math.atan2(hx_corr, hy_corr)) + 360.0) % 360.0
+
+        # 自动选择变化最大的两轴，适配不同安装姿态 / Pick two most-varying axes for mounting differences.
+        axis_pairs = [
+            ("xy", span_x + span_y, hx_corr, hy_corr),
+            ("yz", span_y + span_z, hy_corr, hz_corr),
+            ("zx", span_z + span_x, hz_corr, hx_corr),
+        ]
+        auto_axes, _, auto_a, auto_b = max(axis_pairs, key=lambda it: float(it[1]))
+        heading_auto_deg = (math.degrees(math.atan2(auto_a, auto_b)) + 360.0) % 360.0
+
+        # 采样很少时仍用 raw，避免中心未形成时抖动；其余优先用自动轴校准角。
+        enough_samples = float(st.get("samples", 0.0)) >= 10.0
+        enough_span = max(span_x, span_y, span_z) >= 30.0
+        use_corr = bool(enough_samples and enough_span)
+        heading_deg = heading_auto_deg if use_corr else heading_raw_deg
+        heading_source = f"calibrated_{auto_axes}" if use_corr else "raw_xy"
+
+        mode = MagnetometerDebugService._heading_mode.get(k, "auto")
+        locked = MagnetometerDebugService._heading_locked.get(k)
+        heading_deg_locked: float | None = None
+        if mode == "locked" and locked:
+            axes_locked = str(locked.get("axes_pair") or auto_axes)
+            sign_locked = int(locked.get("sign") or 1)
+            offset_locked = float(locked.get("offset_deg") or 0.0)
+            c = locked.get("center") or {}
+            lx = hx - float(c.get("x", cx))
+            ly = hy - float(c.get("y", cy))
+            lz = hz - float(c.get("z", cz))
+            la, lb = MagnetometerDebugService._pair_values(axes_locked, lx, ly, lz)
+            heading_deg_locked = (
+                (math.degrees(math.atan2(sign_locked * la, lb)) + offset_locked + 360.0)
+                % 360.0
+            )
+            heading_deg = heading_deg_locked
+            heading_source = f"locked_{axes_locked}"
         return {
             "success": True,
             "error": None,
+            "error_stage": None,
             "bus": int(bus),
             "addr_7bit_requested": addr_req,
             "addr_7bit": int(resolved),
             "addr_7bit_hex": f"0x{int(resolved):02x}",
             "addr_auto_fallback": bool(int(resolved) != addr_req),
             "heading_deg": round(heading_deg, 2),
+            "heading_raw_deg": round(heading_raw_deg, 2),
+            "heading_calibrated_deg": round(heading_cal_deg, 2),
+            "heading_auto_deg": round(heading_auto_deg, 2),
+            "heading_locked_deg": None if heading_deg_locked is None else round(heading_deg_locked, 2),
+            "heading_source": heading_source,
+            "heading_axes_auto": auto_axes,
+            "heading_mode": mode,
             "heading_note_zh": (
                 "水平磁场在 XY 平面内的方向角（0°–360°），用于指北调试；安装姿态不同需换算或校准。"
             ),
@@ -281,5 +565,19 @@ class MagnetometerDebugService:
                 "z": meas.ut_z,
             },
             "field_raw": {"x": meas.hx, "y": meas.hy, "z": meas.hz},
+            "field_raw_center_xy": {"x": round(cx, 3), "y": round(cy, 3)},
+            "field_raw_span_xy": {"x": round(span_x, 3), "y": round(span_y, 3)},
+            "field_raw_center_xyz": {
+                "x": round(cx, 3),
+                "y": round(cy, 3),
+                "z": round(cz, 3),
+            },
+            "field_raw_span_xyz": {
+                "x": round(span_x, 3),
+                "y": round(span_y, 3),
+                "z": round(span_z, 3),
+            },
+            "calibration_samples": int(float(st.get("samples", 0.0))),
+            "calibration_locked": locked,
         }
 

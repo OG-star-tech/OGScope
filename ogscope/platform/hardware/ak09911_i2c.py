@@ -57,6 +57,22 @@ class Ak09911Measurement:
     ut_z: float
 
 
+@dataclass(slots=True)
+class Ak09911IoError:
+    """I2C 失败上下文 / Structured I2C failure context."""
+
+    stage: str
+    errno: int | None
+    message: str
+    addr7: int
+
+    def to_text(self) -> str:
+        return (
+            f"[{self.stage}] {self.message}"
+            f" (addr=0x{self.addr7:02x}, errno={self.errno})"
+        )
+
+
 def i2c_dev_path(bus: int) -> str:
     return f"/dev/i2c-{int(bus)}"
 
@@ -142,13 +158,29 @@ def _combine_hxl_6(b: list[int]) -> tuple[int, int, int]:
     return s16(b[0], b[1]), s16(b[2], b[3]), s16(b[4], b[5])
 
 
+def _err_ctx(stage: str, exc: OSError, addr7: int) -> Ak09911IoError:
+    """包装 OSError 为可序列化诊断结构 / Convert OSError to serializable error context."""
+    return Ak09911IoError(
+        stage=stage,
+        errno=getattr(exc, "errno", None),
+        message=str(exc),
+        addr7=int(addr7),
+    )
+
+
 def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
     """单次测量（已打开 SMBus）/ Single-shot read with an open SMBus handle."""
-    smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
+    try:
+        smbus.write_byte_data(addr7, REG_CNTL2, 0x01)
+    except OSError as exc:
+        raise RuntimeError(_err_ctx("cntl2_write", exc, addr7).to_text()) from exc
     deadline = time.monotonic() + 0.35
     st1 = 0
     while time.monotonic() < deadline:
-        st1 = smbus.read_byte_data(addr7, REG_ST1)
+        try:
+            st1 = smbus.read_byte_data(addr7, REG_ST1)
+        except OSError as exc:
+            raise RuntimeError(_err_ctx("st1_read", exc, addr7).to_text()) from exc
         if st1 & 0x01:
             break
         time.sleep(0.002)
@@ -168,19 +200,24 @@ def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
                 errno.EIO,
                 errno.ENXIO,
             ):
-                raise
+                raise RuntimeError(_err_ctx("hxl_read", exc, addr7).to_text()) from exc
             time.sleep(0.006 * (read_try + 1))
     if data is None:
-        raise last_io  # type: ignore[misc]
+        if last_io is not None:
+            raise RuntimeError(_err_ctx("hxl_read", last_io, addr7).to_text()) from last_io
+        raise RuntimeError("hxl_read unknown error")
     try:
         _ = smbus.read_byte_data(addr7, REG_ST2)
     except OSError as exc:
         en = getattr(exc, "errno", None)
         if en in (errno.EREMOTEIO, errno.EIO, errno.ENXIO):
             time.sleep(0.004)
-            _ = smbus.read_byte_data(addr7, REG_ST2)
+            try:
+                _ = smbus.read_byte_data(addr7, REG_ST2)
+            except OSError as exc2:
+                raise RuntimeError(_err_ctx("st2_read", exc2, addr7).to_text()) from exc2
         else:
-            raise
+            raise RuntimeError(_err_ctx("st2_read", exc, addr7).to_text()) from exc
     hx, hy, hz = _combine_hxl_6(data)
     s = AK09911_UT_PER_LSB
     return Ak09911Measurement(
@@ -206,7 +243,7 @@ def measure_heading_with_cad_fallback(
     preferred: int = 0x0C,
     *,
     bus_retries: int = 8,
-) -> tuple[Ak09911Measurement | None, int | None, str | None]:
+) -> tuple[Ak09911Measurement | None, int | None, str | None, str | None]:
     """
     同一 SMBus 会话内先校验 WIA 再测量，并在 0x0C/0x0D 与总线重试间切换。
     / One SMBus session per try: WIA then measure; alternate CAD addrs and retries for EREMOTEIO.
@@ -215,7 +252,7 @@ def measure_heading_with_cad_fallback(
 
     path = ensure_i2c_dev_node(bus)
     if path is None:
-        return None, None, f"missing {i2c_dev_path(bus)}"
+        return None, None, f"missing {i2c_dev_path(bus)}", "dev_missing"
 
     pref = int(preferred)
     if pref in _AK09911_ADDR7_CAD:
@@ -224,22 +261,46 @@ def measure_heading_with_cad_fallback(
         order = [pref]
 
     last_err: str | None = None
+    last_stage: str | None = None
     for attempt in range(max(1, int(bus_retries))):
         for addr7 in order:
             try:
                 with SMBus(bus) as smbus:
-                    w1 = smbus.read_byte_data(addr7, REG_WIA1)
-                    w2 = smbus.read_byte_data(addr7, REG_WIA2)
+                    try:
+                        w1 = smbus.read_byte_data(addr7, REG_WIA1)
+                        w2 = smbus.read_byte_data(addr7, REG_WIA2)
+                    except OSError as exc:
+                        ectx = _err_ctx("wia_read", exc, addr7)
+                        last_err = ectx.to_text()
+                        last_stage = ectx.stage
+                        continue
                     if not wia_matches_ak099xx_family(w1, w2):
+                        last_err = (
+                            f"[wia_mismatch] WIA1=0x{w1:02x} WIA2=0x{w2:02x}"
+                            f" (addr=0x{addr7:02x})"
+                        )
+                        last_stage = "wia_mismatch"
                         continue
                     time.sleep(0.004)
                     meas = _measure_body_smbus(smbus, addr7)
-                    return meas, addr7, None
+                    return meas, addr7, None, None
             except OSError as e:
                 last_err = str(e)
+                last_stage = "bus_open"
+                continue
+            except RuntimeError as e:
+                # _measure_body_smbus 已包装阶段信息 / stage text is already embedded
+                last_err = str(e)
+                if str(e).startswith("[") and "]" in str(e):
+                    last_stage = str(e)[1 : str(e).index("]")]
                 continue
         time.sleep(min(0.06, 0.018 * (attempt + 1)))
-    return None, None, last_err or "AK09911 WIA/measure failed on bus"
+    return (
+        None,
+        None,
+        last_err or "AK09911 WIA/measure failed on bus",
+        last_stage or "unknown",
+    )
 
 
 def measure_single(bus: int, addr7: int) -> tuple[Ak09911Measurement | None, str | None]:
