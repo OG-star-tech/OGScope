@@ -104,6 +104,28 @@ ogscope_i2c_host_setup_full 1
 VENV_PYTHON="$(poetry env info --path)/bin/python"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 ogscope_sync_systemd_execstart_if_needed "${SERVICE_PATH}" "${VENV_PYTHON}"
+ogscope_ensure_systemd_primary_envfile "${SERVICE_PATH}"
+
+OGSCOPE_ENV_DIR="/etc/ogscope"
+OGSCOPE_ENV_FILE="${OGSCOPE_ENV_DIR}/ogscope.env"
+if [ ! -f "${OGSCOPE_ENV_FILE}" ]; then
+    echo "📝 初始化主配置 / Initializing primary config: ${OGSCOPE_ENV_FILE}"
+    sudo install -d -m 755 "${OGSCOPE_ENV_DIR}"
+    if [ "${OGSCOPE_DEVELOPMENT_MODE:-0}" = "1" ] && [ -z "${OGSCOPE_LOG_LEVEL:-}" ]; then
+        _update_log_level="DEBUG"
+    else
+        _update_log_level="${OGSCOPE_LOG_LEVEL:-INFO}"
+    fi
+    sudo tee "${OGSCOPE_ENV_FILE}" >/dev/null <<EOF
+# OGScope 主配置（部署态）/ OGScope primary deployment configuration
+OGSCOPE_HOST=0.0.0.0
+OGSCOPE_PORT=8000
+OGSCOPE_RELOAD=false
+OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE:-0}
+OGSCOPE_LOG_LEVEL=${_update_log_level}
+EOF
+    sudo chmod 640 "${OGSCOPE_ENV_FILE}"
+fi
 
 chmod +x "${PROJECT_DIR}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
 ogscope_sync_network_boot_unit_if_needed "${PROJECT_DIR}"

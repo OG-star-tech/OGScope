@@ -74,6 +74,13 @@ class Settings(BaseSettings):
         default=True,
         description="启用 OGScope 用户界面路由 / Enable OGScope UI routes",
     )
+    subordinate_local_dev_only: bool = Field(
+        default=True,
+        description=(
+            "在 subordinate 角色下，仅允许本机访问 /api/dev/*（联调用途） / "
+            "In subordinate role, allow /api/dev/* only from localhost for integration"
+        ),
+    )
 
     # 日志配置 / Log configuration
     log_level: str = Field(default="INFO", description="日志级别")
@@ -363,7 +370,7 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("/etc/ogscope/ogscope.env", ".env"),
         env_file_encoding="utf-8",
         env_prefix="OGSCOPE_",
         case_sensitive=False,

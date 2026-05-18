@@ -258,6 +258,24 @@ else
     OGSCOPE_LOG_LEVEL_VALUE="${OGSCOPE_LOG_LEVEL:-INFO}"
 fi
 
+OGSCOPE_ENV_DIR="/etc/ogscope"
+OGSCOPE_ENV_FILE="${OGSCOPE_ENV_DIR}/ogscope.env"
+echo "📝 写入主配置文件 / Writing primary config: ${OGSCOPE_ENV_FILE}"
+sudo install -d -m 755 "${OGSCOPE_ENV_DIR}"
+if [ ! -f "${OGSCOPE_ENV_FILE}" ]; then
+    sudo tee "${OGSCOPE_ENV_FILE}" >/dev/null <<EOF
+# OGScope 主配置（部署态）/ OGScope primary deployment configuration
+OGSCOPE_HOST=0.0.0.0
+OGSCOPE_PORT=8000
+OGSCOPE_RELOAD=false
+OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE_VALUE}
+OGSCOPE_LOG_LEVEL=${OGSCOPE_LOG_LEVEL_VALUE}
+EOF
+    sudo chmod 640 "${OGSCOPE_ENV_FILE}"
+else
+    echo "ℹ️  已存在 ${OGSCOPE_ENV_FILE}，保留现有配置 / Existing file preserved"
+fi
+
 # ExecStart 使用 poetry env info --path（与 virtualenvs.in-project=true 时即项目 .venv），勿手写 ~/.virtualenvs/
 # ExecStart uses poetry env path (project .venv when in-project=true); do not hardcode ~/.virtualenvs/
 echo "⚙️ 写入 systemd: ${SERVICE_PATH}"
@@ -272,9 +290,7 @@ User=${USER}
 WorkingDirectory=${PROJECT_DIR}
 Environment=PYTHONPATH=${PYTHONPATH_VALUE}
 Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH_VALUE}
-Environment=OGSCOPE_RELOAD=false
-Environment=OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE_VALUE}
-Environment=OGSCOPE_LOG_LEVEL=${OGSCOPE_LOG_LEVEL_VALUE}
+EnvironmentFile=-/etc/ogscope/ogscope.env
 EnvironmentFile=-/etc/ogscope/network.env
 ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure
