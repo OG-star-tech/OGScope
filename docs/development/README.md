@@ -12,7 +12,7 @@
 - **B 板上运维**：[WiFi](wifi-nm.md) | [English](wifi-nm_EN.md)；[星库](plate-solve-data.md)；[稳定性](ogscope-service-hardening.md)；[BOM](../hardware/bom.md) | [English](../hardware/bom_EN.md)
 - **C API/契约/测试**：[API 架构（含 FastAPI 入口）](../API_ARCHITECTURE.md) | [English](../API_ARCHITECTURE_EN.md)；[系统架构](../architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md)；[Core 契约](../contracts/core-rest-v1.md) | [English](../contracts/core-rest-v1_EN.md)；[Dev 契约](../contracts/dev-rest-v1.md) | [English](../contracts/dev-rest-v1_EN.md)；[兼容矩阵](../contracts/core-compatibility-matrix.md)；[自检](ARCHITECTURE_QUICK_CHECKLIST.md) | [English](ARCHITECTURE_QUICK_CHECKLIST_EN.md)；[测试](testing-guide.md) | [English](testing-guide_EN.md)
 - **D 跨仓**：[CROSS_PROJECT_COLLAB.md](CROSS_PROJECT_COLLAB.md) | [English](CROSS_PROJECT_COLLAB_EN.md)；[外部集成契约](OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md) | [English](OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md)
-- **E 工具与贡献**：[调试控制台](../DEBUG_CONSOLE.md) | [English](../DEBUG_CONSOLE_EN.md)；[贡献指南](../../CONTRIBUTING.md) | [English](../../CONTRIBUTING_EN.md)
+- **E 工具与贡献**：[脚本规范](SCRIPT_STANDARDS.md)；[调试控制台](../DEBUG_CONSOLE.md) | [English](../DEBUG_CONSOLE_EN.md)；[贡献指南](../../CONTRIBUTING.md) | [English](../../CONTRIBUTING_EN.md)
 
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。
@@ -36,7 +36,16 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
+最小化安装（仅主服务与运行时依赖）可使用：
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/install-min.sh
+./scripts/install-min.sh
+```
+
 说明摘要：默认 `poetry install --only main`；国内网络可 `**export OGSCOPE_MIRROR=cn**`；低配板可 `**OGSCOPE_APT_SLOW=1**`。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
+部署态主配置文件为 `/etc/ogscope/ogscope.env`，网络专用配置为 `/etc/ogscope/network.env`。
 
 ### 0.3 网络与 WiFi（AP/STA）
 

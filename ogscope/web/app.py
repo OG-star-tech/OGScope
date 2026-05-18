@@ -31,7 +31,7 @@ from ogscope.platform.hardware_plane.runtime import (
     start_hardware_plane,
     stop_hardware_plane,
 )
-from ogscope.web.api.main import router as api_router
+from ogscope.web.api.main import create_api_router
 
 
 @asynccontextmanager
@@ -183,6 +183,10 @@ app = FastAPI(
 
 settings = get_settings()
 hardware_profile = describe_hardware_plane_profile(settings)
+api_router = create_api_router(
+    include_network=not bool(hardware_profile["subordinate_mode"]),
+    include_dev_debug=True,
+)
 
 
 @app.exception_handler(Exception)
@@ -226,6 +230,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _is_local_client(request: Request) -> bool:
+    """判断是否本机来源 / Determine whether request comes from localhost."""
+    client_host = request.client.host if request.client else ""
+    return client_host in {"127.0.0.1", "::1", "localhost"}
+
+
+@app.middleware("http")
+async def _guard_subordinate_dev_routes(request: Request, call_next):
+    """在 subordinate 角色下限制 dev 接口访问来源 / Limit dev routes in subordinate mode."""
+    if (
+        bool(hardware_profile["subordinate_mode"])
+        and bool(settings.subordinate_local_dev_only)
+        and request.url.path.startswith("/api/dev/")
+        and not _is_local_client(request)
+    ):
+        return JSONResponse(
+            {
+                "success": False,
+                "error": {
+                    "code": "forbidden",
+                    "message": "dev routes are restricted to localhost in subordinate mode",
+                },
+                "data": {},
+            },
+            status_code=403,
+        )
+    return await call_next(request)
 
 # 挂载静态文件 / Mount static files
 if bool(hardware_profile["enable_ui"]) and settings.static_dir.exists():
@@ -316,6 +349,18 @@ async def debug_analysis_console(request: Request):
 @app.get("/api")
 async def api_root():
     """API根路径 / API root path"""
+    endpoints = {
+        "camera": "/api/camera/",
+        "alignment": "/api/alignment/",
+        "system": "/api/dev/system/",
+        "hardware_plane": "/api/dev/system/hardware-plane/status",
+        "system_legacy": "/api/system/",
+        "analysis": "/api/dev/analysis/",
+        "debug": "/api/dev/debug/",
+        "core": "/api/core/v1/",
+    }
+    if not bool(hardware_profile["subordinate_mode"]):
+        endpoints["network"] = "/api/network/"
     return {
         "name": "OGScope",
         "version": __version__,
@@ -324,17 +369,7 @@ async def api_root():
         "sensor_source": hardware_profile["sensor_source"],
         "docs": "/docs",
         "docs_dev": "/docs/dev",
-        "endpoints": {
-            "camera": "/api/camera/",
-            "alignment": "/api/alignment/",
-            "system": "/api/dev/system/",
-            "hardware_plane": "/api/dev/system/hardware-plane/status",
-            "system_legacy": "/api/system/",
-            "network": "/api/network/",
-            "analysis": "/api/dev/analysis/",
-            "debug": "/api/dev/debug/",
-            "core": "/api/core/v1/",
-        },
+        "endpoints": endpoints,
     }
 
 

@@ -264,6 +264,28 @@ ogscope_sync_systemd_execstart_if_needed() {
     echo "✅ 已更新 ${unit_path} / Unit updated"
 }
 
+# 若 systemd unit 缺少主配置 EnvironmentFile，则补齐 / Ensure primary config EnvironmentFile exists in unit
+# 参数 / Args: $1 = unit 文件路径 / unit file path
+ogscope_ensure_systemd_primary_envfile() {
+    local unit_path="${1:?}"
+    local marker="EnvironmentFile=-/etc/ogscope/ogscope.env"
+
+    if [ ! -f "${unit_path}" ]; then
+        echo "ℹ️  未找到 ${unit_path}，跳过 EnvironmentFile 检查 / Unit missing; skip envfile check"
+        return 0
+    fi
+    if grep -qF "${marker}" "${unit_path}" 2>/dev/null; then
+        return 0
+    fi
+    echo "⚙️  为 unit 补充主配置 EnvironmentFile / Injecting primary EnvironmentFile into unit..."
+    sudo awk -v marker="${marker}" '
+        /^\[Service\]$/ { print; print marker; next }
+        { print }
+    ' "${unit_path}" >"${unit_path}.ogscope.tmp"
+    sudo mv "${unit_path}.ogscope.tmp" "${unit_path}"
+    echo "✅ 已补充 ${marker} / Injected"
+}
+
 # 若项目目录变更，同步 ogscope-network-boot.service 的 ExecStart（与 install.sh 一致）
 # If project path changed, sync ExecStart in ogscope-network-boot.service (matches install.sh)
 # 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
