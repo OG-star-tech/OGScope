@@ -222,9 +222,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/start_debug_console.sh`
   - purpose: foreground run with `PYTHONPATH`/`LD_LIBRARY_PATH`
   - status: manual debug helper, not default production startup
-- `Makefile` (`run/dev/deploy`)
-  - purpose: developer convenience commands
-  - status: helper entrypoints, not replacement for `systemd`
+- `poetry run ...` and `scripts/*.sh`
+  - purpose: developer commands and board-side operational entrypoints
+  - status: recommended direct entrypoints; no Makefile wrapper required
 
 ## 5. Configure `systemd` Service and Autostart
 

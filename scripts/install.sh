@@ -34,14 +34,18 @@ if [ "${EUID}" -eq 0 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="${OGSCOPE_DEPLOY_DIR:-/opt/ogscope}"
+PROJECT_DIR="${DEPLOY_DIR}"
 SERVICE_NAME="ogscope"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
-echo "📁 项目目录 / Project: ${PROJECT_DIR}"
+echo "📁 源码目录 / Source: ${SOURCE_DIR}"
+echo "📁 部署目录 / Deploy: ${PROJECT_DIR}"
 
 if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
-    echo "❌ 未找到 pyproject.toml / pyproject.toml not found"
+    echo "❌ 未找到部署目录中的 pyproject.toml: ${PROJECT_DIR}"
+    echo "   请先运行 ./scripts/bootstrap.sh 将源码同步到固定部署目录"
     exit 1
 fi
 

@@ -16,7 +16,9 @@ if [ "${EUID}" -eq 0 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="${OGSCOPE_DEPLOY_DIR:-/opt/ogscope}"
+PROJECT_DIR="${DEPLOY_DIR}"
 SERVICE_NAME="ogscope"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 BOOT_SERVICE_NAME="ogscope-network-boot"
@@ -28,11 +30,14 @@ HW_PLANE_STANDALONE_UNIT="/etc/systemd/system/ogscope-hardware-plane.service"
 echo "======================================"
 echo "  OGScope 卸载 / OGScope uninstall"
 echo "======================================"
-echo "📁 项目目录 / Project: ${PROJECT_DIR}"
+echo "📁 源码目录 / Source: ${SOURCE_DIR}"
+echo "📁 部署目录 / Deploy: ${PROJECT_DIR}"
 
 if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
-    echo "❌ 未找到 pyproject.toml / pyproject.toml not found"
-    exit 1
+    echo "❌ 未找到部署目录中的 pyproject.toml: ${PROJECT_DIR}"
+    echo "   将继续执行 systemd 清理 / Continue with systemd cleanup."
+else
+    cd "${PROJECT_DIR}"
 fi
 
 # 确认 / Confirmation
@@ -54,8 +59,6 @@ if [ "${OGSCOPE_UNINSTALL_CONFIRM:-}" != "1" ]; then
         exit 1
     fi
 fi
-
-cd "${PROJECT_DIR}"
 
 # 停止并禁用主服务 / Stop and disable main service
 echo "🛑 停止服务 / Stopping service..."

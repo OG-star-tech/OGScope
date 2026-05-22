@@ -22,8 +22,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="${OGSCOPE_DEPLOY_DIR:-/opt/ogscope}"
+PROJECT_DIR="${DEPLOY_DIR}"
 SERVICE_NAME="ogscope"
+
+echo "📁 源码目录 / Source: ${SOURCE_DIR}"
+echo "📁 部署目录 / Deploy: ${PROJECT_DIR}"
+
+if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
+    echo "❌ 未找到部署目录中的 pyproject.toml: ${PROJECT_DIR}"
+    echo "   请先运行 ./scripts/bootstrap.sh"
+    exit 1
+fi
 
 cd "${PROJECT_DIR}"
 
@@ -37,11 +48,6 @@ source "${SCRIPT_DIR}/boot-config-i2c.sh"
 ogscope_prompt_mirror_if_needed
 OGSCOPE_MIRROR_RESOLVED="$(ogscope_resolve_mirror)"
 echo "🌐 镜像模式 / Mirror: ${OGSCOPE_MIRROR_RESOLVED}（OGSCOPE_MIRROR=${OGSCOPE_MIRROR:-auto}）"
-
-if [ ! -f "${PROJECT_DIR}/pyproject.toml" ]; then
-    echo "❌ 未找到 pyproject.toml / pyproject.toml not found"
-    exit 1
-fi
 
 export PATH="${HOME}/.local/bin:${PATH}"
 if ! command -v poetry >/dev/null 2>&1; then

@@ -6,6 +6,7 @@ import {
   Cpu,
   LayoutDashboard,
   Network,
+  Settings,
   Sparkles,
   Touchpad,
   Wifi,
@@ -13,7 +14,7 @@ import {
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
 import { useI18n } from "@shared/i18n/I18nProvider";
 
-type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power";
+type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power" | "config";
 
 const navClass = (active: boolean) =>
   `flex items-center gap-3 rounded-lg px-3 py-2.5 font-headline text-sm tracking-tight transition-colors ${
@@ -48,6 +49,7 @@ export function DebugShell({
     sensors: t("sys.shell.top.sensors"),
     hmi: t("sys.shell.top.hmi"),
     power: t("sys.shell.top.power"),
+    config: t("sys.shell.top.config"),
   };
   const externalLinkClass = navClass(false);
   const openNamedWindow = (url: string, name: string) => {
@@ -112,6 +114,10 @@ export function DebugShell({
             <button type="button" className={navClass(route === "hmi")} onClick={() => onRouteChange("hmi")}>
               <Touchpad className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.hmi")}</span>
+            </button>
+            <button type="button" className={navClass(route === "config")} onClick={() => onRouteChange("config")}>
+              <Settings className="h-4 w-4 shrink-0" />
+              <span>{t("sys.shell.nav.config")}</span>
             </button>
           </nav>
         </div>
