@@ -25,6 +25,47 @@ type EnvEntry = {
   value: string;
 };
 
+type ConfigHint = {
+  key: string;
+  zh: string;
+  en: string;
+};
+
+const OGSCOPE_ENV_HINTS: ConfigHint[] = [
+  { key: "OGSCOPE_HOST", zh: "OGScope 服务监听地址，通常保持 0.0.0.0。", en: "OGScope bind host, usually keep 0.0.0.0." },
+  { key: "OGSCOPE_PORT", zh: "OGScope 服务端口，默认 8000。", en: "OGScope service port, default 8000." },
+  { key: "OGSCOPE_RELOAD", zh: "是否启用热重载（开发用）。", en: "Enable hot reload for development." },
+  { key: "OGSCOPE_LOG_LEVEL", zh: "日志级别（DEBUG/INFO/WARNING/ERROR）。", en: "Log level (DEBUG/INFO/WARNING/ERROR)." },
+  { key: "OGSCOPE_DEVELOPMENT_MODE", zh: "开发模式开关，打开后会输出更详细日志。", en: "Development mode switch for more verbose logs." },
+  {
+    key: "OGSCOPE_HARDWARE_PLANE_ROLE",
+    zh: "硬件平面角色：standalone 或 subordinate。",
+    en: "Hardware plane role: standalone or subordinate.",
+  },
+  {
+    key: "OGSCOPE_SUBORDINATE_LOCAL_DEV_ONLY",
+    zh: "在 subordinate 角色下是否仅允许本机访问 /api/dev/*。",
+    en: "Restrict /api/dev/* to localhost in subordinate mode.",
+  },
+  { key: "OGSCOPE_ENABLE_UI", zh: "是否启用 Web UI 路由。", en: "Enable Web UI routes." },
+  { key: "OGSCOPE_ENABLE_LOCAL_SENSORS", zh: "是否启用本地传感器服务。", en: "Enable local sensor services." },
+  { key: "OGSCOPE_ENABLE_HMI", zh: "是否启用 HMI 服务。", en: "Enable HMI service." },
+  {
+    key: "OGSCOPE_WIFI_STA_SSID",
+    zh: "STA 模式目标 WiFi SSID（network.env 常见项）。",
+    en: "Target STA WiFi SSID (common in network.env).",
+  },
+  {
+    key: "OGSCOPE_WIFI_STA_PASSWORD",
+    zh: "STA 模式目标 WiFi 密码（network.env 常见项）。",
+    en: "Target STA WiFi password (common in network.env).",
+  },
+];
+
+const OGSCOPE_ENV_HINT_MAP = new Map<string, ConfigHint>(
+  OGSCOPE_ENV_HINTS.map((item) => [item.key.toUpperCase(), item]),
+);
+
 function parseEnvEntries(content: string): { entries: EnvEntry[]; unsupportedLines: number } {
   const entries: EnvEntry[] = [];
   let unsupportedLines = 0;
@@ -169,6 +210,12 @@ export function ConfigPage() {
     setFormEntries((prev) => prev.filter((entry) => entry.id !== id));
   };
 
+  const configHintText = (key: string) => {
+    const hint = OGSCOPE_ENV_HINT_MAP.get(key.trim().toUpperCase());
+    if (!hint) return isZh ? "暂无释义" : "No hint";
+    return isZh ? hint.zh : hint.en;
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header>
@@ -284,26 +331,47 @@ export function ConfigPage() {
                         : `${unsupportedLines} line(s) cannot be represented in key-value form. Use Raw mode for these lines.`}
                     </div>
                   )}
-                  <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                    {formEntries.map((entry) => (
-                      <div key={entry.id} className="grid grid-cols-12 items-center gap-2">
-                        <input
-                          className="col-span-4 rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
-                          placeholder={isZh ? "变量名，如 OGSCOPE_PORT" : "Key, e.g. OGSCOPE_PORT"}
-                          value={entry.key}
-                          onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-                        />
-                        <input
-                          className="col-span-7 rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
-                          placeholder={isZh ? "变量值" : "Value"}
-                          value={entry.value}
-                          onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-                        />
-                        <button type="button" className="col-span-1 justify-self-end" onClick={() => removeEntry(entry.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-on-surface-variant" />
-                        </button>
-                      </div>
-                    ))}
+                  <div className="max-h-[420px] overflow-auto pr-1">
+                    <table className="w-full border-separate border-spacing-y-2">
+                      <thead>
+                        <tr className="text-left text-[11px] uppercase tracking-wide text-on-surface-variant">
+                          <th>{isZh ? "配置项" : "Key"}</th>
+                          <th>{isZh ? "值" : "Value"}</th>
+                          <th>{isZh ? "释义" : "Meaning"}</th>
+                          <th>{isZh ? "操作" : "Action"}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {formEntries.map((entry) => (
+                          <tr key={entry.id}>
+                            <td className="pr-2 align-top">
+                              <input
+                                className="w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+                                placeholder={isZh ? "变量名，如 OGSCOPE_PORT" : "Key, e.g. OGSCOPE_PORT"}
+                                value={entry.key}
+                                onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+                              />
+                            </td>
+                            <td className="pr-2 align-top">
+                              <input
+                                className="w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+                                placeholder={isZh ? "变量值" : "Value"}
+                                value={entry.value}
+                                onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+                              />
+                            </td>
+                            <td className="pr-2 align-top text-xs text-on-surface-variant">
+                              {configHintText(entry.key)}
+                            </td>
+                            <td className="align-top">
+                              <button type="button" onClick={() => removeEntry(entry.id)}>
+                                <Trash2 className="h-3.5 w-3.5 text-on-surface-variant" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                     {formEntries.length === 0 && (
                       <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-2 text-xs text-on-surface-variant">
                         {isZh ? "当前没有可编辑变量，点击下方添加。" : "No variables yet. Add one below."}
@@ -316,6 +384,18 @@ export function ConfigPage() {
                       {isZh ? "添加变量" : "Add Variable"}
                     </span>
                   </button>
+                  <div className="rounded border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-xs text-on-surface-variant">
+                    <p className="mb-2 font-medium text-on-surface">{isZh ? "常用配置释义" : "Common Config Glossary"}</p>
+                    <div className="space-y-1">
+                      {OGSCOPE_ENV_HINTS.map((hint) => (
+                        <p key={hint.key}>
+                          <span className="font-mono text-[11px] text-on-surface">{hint.key}</span>
+                          {" - "}
+                          <span>{isZh ? hint.zh : hint.en}</span>
+                        </p>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <textarea
