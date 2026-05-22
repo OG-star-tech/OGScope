@@ -111,8 +111,11 @@ OGSCOPE_PORT=8000
 OGSCOPE_RELOAD=false
 OGSCOPE_LOG_LEVEL=INFO
 EOF
+    sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
     sudo chmod 640 "${OGSCOPE_ENV_FILE}"
 fi
+sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
+sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 
 echo "⚙️ 写入 systemd 服务 / Writing systemd service..."
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF

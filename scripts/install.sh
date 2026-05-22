@@ -275,9 +275,12 @@ OGSCOPE_RELOAD=false
 OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE_VALUE}
 OGSCOPE_LOG_LEVEL=${OGSCOPE_LOG_LEVEL_VALUE}
 EOF
+    sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
     sudo chmod 640 "${OGSCOPE_ENV_FILE}"
 else
     echo "ℹ️  已存在 ${OGSCOPE_ENV_FILE}，保留现有配置 / Existing file preserved"
+    sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
+    sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 fi
 
 # ExecStart 使用 poetry env info --path（与 virtualenvs.in-project=true 时即项目 .venv），勿手写 ~/.virtualenvs/

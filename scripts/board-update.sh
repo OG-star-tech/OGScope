@@ -130,8 +130,11 @@ OGSCOPE_RELOAD=false
 OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE:-0}
 OGSCOPE_LOG_LEVEL=${_update_log_level}
 EOF
+    sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
     sudo chmod 640 "${OGSCOPE_ENV_FILE}"
 fi
+sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
+sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 
 chmod +x "${PROJECT_DIR}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
 ogscope_sync_network_boot_unit_if_needed "${PROJECT_DIR}"
