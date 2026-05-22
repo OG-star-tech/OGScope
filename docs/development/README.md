@@ -214,9 +214,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/start_debug_console.sh`
   - 作用：手动设置 `PYTHONPATH`/`LD_LIBRARY_PATH` 后前台启动
   - 状态：手动调试辅助脚本，不是默认生产启动链路
-- `Makefile` 中 `run/dev/deploy`
-  - 作用：开发效率命令
-  - 状态：辅助入口，不替代 `systemd` 主流程
+- `poetry run ...` 与 `scripts/*.sh`
+  - 作用：开发效率命令与板端运维入口
+  - 状态：推荐直接使用，不再依赖 Makefile 包装
 
 ## 5. 配置 `systemd` 服务与开机自启
 

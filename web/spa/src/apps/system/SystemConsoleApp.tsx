@@ -5,10 +5,11 @@ import { NetworkPage } from "./pages/NetworkPage";
 import { HmiPage } from "./pages/HmiPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SensorsPage } from "./pages/SensorsPage";
+import { ConfigPage } from "./pages/ConfigPage";
 
-type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power";
+type SystemRoute = "overview" | "network" | "sensors" | "hmi" | "power" | "config";
 
-const routeSet = new Set<SystemRoute>(["overview", "network", "sensors", "hmi", "power"]);
+const routeSet = new Set<SystemRoute>(["overview", "network", "sensors", "hmi", "power", "config"]);
 
 function readRouteFromHash(): SystemRoute {
   const raw = window.location.hash.replace(/^#\/?/, "").trim().toLowerCase();
@@ -33,6 +34,7 @@ export function SystemConsoleApp() {
     if (route === "network") return <NetworkPage />;
     if (route === "sensors") return <SensorsPage />;
     if (route === "hmi") return <HmiPage />;
+    if (route === "config") return <ConfigPage />;
     if (route === "power") return <PlaceholderPage scope="power" />;
     return <OverviewPage />;
   }, [route]);
