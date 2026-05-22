@@ -101,6 +101,10 @@ fi
 echo "📁 创建最小运行目录 / Creating minimal runtime directories..."
 mkdir -p logs data uploads data/analysis data/plate_solve
 
+# 自动同步星图数据库（与 install.sh / board-update.sh 一致）
+# Auto-sync plate-solve DB (aligned with install.sh / board-update.sh).
+ogscope_sync_plate_solve_database_if_needed "${PROJECT_DIR}"
+
 echo "📝 初始化 /etc/ogscope/ogscope.env / Initializing /etc/ogscope/ogscope.env..."
 sudo install -d -m 755 "${OGSCOPE_ENV_DIR}"
 if [ ! -f "${OGSCOPE_ENV_FILE}" ]; then
@@ -132,6 +136,8 @@ EnvironmentFile=-/etc/ogscope/network.env
 ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=8
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target
@@ -144,4 +150,5 @@ sudo systemctl restart "${SERVICE_NAME}"
 echo "✅ 最小安装完成 / Minimal installation completed"
 echo "   服务状态 / Service: sudo systemctl status ${SERVICE_NAME}"
 echo "   健康检查 / Health: curl -s http://127.0.0.1:8000/health"
+ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
 

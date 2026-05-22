@@ -26,7 +26,9 @@ def _profile_from_settings(settings: Settings) -> dict[str, Any]:
     subordinate = role == "subordinate"
     enable_local_sensors = bool(settings.enable_local_sensors) and not subordinate
     enable_hmi = bool(settings.enable_hmi) and not subordinate
-    enable_ui = bool(settings.enable_ui) and not subordinate
+    # 在 subordinate 模式保留调试台可见性，冲突能力由 API 裁剪控制
+    # Keep debug UI available in subordinate; conflict features are gated by API routing.
+    enable_ui = bool(settings.enable_ui)
     sensor_source = "remote_delegated" if subordinate else "local"
     return {
         "role": role,

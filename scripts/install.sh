@@ -302,6 +302,8 @@ EnvironmentFile=-/etc/ogscope/network.env
 ExecStart=${VENV_PYTHON} -m ogscope.main
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=8
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

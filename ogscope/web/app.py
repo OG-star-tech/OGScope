@@ -117,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
+    shutdown_started = asyncio.get_running_loop().time()
     try:
         from ogscope.platform.hardware.wifi_emergency_gpio import (
             wifi_emergency_gpio_monitor,
@@ -131,10 +132,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         if not should_use_simulation_mode():
             from ogscope.web.camera_shared import get_camera_manager
 
-            await get_camera_manager().stop()
+            await asyncio.wait_for(get_camera_manager().stop(), timeout=8.0)
     except Exception as e:
         logger.warning(f"关闭相机失败 / Failed to stop camera on shutdown: {e}")
-    await stop_hardware_plane()
+    try:
+        await asyncio.wait_for(stop_hardware_plane(), timeout=6.0)
+    except Exception as e:
+        logger.warning(
+            "硬件平面停止超时或异常 / Hardware plane stop timeout or error: {}", e
+        )
+    shutdown_elapsed_ms = int((asyncio.get_running_loop().time() - shutdown_started) * 1000)
+    logger.info("退出阶段完成 / Shutdown cleanup finished in {} ms", shutdown_elapsed_ms)
 
 
 # API 文档分组标签 / API documentation group tags

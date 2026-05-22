@@ -25,10 +25,12 @@ const navClass = (active: boolean) =>
 
 export function DebugShell({
   route,
+  allowNetworkRoute,
   onRouteChange,
   children,
 }: {
   route: SystemRoute;
+  allowNetworkRoute: boolean;
   onRouteChange: (route: SystemRoute) => void;
   children: ReactNode;
 }) {
@@ -77,10 +79,12 @@ export function DebugShell({
               <LayoutDashboard className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.overview")}</span>
             </button>
-            <button type="button" className={navClass(route === "network")} onClick={() => onRouteChange("network")}>
-              <Network className="h-4 w-4 shrink-0" />
-              <span>{t("sys.shell.nav.network")}</span>
-            </button>
+            {allowNetworkRoute && (
+              <button type="button" className={navClass(route === "network")} onClick={() => onRouteChange("network")}>
+                <Network className="h-4 w-4 shrink-0" />
+                <span>{t("sys.shell.nav.network")}</span>
+              </button>
+            )}
             <a
               href="/debug/camera"
               className={externalLinkClass}

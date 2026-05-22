@@ -33,6 +33,18 @@ This section lists **common commands and checks only**. For Poetry/PEP 668, mirr
 
 ### 0.2 First-time install
 
+Recommended: run `bootstrap.sh` first to deploy code into fixed directory `/opt/ogscope`, then install and register service:
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/bootstrap.sh
+./scripts/bootstrap.sh
+```
+
+`bootstrap.sh` runs full install by default; set `OGSCOPE_BOOTSTRAP_MODE=min` for minimal install. It supports "source in any path -> fixed deploy path".
+
+You can also run installers directly in the deploy directory:
+
 ```bash
 cd /path/to/OGScope
 chmod +x scripts/install.sh
@@ -40,6 +52,7 @@ chmod +x scripts/install.sh
 ```
 
 Summary: default `poetry install --only main`; in mainland China use `**export OGSCOPE_MIRROR=cn**`; low-memory boards: `**OGSCOPE_APT_SLOW=1**`. Full options: **§1.4**. After install: `sudo systemctl start ogscope`.
+Install/update scripts also normalize `/etc/ogscope/ogscope.env` permissions to `root:<service-user> 640` so the service can read env safely.
 
 ### 0.3 Network and WiFi (AP/STA)
 
@@ -123,6 +136,7 @@ poetry install
 
 The repository provides `scripts/install.sh`. It performs initial board setup:
 
+- fixed default deploy directory: `/opt/ogscope` (override with `OGSCOPE_DEPLOY_DIR`)
 - reads `/etc/os-release` and **only supports Debian/Ubuntu family** (including **Raspberry Pi OS**); aborts on other distros for safety
 - installs system dependencies and Poetry
 - configures Poetry for `.venv` and `system-site-packages` (when supported)
@@ -132,6 +146,7 @@ The repository provides `scripts/install.sh`. It performs initial board setup:
 - creates `logs`, `uploads`, `data/plate_solve`, etc.
 - creates/updates `systemd` service (`ogscope.service`)
 - injects `PYTHONPATH` and `LD_LIBRARY_PATH` (paths that exist)
+- ensures `/etc/ogscope/ogscope.env` is readable by service user group (`root:<service-user>`, `640`)
 - enables service autostart
 
 Run:
@@ -210,6 +225,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/install.sh`
   - purpose: setup/install and create service
   - status: installer utility, not a runtime auto-invoked entrypoint
+- `scripts/bootstrap.sh`
+  - purpose: sync source code to fixed deploy directory (default `/opt/ogscope`) and call `install.sh` / `install-min.sh`
+  - status: recommended first-time deployment entrypoint (source can be in any directory)
 - `scripts/board-update.sh`
   - purpose: incremental update after install (optional `OGSCOPE_GIT_PULL=1` for
   `git pull`, `poetry install`, restart `ogscope`)
