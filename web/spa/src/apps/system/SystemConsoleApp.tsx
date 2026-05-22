@@ -23,6 +23,7 @@ function setHashRoute(route: SystemRoute) {
 
 export function SystemConsoleApp() {
   const [route, setRoute] = useState<SystemRoute>(() => readRouteFromHash());
+  const [allowNetworkRoute, setAllowNetworkRoute] = useState(true);
 
   useEffect(() => {
     const onHashChange = () => setRoute(readRouteFromHash());
@@ -30,19 +31,40 @@ export function SystemConsoleApp() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const payload = await fetch("/api", { cache: "no-store" });
+        if (!payload.ok) return;
+        const data = (await payload.json()) as { endpoints?: Record<string, string> };
+        setAllowNetworkRoute(Boolean(data.endpoints?.network));
+      } catch {
+        // keep default true for backward compatibility
+      }
+    })();
+  }, []);
+
   const page = useMemo(() => {
-    if (route === "network") return <NetworkPage />;
+    if (route === "network") {
+      return allowNetworkRoute ? (
+        <NetworkPage />
+      ) : (
+        <PlaceholderPage scope="network" />
+      );
+    }
     if (route === "sensors") return <SensorsPage />;
     if (route === "hmi") return <HmiPage />;
     if (route === "config") return <ConfigPage />;
     if (route === "power") return <PlaceholderPage scope="power" />;
     return <OverviewPage />;
-  }, [route]);
+  }, [allowNetworkRoute, route]);
 
   return (
     <DebugShell
       route={route}
+      allowNetworkRoute={allowNetworkRoute}
       onRouteChange={(next) => {
+        if (next === "network" && !allowNetworkRoute) return;
         if (next === route) return;
         setHashRoute(next);
       }}

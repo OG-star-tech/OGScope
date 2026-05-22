@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Save } from "lucide-react";
+import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { requestJson } from "@shared/transport/http";
 import { useI18n } from "@shared/i18n/I18nProvider";
 
@@ -17,11 +17,58 @@ type ConfigFilesResponse = {
   files: ConfigFileItem[];
 };
 
+type EditorMode = "form" | "raw";
+
+type EnvEntry = {
+  id: string;
+  key: string;
+  value: string;
+};
+
+function parseEnvEntries(content: string): { entries: EnvEntry[]; unsupportedLines: number } {
+  const entries: EnvEntry[] = [];
+  let unsupportedLines = 0;
+  const lines = content.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const normalized = trimmed.startsWith("export ") ? trimmed.slice(7) : trimmed;
+    const sepIndex = normalized.indexOf("=");
+    if (sepIndex <= 0) {
+      unsupportedLines += 1;
+      return;
+    }
+    const key = normalized.slice(0, sepIndex).trim();
+    if (!key) {
+      unsupportedLines += 1;
+      return;
+    }
+    const value = normalized.slice(sepIndex + 1);
+    entries.push({
+      id: `env-${index}-${key}`,
+      key,
+      value,
+    });
+  });
+  return { entries, unsupportedLines };
+}
+
+function buildEnvContent(entries: EnvEntry[]): string {
+  const lines = entries
+    .map((entry) => ({ key: entry.key.trim(), value: entry.value }))
+    .filter((entry) => entry.key.length > 0)
+    .map((entry) => `${entry.key}=${entry.value}`);
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+}
+
 export function ConfigPage() {
   const { locale } = useI18n();
   const [files, setFiles] = useState<ConfigFileItem[]>([]);
   const [activeId, setActiveId] = useState<string>("");
   const [editor, setEditor] = useState("");
+  const [mode, setMode] = useState<EditorMode>("form");
+  const [formEntries, setFormEntries] = useState<EnvEntry[]>([]);
+  const [unsupportedLines, setUnsupportedLines] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -32,6 +79,12 @@ export function ConfigPage() {
     () => files.find((item) => item.file_id === activeId) ?? null,
     [activeId, files],
   );
+
+  const reloadFormFromRaw = (raw: string) => {
+    const parsed = parseEnvEntries(raw);
+    setFormEntries(parsed.entries);
+    setUnsupportedLines(parsed.unsupportedLines);
+  };
 
   const loadFiles = async () => {
     setBusy(true);
@@ -52,6 +105,15 @@ export function ConfigPage() {
 
   const saveFile = async () => {
     if (!activeId) return;
+    if (mode === "form" && unsupportedLines > 0) {
+      setError(
+        isZh
+          ? "当前文件包含无法表单化的行，请切换到“原始文本”模式编辑后再保存。"
+          : "This file has lines not supported by form mode. Switch to Raw mode before saving.",
+      );
+      return;
+    }
+    const payloadContent = mode === "form" ? buildEnvContent(formEntries) : editor;
     setBusy(true);
     setError("");
     setMessage("");
@@ -60,7 +122,7 @@ export function ConfigPage() {
         "/api/dev/system/config/files",
         {
           method: "POST",
-          body: JSON.stringify({ file_id: activeId, content: editor }),
+          body: JSON.stringify({ file_id: activeId, content: payloadContent }),
         },
       );
       setMessage(
@@ -83,10 +145,29 @@ export function ConfigPage() {
   useEffect(() => {
     if (!activeFile) {
       setEditor("");
+      setFormEntries([]);
+      setUnsupportedLines(0);
       return;
     }
-    setEditor(activeFile.content ?? "");
+    const nextRaw = activeFile.content ?? "";
+    setEditor(nextRaw);
+    reloadFormFromRaw(nextRaw);
   }, [activeFile]);
+
+  const addEntry = () => {
+    setFormEntries((prev) => [
+      ...prev,
+      { id: `env-new-${Date.now()}-${prev.length}`, key: "", value: "" },
+    ]);
+  };
+
+  const updateEntry = (id: string, patch: Partial<EnvEntry>) => {
+    setFormEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  };
+
+  const removeEntry = (id: string) => {
+    setFormEntries((prev) => prev.filter((entry) => entry.id !== id));
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -97,12 +178,12 @@ export function ConfigPage() {
           <span className="text-primary">{isZh ? "配置管理" : "Config Manager"}</span>
         </div>
         <h2 className="mt-1 font-headline text-3xl font-black tracking-tight">
-          {isZh ? "环境配置编辑器" : "Environment Config Editor"}
+          {isZh ? "环境配置管理" : "Environment Config Manager"}
         </h2>
         <p className="text-sm text-on-surface-variant">
           {isZh
-            ? "用于编辑 /etc/ogscope 下部署配置，保存后建议重启 ogscope 服务。"
-            : "Edit deployment config under /etc/ogscope. Restart ogscope service after saving."}
+            ? "支持键值表单与原始文本两种模式。保存后建议重启 ogscope 服务。"
+            : "Supports both key-value form mode and raw text mode. Restart ogscope after saving."}
         </p>
       </header>
 
@@ -152,6 +233,36 @@ export function ConfigPage() {
                     {isZh ? "存在" : "Exists"}: {String(activeFile.exists)}
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (mode === "raw") reloadFormFromRaw(editor);
+                      setMode("form");
+                    }}
+                    className={`rounded px-2 py-1 text-xs ${
+                      mode === "form"
+                        ? "bg-primary-container text-on-primary-container"
+                        : "border border-outline-variant/30 text-on-surface-variant"
+                    }`}
+                  >
+                    {isZh ? "表单模式" : "Form"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (mode === "form") setEditor(buildEnvContent(formEntries));
+                      setMode("raw");
+                    }}
+                    className={`rounded px-2 py-1 text-xs ${
+                      mode === "raw"
+                        ? "bg-primary-container text-on-primary-container"
+                        : "border border-outline-variant/30 text-on-surface-variant"
+                    }`}
+                  >
+                    {isZh ? "原始文本" : "Raw"}
+                  </button>
+                </div>
                 <button type="button" onClick={() => void saveFile()} disabled={busy || !activeFile.writable}>
                   <span className="inline-flex items-center gap-1">
                     <Save className="h-3.5 w-3.5" />
@@ -164,12 +275,56 @@ export function ConfigPage() {
                   {activeFile.error}
                 </div>
               )}
-              <textarea
-                className="h-[460px] w-full rounded-lg border border-outline-variant/30 bg-neutral-950 p-3 font-mono text-xs text-on-surface outline-none focus:border-primary"
-                spellCheck={false}
-                value={editor}
-                onChange={(e) => setEditor(e.target.value)}
-              />
+              {mode === "form" ? (
+                <div className="space-y-3">
+                  {unsupportedLines > 0 && (
+                    <div className="rounded border border-warning/40 bg-warning/10 px-2 py-1 text-xs text-on-surface">
+                      {isZh
+                        ? `检测到 ${unsupportedLines} 行无法转换为键值表单（如复杂写法）。请切到“原始文本”模式处理。`
+                        : `${unsupportedLines} line(s) cannot be represented in key-value form. Use Raw mode for these lines.`}
+                    </div>
+                  )}
+                  <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+                    {formEntries.map((entry) => (
+                      <div key={entry.id} className="grid grid-cols-12 items-center gap-2">
+                        <input
+                          className="col-span-4 rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+                          placeholder={isZh ? "变量名，如 OGSCOPE_PORT" : "Key, e.g. OGSCOPE_PORT"}
+                          value={entry.key}
+                          onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+                        />
+                        <input
+                          className="col-span-7 rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+                          placeholder={isZh ? "变量值" : "Value"}
+                          value={entry.value}
+                          onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+                        />
+                        <button type="button" className="col-span-1 justify-self-end" onClick={() => removeEntry(entry.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-on-surface-variant" />
+                        </button>
+                      </div>
+                    ))}
+                    {formEntries.length === 0 && (
+                      <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-2 text-xs text-on-surface-variant">
+                        {isZh ? "当前没有可编辑变量，点击下方添加。" : "No variables yet. Add one below."}
+                      </div>
+                    )}
+                  </div>
+                  <button type="button" onClick={addEntry}>
+                    <span className="inline-flex items-center gap-1 text-xs">
+                      <Plus className="h-3.5 w-3.5" />
+                      {isZh ? "添加变量" : "Add Variable"}
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <textarea
+                  className="h-[460px] w-full rounded-lg border border-outline-variant/30 bg-neutral-950 p-3 font-mono text-xs text-on-surface outline-none focus:border-primary"
+                  spellCheck={false}
+                  value={editor}
+                  onChange={(e) => setEditor(e.target.value)}
+                />
+              )}
             </div>
           )}
         </div>

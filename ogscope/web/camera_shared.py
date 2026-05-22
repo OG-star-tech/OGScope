@@ -129,12 +129,69 @@ class CameraManager:
 
     async def stop(self) -> None:
         """停止相机采集 / Stop camera capture."""
-        async with self._control_lock:
+        acquired = False
+        try:
+            await asyncio.wait_for(self._control_lock.acquire(), timeout=2.0)
+            acquired = True
+        except asyncio.TimeoutError:
+            self._logger.warning(
+                "等待相机控制锁超时，跳过优雅停机 / Timed out waiting camera lock, skip graceful stop"
+            )
+            return
+        try:
             await self._stop_grabber_locked()
-            if self._camera is not None and getattr(
-                self._camera, "is_capturing", False
-            ):
-                await asyncio.to_thread(self._camera.stop_capture)
+            if self._camera is None:
+                return
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._safe_stop_capture_sync), timeout=4.0
+                )
+            except asyncio.TimeoutError:
+                self._logger.warning(
+                    "相机停止超时，继续执行退出流程 / Camera stop timed out, continue shutdown"
+                )
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._safe_close_camera_sync), timeout=2.5
+                )
+            except asyncio.TimeoutError:
+                self._logger.warning(
+                    "相机关闭超时，继续执行退出流程 / Camera close timed out, continue shutdown"
+                )
+            self._camera = None
+            with self._frame_lock:
+                self._latest_raw = None
+                self._latest_jpeg = None
+                self._latest_ts = 0.0
+                self._latest_w = 0
+                self._latest_h = 0
+        finally:
+            if acquired:
+                self._control_lock.release()
+
+    def _safe_stop_capture_sync(self) -> None:
+        camera = self._camera
+        if camera is None:
+            return
+        if not getattr(camera, "is_capturing", False):
+            return
+        try:
+            camera.stop_capture()
+        except Exception as e:
+            self._logger.warning(
+                "停止相机捕获异常 / Failed to stop camera capture: %s", e
+            )
+
+    def _safe_close_camera_sync(self) -> None:
+        camera = self._camera
+        if camera is None:
+            return
+        try:
+            inner_camera = getattr(camera, "camera", None)
+            if inner_camera is not None and hasattr(inner_camera, "close"):
+                inner_camera.close()
+        except Exception as e:
+            self._logger.warning("关闭相机资源异常 / Failed to close camera: %s", e)
 
     async def pause_grabber(self) -> None:
         """暂停共享抓帧任务（保留采集）/ Pause shared frame grabber only."""

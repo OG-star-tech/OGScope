@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         description="启用 OGScope 用户界面路由 / Enable OGScope UI routes",
     )
     subordinate_local_dev_only: bool = Field(
-        default=True,
+        default=False,
         description=(
             "在 subordinate 角色下，仅允许本机访问 /api/dev/*（联调用途） / "
             "In subordinate role, allow /api/dev/* only from localhost for integration"

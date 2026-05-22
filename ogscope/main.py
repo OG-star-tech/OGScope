@@ -3,6 +3,7 @@ OGScope 主程序入口
 """
 
 import asyncio
+import os
 import sys
 
 import uvicorn
@@ -70,7 +71,19 @@ async def main() -> int:
 
 def cli() -> None:
     """命令行入口点 / Command line entry point"""
-    exit_code = asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        exit_code = loop.run_until_complete(main())
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
+        asyncio.set_event_loop(None)
+    if os.getenv("OGSCOPE_FORCE_EXIT_ON_SHUTDOWN", "1") == "1":
+        os._exit(exit_code)
     sys.exit(exit_code)
 
 

@@ -30,6 +30,18 @@
 
 ### 0.2 首次安装
 
+推荐先用 `bootstrap.sh` 将代码部署到固定目录 `/opt/ogscope`，再由安装脚本完成服务注册：
+
+```bash
+cd /path/to/OGScope
+chmod +x scripts/bootstrap.sh
+./scripts/bootstrap.sh
+```
+
+`bootstrap.sh` 默认执行全量安装；若只做最小安装可设 `OGSCOPE_BOOTSTRAP_MODE=min`。`bootstrap.sh` 支持“源码任意目录 -> 部署固定目录”。
+
+也可直接在部署目录手动执行安装脚本：
+
 ```bash
 cd /path/to/OGScope
 chmod +x scripts/install.sh
@@ -46,6 +58,7 @@ chmod +x scripts/install-min.sh
 
 说明摘要：默认 `poetry install --only main`；国内网络可 `**export OGSCOPE_MIRROR=cn**`；低配板可 `**OGSCOPE_APT_SLOW=1**`。完整选项见 **§1.4**。安装后：`sudo systemctl start ogscope`。
 部署态主配置文件为 `/etc/ogscope/ogscope.env`，网络专用配置为 `/etc/ogscope/network.env`。
+安装与更新脚本会自动修正 `ogscope.env` 权限到 `root:<service-user> 640`，避免服务因无读取权限启动失败。
 
 ### 0.3 网络与 WiFi（AP/STA）
 
@@ -126,6 +139,7 @@ poetry install
 
 仓库提供 `scripts/install.sh`，用于在开发板执行一次性环境准备。脚本会：
 
+- 默认部署目录固定为 `/opt/ogscope`（可通过 `OGSCOPE_DEPLOY_DIR` 覆盖）
 - 读取 `/etc/os-release` 识别发行版，**仅支持 Debian/Ubuntu 系**（含 **Raspberry Pi OS**）；非该系将退出，避免误改软件源
 - 安装系统依赖与 Poetry
 - 配置 Poetry 使用项目 `.venv` 与 `system-site-packages`（Poetry 版本支持时）
@@ -135,6 +149,7 @@ poetry install
 - 创建 `logs`、`uploads`、`data/plate_solve` 等目录
 - 生成/更新 `systemd` 服务（`ogscope.service`）
 - 注入 `PYTHONPATH` 与 `LD_LIBRARY_PATH`（按实际存在的路径）
+- 自动修正 `/etc/ogscope/ogscope.env` 为服务用户可读（`root:<service-user>`, `640`）
 - 启用服务开机自启
 
 执行方式：
@@ -205,6 +220,9 @@ Environment=LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu
 - `scripts/install.sh`
   - 作用：安装依赖并生成 service
   - 状态：安装辅助脚本，不是运行时自动调用入口
+- `scripts/bootstrap.sh`
+  - 作用：将源码同步到固定部署目录（默认 `/opt/ogscope`）并调用 `install.sh`/`install-min.sh`
+  - 状态：推荐首次部署入口（支持源码在任意目录）
 - `scripts/board-update.sh`
   - 作用：已安装环境下的增量更新（可选 `OGSCOPE_GIT_PULL=1` 执行 `git pull`、`poetry install`、重启 `ogscope`）
   - 状态：日常部署推荐入口
