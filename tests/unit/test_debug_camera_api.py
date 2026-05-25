@@ -145,11 +145,13 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
 
 @pytest.mark.unit
 def test_debug_camera_status_with_fake_camera(client, fake_camera_env):
+    start_resp = client.post("/api/dev/debug/camera/start")
+    assert start_resp.status_code == 200
     response = client.get("/api/dev/debug/camera/status")
     assert response.status_code == 200
     data = response.json()
     assert data["connected"] is True
-    assert data["streaming"] is False
+    assert data["streaming"] is True
     assert "info" in data
 
 

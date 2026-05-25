@@ -233,7 +233,7 @@ class DebugCameraService:
                 "connected": False,
                 "streaming": False,
                 "recording": is_recording,
-                "error": "相机未初始化",
+                "error": status.get("error") or "相机未初始化",
             }
         return {
             "connected": bool(status.get("connected")),

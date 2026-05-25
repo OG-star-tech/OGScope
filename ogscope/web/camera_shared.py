@@ -43,6 +43,17 @@ class CameraManager:
         self._runtime_overrides: dict[str, Any] = {}
         self._jpeg_quality = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
         self._target_fps = max(1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8")))
+        self._probe_timeout_sec = max(
+            0.5,
+            float(os.getenv("OGSCOPE_CAMERA_PROBE_TIMEOUT_SEC", "2.0") or "2.0"),
+        )
+        self._max_grab_failures = max(
+            1,
+            int(os.getenv("OGSCOPE_CAMERA_GRAB_FAILURES_OFFLINE", "3") or "3"),
+        )
+        self._health_error: str | None = None
+        self._consecutive_grab_failures = 0
+        self._stream_started_at = 0.0
         # 是否常驻 raw 帧缓存；默认关闭以降低内存占用（分析路径可同步抓帧）
         # Whether to retain raw frame cache; default off to reduce RAM (analysis can sync-grab).
         self._keep_raw_cache = bool(
@@ -118,13 +129,29 @@ class CameraManager:
         """确保单相机进入采集并启动共享帧抓取 / Ensure capture and shared frame grabber."""
         async with self._control_lock:
             if self._camera is None:
+                self._health_error = None
                 self._camera = await asyncio.to_thread(self._create_camera_sync)
                 if self._camera is None:
-                    raise RuntimeError("相机初始化失败 / Camera init failed")
+                    self._health_error = "相机初始化失败 / Camera init failed"
+                    raise RuntimeError(self._health_error)
             if not getattr(self._camera, "is_capturing", False):
                 ok = await asyncio.to_thread(self._camera.start_capture)
                 if not ok:
-                    raise RuntimeError("相机启动失败 / Camera start failed")
+                    await self._invalidate_camera_locked(
+                        "相机启动失败 / Camera start failed"
+                    )
+                    raise RuntimeError(self._health_error or "相机启动失败")
+                self._stream_started_at = time.time()
+            probe_ok = await asyncio.to_thread(
+                self._probe_stream_health_sync, self._probe_timeout_sec
+            )
+            if not probe_ok:
+                await self._invalidate_camera_locked(
+                    "相机无有效帧 / Camera produces no frames"
+                )
+                raise RuntimeError(self._health_error or "相机无有效帧")
+            self._health_error = None
+            self._consecutive_grab_failures = 0
             await self._ensure_grabber_locked()
 
     async def stop(self) -> None:
@@ -239,6 +266,36 @@ class CameraManager:
                     (time.time() - t0) * 1000.0,
                 )
 
+    def _probe_stream_health_sync(self, timeout_sec: float) -> bool:
+        """启动后探测是否能读到至少一帧 / Probe at least one frame after start."""
+        deadline = time.time() + max(0.1, float(timeout_sec))
+        while time.time() < deadline:
+            frame = self._read_frame_sync()
+            if frame is not None:
+                return True
+            time.sleep(0.05)
+        return False
+
+    async def _invalidate_camera_locked(self, reason: str) -> None:
+        """标记相机离线并释放资源（需持有控制锁）/ Mark camera offline and release resources."""
+        self._health_error = reason
+        current = asyncio.current_task()
+        if self._grabber_task and self._grabber_task is not current:
+            await self._stop_grabber_locked()
+        elif self._grabber_task is current:
+            self._grabber_task = None
+        await asyncio.to_thread(self._safe_stop_capture_sync)
+        await asyncio.to_thread(self._safe_close_camera_sync)
+        self._camera = None
+        self._consecutive_grab_failures = 0
+        self._stream_started_at = 0.0
+        with self._frame_lock:
+            self._latest_raw = None
+            self._latest_jpeg = None
+            self._latest_ts = 0.0
+            self._latest_w = 0
+            self._latest_h = 0
+
     async def _ensure_grabber_locked(self) -> None:
         if self._grabber_task and not self._grabber_task.done():
             return
@@ -267,6 +324,7 @@ class CameraManager:
                 try:
                     frame = await asyncio.to_thread(self._read_frame_sync)
                     if frame is not None:
+                        self._consecutive_grab_failures = 0
                         jpeg = await loop.run_in_executor(
                             None, self._encode_preview_jpeg_sync, frame
                         )
@@ -281,8 +339,26 @@ class CameraManager:
                             self._latest_ts = time.time()
                             self._latest_w = w
                             self._latest_h = h
+                    else:
+                        self._consecutive_grab_failures += 1
+                        if self._consecutive_grab_failures >= self._max_grab_failures:
+                            self._logger.warning(
+                                "连续抓帧失败，标记相机离线 / Consecutive grab failures, mark camera offline"
+                            )
+                            async with self._control_lock:
+                                await self._invalidate_camera_locked(
+                                    "相机数据流中断 / Camera stream lost"
+                                )
+                            return
                 except Exception as e:
+                    self._consecutive_grab_failures += 1
                     self._logger.error(f"共享抓帧循环异常 / Shared grabber error: {e}")
+                    if self._consecutive_grab_failures >= self._max_grab_failures:
+                        async with self._control_lock:
+                            await self._invalidate_camera_locked(
+                                "相机数据流中断 / Camera stream lost"
+                            )
+                        return
                 spent = time.time() - t0
                 await asyncio.sleep(max(0.0, interval - spent))
         except asyncio.CancelledError:
@@ -306,12 +382,38 @@ class CameraManager:
             return {
                 "connected": False,
                 "streaming": False,
+                "error": self._health_error or "相机未初始化 / Camera not initialized",
+                "runtime_overrides": self._runtime_overrides,
+            }
+        initialized = bool(getattr(cam, "is_initialized", False))
+        capturing = bool(getattr(cam, "is_capturing", False))
+        has_frames = self._frame_id > 0
+        within_grace = (
+            self._stream_started_at > 0
+            and (time.time() - self._stream_started_at) <= self._probe_timeout_sec
+        )
+        offline = (
+            bool(self._health_error)
+            or self._consecutive_grab_failures >= self._max_grab_failures
+            or (capturing and not has_frames and not within_grace)
+        )
+        if offline:
+            reason = self._health_error
+            if not reason:
+                if self._consecutive_grab_failures >= self._max_grab_failures:
+                    reason = "相机数据流中断 / Camera stream lost"
+                else:
+                    reason = "相机无有效帧 / Camera produces no frames"
+            return {
+                "connected": False,
+                "streaming": False,
+                "error": reason,
                 "runtime_overrides": self._runtime_overrides,
             }
         info = await asyncio.to_thread(cam.get_camera_info)
         return {
-            "connected": bool(getattr(cam, "is_initialized", False)),
-            "streaming": bool(getattr(cam, "is_capturing", False)),
+            "connected": initialized and capturing,
+            "streaming": capturing and (has_frames or within_grace),
             "info": info,
             "runtime_overrides": self._runtime_overrides,
         }
