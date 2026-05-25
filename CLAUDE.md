@@ -174,9 +174,9 @@ python -m ogscope.main
 
 ## Git 工作流
 
-- 主分支: `main` (稳定版本)
-- 开发分支: `dev` (开发版本)
-- 功能分支: `feature/xxx`
+- 主分支: `main`（稳定发布）
+- 集成分支: `develop`（唯一日常集成线；**已废弃 `dev` / `dev-latest`**）
+- 功能分支: `feature/xxx`（从 `develop` 拉出，合回后删除）
 - 修复分支: `fix/xxx`
 
 ### 提交信息格式

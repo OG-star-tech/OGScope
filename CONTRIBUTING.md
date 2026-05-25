@@ -33,8 +33,11 @@
    cd OGScope
    ```
 
-2. **创建功能分支**
+2. **基于 develop 创建功能分支 / Branch from develop**
    ```bash
+   git fetch origin
+   git checkout develop
+   git pull origin develop
    git checkout -b feature/your-feature-name
    ```
 
@@ -118,13 +121,26 @@
   - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
   - `docs/contracts/core-compatibility-matrix.md`（段内中英）
 
+## Git 分支策略
+
+| 分支 | 用途 |
+|------|------|
+| `main` | 稳定发布线；仅通过 PR 从 `develop` 合入 |
+| `develop` | **唯一集成分支**；日常开发与板端联调基准 |
+| `feature/*` | 功能/重构；从 `develop` 拉出，PR 合回后删除 |
+| `fix/*` | 小修复；可合 `develop`，紧急时可 hotfix 合 `main` |
+
+流程：`feature/*` → PR → `develop` → 定期 PR → `main`。
+
+**已废弃**：不再使用 `dev`、`dev-latest` 双集成分支。
+
 ## 开发流程
 
 1. **选择 Issue**: 从 Issues 列表中选择要解决的问题
 2. **开发**: 在本地开发和测试
 3. **提交 PR**: 创建 Pull Request
 4. **代码审查**: 等待维护者审查
-5. **合并**: 审查通过后合并到主分支
+5. **合并**: 审查通过后合并到 `develop`（发版时再合 `main`）
 
 ## 代码审查标准
 
