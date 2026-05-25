@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -292,6 +292,65 @@ class Settings(BaseSettings):
         ),
     )
 
+    # 预览与抓帧运行时 / Preview and shared grabber runtime
+    shared_preview_fps: int = Field(
+        default=8,
+        ge=1,
+        le=60,
+        description="共享预览/MJPEG 目标帧率 / Target FPS for shared preview and MJPEG",
+    )
+    preview_jpeg_quality: int = Field(
+        default=75,
+        ge=1,
+        le=100,
+        description="共享抓帧 JPEG 质量 / JPEG quality for shared frame grabber",
+    )
+    debug_preview_min_interval_ms: int = Field(
+        default=150,
+        ge=0,
+        le=60000,
+        description=(
+            "调试预览 API 最小间隔（毫秒）；0=不限 / Min interval for debug preview API in ms; 0=unlimited"
+        ),
+    )
+    camera_probe_timeout_sec: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=30.0,
+        description="相机探测超时（秒）/ Camera probe timeout in seconds",
+    )
+    camera_grab_failures_offline: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "连续抓帧失败多少次后标记离线 / Consecutive grab failures before marking offline"
+        ),
+    )
+    keep_raw_cache: bool = Field(
+        default=False,
+        description=(
+            "是否常驻 raw 帧缓存（占内存）；分析路径可同步抓帧 / "
+            "Retain raw frame cache in RAM; analysis can sync-grab when false"
+        ),
+    )
+
+    # 运行时行为 / Runtime behavior
+    simulation_mode: Optional[bool] = Field(
+        default=None,
+        description=(
+            "模拟模式：None=自动（非树莓派启用）；true/false 强制开关 / "
+            "Simulation mode: None=auto (off on Pi); true/false to force"
+        ),
+    )
+    force_exit_on_shutdown: bool = Field(
+        default=True,
+        description=(
+            "CLI 退出时使用 os._exit，避免硬件线程阻塞进程退出 / "
+            "Use os._exit on CLI shutdown to avoid hung hardware threads"
+        ),
+    )
+
     # WiFi（nmcli + scripts/ogscope-wifi-switch.sh）/ WiFi (NetworkManager helper script)
     wifi_switch_script: Path = Field(
         default=Path("/usr/local/bin/ogscope-wifi-switch"),
@@ -370,11 +429,32 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=("/etc/ogscope/ogscope.env", ".env"),
+        env_file=(
+            "/etc/ogscope/ogscope.env",
+            "/etc/ogscope/network.env",
+            ".env",
+        ),
         env_file_encoding="utf-8",
         env_prefix="OGSCOPE_",
         case_sensitive=False,
     )
+
+    @field_validator("simulation_mode", mode="before")
+    @classmethod
+    def _parse_simulation_mode(cls, value: object) -> Optional[bool]:
+        """解析模拟模式三态（auto/true/false）/ Parse tri-state simulation mode."""
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in {"", "auto", "none", "default"}:
+            return None
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return value  # type: ignore[return-value]
 
     @model_validator(mode="after")
     def _apply_development_mode_defaults(self) -> "Settings":

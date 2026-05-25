@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 
 from fastapi import HTTPException
@@ -40,10 +39,9 @@ async def build_camera_mjpeg_stream(
         )
         raise HTTPException(status_code=503, detail=limit_detail)
     boundary = "frame"
-    min_emit_interval = 1.0 / max(
-        1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8")
-    )
-    fetch_timeout_s = get_settings().stream_mjpeg_frame_fetch_timeout_ms / 1000.0
+    settings = get_settings()
+    min_emit_interval = 1.0 / max(1, int(settings.shared_preview_fps))
+    fetch_timeout_s = settings.stream_mjpeg_frame_fetch_timeout_ms / 1000.0
     content_type = "image/jpeg" if image_format.lower() == "jpeg" else "image/png"
 
     async def frame_generator():

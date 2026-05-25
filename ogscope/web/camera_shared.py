@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable
+
+from ogscope.config import get_settings
 
 
 @dataclass(slots=True)
@@ -41,24 +42,17 @@ class CameraManager:
         self._latest_w = 0
         self._latest_h = 0
         self._runtime_overrides: dict[str, Any] = {}
-        self._jpeg_quality = int(os.getenv("OGSCOPE_PREVIEW_JPEG_QUALITY", "75"))
-        self._target_fps = max(1, int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8")))
-        self._probe_timeout_sec = max(
-            0.5,
-            float(os.getenv("OGSCOPE_CAMERA_PROBE_TIMEOUT_SEC", "2.0") or "2.0"),
-        )
-        self._max_grab_failures = max(
-            1,
-            int(os.getenv("OGSCOPE_CAMERA_GRAB_FAILURES_OFFLINE", "3") or "3"),
-        )
+        settings = get_settings()
+        self._jpeg_quality = int(settings.preview_jpeg_quality)
+        self._target_fps = max(1, int(settings.shared_preview_fps))
+        self._probe_timeout_sec = max(0.5, float(settings.camera_probe_timeout_sec))
+        self._max_grab_failures = max(1, int(settings.camera_grab_failures_offline))
         self._health_error: str | None = None
         self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
         # 是否常驻 raw 帧缓存；默认关闭以降低内存占用（分析路径可同步抓帧）
         # Whether to retain raw frame cache; default off to reduce RAM (analysis can sync-grab).
-        self._keep_raw_cache = bool(
-            int(os.getenv("OGSCOPE_KEEP_RAW_CACHE", "0") or "0")
-        )
+        self._keep_raw_cache = bool(settings.keep_raw_cache)
         self._logger = logging.getLogger(__name__)
 
     @property

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { BookOpen, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { requestJson } from "@shared/transport/http";
 import { useI18n } from "@shared/i18n/I18nProvider";
 
@@ -17,6 +17,31 @@ type ConfigFilesResponse = {
   files: ConfigFileItem[];
 };
 
+type CatalogEntry = {
+  key: string;
+  field?: string;
+  scope: "ogscope" | "network" | "both";
+  default?: string | null;
+  zh: string;
+  en: string;
+};
+
+type CatalogSection = {
+  id: string;
+  title_zh: string;
+  title_en: string;
+  scope: "ogscope" | "network" | "both";
+  entries: CatalogEntry[];
+};
+
+type ConfigCatalogResponse = {
+  success: boolean;
+  env_prefix: string;
+  env_files: Record<string, string>;
+  sections: CatalogSection[];
+  network_only: CatalogEntry[];
+};
+
 type EditorMode = "form" | "raw";
 
 type EnvEntry = {
@@ -25,46 +50,10 @@ type EnvEntry = {
   value: string;
 };
 
-type ConfigHint = {
-  key: string;
-  zh: string;
-  en: string;
+const FILE_LABELS: Record<string, { zh: string; en: string }> = {
+  ogscope: { zh: "主配置 ogscope.env", en: "Primary ogscope.env" },
+  network: { zh: "网络 network.env", en: "Network network.env" },
 };
-
-const OGSCOPE_ENV_HINTS: ConfigHint[] = [
-  { key: "OGSCOPE_HOST", zh: "OGScope 服务监听地址，通常保持 0.0.0.0。", en: "OGScope bind host, usually keep 0.0.0.0." },
-  { key: "OGSCOPE_PORT", zh: "OGScope 服务端口，默认 8000。", en: "OGScope service port, default 8000." },
-  { key: "OGSCOPE_RELOAD", zh: "是否启用热重载（开发用）。", en: "Enable hot reload for development." },
-  { key: "OGSCOPE_LOG_LEVEL", zh: "日志级别（DEBUG/INFO/WARNING/ERROR）。", en: "Log level (DEBUG/INFO/WARNING/ERROR)." },
-  { key: "OGSCOPE_DEVELOPMENT_MODE", zh: "开发模式开关，打开后会输出更详细日志。", en: "Development mode switch for more verbose logs." },
-  {
-    key: "OGSCOPE_HARDWARE_PLANE_ROLE",
-    zh: "硬件平面角色：standalone 或 subordinate。",
-    en: "Hardware plane role: standalone or subordinate.",
-  },
-  {
-    key: "OGSCOPE_SUBORDINATE_LOCAL_DEV_ONLY",
-    zh: "在 subordinate 角色下是否仅允许本机访问 /api/dev/*。",
-    en: "Restrict /api/dev/* to localhost in subordinate mode.",
-  },
-  { key: "OGSCOPE_ENABLE_UI", zh: "是否启用 Web UI 路由。", en: "Enable Web UI routes." },
-  { key: "OGSCOPE_ENABLE_LOCAL_SENSORS", zh: "是否启用本地传感器服务。", en: "Enable local sensor services." },
-  { key: "OGSCOPE_ENABLE_HMI", zh: "是否启用 HMI 服务。", en: "Enable HMI service." },
-  {
-    key: "OGSCOPE_WIFI_STA_SSID",
-    zh: "STA 模式目标 WiFi SSID（network.env 常见项）。",
-    en: "Target STA WiFi SSID (common in network.env).",
-  },
-  {
-    key: "OGSCOPE_WIFI_STA_PASSWORD",
-    zh: "STA 模式目标 WiFi 密码（network.env 常见项）。",
-    en: "Target STA WiFi password (common in network.env).",
-  },
-];
-
-const OGSCOPE_ENV_HINT_MAP = new Map<string, ConfigHint>(
-  OGSCOPE_ENV_HINTS.map((item) => [item.key.toUpperCase(), item]),
-);
 
 function parseEnvEntries(content: string): { entries: EnvEntry[]; unsupportedLines: number } {
   const entries: EnvEntry[] = [];
@@ -102,9 +91,15 @@ function buildEnvContent(entries: EnvEntry[]): string {
   return lines.length > 0 ? `${lines.join("\n")}\n` : "";
 }
 
+function scopeMatchesFile(scope: CatalogEntry["scope"], fileId: string): boolean {
+  if (scope === "both") return true;
+  return scope === fileId;
+}
+
 export function ConfigPage() {
   const { locale } = useI18n();
   const [files, setFiles] = useState<ConfigFileItem[]>([]);
+  const [catalog, setCatalog] = useState<ConfigCatalogResponse | null>(null);
   const [activeId, setActiveId] = useState<string>("");
   const [editor, setEditor] = useState("");
   const [mode, setMode] = useState<EditorMode>("form");
@@ -113,6 +108,9 @@ export function ConfigPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [glossaryOpen, setGlossaryOpen] = useState(true);
+  const [catalogPick, setCatalogPick] = useState("");
 
   const isZh = locale === "zh";
 
@@ -121,22 +119,69 @@ export function ConfigPage() {
     [activeId, files],
   );
 
+  const hintMap = useMemo(() => {
+    const map = new Map<string, CatalogEntry>();
+    for (const section of catalog?.sections ?? []) {
+      for (const entry of section.entries) {
+        map.set(entry.key.toUpperCase(), entry);
+      }
+    }
+    for (const entry of catalog?.network_only ?? []) {
+      map.set(entry.key.toUpperCase(), entry);
+    }
+    return map;
+  }, [catalog]);
+
+  const catalogOptions = useMemo(() => {
+    if (!activeId) return [];
+    const existing = new Set(formEntries.map((e) => e.key.trim().toUpperCase()).filter(Boolean));
+    const options: CatalogEntry[] = [];
+    for (const section of catalog?.sections ?? []) {
+      for (const entry of section.entries) {
+        if (!scopeMatchesFile(entry.scope, activeId)) continue;
+        if (existing.has(entry.key.toUpperCase())) continue;
+        options.push(entry);
+      }
+    }
+    for (const entry of catalog?.network_only ?? []) {
+      if (!scopeMatchesFile(entry.scope, activeId)) continue;
+      if (existing.has(entry.key.toUpperCase())) continue;
+      options.push(entry);
+    }
+    return options.sort((a, b) => a.key.localeCompare(b.key));
+  }, [activeId, catalog, formEntries]);
+
+  const filteredFormEntries = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return formEntries;
+    return formEntries.filter((entry) => {
+      const key = entry.key.toLowerCase();
+      const hint = hintMap.get(entry.key.trim().toUpperCase());
+      const text = `${key} ${entry.value} ${hint?.zh ?? ""} ${hint?.en ?? ""}`.toLowerCase();
+      return text.includes(q);
+    });
+  }, [formEntries, hintMap, search]);
+
   const reloadFormFromRaw = (raw: string) => {
     const parsed = parseEnvEntries(raw);
     setFormEntries(parsed.entries);
     setUnsupportedLines(parsed.unsupportedLines);
   };
 
-  const loadFiles = async () => {
+  const loadAll = async () => {
     setBusy(true);
     setError("");
     try {
-      const payload = await requestJson<ConfigFilesResponse>("/api/dev/system/config/files", {
-        cache: "no-store",
-      });
-      setFiles(payload.files ?? []);
-      const nextId = payload.files?.[0]?.file_id ?? "";
-      setActiveId((prev) => (prev && payload.files?.some((f) => f.file_id === prev) ? prev : nextId));
+      const [filesPayload, catalogPayload] = await Promise.all([
+        requestJson<ConfigFilesResponse>("/api/dev/system/config/files", { cache: "no-store" }),
+        requestJson<ConfigCatalogResponse>("/api/dev/system/config/catalog", { cache: "no-store" }),
+      ]);
+      setFiles(filesPayload.files ?? []);
+      setCatalog(catalogPayload);
+      const nextId = filesPayload.files?.[0]?.file_id ?? "";
+      setActiveId((prev) =>
+        prev && filesPayload.files?.some((f) => f.file_id === prev) ? prev : nextId,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -149,7 +194,7 @@ export function ConfigPage() {
     if (mode === "form" && unsupportedLines > 0) {
       setError(
         isZh
-          ? "当前文件包含无法表单化的行，请切换到“原始文本”模式编辑后再保存。"
+          ? "当前文件包含无法表单化的行，请切换到「原始文本」模式编辑后再保存。"
           : "This file has lines not supported by form mode. Switch to Raw mode before saving.",
       );
       return;
@@ -168,10 +213,10 @@ export function ConfigPage() {
       );
       setMessage(
         isZh
-          ? `保存成功：${result.message ?? activeId}；建议重启服务使配置生效`
-          : `Saved: ${result.message ?? activeId}; restart service to apply changes`,
+          ? `保存成功：${result.message ?? activeId}；请重启 ogscope 服务使配置生效`
+          : `Saved: ${result.message ?? activeId}; restart ogscope to apply changes`,
       );
-      await loadFiles();
+      await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -180,7 +225,7 @@ export function ConfigPage() {
   };
 
   useEffect(() => {
-    void loadFiles();
+    void loadAll();
   }, []);
 
   useEffect(() => {
@@ -188,11 +233,13 @@ export function ConfigPage() {
       setEditor("");
       setFormEntries([]);
       setUnsupportedLines(0);
+      setCatalogPick("");
       return;
     }
     const nextRaw = activeFile.content ?? "";
     setEditor(nextRaw);
     reloadFormFromRaw(nextRaw);
+    setCatalogPick("");
   }, [activeFile]);
 
   const addEntry = () => {
@@ -200,6 +247,20 @@ export function ConfigPage() {
       ...prev,
       { id: `env-new-${Date.now()}-${prev.length}`, key: "", value: "" },
     ]);
+  };
+
+  const addFromCatalog = () => {
+    const picked = catalogOptions.find((item) => item.key === catalogPick);
+    if (!picked) return;
+    setFormEntries((prev) => [
+      ...prev,
+      {
+        id: `env-catalog-${Date.now()}-${picked.key}`,
+        key: picked.key,
+        value: picked.default ?? "",
+      },
+    ]);
+    setCatalogPick("");
   };
 
   const updateEntry = (id: string, patch: Partial<EnvEntry>) => {
@@ -211,9 +272,20 @@ export function ConfigPage() {
   };
 
   const configHintText = (key: string) => {
-    const hint = OGSCOPE_ENV_HINT_MAP.get(key.trim().toUpperCase());
-    if (!hint) return isZh ? "暂无释义" : "No hint";
+    const hint = hintMap.get(key.trim().toUpperCase());
+    if (!hint) return isZh ? "暂无释义（可查阅 deploy/*.env.example）" : "No hint (see deploy/*.env.example)";
     return isZh ? hint.zh : hint.en;
+  };
+
+  const defaultHintText = (key: string) => {
+    const hint = hintMap.get(key.trim().toUpperCase());
+    if (!hint?.default) return "";
+    return isZh ? `默认：${hint.default}` : `Default: ${hint.default}`;
+  };
+
+  const fileLabel = (fileId: string) => {
+    const label = FILE_LABELS[fileId];
+    return label ? (isZh ? label.zh : label.en) : fileId;
   };
 
   return (
@@ -229,8 +301,8 @@ export function ConfigPage() {
         </h2>
         <p className="text-sm text-on-surface-variant">
           {isZh
-            ? "支持键值表单与原始文本两种模式。保存后建议重启 ogscope 服务。"
-            : "Supports both key-value form mode and raw text mode. Restart ogscope after saving."}
+            ? "编辑 /etc/ogscope 下的 ogscope.env 与 network.env。保存后请重启 ogscope 服务；配置项说明来自服务端目录 API。"
+            : "Edit ogscope.env and network.env under /etc/ogscope. Restart ogscope after saving; hints come from the server catalog API."}
         </p>
       </header>
 
@@ -245,7 +317,7 @@ export function ConfigPage() {
         <aside className="col-span-12 space-y-2 rounded-xl border border-outline-variant/20 bg-surface-container p-3 lg:col-span-3">
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-wider text-on-surface-variant">{isZh ? "配置文件" : "Config Files"}</p>
-            <button type="button" onClick={() => void loadFiles()} disabled={busy}>
+            <button type="button" onClick={() => void loadAll()} disabled={busy}>
               <span className="inline-flex items-center gap-1 text-xs">
                 <RefreshCw className="h-3.5 w-3.5" /> {isZh ? "刷新" : "Refresh"}
               </span>
@@ -262,22 +334,34 @@ export function ConfigPage() {
                   : "border-outline-variant/30 bg-surface-container-low text-on-surface-variant"
               }`}
             >
-              <div className="font-medium">{file.file_id}</div>
+              <div className="font-medium">{fileLabel(file.file_id)}</div>
               <div className="mt-1 truncate font-mono text-[11px]">{file.path}</div>
             </button>
           ))}
+          {catalog?.env_files && (
+            <div className="mt-3 rounded border border-outline-variant/20 bg-surface-container-low px-2 py-2 text-[11px] text-on-surface-variant">
+              <p className="mb-1 font-medium text-on-surface">{isZh ? "配置路径" : "Config paths"}</p>
+              {Object.entries(catalog.env_files).map(([id, path]) => (
+                <p key={id} className="font-mono">
+                  {id}: {path}
+                </p>
+              ))}
+            </div>
+          )}
         </aside>
 
         <div className="col-span-12 rounded-xl border border-outline-variant/20 bg-surface-container p-4 lg:col-span-9">
-          {!activeFile && <p className="text-sm text-on-surface-variant">{isZh ? "暂无可编辑配置文件" : "No editable config files."}</p>}
+          {!activeFile && (
+            <p className="text-sm text-on-surface-variant">{isZh ? "暂无可编辑配置文件" : "No editable config files."}</p>
+          )}
           {activeFile && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-mono text-xs text-on-surface">{activeFile.path}</p>
                   <p className="text-xs text-on-surface-variant">
-                    {isZh ? "可写" : "Writable"}: {String(activeFile.writable)} ·{" "}
-                    {isZh ? "存在" : "Exists"}: {String(activeFile.exists)}
+                    {isZh ? "可写" : "Writable"}: {String(activeFile.writable)} · {isZh ? "存在" : "Exists"}:{" "}
+                    {String(activeFile.exists)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -327,10 +411,43 @@ export function ConfigPage() {
                   {unsupportedLines > 0 && (
                     <div className="rounded border border-warning/40 bg-warning/10 px-2 py-1 text-xs text-on-surface">
                       {isZh
-                        ? `检测到 ${unsupportedLines} 行无法转换为键值表单（如复杂写法）。请切到“原始文本”模式处理。`
-                        : `${unsupportedLines} line(s) cannot be represented in key-value form. Use Raw mode for these lines.`}
+                        ? `检测到 ${unsupportedLines} 行无法转换为键值表单。请切到「原始文本」模式处理。`
+                        : `${unsupportedLines} line(s) cannot be represented in key-value form. Use Raw mode.`}
                     </div>
                   )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[200px] flex-1">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+                      <input
+                        className="w-full rounded border border-outline-variant/30 bg-surface-container-low py-1.5 pl-8 pr-2 text-xs outline-none focus:border-primary"
+                        placeholder={isZh ? "搜索键名、值或释义…" : "Search keys, values, or hints…"}
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </div>
+                    <select
+                      className="max-w-xs flex-1 rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5 text-xs outline-none focus:border-primary"
+                      value={catalogPick}
+                      onChange={(e) => setCatalogPick(e.target.value)}
+                    >
+                      <option value="">
+                        {isZh ? "从目录添加配置项…" : "Add from catalog…"}
+                      </option>
+                      {catalogOptions.map((item) => (
+                        <option key={item.key} value={item.key}>
+                          {item.key}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!catalogPick}
+                      onClick={addFromCatalog}
+                      className="rounded border border-outline-variant/30 px-2 py-1.5 text-xs disabled:opacity-50"
+                    >
+                      {isZh ? "添加" : "Add"}
+                    </button>
+                  </div>
                   <div className="max-h-[420px] overflow-auto pr-1">
                     <table className="w-full border-separate border-spacing-y-2">
                       <thead>
@@ -342,12 +459,12 @@ export function ConfigPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {formEntries.map((entry) => (
+                        {filteredFormEntries.map((entry) => (
                           <tr key={entry.id}>
                             <td className="pr-2 align-top">
                               <input
                                 className="w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-mono text-xs outline-none focus:border-primary"
-                                placeholder={isZh ? "变量名，如 OGSCOPE_PORT" : "Key, e.g. OGSCOPE_PORT"}
+                                placeholder="OGSCOPE_PORT"
                                 value={entry.key}
                                 onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
                               />
@@ -361,7 +478,12 @@ export function ConfigPage() {
                               />
                             </td>
                             <td className="pr-2 align-top text-xs text-on-surface-variant">
-                              {configHintText(entry.key)}
+                              <p>{configHintText(entry.key)}</p>
+                              {defaultHintText(entry.key) && (
+                                <p className="mt-0.5 font-mono text-[10px] text-on-surface-variant/80">
+                                  {defaultHintText(entry.key)}
+                                </p>
+                              )}
                             </td>
                             <td className="align-top">
                               <button type="button" onClick={() => removeEntry(entry.id)}>
@@ -374,28 +496,84 @@ export function ConfigPage() {
                     </table>
                     {formEntries.length === 0 && (
                       <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-2 text-xs text-on-surface-variant">
-                        {isZh ? "当前没有可编辑变量，点击下方添加。" : "No variables yet. Add one below."}
+                        {isZh ? "当前没有可编辑变量，可从目录添加或手动新增。" : "No variables yet. Add from catalog or manually."}
+                      </div>
+                    )}
+                    {formEntries.length > 0 && filteredFormEntries.length === 0 && (
+                      <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-2 text-xs text-on-surface-variant">
+                        {isZh ? "无匹配项，请调整搜索条件。" : "No matches for the current search."}
                       </div>
                     )}
                   </div>
-                  <button type="button" onClick={addEntry}>
-                    <span className="inline-flex items-center gap-1 text-xs">
-                      <Plus className="h-3.5 w-3.5" />
-                      {isZh ? "添加变量" : "Add Variable"}
-                    </span>
-                  </button>
-                  <div className="rounded border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-xs text-on-surface-variant">
-                    <p className="mb-2 font-medium text-on-surface">{isZh ? "常用配置释义" : "Common Config Glossary"}</p>
-                    <div className="space-y-1">
-                      {OGSCOPE_ENV_HINTS.map((hint) => (
-                        <p key={hint.key}>
-                          <span className="font-mono text-[11px] text-on-surface">{hint.key}</span>
-                          {" - "}
-                          <span>{isZh ? hint.zh : hint.en}</span>
-                        </p>
-                      ))}
-                    </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={addEntry}>
+                      <span className="inline-flex items-center gap-1 text-xs">
+                        <Plus className="h-3.5 w-3.5" />
+                        {isZh ? "空白行" : "Blank row"}
+                      </span>
+                    </button>
                   </div>
+                  <details
+                    open={glossaryOpen}
+                    onToggle={(e) => setGlossaryOpen((e.target as HTMLDetailsElement).open)}
+                    className="rounded border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-xs text-on-surface-variant"
+                  >
+                    <summary className="cursor-pointer font-medium text-on-surface">
+                      <span className="inline-flex items-center gap-1">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        {isZh ? "配置目录（按模块）" : "Config catalog (by section)"}
+                      </span>
+                    </summary>
+                    <div className="mt-3 space-y-4">
+                      {(catalog?.sections ?? []).map((section) => {
+                        const entries = section.entries.filter((entry) =>
+                          activeId ? scopeMatchesFile(entry.scope, activeId) : true,
+                        );
+                        if (entries.length === 0) return null;
+                        return (
+                          <div key={section.id}>
+                            <p className="mb-1 font-medium text-on-surface">
+                              {isZh ? section.title_zh : section.title_en}
+                            </p>
+                            <div className="space-y-1">
+                              {entries.map((entry) => (
+                                <p key={entry.key}>
+                                  <span className="font-mono text-[11px] text-on-surface">{entry.key}</span>
+                                  {entry.default != null && entry.default !== "" && (
+                                    <span className="ml-1 font-mono text-[10px] text-on-surface-variant/80">
+                                      (= {entry.default})
+                                    </span>
+                                  )}
+                                  {" — "}
+                                  <span>{isZh ? entry.zh : entry.en}</span>
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(catalog?.network_only ?? []).filter((entry) =>
+                        activeId ? scopeMatchesFile(entry.scope, activeId) : true,
+                      ).length > 0 && (
+                        <div>
+                          <p className="mb-1 font-medium text-on-surface">
+                            {isZh ? "仅 network.env / 脚本" : "network.env / scripts only"}
+                          </p>
+                          <div className="space-y-1">
+                            {(catalog?.network_only ?? [])
+                              .filter((entry) => (activeId ? scopeMatchesFile(entry.scope, activeId) : true))
+                              .map((entry) => (
+                                <p key={entry.key}>
+                                  <span className="font-mono text-[11px] text-on-surface">{entry.key}</span>
+                                  {" — "}
+                                  <span>{isZh ? entry.zh : entry.en}</span>
+                                </p>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 </div>
               ) : (
                 <textarea
