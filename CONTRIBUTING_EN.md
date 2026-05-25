@@ -24,7 +24,7 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 ### Code contributions
 
 1. **Fork** the repository and clone your fork.
-2. **Branch**: `git checkout -b feature/your-feature-name`
+2. **Branch from `develop`**: `git checkout develop && git pull && git checkout -b feature/your-feature-name`
 3. **Dev dependencies**:
    ```bash
    poetry install
@@ -76,13 +76,26 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
   - `docs/contracts/dev-rest-v1.md` / `docs/contracts/dev-rest-v1_EN.md`
   - `docs/contracts/core-compatibility-matrix.md` (inline bilingual)
 
+## Git branch model
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable release; merge from `develop` via PR only |
+| `develop` | **Single integration branch**; default for daily work and board sync |
+| `feature/*` | Features/refactors; branch from `develop`, delete after merge |
+| `fix/*` | Small fixes; merge to `develop`; hotfix to `main` when urgent |
+
+Flow: `feature/*` → PR → `develop` → periodic PR → `main`.
+
+**Deprecated**: `dev` and `dev-latest` dual integration branches.
+
 ## Workflow
 
 1. Pick or file an issue  
 2. Develop and test locally  
 3. Open a PR  
 4. Review  
-5. Merge
+5. Merge into `develop` (and `main` for releases)
 
 ## Review expectations
 
