@@ -31,9 +31,9 @@ gh api "repos/${REPO}/branches/main/protection" -X PUT \
   -f restrictions=null \
   -f allow_force_pushes=false \
   -f allow_deletions=false \
-  -F required_status_checks[contexts][]=test \
-  -F required_status_checks[contexts][]=lint \
-  -F required_status_checks[contexts][]=block-direct-push-to-main \
+  -F 'required_status_checks[contexts][]=CI / test' \
+  -F 'required_status_checks[contexts][]=CI / lint' \
+  -F 'required_status_checks[contexts][]=Branch Guard / block-direct-push-to-main' \
   2>/dev/null || {
   echo "⚠️  main 保护需 classic protection 或 Rulesets 权限；若失败请在 GitHub UI 手动设置："
   echo "    Settings → Branches → Add rule for main"
@@ -51,8 +51,8 @@ gh api "repos/${REPO}/branches/develop/protection" -X PUT \
   -f restrictions=null \
   -f allow_force_pushes=false \
   -f allow_deletions=false \
-  -F required_status_checks[contexts][]=test \
-  -F required_status_checks[contexts][]=lint \
+  -F 'required_status_checks[contexts][]=CI / test' \
+  -F 'required_status_checks[contexts][]=CI / lint' \
   2>/dev/null || {
   echo "⚠️  develop 保护可选；建议在 UI 为 develop 启用 Require PR（feature → develop）"
 }

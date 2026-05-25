@@ -21,9 +21,10 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          # 允许 GitHub PR 合并产生的 merge/squash 提交 / Allow PR merge commits
+          # 允许 GitHub PR 合并：merge commit / squash (#N) / rebase 批量 / Allow PR merges
           if [[ "${HEAD_MSG}" == Merge\ pull\ request* ]] \
             || [[ "${HEAD_MSG}" == Merge\ branch* ]] \
+            || [[ "${HEAD_MSG}" =~ \(#[0-9]+\)$ ]] \
             || [[ "${ACTOR}" == "github-actions[bot]" ]]; then
             echo "Allowed merge to main."
             exit 0
