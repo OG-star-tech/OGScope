@@ -132,6 +132,8 @@
 
 流程：`feature/*` → PR → `develop` → 定期 PR → `main`。
 
+**禁止直接向 `main` 提交或推送**（本地 pre-commit 会拦截；remote 需配置 Branch protection，见 [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh)）。
+
 **已废弃**：不再使用 `dev`、`dev-latest` 双集成分支。
 
 ## 开发流程
