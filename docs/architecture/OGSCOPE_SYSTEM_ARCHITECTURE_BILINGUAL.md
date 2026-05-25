@@ -1,14 +1,13 @@
 # OGScope System Architecture (Bilingual)
 
-> 本文档给出 OGScope 的“系统级”架构视图（区别于 API 路由分层），强调核心边界、用户层与开发者工具层隔离、运维层横切属性，以及与 subordinate co-deployment时的共享硬件平面。  
-> This document provides OGScope system-level architecture (different from API route layering), emphasizing core boundary, user/developer surface separation, cross-cutting operations, and a shared hardware plane for subordinate co-deploymentment.
+> 本文档给出 OGScope 的“系统级”架构视图（区别于 API 路由分层），强调核心边界、用户层与开发者工具层隔离、运维层横切属性，以及 hardware plane 与 subordinate 集成边界。  
+> This document provides OGScope system-level architecture (different from API route layering), emphasizing core boundary, user/developer surface separation, cross-cutting operations, and hardware-plane / subordinate integration boundaries.
 
 ## Architecture Diagram / 架构图
 
 ```mermaid
 flowchart TD
-  externalCaller["外部调用方 / External Caller<br/>external integrator or Other Clients"]
-  externalLeader["外部服务（联部署） / 外部集成方 Leader Service (Co-deploy)"]
+  externalCaller["外部调用方 / External Caller<br/>Integrators and Clients"]
 
   subgraph interfaceLayer["接口与契约层 / Interface and Contract Layer"]
     restContract["REST契约入口 / REST Contract Entry<br/>/api/core/v1/*"]
@@ -34,13 +33,16 @@ flowchart TD
     dataAdapter["数据读写适配 / Data IO Adapters"]
   end
 
-  subgraph sharedHardwarePlane["共享硬件平面（单实例） / Shared Hardware Plane (Single Instance)"]
-    leaderLease["主导租约 / Leader Lease<br/>external-led or ogscope-led"]
+  subgraph sharedHardwarePlane["硬件平面（进程内） / Hardware Plane (In-Process)"]
     capabilityRegistry["能力注册中心 / Capability Registry"]
-    controlPlane["控制面 / Control Plane<br/>UDS + gRPC or JSON-RPC"]
+    controlPlane["控制面 / Control Plane<br/>In-process + optional UDS JSON-RPC"]
     dataPlane["数据面 / Data Plane<br/>Ring Buffer + UDS Notify"]
     eventPlane["事件面 / Event Plane<br/>D-Bus Signals Optional"]
-    profileConfig["环境配置档 / Environment Profiles"]
+    profileConfig["环境配置档 / Environment Profiles<br/>standalone or subordinate"]
+  end
+
+  subgraph externalSensor["外部传感器服务（subordinate） / External Sensor Provider"]
+    udsSensor["UDS JSON-RPC<br/>hardware-plane-uds-v1"]
   end
 
   subgraph dataAlgoLayer["数据与算法资源层 / Data and Algorithm Resource Layer"]
@@ -68,8 +70,6 @@ flowchart TD
   end
 
   externalCaller --> restContract
-  externalLeader --> restContract
-  externalLeader --> leaderLease
   userSurface --> webGateway
   devSurface --> webGateway
   webGateway --> restContract
@@ -91,11 +91,11 @@ flowchart TD
   algoEngine --> solveDb
 
   profileConfig --> capabilityRegistry
-  leaderLease --> controlPlane
   capabilityRegistry --> controlPlane
   hwClient --> controlPlane
   hwClient --> dataPlane
   hwClient --> eventPlane
+  hwClient -.->|"subordinate"| udsSensor
 
   controlPlane --> cameraHw
   controlPlane --> wifiHw
@@ -126,21 +126,18 @@ flowchart TD
 - **FastAPI is not core / FastAPI 不是核心层**  
 `webGateway` 属于接口网关层，核心业务位于 `appLayer/domainLayer/corePolicy`。
 - **Core cannot be called directly / 核心层禁止外部直调**  
-外部调用方（含 external integrator）必须经 `REST Contract Entry`，不能直接调用核心模块。
+外部调用方必须经 `REST Contract Entry`（`/api/core/v1/*`），不能直接调用核心模块。
 - **Developer tooling is not user surface / 开发者工具层不等于用户层**  
 `userSurface` 与 `devSurface` 分层，路径、权限和稳定性承诺都应分离。
 - **Solve data is not peripheral hardware / 解算数据不属于外围硬件**  
 `Plate Solve Database` 被归入“数据与算法资源层”，与实体硬件层解耦。
 - **Runtime/Ops is cross-cutting / 运维层是横切层**  
 运维能力同时作用于网关层、核心层和基础设施层，不是单一依赖于接口层。
-- **Shared Hardware Plane for co-deploy / 联部署共享硬件平面**  
-当 OGScope 与外部集成方同机部署时，外围硬件服务仅运行一份，并由 `Leader Lease` 决定主导写控制权。
-- **Registerable capabilities and profile switch / 能力可注册且配置可切换**  
-传感器与人机交互硬件通过 `Capability Registry` 与 `Environment Profiles` 管理，支持不同环境装配不同驱动逻辑。
+- **Hardware plane profiles / 硬件平面配置档**  
+通过 `OGSCOPE_HARDWARE_PLANE_ROLE` 在 `standalone` 与 `subordinate` 间切换；详见 [subordinate-mode](../contracts/subordinate-mode.md)。
+- **Registerable capabilities / 能力可注册**  
+传感器与人机交互硬件通过 `Capability Registry` 管理，支持不同环境装配不同驱动逻辑。
 - **Unified hardware contract / 统一硬件契约**  
-OGScope 通过 `Hardware Plane Client` 使用统一能力接口（status/read/command/subscribe），以支持与外部集成方的交叉调用和职责隔离。
-- **subordinate co-deployment minimal boundary / subordinate co-deployment最小边界**  
-在 `subordinate` 角色下，`外部集成方 -> OGScope` 业务协作固定走 `REST /api/core/v1/*`（状态、分析、视频流）；  
-`OGScope -> 外部集成方` 仅通过本机 `UDS JSON-RPC` 读取传感器（GPS、磁力计等）。OGScope 本地 UI/HMI/本地传感器默认禁用，摄像头仍由 OGScope 维护。  
-In `subordinate`, `外部集成方 -> OGScope` business integration stays on `REST /api/core/v1/*` (status, analysis, video stream), while `OGScope -> 外部集成方` uses local `UDS JSON-RPC` only for sensor reads (GPS, magnetometer, etc). OGScope local UI/HMI/local sensors are disabled by default, and camera ownership remains in OGScope.
-
+OGScope 通过 `Hardware Plane Client` 使用统一能力接口（status/read/command/subscribe）。
+- **Subordinate integration boundary / subordinate 集成边界**  
+在 `subordinate` 角色下，上层集成方业务协作走 `REST /api/core/v1/*`；传感器读请求通过本机 `UDS JSON-RPC` 委托给外部提供方（[hardware-plane-uds-v1](../contracts/hardware-plane-uds-v1.md)）。本地传感器/HMI 默认禁用，相机仍由 OGScope 维护。

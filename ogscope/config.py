@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         default=Path("/tmp/external-sensor-plane.sock"),
         description=(
             "外部传感器 UDS 套接字路径（仅 subordinate 使用） / "
-            "External sensor UDS socket path (used in subordinate)"
+            "External sensor UDS socket path (used in subordinate mode)"
         ),
     )
     hardware_plane_camera_autostart: bool = Field(

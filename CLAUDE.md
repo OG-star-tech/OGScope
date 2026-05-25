@@ -227,19 +227,10 @@ chore: 构建/工具变更 / Build/tool changes
 3. **服务重启**: 项目以系统服务方式运行，修改后需要重启服务
 4. **调试前确认**: 如果有不明白的地方，先询问用户再开始工作
 
-## 跨仓协同开发（OGScope 外部集成）
+## 外部集成
 
-- OGScope 在联动中是 **核心能力提供方**；external integrator 是 **上层调用方**。
 - OGScope 对外稳定契约为 `"/api/core/v1/*"`；内部开发接口为 `"/api/dev/*"`。
-- 任何跨仓需求按以下顺序执行：
-  1. 更新契约文档/兼容矩阵
-  2. 修改 OGScope 核心实现与测试
-  3. 同步 external integrator 适配层与上层逻辑
-  4. 双仓测试通过后再提交
-- 禁止在 OGScope 中重新引入旧路径：`/api/debug/`*、`/api/analysis/*`、`/api/system/*`。
-- 联动开发详细流程见 [docs/development/CROSS_PROJECT_COLLAB.md](docs/development/CROSS_PROJECT_COLLAB.md)（English: [CROSS_PROJECT_COLLAB_EN.md](docs/development/CROSS_PROJECT_COLLAB_EN.md)）。
-- Cursor 联动建议：
-  - 同一会话挂载双项目根（OGScope + external integrator）
-  - 指令中明确“分别在两个仓执行改动、测试、提交”
-  - 每次提交前先核对当前仓 `git status` 与 `git remote -v`
+- subordinate 模式与 UDS 传感器委托见 [docs/contracts/subordinate-mode.md](docs/contracts/subordinate-mode.md) 与 [hardware-plane-uds-v1.md](docs/contracts/hardware-plane-uds-v1.md)。
+- 具体产品的联合部署与跨仓流程见各自仓库文档；OGScope 仅维护 vendor-neutral 契约。
+- 禁止在 OGScope 中重新引入旧路径：`/api/debug/*`、`/api/analysis/*`、`/api/system/*`。
 
