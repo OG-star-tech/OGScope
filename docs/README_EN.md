@@ -7,7 +7,7 @@ English | [中文](README.md)
 - **New to the project / first run**: **A Getting started**.
 - **Board networking, hotspot, plate DB, stability, BOM**: **B Board ops**.
 - **API, contracts, architecture, tests, pre-commit checklist**: **C API and quality**.
-- **External integration and cross-repo work**: **D Cross-repo**.
+- **External integration (subordinate mode, delegated sensors)**: **D External integration**.
 - **Debug console and contributing**: **E Tools and contributing**.
 
 ### A Getting started
@@ -32,10 +32,11 @@ English | [中文](README.md)
 - [Architecture Quick Checklist](development/ARCHITECTURE_QUICK_CHECKLIST_EN.md) | [中文](development/ARCHITECTURE_QUICK_CHECKLIST.md)
 - [Testing guide](development/testing-guide_EN.md) | [中文](development/testing-guide.md)
 
-### D Cross-repo
+### D External integration
 
-- [OGScope × external integrator workflow](development/CROSS_PROJECT_COLLAB_EN.md) | [中文](development/CROSS_PROJECT_COLLAB.md)
-- [OGScope external integration minimal co-deploy contract](development/OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md) | [中文](development/OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md)
+- [Subordinate runtime mode](contracts/subordinate-mode_EN.md) | [中文](contracts/subordinate-mode.md)
+- [Hardware Plane UDS v1 (delegated sensors)](contracts/hardware-plane-uds-v1_EN.md) | [中文](contracts/hardware-plane-uds-v1.md)
+- [Core REST v1](contracts/core-rest-v1_EN.md) | [中文](contracts/core-rest-v1.md) (primary integrator entry)
 
 ### E Tools and contributing
 

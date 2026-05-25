@@ -13,7 +13,7 @@ and the team-standard debug workflow.
 - **A Getting started**: this guide; [Quick Start](../QUICK_START_EN.md) | [中文](../QUICK_START.md)
 - **B Board ops**: [WiFi](wifi-nm_EN.md) | [中文](wifi-nm.md); [plate-solve data](plate-solve-data.md); [stability / memory](ogscope-service-hardening.md); [BOM](../hardware/bom_EN.md) | [中文](../hardware/bom.md)
 - **C API and quality**: [API architecture (includes FastAPI entry)](../API_ARCHITECTURE_EN.md) | [中文](../API_ARCHITECTURE.md); [system architecture](../architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md); [Core contract](../contracts/core-rest-v1_EN.md) | [中文](../contracts/core-rest-v1.md); [Dev contract](../contracts/dev-rest-v1_EN.md) | [中文](../contracts/dev-rest-v1.md); [compatibility matrix](../contracts/core-compatibility-matrix.md); [checklist](ARCHITECTURE_QUICK_CHECKLIST_EN.md) | [中文](ARCHITECTURE_QUICK_CHECKLIST.md); [testing](testing-guide_EN.md) | [中文](testing-guide.md)
-- **D Cross-repo**: [CROSS_PROJECT_COLLAB_EN.md](CROSS_PROJECT_COLLAB_EN.md) | [中文](CROSS_PROJECT_COLLAB.md); [外部集成方 contract](OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md) | [中文](OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md)
+- **D External integration**: [Subordinate mode](../contracts/subordinate-mode_EN.md) | [中文](../contracts/subordinate-mode.md); [Hardware Plane UDS v1](../contracts/hardware-plane-uds-v1_EN.md) | [中文](../contracts/hardware-plane-uds-v1.md)
 - **E Tools and contributing**: [Debug console](../DEBUG_CONSOLE_EN.md) | [中文](../DEBUG_CONSOLE.md); [Contributing](../../CONTRIBUTING_EN.md) | [中文](../../CONTRIBUTING.md)
 
 Recommended workflow: **edit locally -> upload to board -> restart with

@@ -2,9 +2,11 @@
 
 ## 矩阵 / Matrix
 
-| OGScope | 契约路径 / Contract Path |
-|---|---|
-| 0.1.x | `/api/core/v1/*` |
+| OGScope | 契约路径 / Contract Path | 说明 |
+|---|---|---|
+| 0.1.x | `/api/core/v1/*` | 上层集成方 REST 入口 |
+| 0.1.x | [subordinate-mode](subordinate-mode.md) | `standalone` / `subordinate` 运行模式 |
+| 0.1.x | [hardware-plane-uds-v1](hardware-plane-uds-v1.md) | subordinate 下委托传感器 UDS JSON-RPC |
 
 ## 向后兼容规则
 

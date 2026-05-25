@@ -27,7 +27,7 @@ def _profile_from_settings(settings: Settings) -> dict[str, Any]:
     enable_local_sensors = bool(settings.enable_local_sensors) and not subordinate
     enable_hmi = bool(settings.enable_hmi) and not subordinate
     # 在 subordinate 模式保留调试台可见性，冲突能力由 API 裁剪控制
-    # Keep debug UI available in subordinate; conflict features are gated by API routing.
+    # Keep debug UI available in subordinate mode; conflict features are gated by API routing.
     enable_ui = bool(settings.enable_ui)
     sensor_source = "remote_delegated" if subordinate else "local"
     return {
@@ -113,10 +113,10 @@ async def start_hardware_plane(settings: Settings | None = None) -> None:
         client = get_hardware_plane_client()
         delegated = await client.sensor_read("sensor.gps")
         if delegated.get("success"):
-            logger.info("外部传感器链路就绪 / Delegated sensor link ready")
+            logger.info("Delegated sensor link ready / 委托传感器链路就绪")
         else:
             logger.warning(
-                "外部传感器链路未就绪 / Delegated sensor link not ready: {}",
+                "Delegated sensor link not ready / 委托传感器链路未就绪: {}",
                 delegated.get("error"),
             )
 

@@ -7,7 +7,7 @@
 - **新成员 / 首次跑通**：**A 入门与总览**。
 - **开发板网络、热点、星库、稳定性、BOM**：**B 板上部署与运维**。
 - **API、契约、架构、测试、提交前自检**：**C API、契约与质量**。
-- **与外部集成方联调**：**D 跨项目协作**。
+- **外部集成（subordinate 模式、UDS 传感器委托）**：**D 外部集成**。
 - **调试控制台、贡献流程**：**E 工具与贡献**。
 
 ### A 入门与总览
@@ -32,10 +32,11 @@
 - [提交前架构自检](development/ARCHITECTURE_QUICK_CHECKLIST.md) | [English](development/ARCHITECTURE_QUICK_CHECKLIST_EN.md)
 - [测试指南](development/testing-guide.md) | [English](development/testing-guide_EN.md)
 
-### D 跨项目协作
+### D 外部集成
 
-- [OGScope × external integrator 联动开发](development/CROSS_PROJECT_COLLAB.md) | [English](development/CROSS_PROJECT_COLLAB_EN.md)
-- [OGScope external integration 最小联部署契约](development/OG_ZENIT_COLLAB_MINIMAL_CONTRACT_ZH.md) | [English](development/OG_ZENIT_COLLAB_MINIMAL_CONTRACT.md)
+- [Subordinate 运行模式](contracts/subordinate-mode.md) | [English](contracts/subordinate-mode_EN.md)
+- [Hardware Plane UDS v1（委托传感器）](contracts/hardware-plane-uds-v1.md) | [English](contracts/hardware-plane-uds-v1_EN.md)
+- [Core REST v1](contracts/core-rest-v1.md) | [English](contracts/core-rest-v1_EN.md)（上层集成方主入口）
 
 ### E 工具与贡献
 

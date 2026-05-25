@@ -197,8 +197,8 @@ def test_docs_are_split_between_core_and_dev(client) -> None:
 
 
 @pytest.mark.unit
-def test_core_openapi_contains_external_required_business_endpoints(client) -> None:
-    """Zenit 协作要求的核心 REST 入口必须稳定存在 / Required Zenit-facing endpoints remain stable."""
+def test_core_openapi_contains_required_business_endpoints(client) -> None:
+    """核心 REST 入口必须稳定存在 / Required core business endpoints remain stable."""
     resp = client.get("/openapi-core.json")
     assert resp.status_code == 200
     paths = set(resp.json()["paths"].keys())
