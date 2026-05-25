@@ -232,6 +232,6 @@ chore: 构建/工具变更 / Build/tool changes
 
 - OGScope 对外稳定契约为 `"/api/core/v1/*"`；内部开发接口为 `"/api/dev/*"`。
 - subordinate 模式与 UDS 传感器委托见 [docs/contracts/subordinate-mode.md](docs/contracts/subordinate-mode.md) 与 [hardware-plane-uds-v1.md](docs/contracts/hardware-plane-uds-v1.md)。
-- 具体产品的联合部署与跨仓流程见各自仓库文档；OGScope 仅维护 vendor-neutral 契约。
+- 集成方产品的联合部署与跨仓流程见各自仓库文档；OGScope 仅维护 vendor-neutral 契约。
 - 禁止在 OGScope 中重新引入旧路径：`/api/debug/*`、`/api/analysis/*`、`/api/system/*`。
 
