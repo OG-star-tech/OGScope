@@ -78,7 +78,7 @@ After startup, visit: http://raspberrypi.local:8000 or http://<IP>:8000
 
 ## Documentation
 
-- **[Documentation index (topics A–E)](docs/README_EN.md)** | [中文](docs/README.md) — board ops, API/contracts, cross-repo, debug, contributing
+- **[Documentation index (topics A–E)](docs/README_EN.md)** | [中文](docs/README.md) — board ops, API/contracts, external integration, debug, contributing
 - [Quick Start](docs/QUICK_START_EN.md) | [中文](docs/QUICK_START.md)
 - [Development Guide](docs/development/README_EN.md) | [中文](docs/development/README.md)
 

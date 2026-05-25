@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ogscope.config import get_settings
+from ogscope.config_catalog import build_config_catalog
 from ogscope.domain.system.services import system_info_service
 from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.web.api.models.schemas import SystemInfo
@@ -168,6 +169,12 @@ async def post_hardware_command(body: HardwareCommandBody) -> dict:
         payload=dict(body.payload),
         timeout_ms=body.timeout_ms,
     )
+
+
+@router.get("/system/config/catalog")
+async def get_system_config_catalog() -> dict:
+    """返回配置项目录（键名、默认值、双语说明）/ Config key catalog with defaults and descriptions."""
+    return {"success": True, **build_config_catalog()}
 
 
 @router.get("/system/config/files")

@@ -82,7 +82,7 @@ def cli() -> None:
             pass
         loop.close()
         asyncio.set_event_loop(None)
-    if os.getenv("OGSCOPE_FORCE_EXIT_ON_SHUTDOWN", "1") == "1":
+    if get_settings().force_exit_on_shutdown:
         os._exit(exit_code)
     sys.exit(exit_code)
 
