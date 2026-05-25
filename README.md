@@ -81,7 +81,7 @@ python -m ogscope.main
 
 ## 文档
 
-- **[文档索引（按主题 A–E 分组）](docs/README.md)** | [English](docs/README_EN.md) — 板上运维、API/契约、跨仓协作、调试与贡献等全部入口
+- **[文档索引（按主题 A–E 分组）](docs/README.md)** | [English](docs/README_EN.md) — 板上运维、API/契约、外部集成、调试与贡献等全部入口
 - [快速开始](docs/QUICK_START.md) | [English](docs/QUICK_START_EN.md)
 - [开发指南（部署与调试）](docs/development/README.md) | [English](docs/development/README_EN.md)
 
