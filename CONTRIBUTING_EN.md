@@ -87,6 +87,8 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 
 Flow: `feature/*` → PR → `develop` → periodic PR → `main`.
 
+**Do not commit or push directly to `main`.** Local pre-commit blocks this; configure GitHub branch protection via [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh).
+
 **Deprecated**: `dev` and `dev-latest` dual integration branches.
 
 ## Workflow
