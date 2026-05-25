@@ -150,24 +150,23 @@ def should_use_simulation_mode() -> bool:
     判断是否应该使用模拟模式
 
     Returns:
-        bool: 如果应该使用模拟模式返回True
+        bool: 如果是树莓派环境且未强制模拟则返回 False，否则按配置或平台决定
     """
-    # 强制使用模拟模式的环境变量 / Environment variables to force use of simulation mode
-    if os.environ.get("OGSCOPE_SIMULATION_MODE") == "1":
-        return True
+    from ogscope.config import get_settings
 
-    # 强制禁用模拟模式的环境变量 / Environment variable to force disabling of simulation mode
-    if os.environ.get("OGSCOPE_SIMULATION_MODE") == "0":
-        return False
+    mode = get_settings().simulation_mode
+    if mode is not None:
+        return bool(mode)
 
-    # 默认逻辑：非树莓派环境使用模拟模式 / Default logic: non-Raspberry Pi environments use simulation mode
+    # 默认逻辑：非树莓派环境使用模拟模式 / Default: simulation off on Raspberry Pi only
     return not is_raspberry_pi()
 
 
 def is_development_mode_enabled() -> bool:
     """是否启用开发模式（更详细日志与异常栈）/ Whether development mode is enabled."""
-    raw = os.environ.get("OGSCOPE_DEVELOPMENT_MODE", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    from ogscope.config import get_settings
+
+    return bool(get_settings().development_mode)
 
 
 def get_simulation_config() -> dict:
