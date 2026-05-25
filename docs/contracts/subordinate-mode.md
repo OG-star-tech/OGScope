@@ -20,7 +20,7 @@ OGScope 支持两种硬件平面角色：
 | `OGSCOPE_ENABLE_LOCAL_SENSORS`             | `true`                            | subordinate 下自动禁用本地传感器                                            |
 | `OGSCOPE_ENABLE_HMI`                       | `true`                            | subordinate 下自动禁用 HMI                                             |
 | `OGSCOPE_ENABLE_UI`                        | `true`                            | 是否启用 Web UI 路由（subordinate 下仍可按需开启调试台）                            |
-| `OGSCOPE_SUBORDINATE_LOCAL_DEV_ONLY`       | `false`                           | subordinate 下是否仅允许本机访问 `/api/dev/`*                               |
+| `OGSCOPE_SUBORDINATE_LOCAL_DEV_ONLY`       | `false`                           | subordinate 下是否仅允许本机访问 `/api/dev/*`                               |
 | `OGSCOPE_HARDWARE_PLANE_REMOTE_UDS_SOCKET` | `/tmp/external-sensor-plane.sock` | 外部传感器 UDS 路径（见 [hardware-plane-uds-v1](hardware-plane-uds-v1.md)） |
 | `OGSCOPE_HARDWARE_PLANE_RPC_TIMEOUT_MS`    | `800`                             | 硬件平面 RPC 超时（毫秒）                                                   |
 
@@ -39,7 +39,7 @@ OGScope 支持两种硬件平面角色：
 
 ## 集成路径
 
-- **业务调用**：上层集成方 → OGScope `REST /api/core/v1/`*（详见 [core-rest-v1](core-rest-v1.md)）。
+- **业务调用**：上层集成方 → OGScope `REST /api/core/v1/*`（详见 [core-rest-v1](core-rest-v1.md)）。
 - **传感器委托**：OGScope → 外部传感器服务 `UDS JSON-RPC`（详见 [hardware-plane-uds-v1](hardware-plane-uds-v1.md)）。
 
 ## 版本与兼容
