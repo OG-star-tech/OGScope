@@ -178,6 +178,7 @@ python -m ogscope.main
 - 集成分支: `develop`（唯一日常集成线；**已废弃 `dev` / `dev-latest`**）
 - 功能分支: `feature/xxx`（从 `develop` 拉出，合回后删除）
 - 修复分支: `fix/xxx`
+- **禁止**在 `main` 上直接 commit/push；日常开发从 `develop` 或 `feature/*` 进行（pre-commit `no-commit-to-branch` 会拦截 main）
 
 ### 提交信息格式
 

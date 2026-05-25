@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Any
 
@@ -20,10 +19,10 @@ from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 logger = logging.getLogger(__name__)
 
 _PREVIEW_CLIENT_LAST_TS: dict[str, float] = {}
-_DEBUG_PREVIEW_MIN_INTERVAL_SEC = max(
-    0.0,
-    float(os.getenv("OGSCOPE_DEBUG_PREVIEW_MIN_INTERVAL_MS", "150") or "150") / 1000.0,
-)
+
+
+def _debug_preview_min_interval_sec() -> float:
+    return max(0.0, float(get_settings().debug_preview_min_interval_ms)) / 1000.0
 
 
 class CameraDomainService:
@@ -78,11 +77,11 @@ class CameraDomainService:
     async def get_rate_limited_preview(
         self, request: Request, *, since_frame_id: int | None = None
     ):
-        if _DEBUG_PREVIEW_MIN_INTERVAL_SEC > 0:
+        if _debug_preview_min_interval_sec() > 0:
             client_host = request.client.host if request.client else "unknown"
             now = time.monotonic()
             last = _PREVIEW_CLIENT_LAST_TS.get(client_host, 0.0)
-            if now - last < _DEBUG_PREVIEW_MIN_INTERVAL_SEC:
+            if now - last < _debug_preview_min_interval_sec():
                 return Response(status_code=304)
             _PREVIEW_CLIENT_LAST_TS[client_host] = now
         return await self.get_preview(since_frame_id=since_frame_id)
@@ -145,7 +144,7 @@ class StreamStateDomainService:
             "max_clients": int(limiter.max_clients),
             "active_clients": int(limiter.active_clients),
             "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
-            "target_preview_fps": int(os.getenv("OGSCOPE_SHARED_PREVIEW_FPS", "8") or "8"),
+            "target_preview_fps": int(settings.shared_preview_fps),
         }
 
 
