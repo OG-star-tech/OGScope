@@ -73,7 +73,9 @@ def _ensure_runtime(settings: Settings) -> None:
     )
     remote_sensor_transport = None
     if profile["subordinate_mode"]:
-        remote_sensor_transport = JsonRpcUdsClient(str(settings.hardware_plane_remote_uds_socket))
+        remote_sensor_transport = JsonRpcUdsClient(
+            str(settings.hardware_plane_remote_uds_socket)
+        )
     _client = HardwarePlaneClient(
         _daemon,
         default_timeout_ms=settings.hardware_plane_rpc_timeout_ms,
@@ -125,4 +127,3 @@ async def stop_hardware_plane() -> None:
     """停止硬件平面 / Stop hardware plane."""
     daemon = get_hardware_plane_daemon()
     await daemon.stop()
-

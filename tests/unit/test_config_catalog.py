@@ -12,9 +12,7 @@ from ogscope.config_catalog import build_config_catalog
 def test_build_config_catalog_includes_new_preview_fields() -> None:
     catalog = build_config_catalog()
     keys = {
-        entry["key"]
-        for section in catalog["sections"]
-        for entry in section["entries"]
+        entry["key"] for section in catalog["sections"] for entry in section["entries"]
     }
     assert "OGSCOPE_SHARED_PREVIEW_FPS" in keys
     assert "OGSCOPE_PREVIEW_JPEG_QUALITY" in keys

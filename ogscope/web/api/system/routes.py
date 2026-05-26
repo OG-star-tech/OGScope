@@ -12,7 +12,10 @@ from ogscope.config_catalog import build_config_catalog
 from ogscope.domain.system.services import system_info_service
 from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.web.api.models.schemas import SystemInfo
-from ogscope.web.api.system.config_files import read_config_file_payload, write_config_file
+from ogscope.web.api.system.config_files import (
+    read_config_file_payload,
+    write_config_file,
+)
 
 router = APIRouter()
 

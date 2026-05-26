@@ -35,7 +35,9 @@ class _FakeLimiter:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_build_camera_mjpeg_stream_rejects_when_limit_reached(monkeypatch) -> None:
+async def test_build_camera_mjpeg_stream_rejects_when_limit_reached(
+    monkeypatch,
+) -> None:
     limiter = _FakeLimiter(can_acquire=False)
     monkeypatch.setattr(streaming_mod, "get_mjpeg_stream_limiter", lambda: limiter)
 
@@ -60,10 +62,13 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
 
     class _FakeSettings:
         stream_mjpeg_frame_fetch_timeout_ms = 1000
+        shared_preview_fps = 8
 
     monkeypatch.setattr(streaming_mod, "get_settings", lambda: _FakeSettings())
 
-    async def _fake_get_stream_frame_bytes(fmt: str, quality: int, *, since_frame_id: int):
+    async def _fake_get_stream_frame_bytes(
+        fmt: str, quality: int, *, since_frame_id: int
+    ):
         _ = fmt, quality, since_frame_id
         return 200, b"abc", 1
 
@@ -87,4 +92,3 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
     assert b"Content-Type: image/jpeg" in first_chunk
     await body_iter.aclose()
     assert limiter.released is True
-

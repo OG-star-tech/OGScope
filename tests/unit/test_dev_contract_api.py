@@ -58,4 +58,3 @@ def test_dev_hardware_plane_metrics_include_profile(client) -> None:
 def test_legacy_debug_path_not_exposed(client) -> None:
     resp = client.get("/api/debug/camera/status")
     assert resp.status_code in {404, 405}
-
