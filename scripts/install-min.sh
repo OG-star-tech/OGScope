@@ -121,6 +121,8 @@ fi
 sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 
+ogscope_install_config_write_artifacts "${PROJECT_DIR}" "${USER}"
+
 echo "⚙️ 写入 systemd 服务 / Writing systemd service..."
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
