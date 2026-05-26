@@ -38,7 +38,9 @@ async def test_hardware_plane_daemon_minimal_methods() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_hardware_plane_daemon_subordinate_profile_disables_local_services() -> None:
+async def test_hardware_plane_daemon_subordinate_profile_disables_local_services() -> (
+    None
+):
     daemon = HardwarePlaneDaemon(
         enable_local_sensors=False,
         enable_hmi=False,
@@ -62,7 +64,9 @@ async def test_hardware_plane_daemon_subordinate_profile_disables_local_services
 @pytest.mark.asyncio
 async def test_jsonrpc_uds_sensor_read_roundtrip(tmp_path: Path) -> None:
     _ = tmp_path
-    socket_path = Path("/tmp") / f"external-sensor-{os.getpid()}-{int(time.time() * 1000)}.sock"
+    socket_path = (
+        Path("/tmp") / f"external-sensor-{os.getpid()}-{int(time.time() * 1000)}.sock"
+    )
 
     async def _handler(method: str, params: dict[str, object]) -> dict[str, object]:
         if method != "sensor.read":
@@ -108,4 +112,3 @@ def test_runtime_profile_subordinate_disables_ui_hmi_local_sensors() -> None:
     assert profile["enable_hmi"] is False
     assert profile["enable_ui"] is True
     assert profile["enable_local_sensors"] is False
-

@@ -195,9 +195,7 @@ class HardwarePlaneDaemon:
                         code=PlaneErrorCode.UNAVAILABLE,
                         message="local sensor service is disabled; use delegated sensor backend",
                     )
-                return ok_payload(
-                    {"sensor": await sensor_hub.read(sensor_name)}
-                )
+                return ok_payload({"sensor": await sensor_hub.read(sensor_name)})
             if method == PlaneMethod.DEVICE_COMMAND.value:
                 target = str(params.get("target", ""))
                 action = str(params.get("action", ""))
@@ -257,4 +255,3 @@ class HardwarePlaneDaemon:
 
     def metrics(self) -> dict[str, Any]:
         return self._metrics.to_dict()
-

@@ -95,4 +95,3 @@ async def build_camera_mjpeg_stream(
         frame_generator(),
         media_type=f"multipart/x-mixed-replace; boundary={boundary}",
     )
-

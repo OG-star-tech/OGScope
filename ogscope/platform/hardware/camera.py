@@ -771,9 +771,7 @@ class IMX327MIPICamera(CameraInterface):
             return False
         self.flip_horizontal = bool(flip_horizontal)
         self.flip_vertical = bool(flip_vertical)
-        logger.info(
-            f"图像镜像: 水平={self.flip_horizontal}, 垂直={self.flip_vertical}"
-        )
+        logger.info(f"图像镜像: 水平={self.flip_horizontal}, 垂直={self.flip_vertical}")
         return True
 
     def set_sampling_mode(self, mode: str) -> bool:

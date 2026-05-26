@@ -219,7 +219,9 @@ def test_analysis_list_presets_and_batch(
     )
     assert exp.status_code == 200
 
-    el = client.get("/api/dev/analysis/experiments", params={"page": 1, "page_size": 10})
+    el = client.get(
+        "/api/dev/analysis/experiments", params={"page": 1, "page_size": 10}
+    )
     assert el.status_code == 200
     assert el.json()["total"] >= 1
 

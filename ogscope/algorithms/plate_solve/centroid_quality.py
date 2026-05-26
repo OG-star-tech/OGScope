@@ -67,7 +67,9 @@ def _reject_dense_clusters(
     return kept, removed, removed_pts
 
 
-def _point_line_dist(points_yx: np.ndarray, p0: np.ndarray, p1: np.ndarray) -> np.ndarray:
+def _point_line_dist(
+    points_yx: np.ndarray, p0: np.ndarray, p1: np.ndarray
+) -> np.ndarray:
     """点到线段距离（像素）/ Distance from points to segment."""
     # segment vector
     vx = p1[1] - p0[1]
@@ -221,9 +223,11 @@ def filter_centroids_yx(
         )
 
     n1 = int(xy3.shape[0])
-    rejected_pts = np.concatenate(
-        [dense_removed, line_removed], axis=0
-    ) if (dense_removed.size > 0 or line_removed.size > 0) else np.empty((0, 2), dtype=np.float64)
+    rejected_pts = (
+        np.concatenate([dense_removed, line_removed], axis=0)
+        if (dense_removed.size > 0 or line_removed.size > 0)
+        else np.empty((0, 2), dtype=np.float64)
+    )
     quality: dict[str, Any] = {
         "level": lv,
         "flags": flags,

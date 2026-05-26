@@ -236,7 +236,9 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
 
 @pytest.mark.unit
 def test_debug_camera_auto_exposure_switch_success(client, fake_camera_env):
-    response = client.post("/api/dev/debug/camera/auto-exposure", params={"enabled": False})
+    response = client.post(
+        "/api/dev/debug/camera/auto-exposure", params={"enabled": False}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True

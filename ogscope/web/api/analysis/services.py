@@ -1317,7 +1317,9 @@ class AnalysisService:
             )
             loop = asyncio.get_running_loop()
 
-            cr_frame = self._clamp_centroid_rejection_level(body.centroid_rejection_level)
+            cr_frame = self._clamp_centroid_rejection_level(
+                body.centroid_rejection_level
+            )
 
             def _run() -> dict[str, Any]:
                 return self._solve_bgr_to_row(

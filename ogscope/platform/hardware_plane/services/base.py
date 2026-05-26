@@ -21,6 +21,7 @@ class HardwareService(Protocol):
     async def status(self) -> dict[str, Any]:
         """读取服务状态 / Read service status."""
 
-    async def command(self, action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def command(
+        self, action: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """执行命令 / Execute command."""
-

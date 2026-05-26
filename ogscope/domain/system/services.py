@@ -225,7 +225,9 @@ def read_systemd_logs(
         rt = item.get("__REALTIME_TIMESTAMP")
         try:
             if rt is not None:
-                ts = dt.datetime.fromtimestamp(int(str(rt)) / 1_000_000, tz=dt.timezone.utc)
+                ts = dt.datetime.fromtimestamp(
+                    int(str(rt)) / 1_000_000, tz=dt.timezone.utc
+                )
                 ts_iso = ts.isoformat()
         except (ValueError, TypeError):
             ts_iso = None
@@ -256,4 +258,3 @@ def _journal_priority_to_level(priority: str | int | None) -> str:
 system_info_service = SystemInfoService()
 
 __all__ = ["SystemInfoService", "system_info_service", "read_systemd_logs"]
-

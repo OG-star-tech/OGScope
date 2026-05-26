@@ -18,7 +18,9 @@ def test_read_config_file_payload_marks_sudo_writable(
     monkeypatch.setattr(mod, "CONFIG_WRITE_SCRIPT", tmp_path / "write.sh")
     monkeypatch.setattr(mod, "CONFIG_SUDOERS", tmp_path / "sudoers")
     mod.CONFIG_WRITE_SCRIPT.write_text("#!/bin/sh\n", encoding="utf-8")
-    mod.CONFIG_SUDOERS.write_text("ogscope ALL=(ALL) NOPASSWD: /usr/local/bin/ogscope-config-write\n")
+    mod.CONFIG_SUDOERS.write_text(
+        "ogscope ALL=(ALL) NOPASSWD: /usr/local/bin/ogscope-config-write\n"
+    )
 
     payload = mod.read_config_file_payload(env_path)
 
@@ -29,7 +31,8 @@ def test_read_config_file_payload_marks_sudo_writable(
 
 @pytest.mark.unit
 def test_read_config_file_payload_not_writable_without_sudoers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     env_path = tmp_path / "ogscope.env"
     env_path.write_text("OGSCOPE_PORT=8000\n", encoding="utf-8")
