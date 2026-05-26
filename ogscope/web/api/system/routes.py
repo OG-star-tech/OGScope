@@ -3,8 +3,6 @@
 """
 
 from pathlib import Path
-import os
-import subprocess
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -14,6 +12,7 @@ from ogscope.config_catalog import build_config_catalog
 from ogscope.domain.system.services import system_info_service
 from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.web.api.models.schemas import SystemInfo
+from ogscope.web.api.system.config_files import read_config_file_payload, write_config_file
 
 router = APIRouter()
 
@@ -59,64 +58,14 @@ def _validate_env_content(content: str) -> None:
 
 
 def _read_config_file(path: Path) -> dict:
-    exists = path.exists()
-    writable = os.access(path if exists else path.parent, os.W_OK)
-    if not exists:
-        return {
-            "path": str(path),
-            "exists": False,
-            "writable": writable,
-            "content": "",
-            "error": "file not found",
-        }
-    try:
-        content = path.read_text(encoding="utf-8")
-        return {
-            "path": str(path),
-            "exists": True,
-            "writable": writable,
-            "content": content,
-            "error": None,
-        }
-    except OSError as exc:
-        return {
-            "path": str(path),
-            "exists": True,
-            "writable": writable,
-            "content": "",
-            "error": str(exc),
-        }
+    return read_config_file_payload(path)
 
 
 def _write_config_file(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        path.write_text(content, encoding="utf-8")
-        return
-    except OSError:
-        pass
-
-    proc = subprocess.run(
-        ["sudo", "-n", "tee", str(path)],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "failed to write config file; grant write permission "
-                "or allow sudo tee without password"
-            ),
-        )
-    subprocess.run(
-        ["sudo", "-n", "chmod", "640", str(path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+        write_config_file(path, content)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/system/info", response_model=SystemInfo)
