@@ -435,6 +435,7 @@ class CoreSystemStatusResponse(BaseModel):
 
     success: bool
     health: str
+    health_reasons: list[str] = Field(default_factory=list)
     version: str
     capabilities: dict[str, bool]
     system: dict[str, Any]
