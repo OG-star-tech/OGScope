@@ -54,7 +54,6 @@ class CameraManager:
         # Whether to retain raw frame cache; default off to reduce RAM (analysis can sync-grab).
         self._keep_raw_cache = bool(settings.keep_raw_cache)
         self._logger = logging.getLogger(__name__)
-        self._stopping = False
 
     @property
     def preview_jpeg_quality(self) -> int:
@@ -122,11 +121,7 @@ class CameraManager:
 
     async def ensure_started(self) -> None:
         """确保单相机进入采集并启动共享帧抓取 / Ensure capture and shared frame grabber."""
-        if self._stopping:
-            raise RuntimeError("相机正在停止 / Camera is stopping")
         async with self._control_lock:
-            if self._stopping:
-                raise RuntimeError("相机正在停止 / Camera is stopping")
             if self._camera is None:
                 self._health_error = None
                 self._camera = await asyncio.to_thread(self._create_camera_sync)
@@ -155,22 +150,15 @@ class CameraManager:
 
     async def stop(self) -> None:
         """停止相机采集 / Stop camera capture."""
-        self._stopping = True
         acquired = False
-        for attempt in range(6):
-            try:
-                await asyncio.wait_for(self._control_lock.acquire(), timeout=2.0)
-                acquired = True
-                break
-            except asyncio.TimeoutError:
-                if attempt < 5:
-                    await asyncio.sleep(0.25)
-                    continue
-                self._logger.warning(
-                    "等待相机控制锁超时，跳过优雅停机 / Timed out waiting camera lock, skip graceful stop"
-                )
-                self._stopping = False
-                return
+        try:
+            await asyncio.wait_for(self._control_lock.acquire(), timeout=2.0)
+            acquired = True
+        except asyncio.TimeoutError:
+            self._logger.warning(
+                "等待相机控制锁超时，跳过优雅停机 / Timed out waiting camera lock, skip graceful stop"
+            )
+            return
         try:
             await self._stop_grabber_locked()
             if self._camera is None:
@@ -198,11 +186,9 @@ class CameraManager:
                 self._latest_ts = 0.0
                 self._latest_w = 0
                 self._latest_h = 0
-            self._health_error = None
         finally:
             if acquired:
                 self._control_lock.release()
-            self._stopping = False
 
     def _safe_stop_capture_sync(self) -> None:
         camera = self._camera
