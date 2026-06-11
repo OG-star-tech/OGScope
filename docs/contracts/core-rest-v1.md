@@ -55,12 +55,13 @@
 - `GET /api/core/v1/system/status`
 - 响应：
   - `success: bool`
-  - `health: str`
+  - `health: str`（`healthy` | `degraded`）
+  - `health_reasons: string[]`（降级时的稳定原因码，如 `camera_not_connected`、`network_wifi_not_configured`；`healthy` 时为空数组）
   - `version: str`
   - `capabilities: object`
   - `system: object`
   - `camera: object`（相机在线与运行态摘要）
-  - `network: object`（WiFi 模式/信号/连接态）
+  - `network: object`（WiFi 模式/信号/连接态；含 `managed_by`、`in_health_scope`；subordinate 或最小部署未配 WiFi 时为 `delegated`，**不参与** `health`）
   - `sensors: object`（温度/CPU/内存等核心传感状态）
 
 ### 5) Camera Runtime & Preview (MJPEG / single-frame)

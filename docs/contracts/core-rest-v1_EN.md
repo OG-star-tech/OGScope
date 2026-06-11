@@ -55,12 +55,13 @@ This document defines the **minimal stable REST surface** for callers integratin
 - `GET /api/core/v1/system/status`
 - Response:
   - `success: bool`
-  - `health: str`
+  - `health: str` (`healthy` | `degraded`)
+  - `health_reasons: string[]` — stable degradation codes when not healthy (e.g. `camera_not_connected`, `network_wifi_not_configured`); empty when `healthy`
   - `version: str`
   - `capabilities: object`
   - `system: object`
   - `camera: object` — camera online and runtime summary
-  - `network: object` — WiFi mode / signal / connection state
+  - `network: object` — WiFi mode / signal / connection; includes `managed_by`, `in_health_scope`; when subordinate or minimal deploy without OGScope WiFi config, status is `delegated` and **does not** affect `health`
   - `sensors: object` — temperature / CPU / memory, etc.
 
 ### 5) Camera Runtime & Preview (MJPEG / single-frame)

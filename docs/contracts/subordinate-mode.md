@@ -42,6 +42,11 @@ OGScope 支持两种硬件平面角色：
 - **业务调用**：上层集成方 → OGScope `REST /api/core/v1/*`（详见 [core-rest-v1](core-rest-v1.md)）。
 - **传感器委托**：OGScope → 外部传感器服务 `UDS JSON-RPC`（详见 [hardware-plane-uds-v1](hardware-plane-uds-v1.md)）。
 
+## 健康状态（health）
+
+- subordinate 或最小部署未配置 OGScope WiFi 脚本/连接名时，`GET /api/core/v1/system/status` 的 `network` 块为 `managed_by: external`（或 standalone 未配时为 `unconfigured`）、`status: delegated`，**不参与** `health` / `health_reasons` 计算。
+- 此时 `health` 仅反映 OGScope 职责内子系统（当前主要为相机）；上层集成方应自行监控网络。
+
 ## 版本与兼容
 
 - 契约以增量扩展为主；破坏性变更须更新本文档与 [core-compatibility-matrix](core-compatibility-matrix.md)。

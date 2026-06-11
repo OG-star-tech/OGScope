@@ -17,7 +17,10 @@ from ogscope.domain.camera.services import (
     stream_state_domain_service,
 )
 from ogscope.domain.system.services import system_info_service
-from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
+from ogscope.platform.hardware_plane.runtime import (
+    describe_hardware_plane_profile,
+    get_hardware_plane_client,
+)
 from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 
 
@@ -45,6 +48,71 @@ class CoreContractService:
             "info": status.get("info", {}) or {},
             "runtime_overrides": status.get("runtime_overrides", {}) or {},
             "error": status.get("error"),
+        }
+
+    @staticmethod
+    def _network_health_in_scope(profile: dict[str, Any]) -> bool:
+        """网络是否纳入 OGScope health 评估 / Whether network affects OGScope health."""
+        if bool(profile.get("subordinate_mode")):
+            return False
+        return wifi_switch_service.is_configured()
+
+    @staticmethod
+    def _health_reasons(
+        camera_status: dict[str, Any],
+        network: dict[str, Any],
+        *,
+        network_in_health_scope: bool,
+    ) -> list[str]:
+        """稳定 health 降级原因码 / Stable machine-readable health degradation codes."""
+        reasons: list[str] = []
+        if not camera_status.get("connected", False):
+            reasons.append("camera_not_connected")
+        if not network_in_health_scope:
+            return reasons
+        net_err = network.get("error")
+        if net_err:
+            token = str(net_err).strip().lower().replace("-", "_")
+            if token and token.replace("_", "").isalnum():
+                reasons.append(f"network_{token}")
+            else:
+                reasons.append("network_error")
+        return reasons
+
+    @staticmethod
+    def _build_network_status(
+        profile: dict[str, Any],
+        system: dict[str, Any],
+    ) -> dict[str, Any]:
+        """构造 network 块：职责外仅遥测，不参与 health / Build network block with scope metadata."""
+        settings = get_settings()
+        in_health_scope = CoreContractService._network_health_in_scope(profile)
+        base: dict[str, Any] = {
+            "wireless_interface": settings.wifi_interface,
+            "signal_dbm": system.get("wifi_signal_dbm"),
+            "quality_percent": system.get("wifi_quality"),
+            "in_health_scope": in_health_scope,
+        }
+        if not in_health_scope:
+            managed_by = "external" if profile.get("subordinate_mode") else "unconfigured"
+            return {
+                **base,
+                "managed_by": managed_by,
+                "status": "delegated",
+                "mode": "unknown",
+                "active_connection": None,
+                "ap_ipv4": None,
+                "error": None,
+            }
+        wifi_raw = wifi_switch_service.get_status()
+        return {
+            **base,
+            "managed_by": "ogscope",
+            "status": "managed",
+            "mode": wifi_raw.get("MODE", "unknown"),
+            "active_connection": wifi_raw.get("ACTIVE_CONNECTION"),
+            "ap_ipv4": wifi_raw.get("AP_IPV4"),
+            "error": wifi_raw.get("error"),
         }
 
     async def start_analysis(
@@ -103,7 +171,8 @@ class CoreContractService:
 
     async def get_system_status(self) -> dict[str, Any]:
         """系统状态与能力 / System status and capability map."""
-        wifi_raw = wifi_switch_service.get_status()
+        profile = describe_hardware_plane_profile()
+        network_in_health_scope = self._network_health_in_scope(profile)
         hardware_client = get_hardware_plane_client()
         hw_status_resp = await hardware_client.status_get()
         hw_status_data = hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
@@ -128,25 +197,17 @@ class CoreContractService:
             "memory_usage_percent": system.get("memory_usage"),
             "uptime_seconds": system.get("uptime_seconds"),
         }
-        network = {
-            "mode": wifi_raw.get("MODE", "unknown"),
-            "wireless_interface": wifi_raw.get(
-                "WIRELESS_INTERFACE", get_settings().wifi_interface
-            ),
-            "signal_dbm": system.get("wifi_signal_dbm"),
-            "quality_percent": system.get("wifi_quality"),
-            "active_connection": wifi_raw.get("ACTIVE_CONNECTION"),
-            "ap_ipv4": wifi_raw.get("AP_IPV4"),
-            "error": wifi_raw.get("error"),
-        }
-        health = "healthy"
-        if network.get("error"):
-            health = "degraded"
-        if not camera_status.get("connected", False):
-            health = "degraded"
+        network = self._build_network_status(profile, system)
+        health_reasons = self._health_reasons(
+            camera_status,
+            network,
+            network_in_health_scope=network_in_health_scope,
+        )
+        health = "healthy" if not health_reasons else "degraded"
         return {
             "success": True,
             "health": health,
+            "health_reasons": health_reasons,
             "version": __version__,
             "capabilities": capability_map(),
             "hardware_plane": {
