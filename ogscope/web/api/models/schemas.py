@@ -215,6 +215,15 @@ class AnalysisSolveImageRequest(BaseModel):
         le=5,
         description="1=mild … 5=aggressive dense+collinear rejection",
     )
+    # 叠加与引导选项（可选，未提供则使用后端默认）/ Optional overlay & guidance options
+    overlay_topn_count: Optional[int] = Field(
+        default=None,
+        description="自动标注的星点数量上限（Top-N），未填用服务器默认 / Max number of stars to label (Top-N); server default if omitted",
+    )
+    enable_polar_guide: Optional[bool] = Field(
+        default=None,
+        description="是否计算极轴引导信息；未填用服务器默认 / Whether to compute polar guide info; server default if omitted",
+    )
 
 
 class AnalysisExtractPreviewRequest(BaseModel):
