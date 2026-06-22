@@ -505,6 +505,7 @@ class CoreCameraStatusResponse(BaseModel):
     streaming: bool
     recording: bool
     info: dict[str, Any] = Field(default_factory=dict)
+    ambient_hint: dict[str, Any] = Field(default_factory=dict)
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 

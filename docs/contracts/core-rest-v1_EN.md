@@ -66,7 +66,8 @@ This document defines the **minimal stable REST surface** for callers integratin
 
 ### 5) Camera Runtime & Preview (MJPEG / single-frame)
 
-- `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides
+- `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
+  - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
 - `POST /api/core/v1/camera/start`
 - `POST /api/core/v1/camera/stop`
 
