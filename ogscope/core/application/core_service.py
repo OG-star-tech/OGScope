@@ -358,7 +358,7 @@ class CoreContractService:
 
     async def get_stream_status(self) -> dict[str, Any]:
         """获取流控状态 / Get stream limiter status."""
-        stream = stream_state_domain_service.get_stream_status()
+        stream = await stream_state_domain_service.get_stream_status()
         return {
             "success": True,
             **stream,

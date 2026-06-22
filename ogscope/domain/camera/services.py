@@ -137,14 +137,18 @@ class FileDomainService:
 class StreamStateDomainService:
     """流状态门面 / Stream state facade."""
 
-    def get_stream_status(self) -> dict[str, int]:
+    async def get_stream_status(self) -> dict[str, Any]:
         limiter = get_mjpeg_stream_limiter()
         settings = get_settings()
+        from ogscope.web.camera_shared import get_camera_manager
+
+        metrics = await get_camera_manager().stream_metrics()
         return {
             "max_clients": int(limiter.max_clients),
             "active_clients": int(limiter.active_clients),
             "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
-            "target_preview_fps": int(settings.shared_preview_fps),
+            "target_preview_fps": int(metrics["preview_target_fps"]),
+            **metrics,
         }
 
 
@@ -323,4 +327,3 @@ __all__ = [
     "file_domain_service",
     "stream_state_domain_service",
 ]
-

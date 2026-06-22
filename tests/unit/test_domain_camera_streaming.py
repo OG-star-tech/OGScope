@@ -63,6 +63,20 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
 
     monkeypatch.setattr(streaming_mod, "get_settings", lambda: _FakeSettings())
 
+    class _FakeManager:
+        acquired = False
+        released = False
+        preview_target_fps = 8
+
+        async def acquire_preview_consumer(self) -> None:
+            self.acquired = True
+
+        async def release_preview_consumer(self) -> None:
+            self.released = True
+
+    manager = _FakeManager()
+    monkeypatch.setattr(streaming_mod, "get_camera_manager", lambda: manager)
+
     async def _fake_get_stream_frame_bytes(fmt: str, quality: int, *, since_frame_id: int):
         _ = fmt, quality, since_frame_id
         return 200, b"abc", 1
@@ -87,4 +101,5 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
     assert b"Content-Type: image/jpeg" in first_chunk
     await body_iter.aclose()
     assert limiter.released is True
-
+    assert manager.acquired is True
+    assert manager.released is True

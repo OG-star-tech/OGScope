@@ -114,9 +114,14 @@ class StarExtractor:
                 continue
             cx = float(m["m10"] / m["m00"]) * scale
             cy = float(m["m01"] / m["m00"]) * scale
-            mask = np.zeros_like(gray, dtype=np.uint8)
-            cv2.drawContours(mask, [contour], -1, color=255, thickness=-1)
-            flux = float(cv2.mean(gray, mask=mask)[0] * area)
+            # 仅为轮廓包围框分配掩膜，避免每颗候选星都创建全画幅数组
+            # Allocate a mask only for the contour ROI instead of one full-frame array per star.
+            x, y, roi_w, roi_h = cv2.boundingRect(contour)
+            roi = gray[y : y + roi_h, x : x + roi_w]
+            roi_mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+            shifted = contour - np.array([[[x, y]]], dtype=contour.dtype)
+            cv2.drawContours(roi_mask, [shifted], -1, color=255, thickness=-1)
+            flux = float(cv2.mean(roi, mask=roi_mask)[0] * area)
             points.append(StarPoint(x=cx, y=cy, flux=flux, area=area))
 
         points.sort(key=lambda p: p.flux, reverse=True)

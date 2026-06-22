@@ -514,6 +514,21 @@ class CoreStreamStatusResponse(BaseModel):
     active_clients: int
     frame_fetch_timeout_ms: int
     target_preview_fps: int
+    sensor_target_fps: float = 0.0
+    preview_target_fps: int = 0
+    actual_capture_fps: float = 0.0
+    actual_preview_fps: float = 0.0
+    actual_exposure_us: int = 0
+    frame_duration_us: int = 0
+    preview_consumers: int = 0
+    analysis_consumers: int = 0
+    recording_consumers: int = 0
+    jpeg_average_encode_ms: float = 0.0
+    jpeg_cached_bytes: int = 0
+    throttle_reason: Optional[str] = None
+    process_rss_kb: int = 0
+    process_swap_kb: int = 0
+    cma_free_kb: int = 0
 
 
 class CoreVideoFileEntry(BaseModel):

@@ -95,7 +95,7 @@ class Settings(BaseSettings):
         default=720, description="图像高度 / Default capture height"
     )
     camera_fps: int = Field(
-        default=5, description="预览与调试默认帧率 / Default preview FPS"
+        default=8, description="传感器目标帧率 / Target sensor FPS"
     )
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
@@ -244,8 +244,8 @@ class Settings(BaseSettings):
         description="大尺度背景减除：小图长边上限（像素），越小越快 / Large-scale BG downsample max side",
     )
     star_analysis_target_fps: float = Field(
-        default=2 / 3,
-        description="星空分析目标帧率（约 1.5 秒 1 帧），仅用于前端节流 / Target star-analysis FPS for UI throttle (~1.5s per frame)",
+        default=0.5,
+        description="星空分析目标帧率（默认 2 秒 1 帧）/ Target star-analysis FPS (one frame per 2 seconds)",
     )
     star_analysis_min_interval_ms: int = Field(
         default=2000,
@@ -300,7 +300,7 @@ class Settings(BaseSettings):
         description="共享预览/MJPEG 目标帧率 / Target FPS for shared preview and MJPEG",
     )
     preview_jpeg_quality: int = Field(
-        default=75,
+        default=65,
         ge=1,
         le=100,
         description="共享抓帧 JPEG 质量 / JPEG quality for shared frame grabber",
@@ -326,6 +326,18 @@ class Settings(BaseSettings):
         description=(
             "连续抓帧失败多少次后标记离线 / Consecutive grab failures before marking offline"
         ),
+    )
+    camera_idle_shutdown_sec: float = Field(
+        default=20.0,
+        ge=0.0,
+        le=300.0,
+        description="无消费者后相机热驻留秒数 / Camera warm-idle timeout after the last consumer",
+    )
+    camera_frame_stale_timeout_sec: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=60.0,
+        description="超过该时间无成功帧时重新探测 / Re-probe after no successful frame for this duration",
     )
     keep_raw_cache: bool = Field(
         default=False,

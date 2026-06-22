@@ -191,8 +191,8 @@ class AnalysisService:
                     "gate_reason": "previous request still running",
                     "next_allowed_in_ms": 0,
                 }
-            if state.last_finished_mono > 0:
-                elapsed = now - state.last_finished_mono
+            if state.last_started_mono > 0 and state.last_finished_mono > 0:
+                elapsed = now - state.last_started_mono
                 if elapsed < interval:
                     wait_ms = max(0, int((interval - elapsed) * 1000.0))
                     return {
@@ -224,9 +224,9 @@ class AnalysisService:
         self, requested_ms: int | None
     ) -> tuple[int, int]:
         """解析实时解算间隔并按系统上下限裁剪 / Resolve realtime interval with server bounds."""
-        if requested_ms is None:
-            return 0, 0
         settings = get_settings()
+        if requested_ms is None:
+            requested_ms = round(1000.0 / max(0.01, settings.star_analysis_target_fps))
         min_interval_ms = int(settings.star_analysis_min_interval_ms)
         max_interval_ms = int(settings.star_analysis_max_interval_ms)
         requested_interval_ms = int(requested_ms)
@@ -1032,6 +1032,13 @@ class AnalysisService:
                 "gate_status": "SOLVED",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms
+                        - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         except asyncio.TimeoutError:
             return {
@@ -1048,6 +1055,13 @@ class AnalysisService:
                 "gate_reason": "outer request timeout",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms
+                        - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         finally:
             await self._leave_realtime_gate("file_upload")
@@ -1390,7 +1404,9 @@ class AnalysisService:
                 ),
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
-                "next_allowed_in_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0, int(effective_interval_ms - elapsed_ms)
+                ),
             }
         except asyncio.TimeoutError:
             return {
@@ -1410,7 +1426,13 @@ class AnalysisService:
                 "gate_reason": "outer request timeout",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
-                "next_allowed_in_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms
+                        - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         finally:
             await self._leave_realtime_gate(gate_source_key)
@@ -1432,6 +1454,7 @@ class AnalysisService:
             "camera_width": s.camera_width,
             "camera_height": s.camera_height,
             "camera_fps": s.camera_fps,
+            "shared_preview_fps": s.shared_preview_fps,
             "solver_fov_deg": s.solver_fov_deg,
             "solver_max_image_side": s.solver_max_image_side,
             "solver_large_scale_bg_downsample": s.solver_large_scale_bg_downsample,
