@@ -4,6 +4,7 @@ Core 标准契约应用服务 / Core standard contract application service.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,11 +18,11 @@ from ogscope.domain.camera.services import (
     stream_state_domain_service,
 )
 from ogscope.domain.system.services import system_info_service
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 from ogscope.platform.hardware_plane.runtime import (
     describe_hardware_plane_profile,
     get_hardware_plane_client,
 )
-from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 
 
 @dataclass(slots=True)
@@ -39,13 +40,68 @@ class CoreContractService:
         self._session = CoreAnalysisSession()
 
     @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, value))
+
+    @staticmethod
+    def _build_ambient_hint(info: dict[str, Any], *, streaming: bool) -> dict[str, Any]:
+        """构造环境亮度建议遥测 / Build ambient brightness hint telemetry."""
+        lux = CoreContractService._optional_float(info.get("lux"))
+        exposure_us = CoreContractService._optional_float(
+            info.get("actual_exposure_us", info.get("exposure_us"))
+        )
+        digital_gain = CoreContractService._optional_float(
+            info.get("actual_digital_gain", info.get("digital_gain"))
+        )
+        max_exposure_us = CoreContractService._optional_float(
+            info.get("auto_exposure_max_us", info.get("frame_duration_us"))
+        )
+
+        scores: list[float] = []
+        if lux is not None and lux >= 0:
+            scores.append(CoreContractService._clamp01(1.0 - math.log10(lux + 1.0) / 2.0))
+        if exposure_us is not None and exposure_us > 0:
+            exposure_ceiling = max(max_exposure_us or 100_000.0, 1.0)
+            exposure_score = CoreContractService._clamp01(exposure_us / exposure_ceiling)
+            gain_score = 0.0
+            if digital_gain is not None:
+                gain_score = CoreContractService._clamp01((digital_gain - 1.0) / 7.0)
+            scores.append(CoreContractService._clamp01(exposure_score * 0.75 + gain_score * 0.25))
+
+        dark_score = sum(scores) / len(scores) if scores else None
+        return {
+            "available": bool(streaming and dark_score is not None),
+            "source": "camera_metadata" if dark_score is not None else "unavailable",
+            "confidence": "live" if streaming and dark_score is not None else "stale",
+            "dark_score": round(dark_score, 3) if dark_score is not None else None,
+            "lux": lux,
+            "exposure_us": int(exposure_us) if exposure_us is not None else None,
+            "digital_gain": digital_gain,
+        }
+
+    @staticmethod
     def _normalize_camera_status(status: dict[str, Any]) -> dict[str, Any]:
         """统一 Core 相机状态形状 / Normalize camera status payload shape."""
+        streaming = bool(status.get("streaming", False))
+        info = status.get("info", {}) or {}
         return {
             "connected": bool(status.get("connected", False)),
-            "streaming": bool(status.get("streaming", False)),
+            "streaming": streaming,
             "recording": bool(status.get("recording", False)),
-            "info": status.get("info", {}) or {},
+            "info": info,
+            "ambient_hint": CoreContractService._build_ambient_hint(
+                info,
+                streaming=streaming,
+            ),
             "runtime_overrides": status.get("runtime_overrides", {}) or {},
             "error": status.get("error"),
         }

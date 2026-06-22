@@ -57,6 +57,32 @@ def test_core_system_status_health_reasons_ignore_delegated_network() -> None:
 
 
 @pytest.mark.unit
+def test_core_camera_ambient_hint_from_metadata() -> None:
+    """相机 metadata 生成环境亮度建议 / Camera metadata builds ambient hint."""
+    from ogscope.core.application.core_service import CoreContractService
+
+    normalized = CoreContractService._normalize_camera_status(
+        {
+            "connected": True,
+            "streaming": True,
+            "recording": False,
+            "info": {
+                "lux": 4.0,
+                "actual_exposure_us": 80_000,
+                "auto_exposure_max_us": 100_000,
+                "actual_digital_gain": 2.0,
+            },
+        }
+    )
+
+    hint = normalized["ambient_hint"]
+    assert hint["available"] is True
+    assert hint["source"] == "camera_metadata"
+    assert 0.0 <= hint["dark_score"] <= 1.0
+    assert hint["exposure_us"] == 80_000
+
+
+@pytest.mark.unit
 def test_core_system_status_network_delegated_when_subordinate(monkeypatch) -> None:
     """subordinate 下 network 标记 delegated 且不降级 / Subordinate marks network delegated."""
     from ogscope.core.application.core_service import CoreContractService
