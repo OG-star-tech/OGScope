@@ -15,6 +15,11 @@ from threading import Lock
 from typing import Any, Callable
 
 from ogscope.config import get_settings
+from ogscope.domain.camera.encoding import (
+    EncodedImage,
+    OpenCVEncoder,
+    create_preview_encoder,
+)
 
 
 @dataclass(slots=True)
@@ -49,6 +54,12 @@ class CameraManager:
         self._runtime_overrides: dict[str, Any] = {}
         settings = get_settings()
         self._jpeg_quality = int(settings.preview_jpeg_quality)
+        self._preview_encoder = create_preview_encoder(
+            getattr(settings, "preview_encoder", "auto")
+        )
+        self._last_jpeg_encoder = getattr(self._preview_encoder, "name", "opencv")
+        self._last_jpeg_source_format = "RGB888"
+        self._jpeg_encode_failures = 0
         self._target_fps = max(1, int(settings.shared_preview_fps))
         self._probe_timeout_sec = max(0.5, float(settings.camera_probe_timeout_sec))
         self._stale_timeout_sec = max(
@@ -98,11 +109,22 @@ class CameraManager:
             "auto_exposure": True,
             "ae_polar_preset": settings.camera_ae_polar_preset,
             "ae_exposure_value": settings.camera_ae_exposure_value,
+            "auto_exposure_max_us": getattr(
+                settings, "camera_auto_exposure_max_us", 2_000_000
+            ),
+            "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
+            "noise_reduction_mode": getattr(
+                settings, "camera_noise_reduction_mode", "fast"
+            ),
+            "lores_enabled": bool(getattr(settings, "camera_lores_enabled", True)),
+            "lores_width": int(getattr(settings, "camera_lores_width", 320)),
+            "lores_height": int(getattr(settings, "camera_lores_height", 240)),
+            "lores_format": getattr(settings, "camera_lores_format", "YUV420"),
             "rotation": 180,
             "flip_horizontal": bool(getattr(settings, "camera_flip_horizontal", False)),
             "flip_vertical": bool(getattr(settings, "camera_flip_vertical", False)),
             "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
-            "noise_reduction": 0,
+            "noise_reduction": 1,
             "white_balance_mode": getattr(
                 settings, "camera_white_balance_mode", "auto"
             ),
@@ -130,31 +152,29 @@ class CameraManager:
             return camera
         return None
 
-    def _encode_preview_jpeg_sync(self, frame) -> bytes | None:
+    def _encode_preview_jpeg_sync(self, frame) -> EncodedImage | None:
+        source_format = str(
+            getattr(self._camera, "output_pixel_format", None)
+            or getattr(self._camera, "pixel_format", None)
+            or "RGB888"
+        )
         try:
-            import cv2
-
-            frame_for_cv = self._rgb_frame_to_cv_bgr(frame, cv2)
-            ok, buf = cv2.imencode(
-                ".jpg",
-                frame_for_cv,
-                [cv2.IMWRITE_JPEG_QUALITY, int(self._jpeg_quality)],
+            encoded = self._preview_encoder.encode_jpeg(
+                frame, quality=int(self._jpeg_quality), source_format=source_format
             )
-            if not ok:
-                return None
-            return buf.tobytes()
-        except Exception:
-            return None
-
-    @staticmethod
-    def _rgb_frame_to_cv_bgr(frame: Any, cv2_module: Any) -> Any:
-        """相机帧是 RGB888，写入 OpenCV 前转 BGR / Camera frames are RGB888; convert before OpenCV encoding."""
+            if encoded is not None:
+                return encoded
+        except Exception as exc:
+            self._logger.debug("预览编码失败 / Preview encode failed: %s", exc)
+        # TurboJPEG 或首选编码器异常时，当前帧回退 OpenCV；下次仍保留首选项便于热安装后生效
+        # Fall back to OpenCV for this frame if the preferred encoder fails.
         try:
-            if getattr(frame, "ndim", 0) == 3 and int(frame.shape[2]) >= 3:
-                return cv2_module.cvtColor(frame, cv2_module.COLOR_RGB2BGR)
-        except Exception:
-            return frame
-        return frame
+            return OpenCVEncoder().encode_jpeg(
+                frame, quality=int(self._jpeg_quality), source_format=source_format
+            )
+        except Exception as exc:
+            self._logger.debug("OpenCV 回退编码失败 / OpenCV fallback encode failed: %s", exc)
+            return None
 
     def _read_frame_sync(self):
         with self._read_lock:
@@ -459,10 +479,15 @@ class CameraManager:
                     if frame is not None:
                         self._consecutive_grab_failures = 0
                         encode_t0 = time.perf_counter()
-                        jpeg = await loop.run_in_executor(
+                        encoded = await loop.run_in_executor(
                             self._jpeg_executor, self._encode_preview_jpeg_sync, frame
                         )
                         encode_ms = (time.perf_counter() - encode_t0) * 1000.0
+                        if encoded is None:
+                            self._jpeg_encode_failures += 1
+                            await asyncio.sleep(max(0.0, interval - (time.time() - t0)))
+                            continue
+                        jpeg = encoded.data
                         h = int(getattr(frame, "shape", [0, 0])[0] or 0)
                         w = int(getattr(frame, "shape", [0, 0])[1] or 0)
                         with self._frame_lock:
@@ -474,6 +499,8 @@ class CameraManager:
                             self._latest_ts = time.time()
                             self._latest_w = w
                             self._latest_h = h
+                            self._last_jpeg_encoder = encoded.encoder
+                            self._last_jpeg_source_format = encoded.source_format
                         now_mono = time.monotonic()
                         self._jpeg_timestamps.append(now_mono)
                         self._jpeg_encode_ms.append(encode_ms)
@@ -624,20 +651,14 @@ class CameraManager:
     ) -> bytes | None:
         """将原始帧编码为图像字节 / Encode raw frame to image bytes."""
         try:
-            import cv2
-
-            frame_for_cv = CameraManager._rgb_frame_to_cv_bgr(raw_frame, cv2)
             if image_format.lower() == "png":
-                ok, buf = cv2.imencode(".png", frame_for_cv)
-            else:
-                ok, buf = cv2.imencode(
-                    ".jpg",
-                    frame_for_cv,
-                    [cv2.IMWRITE_JPEG_QUALITY, int(max(10, min(100, quality)))],
-                )
-            if not ok:
-                return None
-            return buf.tobytes()
+                return OpenCVEncoder().encode_png(raw_frame, source_format="RGB888")
+            encoded = create_preview_encoder("auto").encode_jpeg(
+                raw_frame,
+                quality=int(max(10, min(100, quality))),
+                source_format="RGB888",
+            )
+            return encoded.data if encoded is not None else None
         except Exception:
             return None
 
@@ -695,6 +716,16 @@ class CameraManager:
             if self._jpeg_encode_ms
             else 0.0,
             "jpeg_cached_bytes": len(self._latest_jpeg or b""),
+            "preview_encoder": self._last_jpeg_encoder,
+            "jpeg_encode_failures": int(self._jpeg_encode_failures),
+            "jpeg_source_format": self._last_jpeg_source_format,
+            "camera_driver": str(info.get("driver", "")),
+            "camera_backend": str(info.get("backend", "")),
+            "lores_enabled": bool(info.get("lores_enabled", False)),
+            "lores_available": bool(info.get("lores_available", False)),
+            "lores_width": int(info.get("lores_width", 0) or 0),
+            "lores_height": int(info.get("lores_height", 0) or 0),
+            "lores_format": str(info.get("lores_format", "")),
             "throttle_reason": throttle_reason,
             **memory,
         }

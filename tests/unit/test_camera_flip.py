@@ -6,6 +6,7 @@ import types
 import numpy as np
 import pytest
 
+from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.platform.hardware.camera import IMX327MIPICamera
 from ogscope.web.camera_shared import CameraManager
 
@@ -127,3 +128,43 @@ def test_encode_frame_preserves_rgb_channel_order() -> None:
     mean_rgb = decoded_rgb.reshape(-1, 3).mean(axis=0)
 
     assert mean_rgb[0] > mean_rgb[2] * 4
+
+
+@pytest.mark.unit
+def test_preview_encoder_falls_back_to_opencv_when_turbojpeg_missing(monkeypatch) -> None:
+    """TurboJPEG 缺失时必须安全回退 / Missing TurboJPEG must safely fall back."""
+    monkeypatch.setitem(sys.modules, "turbojpeg", types.SimpleNamespace())
+
+    encoder = create_preview_encoder("turbojpeg")
+
+    assert isinstance(encoder, OpenCVEncoder)
+
+
+@pytest.mark.unit
+def test_frame_duration_limits_allow_long_auto_exposure() -> None:
+    cam = IMX327MIPICamera(
+        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=2_000_000)
+    )
+
+    assert cam._compute_frame_duration_limits() == (125_000, 2_000_000)
+
+
+@pytest.mark.unit
+def test_frame_duration_limits_follow_manual_exposure() -> None:
+    cam = IMX327MIPICamera(
+        _minimal_config(fps=8, auto_exposure=False, exposure_us=250_000)
+    )
+
+    assert cam._compute_frame_duration_limits() == (250_000, 250_000)
+
+
+@pytest.mark.unit
+def test_unsupported_noise_reduction_control_is_skipped() -> None:
+    fake = _FakePicamera2()
+    fake.camera_controls = {}
+    cam = IMX327MIPICamera(_minimal_config(noise_reduction_mode="high_quality"))
+    cam.camera = fake
+
+    cam._apply_noise_reduction_controls()
+
+    assert fake.controls_log == []

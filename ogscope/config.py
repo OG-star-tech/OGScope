@@ -112,6 +112,40 @@ class Settings(BaseSettings):
         le=2.0,
         description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
     )
+    camera_auto_exposure_max_us: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=10_000_000,
+        description="自动曝光最长帧周期 us，暗场允许降帧 / Max auto-exposure frame duration in us",
+    )
+    camera_ae_flicker_mode: str = Field(
+        default="off",
+        description="AE 防闪烁模式 off/50hz/60hz / AE flicker mode: off/50hz/60hz",
+    )
+    camera_noise_reduction_mode: str = Field(
+        default="fast",
+        description="降噪语义模式 off/fast/high_quality / Semantic noise reduction mode",
+    )
+    camera_lores_enabled: bool = Field(
+        default=True,
+        description="启用低分辨率辅助流用于统计 / Enable lores helper stream for stats",
+    )
+    camera_lores_width: int = Field(
+        default=320,
+        ge=64,
+        le=1280,
+        description="低分辨率辅助流宽度 / Lores helper stream width",
+    )
+    camera_lores_height: int = Field(
+        default=240,
+        ge=48,
+        le=720,
+        description="低分辨率辅助流高度 / Lores helper stream height",
+    )
+    camera_lores_format: str = Field(
+        default="YUV420",
+        description="低分辨率辅助流格式 / Lores helper stream format",
+    )
     camera_flip_horizontal: bool = Field(
         default=False,
         description="相机输出水平镜像；与预览/解算同坐标系 / Camera output horizontal flip",
@@ -325,6 +359,10 @@ class Settings(BaseSettings):
         le=100,
         description="共享抓帧 JPEG 质量 / JPEG quality for shared frame grabber",
     )
+    preview_encoder: str = Field(
+        default="auto",
+        description="预览编码器 auto/turbojpeg/opencv / Preview encoder: auto/turbojpeg/opencv",
+    )
     debug_preview_min_interval_ms: int = Field(
         default=150,
         ge=0,
@@ -493,7 +531,47 @@ class Settings(BaseSettings):
     def _parse_camera_white_balance_mode(cls, value: object) -> str:
         """校验白平衡模式，非法值回退 auto / Validate WB mode and fall back to auto."""
         text = str(value or "auto").strip().lower()
-        if text in {"auto", "manual", "night"}:
+        if text in {
+            "auto",
+            "daylight",
+            "cloudy",
+            "tungsten",
+            "fluorescent",
+            "indoor",
+            "manual",
+            "night",
+        }:
+            return text
+        return "auto"
+
+    @field_validator("camera_ae_flicker_mode", mode="before")
+    @classmethod
+    def _parse_camera_ae_flicker_mode(cls, value: object) -> str:
+        """校验防闪烁模式 / Validate AE flicker mode."""
+        text = str(value or "off").strip().lower().replace("_", "")
+        if text in {"50", "50hz"}:
+            return "50hz"
+        if text in {"60", "60hz"}:
+            return "60hz"
+        return "off"
+
+    @field_validator("camera_noise_reduction_mode", mode="before")
+    @classmethod
+    def _parse_camera_noise_reduction_mode(cls, value: object) -> str:
+        """校验降噪语义模式 / Validate semantic noise reduction mode."""
+        text = str(value or "fast").strip().lower().replace("-", "_")
+        aliases = {"hq": "high_quality", "highquality": "high_quality", "0": "off"}
+        text = aliases.get(text, text)
+        if text in {"off", "fast", "high_quality"}:
+            return text
+        return "fast"
+
+    @field_validator("preview_encoder", mode="before")
+    @classmethod
+    def _parse_preview_encoder(cls, value: object) -> str:
+        """校验预览编码器偏好 / Validate preview encoder preference."""
+        text = str(value or "auto").strip().lower()
+        if text in {"auto", "turbojpeg", "opencv"}:
             return text
         return "auto"
 
