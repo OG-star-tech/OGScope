@@ -459,24 +459,6 @@ class Settings(BaseSettings):
         default="192.168.4.1",
         description="AP 模式下前端提示用的主机地址（不含端口）/ AP URL hint host without port",
     )
-    wifi_emergency_gpio_enabled: bool = Field(
-        default=False,
-        description="启用短接 GPIO 强制切 STA / Enable GPIO short-to-STA recovery",
-    )
-    wifi_emergency_pin_out_bcm: int = Field(
-        default=22,
-        description="应急检测：输出低电平（BCM）/ Emergency: output LOW (BCM)",
-    )
-    wifi_emergency_pin_in_bcm: int = Field(
-        default=23,
-        description="应急检测：上拉输入（BCM）/ Emergency: input with pull-up (BCM)",
-    )
-    wifi_emergency_hold_seconds: float = Field(
-        default=2.0,
-        ge=0.5,
-        le=30.0,
-        description="短接持续多久触发 STA / Hold time before forcing STA",
-    )
     device_id_suffix: str = Field(
         default="",
         description="设备后缀（network.env 中 OGSCOPE_DEVICE_ID_SUFFIX）/ Device id suffix from network.env",
