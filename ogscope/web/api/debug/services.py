@@ -532,9 +532,9 @@ class DebugCameraService:
             except ImportError:
                 pass
 
-            camera = get_camera_instance()
-            if not camera or not camera.is_capturing:
-                raise Exception("相机未运行")
+            manager = get_camera_manager()
+            await manager.acquire_recording_consumer()
+            camera = manager.get_camera_instance()
 
             try:
                 import cv2
@@ -611,8 +611,10 @@ class DebugCameraService:
                     "path": str(video_path),
                 }
             except ImportError:
+                await manager.release_recording_consumer()
                 raise Exception("OpenCV未安装")
             except Exception as e:
+                await manager.release_recording_consumer()
                 raise Exception(f"录制启动失败: {str(e)}")
 
     @staticmethod
@@ -679,6 +681,7 @@ class DebugCameraService:
             recording_media_filename = None
             recording_codec_fourcc = "MJPG"
             recording_container = "AVI"
+            await get_camera_manager().release_recording_consumer()
 
         return {
             "success": True,

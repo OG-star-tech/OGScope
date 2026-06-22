@@ -69,6 +69,7 @@ class IMX327MIPICamera(CameraInterface):
         self.camera = None
         self.is_initialized = False
         self.is_capturing = False
+        self._last_metadata: dict[str, Any] = {}
 
         # 相机参数 / Camera parameters
         requested_width = int(config.get("width", 640))
@@ -416,18 +417,6 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
-            # 使用视频配置以获得更高实时性 / Use video configuration for greater real-time performance
-            try:
-                video_config = self.camera.create_video_configuration(
-                    main={
-                        "size": (self.capture_width, self.capture_height),
-                        "format": "RGB888",
-                    },
-                    buffer_count=self.PREVIEW_BUFFER_COUNT,
-                )
-                self.camera.configure(video_config)
-            except Exception as e:
-                logger.warning(f"视频配置失败，回退到当前配置: {e}")
             # 设置目标帧率（若固件支持） / Set target frame rate (if supported by firmware)
             try:
                 self.camera.set_controls({"FrameRate": self.fps})
@@ -486,8 +475,14 @@ class IMX327MIPICamera(CameraInterface):
             return None
 
         try:
-            # 捕获图像 / capture image
-            image = self.camera.capture_array()
+            # 同一请求读取图像与元数据，避免额外等待下一帧
+            # Read image and metadata from one request to avoid waiting for another frame.
+            request = self.camera.capture_request()
+            try:
+                image = request.make_array("main")
+                self._last_metadata = dict(request.get_metadata() or {})
+            finally:
+                request.release()
 
             # 如果是 RAW 格式，需要转换为 RGB / If it is RAW format, it needs to be converted to RGB
             if len(image.shape) == 2:  # RAW 格式 / RAW format
@@ -859,6 +854,12 @@ class IMX327MIPICamera(CameraInterface):
                 "resolution": f"{self.width}x{self.height}",
                 "fps": self.fps,
                 "exposure_us": self.exposure_us,
+                "actual_exposure_us": int(
+                    self._last_metadata.get("ExposureTime", self.exposure_us) or 0
+                ),
+                "frame_duration_us": int(
+                    self._last_metadata.get("FrameDuration", 0) or 0
+                ),
                 "analogue_gain": self.analogue_gain,
                 "digital_gain": self.digital_gain,
                 "auto_exposure": self.auto_exposure,

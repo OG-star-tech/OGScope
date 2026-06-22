@@ -29,6 +29,8 @@ rsync -avz --delete \
   --exclude 'node_modules/' \
   --exclude '__pycache__/' \
   --exclude '.pytest_cache/' \
+  --exclude '.coverage' \
+  --exclude 'htmlcov/' \
   --exclude 'uploads/' \
   --exclude 'logs/' \
   --exclude 'data/' \
