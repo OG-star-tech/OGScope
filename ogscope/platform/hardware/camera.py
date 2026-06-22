@@ -91,6 +91,7 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_mode = config.get("white_balance_mode", "auto")
         self.white_balance_gain_r = config.get("white_balance_gain_r", 1.0)
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
+        self.night_mode = bool(config.get("night_mode", False))
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率） / Sampling mode and size (supersample: acquisition resolution can be higher than output resolution)
         self.sampling_mode = config.get(
             "sampling_mode", "native"
@@ -357,6 +358,30 @@ class IMX327MIPICamera(CameraInterface):
                 except Exception as err:
                     logger.debug("AE 控制 %s 未生效: %s", key, err)
 
+    def _white_balance_controls(self) -> dict[str, Any]:
+        """生成白平衡控制；auto 必须真正打开 AWB / Build WB controls; auto must really enable AWB."""
+        mode = str(self.white_balance_mode or "auto").lower()
+        if mode == "manual":
+            return {
+                "AwbEnable": False,
+                "ColourGains": (
+                    float(self.white_balance_gain_r),
+                    float(self.white_balance_gain_b),
+                ),
+            }
+        if mode == "night":
+            self.white_balance_gain_r = 1.1
+            self.white_balance_gain_b = 0.9
+            return {"AwbEnable": False, "ColourGains": (1.1, 0.9)}
+        self.white_balance_mode = "auto"
+        return {"AwbEnable": True}
+
+    def _apply_white_balance_controls(self) -> None:
+        """重放白平衡控制，避免配置重建后回到错误状态 / Replay WB controls after reconfiguration."""
+        if not self.camera:
+            return
+        self.camera.set_controls(self._white_balance_controls())
+
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
         try:
@@ -385,9 +410,9 @@ class IMX327MIPICamera(CameraInterface):
                 "ExposureTime": self.exposure_us,
                 "AnalogueGain": self.analogue_gain,
                 "AeEnable": self.auto_exposure,
-                "AwbEnable": False,  # 禁用自动白平衡 / Disable automatic white balance
                 "NoiseReductionMode": 0,  # 禁用降噪以获得原始数据 / Disable noise reduction to get raw data
             }
+            controls.update(self._white_balance_controls())
             try:
                 self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
             except Exception:
@@ -439,6 +464,7 @@ class IMX327MIPICamera(CameraInterface):
                         )
                     except Exception:
                         self.camera.set_controls(controls)
+                self._apply_white_balance_controls()
             except Exception as e:
                 logger.warning(f"重放曝光控制失败，使用驱动默认控制: {e}")
 
@@ -636,6 +662,10 @@ class IMX327MIPICamera(CameraInterface):
                 self.camera.set_controls({"FrameRate": self.fps})
             except Exception:
                 pass
+            try:
+                self._apply_white_balance_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             if need_reconfig and was_capturing:
                 return self.start_capture()
@@ -833,6 +863,10 @@ class IMX327MIPICamera(CameraInterface):
                 self.camera.set_controls({"FrameRate": self.fps})
             except Exception:
                 pass
+            try:
+                self._apply_white_balance_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             if was_capturing:
                 return self.start_capture()
@@ -878,6 +912,11 @@ class IMX327MIPICamera(CameraInterface):
                 "white_balance_mode": self.white_balance_mode,
                 "white_balance_gain_r": self.white_balance_gain_r,
                 "white_balance_gain_b": self.white_balance_gain_b,
+                "actual_white_balance_gains": self._last_metadata.get(
+                    "ColourGains"
+                ),
+                "awb_enabled": self.white_balance_mode == "auto",
+                "night_mode": self.night_mode,
                 "ae_polar_preset": self.ae_polar_preset,
                 "ae_exposure_value": self.ae_exposure_value,
                 "control_ranges": self.get_manual_control_ranges(),
@@ -903,9 +942,7 @@ class IMX327MIPICamera(CameraInterface):
             gain_level = self.analogue_gain * self.digital_gain
 
             # 根据曝光时间判断夜间模式 / Determine night mode based on exposure time
-            night_mode = (
-                self.exposure_us > 30000
-            )  # 曝光时间超过30ms认为是夜间模式 / Exposure time longer than 30ms is considered night mode
+            night_mode = bool(self.night_mode)
 
             # 计算曝光充足度（基于曝光时间） / Calculate exposure adequacy (based on exposure time)
             # 假设10ms为基准曝光时间 / Assume 10ms as the base exposure time
@@ -986,6 +1023,8 @@ class IMX327MIPICamera(CameraInterface):
             if mode == "auto":
                 self.camera.set_controls({"AwbEnable": True})
                 self.white_balance_mode = "auto"
+                self.white_balance_gain_r = 1.0
+                self.white_balance_gain_b = 1.0
                 logger.info("白平衡设置为自动模式")
             elif mode == "manual":
                 self.camera.set_controls(
@@ -1081,6 +1120,12 @@ class IMX327MIPICamera(CameraInterface):
                         "NoiseReductionMode": 2,  # 中等降噪 / Moderate noise reduction
                     }
                 )
+                self.exposure_us = max(self.exposure_us, 30000)
+                self.analogue_gain = max(self.analogue_gain, 4.0)
+                self.white_balance_mode = "night"
+                self.white_balance_gain_r = 1.1
+                self.white_balance_gain_b = 0.9
+                self.night_mode = True
                 logger.info("夜间模式已启用")
             else:
                 # 关闭夜间模式：恢复默认设置 / Turn off night mode: restore default settings
@@ -1092,6 +1137,10 @@ class IMX327MIPICamera(CameraInterface):
                         "NoiseReductionMode": 0,  # 关闭降噪 / Turn off noise reduction
                     }
                 )
+                self.white_balance_mode = "auto"
+                self.white_balance_gain_r = 1.0
+                self.white_balance_gain_b = 1.0
+                self.night_mode = False
                 logger.info("夜间模式已关闭")
 
             return True
@@ -1134,6 +1183,10 @@ class IMX327MIPICamera(CameraInterface):
             )
 
             self.camera.configure(camera_config)
+            try:
+                self._apply_white_balance_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             # 如果之前在捕获，重新开始 / If capturing before, start again
             if was_capturing:

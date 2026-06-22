@@ -45,6 +45,10 @@ _CAMERA_ENV_KEY_MAP = {
     "analogue_gain": "OGSCOPE_CAMERA_GAIN",
     "flip_horizontal": "OGSCOPE_CAMERA_FLIP_HORIZONTAL",
     "flip_vertical": "OGSCOPE_CAMERA_FLIP_VERTICAL",
+    "white_balance_mode": "OGSCOPE_CAMERA_WHITE_BALANCE_MODE",
+    "white_balance_gain_r": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_R",
+    "white_balance_gain_b": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_B",
+    "night_mode": "OGSCOPE_CAMERA_NIGHT_MODE",
 }
 
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
@@ -432,8 +436,17 @@ class DebugCameraService:
             stem = generate_capture_stem("IMG", camera_info)
             image_path = DEBUG_CAPTURES_DIR / f"{stem}.jpg"
 
-            # 保存图像 / save image
-            success = cv2.imwrite(str(image_path), image)
+            # 相机输出为 RGB888，OpenCV 写文件前需要转 BGR，避免红蓝通道互换。
+            # Camera output is RGB888; convert to BGR before OpenCV writes files to avoid R/B swap.
+            image_for_write = image
+            try:
+                if getattr(image, "ndim", 0) == 3 and int(image.shape[2]) >= 3:
+                    image_for_write = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            except Exception:
+                image_for_write = image
+
+            # 保存图像 / Save image
+            success = cv2.imwrite(str(image_path), image_for_write)
             if not success:
                 raise Exception("图像保存失败")
 
@@ -982,6 +995,14 @@ class DebugCameraService:
                 overrides["auto_exposure"] = bool(settings["autoExposure"])
             if "colorMode" in settings:
                 overrides["color_mode"] = settings["colorMode"]
+            if "whiteBalanceMode" in settings:
+                overrides["white_balance_mode"] = settings["whiteBalanceMode"]
+                overrides["white_balance_gain_r"] = settings.get(
+                    "whiteBalanceGainR", 1.0
+                )
+                overrides["white_balance_gain_b"] = settings.get(
+                    "whiteBalanceGainB", 1.0
+                )
             if overrides:
                 get_camera_manager().update_runtime_overrides(overrides)
 
@@ -1065,6 +1086,13 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         if camera.set_white_balance(mode, gain_r, gain_b):
+            get_camera_manager().update_runtime_overrides(
+                {
+                    "white_balance_mode": mode,
+                    "white_balance_gain_r": float(gain_r),
+                    "white_balance_gain_b": float(gain_b),
+                }
+            )
             return {
                 "success": True,
                 **i18n_payload(
@@ -1104,6 +1132,24 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         if camera.set_night_mode(enabled):
+            overrides = {"night_mode": bool(enabled)}
+            if enabled:
+                overrides.update(
+                    {
+                        "white_balance_mode": "night",
+                        "white_balance_gain_r": 1.1,
+                        "white_balance_gain_b": 0.9,
+                    }
+                )
+            else:
+                overrides.update(
+                    {
+                        "white_balance_mode": "auto",
+                        "white_balance_gain_r": 1.0,
+                        "white_balance_gain_b": 1.0,
+                    }
+                )
+            get_camera_manager().update_runtime_overrides(overrides)
             mode_text = "启用" if enabled else "关闭"
             return {
                 "success": True,

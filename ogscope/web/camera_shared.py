@@ -103,14 +103,20 @@ class CameraManager:
             "flip_vertical": bool(getattr(settings, "camera_flip_vertical", False)),
             "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
             "noise_reduction": 0,
-            "white_balance_mode": "auto",
-            "white_balance_gain_r": 1.0,
-            "white_balance_gain_b": 1.0,
+            "white_balance_mode": getattr(
+                settings, "camera_white_balance_mode", "auto"
+            ),
+            "white_balance_gain_r": getattr(
+                settings, "camera_white_balance_gain_r", 1.0
+            ),
+            "white_balance_gain_b": getattr(
+                settings, "camera_white_balance_gain_b", 1.0
+            ),
             "contrast": 1.0,
             "brightness": 0.0,
             "saturation": 1.0,
             "sharpness": 1.0,
-            "night_mode": False,
+            "night_mode": bool(getattr(settings, "camera_night_mode", False)),
             "color_mode": "color",
         }
         return {**base, **self._runtime_overrides}
@@ -128,14 +134,27 @@ class CameraManager:
         try:
             import cv2
 
+            frame_for_cv = self._rgb_frame_to_cv_bgr(frame, cv2)
             ok, buf = cv2.imencode(
-                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, int(self._jpeg_quality)]
+                ".jpg",
+                frame_for_cv,
+                [cv2.IMWRITE_JPEG_QUALITY, int(self._jpeg_quality)],
             )
             if not ok:
                 return None
             return buf.tobytes()
         except Exception:
             return None
+
+    @staticmethod
+    def _rgb_frame_to_cv_bgr(frame: Any, cv2_module: Any) -> Any:
+        """相机帧是 RGB888，写入 OpenCV 前转 BGR / Camera frames are RGB888; convert before OpenCV encoding."""
+        try:
+            if getattr(frame, "ndim", 0) == 3 and int(frame.shape[2]) >= 3:
+                return cv2_module.cvtColor(frame, cv2_module.COLOR_RGB2BGR)
+        except Exception:
+            return frame
+        return frame
 
     def _read_frame_sync(self):
         with self._read_lock:
@@ -607,12 +626,13 @@ class CameraManager:
         try:
             import cv2
 
+            frame_for_cv = CameraManager._rgb_frame_to_cv_bgr(raw_frame, cv2)
             if image_format.lower() == "png":
-                ok, buf = cv2.imencode(".png", raw_frame)
+                ok, buf = cv2.imencode(".png", frame_for_cv)
             else:
                 ok, buf = cv2.imencode(
                     ".jpg",
-                    raw_frame,
+                    frame_for_cv,
                     [cv2.IMWRITE_JPEG_QUALITY, int(max(10, min(100, quality)))],
                 )
             if not ok:
