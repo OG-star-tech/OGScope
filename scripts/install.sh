@@ -126,6 +126,7 @@ ogscope_i2c_host_setup_full 0
 echo "📦 安装图像基础库（jpeg/png/freetype）/ Installing image base dev libraries..."
 sudo apt install -y \
     libjpeg-dev \
+    libturbojpeg0 \
     libpng-dev \
     libfreetype6-dev
 _apt_pause
@@ -213,6 +214,19 @@ if ! ogscope_verify_numpy_scipy; then
     exit 1
 fi
 echo "✅ numpy/scipy 已就绪 / numpy & scipy OK"
+
+# TurboJPEG 是预览编码加速路径；缺失时应用会回退 OpenCV，但安装脚本应尽量保证可用。
+# TurboJPEG accelerates preview JPEG encoding; app can fall back, but installer should provide it.
+if ! ogscope_verify_turbojpeg; then
+    echo "⚠️ TurboJPEG 不可用，尝试补装 libturbojpeg0 + PyTurboJPEG / TurboJPEG unavailable; installing fallback deps"
+    sudo apt install -y libturbojpeg0
+    poetry run pip install --no-cache-dir "PyTurboJPEG>=1.7,<2"
+fi
+if ogscope_verify_turbojpeg; then
+    echo "✅ TurboJPEG 编码加速已就绪 / TurboJPEG encoder ready"
+else
+    echo "⚠️ TurboJPEG 仍不可用，将自动回退 OpenCV / TurboJPEG still unavailable; OpenCV fallback will be used"
+fi
 
 VENV_PATH="$(poetry env info --path)"
 VENV_PYTHON="${VENV_PATH}/bin/python"

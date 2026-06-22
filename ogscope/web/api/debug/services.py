@@ -49,6 +49,9 @@ _CAMERA_ENV_KEY_MAP = {
     "white_balance_gain_r": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_R",
     "white_balance_gain_b": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_B",
     "night_mode": "OGSCOPE_CAMERA_NIGHT_MODE",
+    "auto_exposure_max_us": "OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US",
+    "ae_flicker_mode": "OGSCOPE_CAMERA_AE_FLICKER_MODE",
+    "noise_reduction_mode": "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE",
 }
 
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
@@ -962,9 +965,20 @@ class DebugCameraService:
                     )
 
             # 更新降噪设置 / Update noise reduction settings
-            if "noiseReduction" in settings:
+            if "noiseReductionMode" in settings:
+                if hasattr(camera, "set_noise_reduction_mode"):
+                    camera.set_noise_reduction_mode(settings["noiseReductionMode"])
+            if "noiseReduction" in settings and "noiseReductionMode" not in settings:
                 if hasattr(camera, "set_noise_reduction"):
                     camera.set_noise_reduction(settings["noiseReduction"])
+
+            # 更新 libcamera 高级控制 / Update advanced libcamera controls
+            if "aeFlickerMode" in settings:
+                if hasattr(camera, "set_ae_flicker_mode"):
+                    camera.set_ae_flicker_mode(settings["aeFlickerMode"])
+            if "autoExposureMaxUs" in settings and settings["autoExposureMaxUs"]:
+                if hasattr(camera, "set_auto_exposure_max_us"):
+                    camera.set_auto_exposure_max_us(settings["autoExposureMaxUs"])
 
             # 更新白平衡设置 / Update white balance settings
             if "whiteBalanceMode" in settings:
@@ -993,6 +1007,18 @@ class DebugCameraService:
                 overrides["digital_gain"] = settings["digitalGain"]
             if "autoExposure" in settings:
                 overrides["auto_exposure"] = bool(settings["autoExposure"])
+            if "noiseReductionMode" in settings:
+                overrides["noise_reduction_mode"] = settings["noiseReductionMode"]
+            elif "noiseReduction" in settings:
+                # 兼容旧控制台数值降噪 / Compat numeric NR control from legacy console.
+                level = int(settings.get("noiseReduction") or 0)
+                overrides["noise_reduction_mode"] = (
+                    "off" if level <= 0 else "fast" if level <= 2 else "high_quality"
+                )
+            if "aeFlickerMode" in settings:
+                overrides["ae_flicker_mode"] = settings["aeFlickerMode"]
+            if "autoExposureMaxUs" in settings:
+                overrides["auto_exposure_max_us"] = settings["autoExposureMaxUs"]
             if "colorMode" in settings:
                 overrides["color_mode"] = settings["colorMode"]
             if "whiteBalanceMode" in settings:
