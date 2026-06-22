@@ -120,6 +120,26 @@ class Settings(BaseSettings):
         default=False,
         description="相机输出垂直镜像；与预览/解算同坐标系 / Camera output vertical flip",
     )
+    camera_white_balance_mode: str = Field(
+        default="auto",
+        description="白平衡模式 auto/manual/night / White balance mode: auto/manual/night",
+    )
+    camera_white_balance_gain_r: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=3.0,
+        description="手动白平衡红色增益 / Manual white-balance red gain",
+    )
+    camera_white_balance_gain_b: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=3.0,
+        description="手动白平衡蓝色增益 / Manual white-balance blue gain",
+    )
+    camera_night_mode: bool = Field(
+        default=False,
+        description="启动时应用夜间白平衡标记 / Apply night white-balance mode on startup",
+    )
 
     # 显示屏配置 / Display configuration
     display_enabled: bool = Field(default=False, description="启用 SPI 屏幕")
@@ -467,6 +487,15 @@ class Settings(BaseSettings):
         if text in {"0", "false", "no", "off"}:
             return False
         return value  # type: ignore[return-value]
+
+    @field_validator("camera_white_balance_mode", mode="before")
+    @classmethod
+    def _parse_camera_white_balance_mode(cls, value: object) -> str:
+        """校验白平衡模式，非法值回退 auto / Validate WB mode and fall back to auto."""
+        text = str(value or "auto").strip().lower()
+        if text in {"auto", "manual", "night"}:
+            return text
+        return "auto"
 
     @model_validator(mode="after")
     def _apply_development_mode_defaults(self) -> "Settings":

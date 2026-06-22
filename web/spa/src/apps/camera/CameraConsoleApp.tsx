@@ -495,8 +495,9 @@ export function CameraConsoleApp() {
     }
   };
 
-  const syncFormFromStatus = (info: CameraInfo | undefined) => {
+  const syncFormFromStatus = (info: CameraInfo | undefined, options?: { syncRuntime?: boolean }) => {
     if (!info) return;
+    const syncRuntime = options?.syncRuntime ?? true;
     setForm({
       exposure: clamp(Math.round(toNum(info.exposure_us, 5000)), 100, 120000),
       gain: clamp(toNum(info.analogue_gain, 1.0), 1.0, 24.0),
@@ -512,10 +513,14 @@ export function CameraConsoleApp() {
       whiteBalanceGainB: clamp(toNum(info.white_balance_gain_b, 1.0), 0.1, 3.0),
       colorMode: String(info.color_mode ?? "color"),
     });
-    setFpsValue(String(Math.round(toNum(info.fps, 8))));
-    setResValue(`${Math.round(toNum(info.width, 1280))}x${Math.round(toNum(info.height, 720))}`);
-    setSamplingMode(String(info.sampling_mode ?? "supersample"));
-    setRuntimeDirty(false);
+    if (syncRuntime) {
+      // 用户修改运行时参数但尚未应用时，轮询状态不应把选项弹回旧值。
+      // Do not let status polling snap runtime controls back while the user has unapplied edits.
+      setFpsValue(String(Math.round(toNum(info.fps, 8))));
+      setResValue(`${Math.round(toNum(info.width, 1280))}x${Math.round(toNum(info.height, 720))}`);
+      setSamplingMode(String(info.sampling_mode ?? "supersample"));
+      setRuntimeDirty(false);
+    }
     setRotationValue(clamp(Math.round(toNum(info.rotation, 180)), 0, 270));
     setFlipHorizontal(Boolean(info.flip_horizontal));
     setFlipVertical(Boolean(info.flip_vertical));
@@ -867,8 +872,8 @@ export function CameraConsoleApp() {
 
   useEffect(() => {
     if (!status?.info || formDirty) return;
-    syncFormFromStatus(status.info);
-  }, [status?.info, formDirty]);
+    syncFormFromStatus(status.info, { syncRuntime: !runtimeDirty });
+  }, [status?.info, formDirty, runtimeDirty]);
 
   useEffect(() => {
     if (!status?.recording) {
