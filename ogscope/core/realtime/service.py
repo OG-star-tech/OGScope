@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
+from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.star_extract import StarExtractor, StarPoint
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.web.camera_shared import get_camera_manager
@@ -46,6 +47,7 @@ class RealtimeSolveService:
         self._fov_estimate: float | None = None
         self._fov_max_error: float | None = None
         self._solve_timeout_ms: int | None = None
+        self._solve_context: Any | None = None
         self._analysis_interval_sec = max(
             float(settings.star_analysis_min_interval_ms) / 1000.0,
             1.0 / max(0.01, float(settings.star_analysis_target_fps)),
@@ -58,6 +60,7 @@ class RealtimeSolveService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
         if self.state.running:
@@ -72,6 +75,7 @@ class RealtimeSolveService:
         self._fov_estimate = fov_estimate
         self._fov_max_error = fov_max_error
         self._solve_timeout_ms = solve_timeout_ms
+        self._solve_context = solve_context
         self.state = RealtimeState(running=True)
         self._previous_stars = None
         self._task = asyncio.create_task(self._loop())
@@ -169,7 +173,9 @@ class RealtimeSolveService:
 
     def _apply_solve_result(self, solved: SolveResult) -> None:
         """写入解算结果 / Persist solve result"""
-        self.state.last_result = solved.to_dict()
+        row = solved.to_dict()
+        attach_sensor_prediction(row, self._solve_context)
+        self.state.last_result = row
         self._hint_ra = solved.ra_deg
         self._hint_dec = solved.dec_deg
 

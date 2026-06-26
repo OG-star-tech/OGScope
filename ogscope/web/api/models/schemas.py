@@ -194,6 +194,50 @@ class CentroidParamsPayload(BaseModel):
         return v
 
 
+class SolveObserverContext(BaseModel):
+    """Observer context for sensor-assisted solve / 传感器辅助解算的观测者上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    latitude_deg: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    longitude_deg: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    altitude_m: Optional[float] = None
+    time_utc: Optional[str] = None
+    source: Optional[str] = None
+
+
+class SolveOrientationContext(BaseModel):
+    """Orientation context for sensor-assisted solve / 传感器辅助解算的指向上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    azimuth_deg: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    altitude_deg: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    heading_deg: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    source: Optional[str] = None
+
+
+class SolveContextQuality(BaseModel):
+    """Validity flags for sensor-assisted solve / 传感器辅助解算的有效性标记。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gps_valid: bool = False
+    time_valid: bool = False
+    heading_valid: bool = False
+    mount_valid: bool = False
+
+
+class SolveContextPayload(BaseModel):
+    """Optional sensor context from ZenitAPA / ZenitAPA 提供的可选传感器上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    observer: Optional[SolveObserverContext] = None
+    orientation: Optional[SolveOrientationContext] = None
+    quality: Optional[SolveContextQuality] = None
+
+
 class AnalysisSolveImageRequest(BaseModel):
     """单图解算请求（JSON body）/ Single-image plate solve request."""
 
@@ -205,6 +249,7 @@ class AnalysisSolveImageRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_context: Optional[SolveContextPayload] = None
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
@@ -365,6 +410,7 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_context: Optional[SolveContextPayload] = None
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
@@ -419,6 +465,7 @@ class CoreStartAnalysisRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = Field(default=None, ge=200, le=120000)
+    solve_context: Optional[SolveContextPayload] = None
 
 
 class CoreAnalysisControlResponse(BaseModel):
