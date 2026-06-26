@@ -179,6 +179,7 @@ class CoreContractService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
         result = await realtime_solve_service.start(
@@ -187,6 +188,7 @@ class CoreContractService:
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
+            solve_context=solve_context,
         )
         self._session.running = True
         return {

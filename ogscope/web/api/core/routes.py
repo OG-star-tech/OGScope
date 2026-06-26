@@ -34,6 +34,7 @@ async def core_start_analysis(body: CoreStartAnalysisRequest) -> CoreAnalysisCon
             fov_estimate=body.fov_estimate,
             fov_max_error=body.fov_max_error,
             solve_timeout_ms=body.solve_timeout_ms,
+            solve_context=body.solve_context,
         )
         return CoreAnalysisControlResponse(**data)
     except Exception as exc:  # noqa: BLE001

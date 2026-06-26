@@ -25,6 +25,7 @@ from ogscope.algorithms.plate_solve import (
     centroid_extraction_preview,
     merge_centroid_params,
 )
+from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.star_extract import StarExtractor
 from ogscope.config import (
     effective_solver_max_image_side,
@@ -671,6 +672,7 @@ class AnalysisService:
                 max_stars=max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
 
         def _run_two_stage() -> list[dict[str, Any]]:
@@ -693,6 +695,7 @@ class AnalysisService:
                 max_stars=speed_max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
             row0 = first[0] if first else None
             if row0 and row0.get("status") == "MATCH_FOUND":
@@ -722,6 +725,7 @@ class AnalysisService:
                 max_stars=robust_max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
             if second:
                 second[0]["solve_profile"] = "robust"
@@ -1005,6 +1009,7 @@ class AnalysisService:
                     self._clamp_centroid_rejection_level(
                         solve_params.centroid_rejection_level
                     ),
+                    solve_context=solve_params.solve_context,
                 )
 
             hard_timeout_sec = max(
@@ -1152,6 +1157,7 @@ class AnalysisService:
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
         centroid_rejection_level: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
         cr_level = self._clamp_centroid_rejection_level(
@@ -1179,7 +1185,9 @@ class AnalysisService:
             large_scale_bg_subtract=large_scale_bg_subtract,
             centroid_rejection_level=cr_level,
         )
-        return {"frame_index": 0, **solved.to_dict()}
+        row = {"frame_index": 0, **solved.to_dict()}
+        attach_sensor_prediction(row, solve_context)
+        return row
 
     def _analyze_image(
         self,
@@ -1194,6 +1202,7 @@ class AnalysisService:
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
         centroid_rejection_level: int | None = None,
+        solve_context: Any | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         t_total = time.perf_counter()
@@ -1214,6 +1223,7 @@ class AnalysisService:
             max_stars=max_stars,
             large_scale_bg_subtract=large_scale_bg_subtract,
             centroid_rejection_level=centroid_rejection_level,
+            solve_context=solve_context,
         )
         row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
         row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
@@ -1366,6 +1376,7 @@ class AnalysisService:
                     max_stars,
                     bool(body.large_scale_bg_subtract),
                     cr_frame,
+                    solve_context=body.solve_context,
                 )
 
             hard_timeout_sec = max(
