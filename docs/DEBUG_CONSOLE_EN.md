@@ -9,9 +9,9 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 ## Features
 
 ### Live preview
-- ~15 fps live preview
+- Low-memory-board-friendly live preview. Effective FPS is governed by `preview_target_fps` and runtime throttling.
 - Start/stop preview
-- Live status
+- Live status: capture FPS, preview FPS, exposure, consumers, encoder, and memory pressure
 
 ### Capture
 - **Still capture**: high-quality photos with auto-save
@@ -23,6 +23,10 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - **Exposure**: 1ms–100ms (fine steps)
 - **Analog gain**: 1x–16x (0.1x steps)
 - **Digital gain**: 1x–4x (0.1x steps)
+- **White balance**: `auto` / `manual` / `night`; manual mode exposes red/blue gains
+- **Auto-exposure ceiling**: `camera_auto_exposure_max_us` controls the longest dark-field frame duration
+- **Flicker and noise reduction**: AE flicker and semantic noise-reduction modes
+- **Preview encoder**: `auto` / `turbojpeg` / `opencv`
 - **Apply immediately**: changes take effect at once
 - **Reset**: restore defaults
 
@@ -121,6 +125,21 @@ Browser: `http://localhost:8000/debug`
 - `POST /api/dev/debug/camera/settings`
 - `POST /api/dev/debug/camera/reset`
 
+Camera status also exposes diagnostic fields:
+
+| Field | Meaning |
+|-------|---------|
+| `sensor_target_fps` / `preview_target_fps` | Sensor and preview target FPS |
+| `actual_capture_fps` / `actual_preview_fps` | Measured capture and preview FPS |
+| `actual_exposure_us` / `frame_duration_us` | Current exposure and frame duration |
+| `preview_consumers` / `analysis_consumers` / `recording_consumers` | Preview, analysis, and recording consumers |
+| `jpeg_average_encode_ms` / `jpeg_cached_bytes` | JPEG encode time and cached bytes |
+| `throttle_reason` | Current throttle reason, for example low memory or no consumers |
+| `process_rss_kb` / `process_swap_kb` / `cma_free_kb` | Process memory, swap, and CMA free memory |
+| `preview_encoder` / `jpeg_source_format` | Selected preview encoder and input format |
+| `camera_driver` / `camera_backend` | Camera driver and backend names |
+| `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format` | Low-resolution helper stream state |
+
 ### Presets
 - `GET /api/dev/debug/camera/presets`
 - `POST /api/dev/debug/camera/presets`
@@ -147,6 +166,26 @@ python scripts/test_debug_console.py --test deps
 2. **Permissions**: camera access for the service user.
 3. **Disk**: ensure free space for captures.
 4. **Network**: Web UI requires reachable HTTP port.
+5. **32-bit OS**: OpenCV, SciPy, and PyTurboJPEG may not have suitable wheels. Prefer distro packages or piwheels, and use lower preview FPS plus automatic encoder selection on low-memory boards.
+
+## Camera Pipeline Configuration
+
+These settings enter runtime through environment variables or config files. Names match `ogscope/config.py`:
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `camera_idle_shutdown_sec` | `20.0` | Warm-idle timeout after the last consumer |
+| `camera_frame_stale_timeout_sec` | `5.0` | Re-probe when no successful frame arrives within this duration |
+| `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
+| `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | Manual white-balance red/blue gains |
+| `camera_night_mode` | `false` | Apply night white-balance flag at startup |
+| `camera_auto_exposure_max_us` | `2000000` | Longest AE frame duration for dark fields |
+| `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
+| `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
+| `camera_lores_enabled` | `true` | Enable the low-resolution helper stream |
+| `camera_lores_width` / `camera_lores_height` | `320` / `240` | Low-resolution helper stream size |
+| `camera_lores_format` | `YUV420` | Low-resolution helper stream format |
+| `preview_encoder` | `auto` | `auto` / `turbojpeg` / `opencv` |
 
 ## Troubleshooting
 

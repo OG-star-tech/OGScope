@@ -317,6 +317,7 @@ Notes:
 - if only templates/static files changed, `poetry install` is usually not needed
 - if service file changed, run `sudo systemctl daemon-reload` first
 - the script syncs `**ExecStart**` for the main `ogscope` unit and, if installed, `**ogscope-network-boot.service**` (when the project directory path changed); if the boot unit was never installed, that step is skipped
+- `scripts/sync_board_code.sh` is the developer-machine-to-board convenience sync: it uploads source with `rsync`, then runs `scripts/board-update.sh` on the board while preserving runtime data such as `uploads/`, `logs/`, and `data/`. Use it for frequent iteration; use `install.sh` / `bootstrap.sh` for full reinstall, system dependency changes, or first-time service-unit installation.
 
 ### 6.3 Uninstall service and local environment (`scripts/uninstall.sh`)
 
@@ -461,6 +462,7 @@ To reduce mistaken submissions as the architecture grows, verify all items below
   - `docs/contracts/core-rest-v1.md` / `docs/contracts/core-rest-v1_EN.md`
   - `docs/contracts/dev-rest-v1.md` / `docs/contracts/dev-rest-v1_EN.md`
   - `docs/contracts/core-compatibility-matrix.md` (inline bilingual, single file)
+6. If debug-console fields, camera-pipeline telemetry, or analysis-result `overlay_ext` changes, update `docs/DEBUG_CONSOLE.md` / `docs/DEBUG_CONSOLE_EN.md` and the matching contract docs.
 
 ## 10. Troubleshooting Checklist
 
@@ -487,4 +489,3 @@ sudo journalctl -u ogscope -f
 # ./scripts/uninstall.sh
 # OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```
-
