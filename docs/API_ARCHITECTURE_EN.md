@@ -17,6 +17,7 @@ For system-level architecture (core boundary, user vs developer surfaces, operat
 1. Keep business logic in `domain/*` or `core/application/*`; `routes.py` handles HTTP adaptation only.
 2. Stable surface: `/api/core/v1/*`; developer surface: `/api/dev/*`.
 3. Update contract docs: `docs/contracts/core-rest-v1.md` / `core-rest-v1_EN.md`, `dev-rest-v1.md` / `dev-rest-v1_EN.md`.
+4. When adding debug-console fields, camera telemetry, or analysis-result `overlay_ext`, also update `docs/DEBUG_CONSOLE.md` / `DEBUG_CONSOLE_EN.md`.
 
 Board deployment overview: [Development Guide](development/README_EN.md) | [中文](development/README.md). Pre-submit checks: section 5 below.
 
@@ -90,6 +91,7 @@ Before API changes, confirm:
    - `docs/contracts/core-rest-v1.md` / `docs/contracts/core-rest-v1_EN.md`
    - `docs/contracts/dev-rest-v1.md` / `docs/contracts/dev-rest-v1_EN.md`
    - `docs/contracts/core-compatibility-matrix.md` (when versioning/path policy changes)
+7. Debug-console fields, camera-pipeline telemetry, and analysis extension fields are reflected in debug documentation.
 
 ## 6) Quick verification commands
 

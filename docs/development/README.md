@@ -317,6 +317,7 @@ sudo journalctl -u ogscope -f
 - 若仅前端模板/静态文件变更，通常不需要 `poetry install`
 - 若服务文件配置有改动，需先 `sudo systemctl daemon-reload`
 - 脚本会同步主服务 `ExecStart` 与已安装的 `**ogscope-network-boot.service**` 内 `ExecStart`（项目目录变更时）；未安装开机单元则跳过
+- `scripts/sync_board_code.sh` 是开发机到开发板的便捷同步脚本：通过 `rsync` 上传源码后在板端执行 `scripts/board-update.sh`，并保留 `uploads/`、`logs/`、`data/` 等运行数据。它适合频繁迭代；全量重装、系统依赖变化或服务单元首次安装仍应使用 `install.sh` / `bootstrap.sh`。
 
 ### 6.3 卸载服务与本地环境（`scripts/uninstall.sh`）
 
@@ -465,6 +466,7 @@ router.include_router(new_router, tags=["NewModule - 新模块"])
   - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
   - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
   - `docs/contracts/core-compatibility-matrix.md`（段内中英，单文件）
+6. 若新增或变更调试页字段、相机管线遥测、分析结果 `overlay_ext`，同步更新 `docs/DEBUG_CONSOLE.md` / `docs/DEBUG_CONSOLE_EN.md` 与对应契约文档。
 
 ## 10. 常见故障排查
 
@@ -495,4 +497,3 @@ sudo journalctl -u ogscope -f
 # ./scripts/uninstall.sh
 # OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```
-
