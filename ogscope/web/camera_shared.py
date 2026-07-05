@@ -100,7 +100,11 @@ class CameraManager:
 
         settings = get_settings()
         base = {
-            "type": "imx327_mipi",
+            "type": settings.camera_type,
+            "device": getattr(settings, "camera_device", "/dev/video0"),
+            "backend": getattr(settings, "camera_backend", "opencv"),
+            "v4l2_sensor_subdev": getattr(settings, "camera_v4l2_sensor_subdev", "/dev/v4l-subdev1"),
+            "pixel_format": getattr(settings, "camera_pixel_format", "RGB3"),
             "width": settings.camera_width,
             "height": settings.camera_height,
             "fps": max(1, int(getattr(settings, "camera_fps", 5) or 5)),

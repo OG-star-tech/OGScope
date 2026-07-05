@@ -87,7 +87,26 @@ class Settings(BaseSettings):
     log_file: Optional[Path] = Field(default=None, description="日志文件路径")
 
     # 相机配置 / Camera configuration
-    camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
+    camera_type: str = Field(
+        default="v4l2",
+        description="相机类型: v4l2 (OpenCV+V4L2) | imx327_mipi (picamera2) | gstreamer (future)"
+    )
+    camera_device: str = Field(
+        default="/dev/video0",
+        description="V4L2 视频设备路径 / V4L2 video device path"
+    )
+    camera_backend: str = Field(
+        default="opencv",
+        description="V4L2 后端: opencv (直接) | gstreamer (未来) / V4L2 backend: opencv (direct) | gstreamer (future)"
+    )
+    camera_v4l2_sensor_subdev: str = Field(
+        default="/dev/v4l-subdev1",
+        description="V4L2 传感器子设备路径用于控制 / V4L2 sensor subdevice for controls"
+    )
+    camera_pixel_format: str = Field(
+        default="RG10",
+        description="V4L2 像素格式: RG10 (10-bit Bayer), RGB3, YUYV, etc. / V4L2 pixel format"
+    )
     camera_width: int = Field(
         default=1280, description="图像宽度 / Default capture width"
     )
