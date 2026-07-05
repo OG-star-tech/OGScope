@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePath
 
-DEV_CAPTURES_DIR = Path.home() / "dev_captures"
+DEV_CAPTURES_DIR = Path("/tmp/dev_captures")
 DEV_CAPTURES_DIR.mkdir(exist_ok=True)
 
 IMAGE_EXTENSIONS = {
