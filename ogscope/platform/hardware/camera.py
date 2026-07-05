@@ -125,9 +125,190 @@ class IMX327MIPICamera(CameraInterface):
         self.ae_polar_preset = bool(config.get("ae_polar_preset", True))
         self.ae_exposure_value = float(config.get("ae_exposure_value", 0.35))
 
+        # V4L2 直接控制配置（混合模式：V4L2 控制 + picamera2 捕获）/ V4L2 direct control config (hybrid: V4L2 control + picamera2 capture)
+        self.use_v4l2_controls = bool(config.get("use_v4l2_controls", True))
+        self.v4l2_sensor_subdev = config.get("v4l2_sensor_subdev", "/dev/v4l-subdev1")
+        self.v4l2_video_device = config.get("v4l2_video_device", "/dev/video0")
+        self._v4l2_available = False
+        self._current_vblank = 45  # IMX327 默认最小值 / Default minimum
+
+        # IMX327 传感器参数 / IMX327 sensor parameters
+        self.ACTIVE_HEIGHT = 1080
+        self.MIN_VBLANK = 45
+        self.MAX_VBLANK = 261063
+        self.MIN_HBLANK = 280
+        self.MAX_HBLANK = 63615
+        self.MICROSECONDS_PER_LINE = 0.008  # 8µs per line for IMX327
+
         logger.info(
-            f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps"
+            f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps (V4L2直控={'启用' if self.use_v4l2_controls else '禁用'})"
         )
+
+    # ==================== V4L2 Direct Control Methods ====================
+
+    def _check_v4l2_availability(self) -> bool:
+        """检查 V4L2 直接控制是否可用 / Check if V4L2 direct control is available"""
+        if not self.use_v4l2_controls:
+            return False
+
+        import os
+        import subprocess
+
+        # 检查设备文件存在 / Check device files exist
+        if not os.path.exists(self.v4l2_sensor_subdev):
+            logger.debug(f"V4L2 子设备不存在: {self.v4l2_sensor_subdev}")
+            return False
+
+        # 检查 v4l2-ctl 可用 / Check v4l2-ctl available
+        try:
+            result = subprocess.run(
+                ["v4l2-ctl", "--version"],
+                capture_output=True,
+                timeout=2,
+                check=False
+            )
+            if result.returncode != 0:
+                logger.debug("v4l2-ctl 不可用")
+                return False
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            logger.debug("v4l2-ctl 未找到或超时")
+            return False
+
+        return True
+
+    def _v4l2_get_control(self, v4l2_name: str) -> Optional[int]:
+        """读取 V4L2 控制值 / Read V4L2 control value"""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["v4l2-ctl", "-d", self.v4l2_sensor_subdev, "--all"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False
+            )
+            if result.returncode != 0:
+                return None
+
+            # 解析输出查找控制值 / Parse output for control value
+            for line in result.stdout.splitlines():
+                if v4l2_name.lower() in line.lower() and "value=" in line:
+                    try:
+                        value_part = line.split("value=")[1].split()[0]
+                        return int(value_part)
+                    except (IndexError, ValueError):
+                        pass
+            return None
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.debug(f"读取 V4L2 控制失败 {v4l2_name}: {e}")
+            return None
+
+    def _v4l2_set_control(self, v4l2_name: str, value: int) -> bool:
+        """设置 V4L2 控制值 / Set V4L2 control value"""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["v4l2-ctl", "-d", self.v4l2_sensor_subdev, f"--set-ctrl={v4l2_name}={value}"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False
+            )
+            if result.returncode != 0:
+                logger.debug(f"V4L2 控制设置失败 {v4l2_name}={value}: {result.stderr.strip()}")
+                return False
+            return True
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.debug(f"V4L2 控制设置异常 {v4l2_name}={value}: {e}")
+            return False
+
+    def _exposure_us_to_lines(self, exposure_us: int) -> int:
+        """将曝光时间从微秒转换为行数 / Convert exposure from microseconds to lines"""
+        return int(round(exposure_us * 0.001 / self.MICROSECONDS_PER_LINE))
+
+    def _exposure_lines_to_us(self, exposure_lines: int) -> int:
+        """将曝光行数转换为微秒 / Convert exposure from lines to microseconds"""
+        return int(round(exposure_lines * self.MICROSECONDS_PER_LINE * 1000))
+
+    def _calculate_required_vblank(self, exposure_lines: int) -> int:
+        """计算满足曝光需求的最小 vblank / Calculate minimum vblank for exposure"""
+        # 曝光最大可达 (ACTIVE_HEIGHT + vblank) 行
+        # Max exposure = (ACTIVE_HEIGHT + vblank) lines
+        required_vblank = max(
+            self.MIN_VBLANK,
+            exposure_lines - self.ACTIVE_HEIGHT + 100  # +100 安全边际 / safety margin
+        )
+        return min(required_vblank, self.MAX_VBLANK)
+
+    def _auto_adjust_vblank_for_exposure(self, exposure_us: int) -> bool:
+        """自动调整 vblank 以适应曝光时间（类似 imx327-capture）/ Auto-adjust vblank for exposure (like imx327-capture)"""
+        if not self._v4l2_available:
+            return False
+
+        exposure_lines = self._exposure_us_to_lines(exposure_us)
+        required_vblank = self._calculate_required_vblank(exposure_lines)
+
+        # 总是设置为所需的 vblank（可增可减，避免不必要的慢帧率）
+        # Always set to required vblank (increase or decrease to avoid slow frame rates)
+        if required_vblank != self._current_vblank:
+            if self._v4l2_set_control("vertical_blanking", required_vblank):
+                old_vblank = self._current_vblank
+                self._current_vblank = required_vblank
+                logger.debug(f"自动调整 vblank: {old_vblank} → {required_vblank} (曝光={exposure_us}µs, {exposure_lines}行)")
+                return True
+
+        return True
+
+    def _v4l2_set_exposure_direct(self, exposure_us: int) -> bool:
+        """使用 V4L2 直接设置曝光（含 vblank 自动调整）/ Set exposure via V4L2 with vblank auto-adjust"""
+        if not self._v4l2_available:
+            return False
+
+        # 1. 先调整 vblank 以适应曝光 / First adjust vblank for exposure
+        if not self._auto_adjust_vblank_for_exposure(exposure_us):
+            return False
+
+        # 2. 设置曝光行数 / Set exposure lines
+        exposure_lines = self._exposure_us_to_lines(exposure_us)
+        max_exposure_lines = self.ACTIVE_HEIGHT + self._current_vblank
+
+        # 限制曝光在有效范围内 / Clamp exposure to valid range
+        clamped_lines = max(1, min(exposure_lines, max_exposure_lines))
+        if clamped_lines != exposure_lines:
+            logger.warning(
+                f"曝光超出范围，已限制: {exposure_lines}行 → {clamped_lines}行 "
+                f"(最大={max_exposure_lines}, vblank={self._current_vblank})"
+            )
+
+        # 设置曝光控制 / Set exposure control
+        success = self._v4l2_set_control("exposure", clamped_lines)
+        if success:
+            actual_us = self._exposure_lines_to_us(clamped_lines)
+            logger.info(
+                f"V4L2 曝光设置成功: {exposure_us}µs → {clamped_lines}行 "
+                f"(实际≈{actual_us}µs, vblank={self._current_vblank})"
+            )
+        return success
+
+    def _v4l2_set_gain_direct(self, analogue_gain: float) -> bool:
+        """使用 V4L2 直接设置模拟增益 / Set analogue gain via V4L2"""
+        if not self._v4l2_available:
+            return False
+
+        # IMX327 模拟增益范围: 0-98 (对应约 1x-16x)
+        # IMX327 analogue gain range: 0-98 (approximately 1x-16x)
+        # 简化映射: linear scale from float to 0-98
+        gain_value = int(round((analogue_gain - 1.0) * 98.0 / 15.0))
+        gain_value = max(0, min(98, gain_value))
+
+        success = self._v4l2_set_control("analogue_gain", gain_value)
+        if success:
+            logger.info(f"V4L2 增益设置成功: {analogue_gain:.2f} → {gain_value}")
+        return success
+
+    # ==================== End V4L2 Direct Control Methods ====================
 
     @staticmethod
     def _to_number(value: Any) -> Optional[float]:
@@ -625,6 +806,18 @@ class IMX327MIPICamera(CameraInterface):
 
             self.camera = Picamera2()
 
+            # 检查 V4L2 直接控制是否可用 / Check V4L2 direct control availability
+            self._v4l2_available = self._check_v4l2_availability()
+            if self._v4l2_available:
+                logger.info(f"V4L2 直接控制可用: {self.v4l2_sensor_subdev}")
+                # 读取当前 vblank 值 / Read current vblank
+                current_vblank = self._v4l2_get_control("vertical_blanking")
+                if current_vblank is not None:
+                    self._current_vblank = current_vblank
+                    logger.debug(f"当前 vblank: {self._current_vblank}")
+            else:
+                logger.info("V4L2 直接控制不可用，使用 picamera2 控制")
+
             # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
             # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
             camera_config = self._create_video_configuration()
@@ -632,18 +825,25 @@ class IMX327MIPICamera(CameraInterface):
             self.camera.configure(camera_config)
 
             # 设置相机控制参数 / Set camera control parameters
-            # 构建控制参数，兼容部分固件未提供 DigitalGain 的情况 / Build control parameters, compatible with some firmwares that do not provide DigitalGain
-            controls = {
-                "ExposureTime": self.exposure_us,
-                "AnalogueGain": self.analogue_gain,
-                "AeEnable": self.auto_exposure,
-            }
-            controls.update(self._white_balance_controls())
-            try:
-                self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
-            except Exception:
-                # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is not supported, it will degenerate to not setting this item.
-                self.camera.set_controls(controls)
+            # 如果 V4L2 可用，先设置 V4L2 控制，否则使用 picamera2
+            # If V4L2 available, set V4L2 controls first, otherwise use picamera2
+            if self._v4l2_available and not self.auto_exposure:
+                # 使用 V4L2 直接控制设置初始曝光和增益 / Use V4L2 for initial exposure and gain
+                self._v4l2_set_exposure_direct(self.exposure_us)
+                self._v4l2_set_gain_direct(self.analogue_gain)
+            else:
+                # 回退到 picamera2 控制 / Fallback to picamera2 controls
+                controls = {
+                    "ExposureTime": self.exposure_us,
+                    "AnalogueGain": self.analogue_gain,
+                    "AeEnable": self.auto_exposure,
+                }
+                controls.update(self._white_balance_controls())
+                try:
+                    self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
+                except Exception:
+                    # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is not supported, it will degenerate to not setting this item.
+                    self.camera.set_controls(controls)
 
             if self.auto_exposure:
                 self._apply_polar_auto_exposure_controls()
@@ -932,11 +1132,27 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
+            # 尝试使用 V4L2 直接控制 / Try V4L2 direct control first
+            if self._v4l2_available:
+                v4l2_success = self._v4l2_set_exposure_direct(exposure_us)
+                if v4l2_success:
+                    self.exposure_us = exposure_us
+                    self.auto_exposure = False
+                    # 同步到 picamera2 以保持状态一致 / Sync to picamera2 for state consistency
+                    try:
+                        self.camera.set_controls({"AeEnable": False})
+                    except Exception:
+                        pass
+                    return True
+                else:
+                    logger.warning("V4L2 曝光设置失败，回退到 picamera2")
+
+            # 回退到 picamera2 控制 / Fallback to picamera2 control
             self.camera.set_controls({"AeEnable": False, "ExposureTime": exposure_us})
             self.exposure_us = exposure_us
             self.auto_exposure = False
             self._apply_frame_duration_controls()
-            logger.info(f"曝光时间设置为: {exposure_us}μs")
+            logger.info(f"曝光时间设置为: {exposure_us}μs (picamera2)")
             return True
         except Exception as e:
             logger.error(f"设置曝光时间失败: {e}")
@@ -955,6 +1171,24 @@ class IMX327MIPICamera(CameraInterface):
             except Exception:
                 pass
 
+            # 尝试使用 V4L2 直接控制模拟增益 / Try V4L2 direct control for analogue gain
+            if self._v4l2_available:
+                v4l2_success = self._v4l2_set_gain_direct(analogue_gain)
+                if v4l2_success:
+                    self.analogue_gain = analogue_gain
+                    self.digital_gain = digital_gain
+                    self.auto_exposure = False
+                    # 数字增益仍通过 picamera2 设置（V4L2 不直接支持）/ Digital gain still via picamera2
+                    if digital_gain != 1.0:
+                        try:
+                            self.camera.set_controls({"DigitalGain": digital_gain})
+                        except Exception:
+                            pass
+                    return True
+                else:
+                    logger.warning("V4L2 增益设置失败，回退到 picamera2")
+
+            # 回退到 picamera2 控制 / Fallback to picamera2 control
             # 优先同时设置，若不支持 DigitalGain 则退化仅设置 AnalogueGain / Priority is given to setting both at the same time. If DigitalGain is not supported, only AnalogueGain is set.
             try:
                 self.camera.set_controls(
@@ -966,7 +1200,7 @@ class IMX327MIPICamera(CameraInterface):
             self.digital_gain = digital_gain
             self.auto_exposure = False
             self._apply_frame_duration_controls()
-            logger.info(f"增益设置为: 模拟={analogue_gain}, 数字={digital_gain}")
+            logger.info(f"增益设置为: 模拟={analogue_gain}, 数字={digital_gain} (picamera2)")
             return True
         except Exception as e:
             logger.error(f"设置增益失败: {e}")
@@ -1111,10 +1345,21 @@ class IMX327MIPICamera(CameraInterface):
             camera_properties = self.camera.camera_properties
             metadata = self._last_metadata or {}
             capabilities = self._camera_capabilities()
+
+            # V4L2 直接控制状态 / V4L2 direct control status
+            v4l2_info = {
+                "v4l2_controls_enabled": self.use_v4l2_controls,
+                "v4l2_available": self._v4l2_available,
+                "v4l2_sensor_subdev": self.v4l2_sensor_subdev if self._v4l2_available else None,
+                "current_vblank": self._current_vblank if self._v4l2_available else None,
+                "exposure_lines": self._exposure_us_to_lines(self.exposure_us) if self._v4l2_available else None,
+            }
+
             return {
                 "driver": self.driver_name,
-                "backend": self.backend_name,
+                "backend": f"{self.backend_name}+v4l2" if self._v4l2_available else self.backend_name,
                 "capabilities": capabilities,
+                "v4l2_direct_control": v4l2_info,
                 "sensor": camera_properties.get("Model", "Unknown"),
                 "resolution": f"{self.width}x{self.height}",
                 "fps": self.fps,
@@ -1454,6 +1699,461 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
 
+class V4L2Camera(CameraInterface):
+    """V4L2-based camera using OpenCV VideoCapture - no picamera2 dependency
+
+    Modular design supporting multiple backends:
+    - opencv: Direct OpenCV VideoCapture (default, zero dependencies)
+    - gstreamer: GStreamer pipeline via OpenCV (future)
+    """
+
+    def __init__(self, config: dict[str, Any]):
+        self.config = config
+        self.backend = config.get("backend", "opencv")  # opencv | gstreamer
+        self.device = config.get("device", "/dev/video0")
+        self.v4l2_sensor_subdev = config.get("v4l2_sensor_subdev", "/dev/v4l-subdev1")
+
+        # Resolution and capture settings
+        self.width = int(config.get("width", 640))
+        self.height = int(config.get("height", 480))
+        self.fps = int(config.get("fps", 5))
+        self.pixel_format = config.get("pixel_format", "RGB3")  # RGB3, YUYV, etc.
+
+        # Exposure and gain settings (V4L2 control via v4l2-ctl)
+        self.exposure_us = int(config.get("exposure_us", 10000))
+        self.analogue_gain = float(config.get("analogue_gain", 1.0))
+
+        # IMX327 sensor parameters for V4L2 control
+        self.ACTIVE_HEIGHT = 1080
+        self.MIN_VBLANK = 45
+        self.MAX_VBLANK = 261063
+        self.MICROSECONDS_PER_LINE = 0.008  # 8µs per line for IMX327
+        self._current_vblank = 45
+
+        # Image transformation
+        self.rotation = config.get("rotation", 0)
+        self.flip_horizontal = bool(config.get("flip_horizontal", False))
+        self.flip_vertical = bool(config.get("flip_vertical", False))
+
+        # State
+        self.is_initialized = False
+        self.is_capturing = False
+        self._capture: Optional[Any] = None
+        self._v4l2_available = False
+
+        logger.info(
+            f"初始化 V4L2 相机: {self.width}x{self.height}@{self.fps}fps, "
+            f"设备: {self.device}, 后端: {self.backend}"
+        )
+
+    def _configure_media_pipeline(self) -> bool:
+        """Configure media controller pipeline for IMX327 sensor (like imx327-capture script)"""
+        import subprocess
+
+        try:
+            # Configure media pipeline: sensor -> unicam -> video device
+            # Use full sensor resolution for media pipeline
+            sensor_width = 1920
+            sensor_height = 1080
+            sensor_format = "SRGGB10_1X10"  # 10-bit Bayer from IMX327
+
+            targets = [
+                f'"imx327 10-001a":0[fmt:{sensor_format}/{sensor_width}x{sensor_height}]',
+                f'"unicam":0[fmt:{sensor_format}/{sensor_width}x{sensor_height}]',
+                f'"unicam":1[fmt:{sensor_format}/{sensor_width}x{sensor_height}]'
+            ]
+
+            for target in targets:
+                cmd = f'media-ctl -d /dev/media0 --set-v4l2 \'{target}\''
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5, check=False)
+
+                if result.returncode != 0:
+                    logger.warning(f"媒体管道配置失败 {target}: {result.stderr.strip()}")
+                    return False
+
+                logger.debug(f"媒体管道配置成功: {target}")
+
+            logger.info(f"媒体控制器管道已配置: {sensor_width}x{sensor_height} {sensor_format}")
+            return True
+
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.warning(f"媒体管道配置失败: {e}")
+            return False
+
+    def _check_v4l2_controls_availability(self) -> bool:
+        """Check if V4L2 sensor controls are available"""
+        import os
+        import subprocess
+
+        if not os.path.exists(self.v4l2_sensor_subdev):
+            logger.debug(f"V4L2 子设备不存在: {self.v4l2_sensor_subdev}")
+            return False
+
+        try:
+            result = subprocess.run(
+                ["v4l2-ctl", "--version"],
+                capture_output=True,
+                timeout=2,
+                check=False
+            )
+            if result.returncode != 0:
+                logger.debug("v4l2-ctl 不可用")
+                return False
+            return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            logger.debug("v4l2-ctl 未找到或超时")
+            return False
+
+    def _v4l2_set_control(self, v4l2_name: str, value: int) -> bool:
+        """Set V4L2 control value using v4l2-ctl"""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["v4l2-ctl", "-d", self.v4l2_sensor_subdev, f"--set-ctrl={v4l2_name}={value}"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False
+            )
+            if result.returncode != 0:
+                logger.debug(f"V4L2 控制设置失败 {v4l2_name}={value}: {result.stderr.strip()}")
+                return False
+            return True
+        except (subprocess.TimeoutExpired, Exception) as e:
+            logger.debug(f"V4L2 控制设置异常 {v4l2_name}={value}: {e}")
+            return False
+
+    def _exposure_us_to_lines(self, exposure_us: int) -> int:
+        """Convert exposure from microseconds to lines"""
+        return int(round(exposure_us * 0.001 / self.MICROSECONDS_PER_LINE))
+
+    def _calculate_required_vblank(self, exposure_lines: int) -> int:
+        """Calculate minimum vblank for exposure"""
+        required_vblank = max(
+            self.MIN_VBLANK,
+            exposure_lines - self.ACTIVE_HEIGHT + 100  # +100 safety margin
+        )
+        return min(required_vblank, self.MAX_VBLANK)
+
+    def _auto_adjust_vblank_for_exposure(self, exposure_us: int) -> bool:
+        """Auto-adjust vblank to accommodate exposure time"""
+        if not self._v4l2_available:
+            return False
+
+        exposure_lines = self._exposure_us_to_lines(exposure_us)
+        required_vblank = self._calculate_required_vblank(exposure_lines)
+
+        if required_vblank != self._current_vblank:
+            if self._v4l2_set_control("vertical_blanking", required_vblank):
+                old_vblank = self._current_vblank
+                self._current_vblank = required_vblank
+                logger.debug(f"自动调整 vblank: {old_vblank} → {required_vblank} (曝光={exposure_us}µs)")
+                return True
+
+        return True
+
+    def _create_opencv_capture(self) -> Optional[Any]:
+        """Create OpenCV VideoCapture object based on backend (like imx327-capture script)"""
+        import cv2
+
+        if self.backend == "opencv":
+            # Direct V4L2 capture via OpenCV - use RAW Bayer format
+            cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
+
+            if not cap.isOpened():
+                logger.error(f"无法打开摄像头设备: {self.device}")
+                return None
+
+            # Set resolution - use full sensor resolution for capture
+            # We'll resize later if needed
+            sensor_width = 1920
+            sensor_height = 1080
+
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, sensor_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, sensor_height)
+
+            # Use RG10 (10-bit Bayer) format - this is what the sensor outputs
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"RG10"))
+
+            # Disable automatic RGB conversion - we'll debayer manually
+            cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+
+            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            fourcc_s = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
+
+            logger.info(f"OpenCV VideoCapture 已创建: {actual_w}x{actual_h} [{fourcc_s}] 后端=V4L2")
+            return cap
+
+        elif self.backend == "gstreamer":
+            # GStreamer pipeline via OpenCV (future implementation)
+            pipeline = (
+                f"v4l2src device={self.device} ! "
+                f"video/x-raw,width={self.width},height={self.height},framerate={self.fps}/1 ! "
+                f"videoconvert ! appsink"
+            )
+            cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+            if not cap.isOpened():
+                logger.error(f"无法创建 GStreamer 管道: {pipeline}")
+                return None
+
+            logger.info(f"GStreamer VideoCapture 已创建")
+            return cap
+
+        else:
+            logger.error(f"不支持的后端: {self.backend}")
+            return None
+
+    def initialize(self) -> bool:
+        """Initialize V4L2 camera"""
+        try:
+            # Check V4L2 controls availability
+            self._v4l2_available = self._check_v4l2_controls_availability()
+            if self._v4l2_available:
+                logger.info(f"V4L2 直接控制可用: {self.v4l2_sensor_subdev}")
+            else:
+                logger.info("V4L2 直接控制不可用")
+
+            # Configure media pipeline BEFORE opening camera (critical for IMX327)
+            if not self._configure_media_pipeline():
+                logger.warning("媒体管道配置失败，继续尝试打开相机")
+
+            # Create OpenCV capture object
+            self._capture = self._create_opencv_capture()
+            if not self._capture:
+                return False
+
+            # Set initial exposure and gain via V4L2 if available
+            if self._v4l2_available:
+                self._auto_adjust_vblank_for_exposure(self.exposure_us)
+                exposure_lines = self._exposure_us_to_lines(self.exposure_us)
+                self._v4l2_set_control("exposure", exposure_lines)
+
+                # IMX327 analogue gain: 0-98 (1x-16x)
+                gain_value = int(round((self.analogue_gain - 1.0) * 98.0 / 15.0))
+                gain_value = max(0, min(98, gain_value))
+                self._v4l2_set_control("analogue_gain", gain_value)
+
+                # Allow camera to settle after control changes (like imx327-capture)
+                import time
+                settling_time = 0.2
+                if self.exposure_us > 1000:  # If exposure > 1ms
+                    settling_time += (self.exposure_us * 1e-6) * 3  # Wait 3x exposure time
+                logger.debug(f"等待相机稳定 {settling_time:.2f}秒...")
+                time.sleep(settling_time)
+
+            self.is_initialized = True
+            logger.info("V4L2 相机初始化成功")
+            return True
+
+        except Exception as e:
+            logger.error(f"V4L2 相机初始化失败: {e}")
+            return False
+
+    def start_capture(self) -> bool:
+        """Start image capture"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+
+        # OpenCV VideoCapture starts automatically, just mark as capturing
+        self.is_capturing = True
+        logger.info("相机开始捕获")
+        return True
+
+    def stop_capture(self) -> bool:
+        """Stop image capture"""
+        if not self.is_capturing:
+            return True
+
+        self.is_capturing = False
+        logger.info("相机停止捕获")
+        return True
+
+    def capture_image(self) -> Optional[np.ndarray]:
+        """Capture a single image (like imx327-capture script)"""
+        if not self.is_initialized or not self._capture:
+            logger.error("相机未初始化")
+            return None
+
+        if not self.is_capturing:
+            logger.error("相机未在捕获状态")
+            return None
+
+        try:
+            import cv2
+
+            # Discard first few frames (like imx327-capture does)
+            for _ in range(3):
+                self._capture.grab()
+
+            # Read raw Bayer frame
+            ret, frame = self._capture.read()
+
+            if not ret or frame is None:
+                logger.error("读取帧失败")
+                return None
+
+            # Process raw Bayer data (10-bit to 8-bit conversion + debayering)
+            frame = self._process_raw_frame(frame)
+
+            # Resize to target resolution if needed
+            if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+
+            # Apply rotation
+            if self.rotation != 0:
+                frame = self._apply_rotation(frame, self.rotation)
+
+            # Apply flip
+            frame = self._apply_flip(frame)
+
+            # Ensure contiguous memory for encoder
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame)
+
+            return frame
+
+        except Exception as e:
+            logger.error(f"捕获图像失败: {e}")
+            return None
+
+    def _process_raw_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Process raw Bayer frame: reshape, convert to 8-bit, debayer (like imx327-capture)"""
+        import cv2
+
+        # Handle different frame shapes from VideoCapture
+        if frame.ndim == 2 and frame.shape[0] == 1:
+            # Flattened array, reshape to image dimensions
+            frame = frame.flatten().view(np.uint16).reshape((1080, 1920))
+        elif frame.ndim == 1:
+            # 1D array, view as uint16 and reshape
+            frame = frame.view(np.uint16).reshape((1080, 1920))
+        elif frame.ndim == 3:
+            # Already in image format, might need dtype conversion
+            if frame.dtype != np.uint16:
+                frame = frame.view(np.uint16)
+
+        # Convert 10-bit raw to 8-bit for debayering (right shift by 2 bits)
+        raw8 = (frame >> 2).astype(np.uint8) if frame.dtype == np.uint16 else frame
+
+        # Debayer: RG Bayer pattern to BGR
+        bgr = cv2.cvtColor(raw8, cv2.COLOR_BayerRG2BGR)
+
+        # Convert BGR to RGB (OGScope expects RGB)
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+        return rgb
+
+    def _apply_rotation(self, image: np.ndarray, rotation: int) -> np.ndarray:
+        """Apply image rotation"""
+        try:
+            if rotation == 90:
+                return np.rot90(image, 1)
+            elif rotation == 180:
+                return np.rot90(image, 2)
+            elif rotation == 270:
+                return np.rot90(image, 3)
+            else:
+                return image
+        except Exception as e:
+            logger.error(f"图像旋转失败: {e}")
+            return image
+
+    def _apply_flip(self, image: np.ndarray) -> np.ndarray:
+        """Horizontal and vertical flip"""
+        if not self.flip_horizontal and not self.flip_vertical:
+            return image
+        try:
+            import cv2
+            if self.flip_horizontal and self.flip_vertical:
+                return cv2.flip(image, -1)
+            if self.flip_horizontal:
+                return cv2.flip(image, 1)
+            return cv2.flip(image, 0)
+        except Exception as e:
+            logger.error(f"图像镜像失败: {e}")
+            return image
+
+    def set_exposure(self, exposure_us: int) -> bool:
+        """Set exposure time via V4L2"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+
+        if not self._v4l2_available:
+            logger.warning("V4L2 控制不可用，无法设置曝光")
+            return False
+
+        try:
+            # Adjust vblank first
+            self._auto_adjust_vblank_for_exposure(exposure_us)
+
+            # Set exposure in lines
+            exposure_lines = self._exposure_us_to_lines(exposure_us)
+            max_exposure_lines = self.ACTIVE_HEIGHT + self._current_vblank
+            clamped_lines = max(1, min(exposure_lines, max_exposure_lines))
+
+            if self._v4l2_set_control("exposure", clamped_lines):
+                self.exposure_us = exposure_us
+                logger.info(f"V4L2 曝光设置成功: {exposure_us}µs → {clamped_lines}行")
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"设置曝光时间失败: {e}")
+            return False
+
+    def set_gain(self, analogue_gain: float, digital_gain: float = 1.0) -> bool:
+        """Set gain via V4L2 (digital_gain not supported in V4L2-only mode)"""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+
+        if not self._v4l2_available:
+            logger.warning("V4L2 控制不可用，无法设置增益")
+            return False
+
+        try:
+            # IMX327 analogue gain: 0-98 (1x-16x)
+            gain_value = int(round((analogue_gain - 1.0) * 98.0 / 15.0))
+            gain_value = max(0, min(98, gain_value))
+
+            if self._v4l2_set_control("analogue_gain", gain_value):
+                self.analogue_gain = analogue_gain
+                logger.info(f"V4L2 增益设置成功: {analogue_gain:.2f} → {gain_value}")
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"设置增益失败: {e}")
+            return False
+
+    def get_camera_info(self) -> dict[str, Any]:
+        """Get camera information"""
+        return {
+            "driver": "v4l2",
+            "backend": self.backend,
+            "device": self.device,
+            "width": self.width,
+            "height": self.height,
+            "fps": self.fps,
+            "pixel_format": self.pixel_format,
+            "exposure_us": self.exposure_us,
+            "analogue_gain": self.analogue_gain,
+            "is_initialized": self.is_initialized,
+            "is_capturing": self.is_capturing,
+            "v4l2_available": self._v4l2_available,
+        }
+
+    def get_video_frame(self) -> Optional[np.ndarray]:
+        """Get a frame of video image (for live streaming)"""
+        return self.capture_image()
+
+
 class CameraFactory:
     """相机工厂类 / Camera factory class"""
 
@@ -1464,6 +2164,8 @@ class CameraFactory:
         """创建相机实例 / Create camera instance"""
         if camera_type == "imx327_mipi":
             return IMX327MIPICamera(config)
+        if camera_type == "v4l2":
+            return V4L2Camera(config)
         if camera_type in {"linuxpy_v4l2", "v4l2_linuxpy"}:
             # 预留自定义 Linux 入口；树莓派 CSI 默认仍走 Picamera2 / Reserved custom-Linux hook; Pi CSI stays Picamera2.
             return LinuxpyV4L2Driver(config)  # type: ignore[return-value]
