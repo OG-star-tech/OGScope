@@ -2,9 +2,70 @@
 # 由 install.sh、board-update.sh 用 `source` 加载 / Sourced by install.sh and board-update.sh
 #
 # 环境变量 / Environment:
-#   OGSCOPE_CAMERA=imx327|skip — 非交互时指定摄像头型号或跳过 / Preset camera model or skip (non-interactive)
+#   OGSCOPE_CAMERA=imx327|skip — 指定摄像头型号或跳过 / Preset camera model or skip
+#   OGSCOPE_CAMERA_DEFAULT=imx327|skip — 无 TTY/非交互默认值，默认 imx327 / Default for non-TTY/non-interactive; default imx327
+#   OGSCOPE_SKIP_CAMERA_STACK=1 — 不补装 Picamera2/libcamera 运行栈 / Skip Picamera2/libcamera runtime repair
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不修改 /boot 配置 / Do not prompt or modify boot config
-#   OGSCOPE_NONINTERACTIVE=1 — 无 TTY 时不提示；未设 OGSCOPE_CAMERA 时等同 skip / No prompt; default skip without OGSCOPE_CAMERA
+#   OGSCOPE_NONINTERACTIVE=1 — 不提示；未设 OGSCOPE_CAMERA 时使用 OGSCOPE_CAMERA_DEFAULT / No prompt; use OGSCOPE_CAMERA_DEFAULT without OGSCOPE_CAMERA
+
+ogscope_camera_apt_install_if_available() {
+    local pkg="$1"
+    local label="$2"
+    if ! apt-cache show "${pkg}" >/dev/null 2>&1; then
+        return 1
+    fi
+    echo "📦 安装 ${label}: ${pkg} / Installing ${label}: ${pkg}"
+    if sudo apt install -y "${pkg}"; then
+        return 0
+    fi
+    echo "⚠️  ${pkg} 安装失败，继续后续步骤 / ${pkg} install failed; continuing" >&2
+    return 2
+}
+
+# 补齐树莓派 CSI 相机运行栈；增量更新也调用，避免只重装时才修复。
+# Repair Raspberry Pi CSI camera runtime; board-update calls this too, not only reinstall.
+ogscope_install_camera_stack_if_needed() {
+    if [ "${OGSCOPE_SKIP_CAMERA_STACK:-}" = "1" ]; then
+        echo "⏭️  跳过相机运行栈补装（OGSCOPE_SKIP_CAMERA_STACK=1）/ Skipping camera stack repair"
+        return 0
+    fi
+
+    if ! command -v apt-cache >/dev/null 2>&1; then
+        echo "ℹ️  未找到 apt-cache，跳过相机运行栈补装 / apt-cache not found; skipped camera stack repair"
+        return 0
+    fi
+
+    if python3 -c 'from picamera2 import Picamera2' >/dev/null 2>&1; then
+        echo "✅ Picamera2 已可导入 / Picamera2 import OK"
+    else
+        if ogscope_camera_apt_install_if_available "python3-picamera2" "Picamera2"; then
+            :
+        else
+            _picamera_install_status=$?
+            if [ "${_picamera_install_status}" -eq 1 ]; then
+                echo "ℹ️  未找到 python3-picamera2 软件包，请按板卡文档安装相机栈 / No python3-picamera2 package; install camera stack per board docs"
+            fi
+        fi
+        if python3 -c 'from picamera2 import Picamera2' >/dev/null 2>&1; then
+            echo "✅ Picamera2 补装完成 / Picamera2 repaired"
+        else
+            echo "⚠️  Picamera2 仍不可导入；若相机不可用请检查 apt 源与板卡相机栈 / Picamera2 still unavailable; check apt source and board camera stack"
+        fi
+    fi
+
+    if command -v rpicam-hello >/dev/null 2>&1 || command -v libcamera-hello >/dev/null 2>&1; then
+        echo "✅ libcamera/rpicam 工具已存在 / libcamera/rpicam tools found"
+        return 0
+    fi
+
+    local pkg
+    for pkg in rpicam-apps-core rpicam-apps libcamera-apps; do
+        if ogscope_camera_apt_install_if_available "${pkg}" "libcamera/rpicam 工具 / tools"; then
+            return 0
+        fi
+    done
+    echo "ℹ️  未找到 rpicam/libcamera apps 软件包；Picamera2 可用时 OGScope 仍可运行 / No rpicam/libcamera apps package; OGScope can still run if Picamera2 works"
+}
 
 # 返回可写的 config.txt 路径（Bookworm 多为 /boot/firmware/config.txt）/ Resolve config.txt path
 ogscope_boot_config_path() {
@@ -71,7 +132,10 @@ ogscope_boot_config_apply_imx327() {
         END { exit (inserted ? 0 : 1) }
     ' "${cfg}" > "${tmp}"; then
         sudo cp -a "${cfg}" "${cfg}.bak.ogscope.$(date +%s)"
-        sudo mv "${tmp}" "${cfg}"
+        # /boot/firmware 常见为 FAT 分区，mv 会尝试保留所有权并打印误导性警告；用 cp 覆盖内容。
+        # /boot/firmware is often FAT; mv may warn about ownership preservation, so copy contents instead.
+        sudo cp "${tmp}" "${cfg}"
+        rm -f "${tmp}"
         sudo chown root:root "${cfg}" 2>/dev/null || true
         sudo chmod 644 "${cfg}" 2>/dev/null || true
         return 0
@@ -130,13 +194,19 @@ ogscope_resolve_camera_choice() {
         return 0
     fi
 
-    if [ "${OGSCOPE_NONINTERACTIVE:-}" = "1" ]; then
-        echo "skip"
-        return 0
-    fi
-
-    if [ ! -t 0 ]; then
-        echo "skip"
+    if [ "${OGSCOPE_NONINTERACTIVE:-}" = "1" ] || [ ! -t 0 ]; then
+        case "${OGSCOPE_CAMERA_DEFAULT:-imx327}" in
+        imx327 | IMX327)
+            echo "imx327"
+            ;;
+        skip | none | off | "")
+            echo "skip"
+            ;;
+        *)
+            echo "⚠️ 未知 OGSCOPE_CAMERA_DEFAULT=${OGSCOPE_CAMERA_DEFAULT}，按 skip 处理 / Unknown OGSCOPE_CAMERA_DEFAULT; using skip" >&2
+            echo "skip"
+            ;;
+        esac
         return 0
     fi
 

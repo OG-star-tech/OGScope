@@ -10,7 +10,9 @@
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
-#   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
+#   OGSCOPE_CAMERA=imx327|skip — 指定摄像头 boot 配置 / Boot camera preset
+#   OGSCOPE_CAMERA_DEFAULT=imx327|skip — 无 TTY/非交互默认值，默认 imx327 / Default for non-TTY/non-interactive; default imx327
+#   OGSCOPE_SKIP_CAMERA_STACK=1 — 不补装 Picamera2/libcamera 运行栈 / Skip Picamera2/libcamera runtime repair
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 #   OGSCOPE_SKIP_BOOT_I2C=1 — 不写入 /boot 中 dtparam=i2c_arm=on（仍会安装 i2c-tools、仍将用户加入 i2c 组）/ Skip I2C boot dtparam; still installs i2c-tools and adds user to i2c group
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
@@ -119,6 +121,7 @@ fi
 
 echo "📦 I²C 主机依赖（与 install.sh 对齐）/ I2C host setup (aligned with install.sh)..."
 sudo apt update -qq
+ogscope_install_camera_stack_if_needed
 ogscope_i2c_host_setup_full 1
 
 VENV_PYTHON="$(poetry env info --path)/bin/python"
