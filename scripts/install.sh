@@ -13,7 +13,9 @@
 #   OGSCOPE_FORCE_PLATE_DB=1 — 若目标已存在仍覆盖 / Overwrite data/plate_solve/default_database.npz if present
 #   OGSCOPE_DEVELOPMENT_MODE=1 — 启用开发模式（默认 OGSCOPE_LOG_LEVEL=DEBUG；也可显式设置 OGSCOPE_LOG_LEVEL）/ Dev mode (default DEBUG log level)
 #   OGSCOPE_POETRY_INSTALLER_URL — 可选，覆盖 Poetry 引导脚本 URL（国内可自建镜像）/ Optional Poetry bootstrap URL mirror
-#   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset (non-interactive)
+#   OGSCOPE_CAMERA=imx327|skip — 指定摄像头 boot 配置（树莓派 config.txt）/ Boot camera preset
+#   OGSCOPE_CAMERA_DEFAULT=imx327|skip — 无 TTY/非交互默认值，默认 imx327 / Default for non-TTY/non-interactive; default imx327
+#   OGSCOPE_SKIP_CAMERA_STACK=1 — 不补装 Picamera2/libcamera 运行栈 / Skip Picamera2/libcamera runtime repair
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 #   OGSCOPE_SKIP_BOOT_I2C=1 — 不写入 /boot 中 dtparam=i2c_arm=on（仍会 apt 装 i2c-tools、仍将用户加入 i2c 组）/ Skip appending I2C dtparam; still installs i2c-tools and adds user to i2c group
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不安装 journald 持久化 drop-in（默认安装）/ Skip persistent journald config
@@ -140,13 +142,7 @@ else
 fi
 _apt_pause
 
-# 树莓派常见；若无此包可忽略 / Common on Raspberry Pi OS; skip if unavailable
-if apt-cache show python3-picamera2 >/dev/null 2>&1; then
-    echo "📦 安装 python3-picamera2..."
-    sudo apt install -y python3-picamera2 || echo "⚠️ picamera2 安装跳过 / picamera2 install skipped"
-else
-    echo "ℹ️ 未找到 python3-picamera2 软件包，请按板卡文档安装相机栈 / No python3-picamera2 package"
-fi
+ogscope_install_camera_stack_if_needed
 _apt_pause
 
 PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"

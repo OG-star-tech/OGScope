@@ -99,7 +99,7 @@ sudo journalctl -u ogscope -f
 
 | 现象                       | 处理方向                                                   |
 | ------------------------ | ------------------------------------------------------ |
-| `ImportError: picamera2` | 用 `apt` 装相机栈；venv 由 `install.sh` 配置（**§1.2、§3**）       |
+| `ImportError: picamera2` | 重新跑 `install.sh` 或 `board-update.sh` 补齐相机栈；venv 由脚本配置（**§1.2、§3**） |
 | PEP 668 / 系统 pip 被拒      | 只用项目 `.venv`，勿在系统 Python 上混装（**§1.2**）                 |
 | 服务无法启动                   | 查 `WorkingDirectory`、`ExecStart`、`journalctl`（**§10**） |
 
@@ -169,6 +169,7 @@ chmod +x scripts/install.sh
 ## 2. 系统环境依赖（重点）
 
 OGScope 除 Python 包依赖外，还依赖开发板系统层的相机生态（如 `picamera2`/`libcamera`）。
+`scripts/install.sh` 与 `scripts/board-update.sh` 都会尝试补装 `python3-picamera2` 与可用的 `rpicam/libcamera` 工具；若目标板不是 IMX327，可用 `OGSCOPE_CAMERA=skip` 跳过 boot overlay 写入。
 
 建议系统具备以下基础组件（按发行版实际包名调整）：
 
@@ -316,6 +317,7 @@ sudo journalctl -u ogscope -f
 
 - 若仅前端模板/静态文件变更，通常不需要 `poetry install`
 - 若服务文件配置有改动，需先 `sudo systemctl daemon-reload`
+- 脚本会补齐 Picamera2/libcamera 相机运行栈；无 TTY 或 `OGSCOPE_NONINTERACTIVE=1` 时默认写入 IMX327 boot overlay，可用 `OGSCOPE_CAMERA=skip` 或 `OGSCOPE_SKIP_BOOT_CAMERA=1` 跳过
 - 脚本会同步主服务 `ExecStart` 与已安装的 `**ogscope-network-boot.service**` 内 `ExecStart`（项目目录变更时）；未安装开机单元则跳过
 - `scripts/sync_board_code.sh` 是开发机到开发板的便捷同步脚本：通过 `rsync` 上传源码后在板端执行 `scripts/board-update.sh`，并保留 `uploads/`、`logs/`、`data/` 等运行数据。它适合频繁迭代；全量重装、系统依赖变化或服务单元首次安装仍应使用 `install.sh` / `bootstrap.sh`。
 
