@@ -75,7 +75,7 @@ class WifiSwitchService:
         script = Path(s.wifi_switch_script)
         cmd: list[str] = []
         if s.wifi_switch_use_sudo:
-            # 不用 sudo -E：多数 sudoers 禁止 preserve env；脚本会从 /etc/ogscope/network.env 读取
+            # 不用 sudo -E：多数 sudoers 禁止 preserve env；脚本会从 /data/ogscope/network.env 读取
             # Avoid sudo -E (often blocked); switch script sources network.env when env is empty
             cmd.extend(["sudo", "-n", str(script), subcommand])
         else:
