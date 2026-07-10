@@ -405,12 +405,22 @@ class IMX327MIPICamera(CameraInterface):
         digital = self._extract_control_range(
             "DigitalGain", self.MANUAL_CONTROL_RANGE_DEFAULTS["DigitalGain"]
         )
+
+        # If V4L2 controls are available, calculate actual max exposure based on vblank
+        if self._v4l2_available:
+            # Calculate max exposure with MAX_VBLANK: (1080 + 261063) lines * 8µs = ~2.1s
+            max_exposure_lines = self.ACTIVE_HEIGHT + self.MAX_VBLANK
+            max_exposure_us = int(max_exposure_lines * self.MICROSECONDS_PER_LINE * 1000)
+            exposure["max"] = float(max_exposure_us)
+            exposure["note"] = f"V4L2 direct control: max {max_exposure_us/1000:.1f}ms with vblank auto-adjust"
+
         return {
             "exposure_us": {
                 "min": int(round(exposure["min"])),
                 "max": int(round(exposure["max"])),
                 "default": int(round(exposure["default"])),
                 "step": max(1, int(round(exposure.get("step", 1)))),
+                "note": exposure.get("note", ""),
             },
             "analogue_gain": {
                 "min": float(analogue["min"]),
@@ -1853,6 +1863,30 @@ class V4L2Camera(CameraInterface):
 
         return True
 
+    def _calculate_max_exposure_us(self, vblank: Optional[int] = None) -> int:
+        """Calculate maximum achievable exposure in microseconds based on vblank
+
+        For IMX327: max_exposure_lines = ACTIVE_HEIGHT + vblank
+        Each line = 8µs, so max_exposure_us = max_lines * 8
+
+        Args:
+            vblank: Specific vblank value, or None to use MAX_VBLANK
+
+        Returns:
+            Maximum exposure in microseconds
+        """
+        if vblank is None:
+            vblank = self.MAX_VBLANK
+
+        max_exposure_lines = self.ACTIVE_HEIGHT + vblank
+        # Convert lines to microseconds: lines * 8µs/line = lines * 0.008ms = lines * 8µs
+        max_exposure_us = int(max_exposure_lines * self.MICROSECONDS_PER_LINE * 1000)
+        return max_exposure_us
+
+    def _exposure_lines_to_us(self, exposure_lines: int) -> int:
+        """Convert exposure from lines to microseconds"""
+        return int(round(exposure_lines * self.MICROSECONDS_PER_LINE * 1000))
+
     def _create_opencv_capture(self) -> Optional[Any]:
         """Create OpenCV VideoCapture object based on backend (like imx327-capture script)"""
         import cv2
@@ -2132,6 +2166,39 @@ class V4L2Camera(CameraInterface):
             logger.error(f"设置增益失败: {e}")
             return False
 
+    def get_manual_control_ranges(self) -> dict[str, dict[str, Any]]:
+        """Get manual control ranges with dynamic max exposure based on vblank capability"""
+        # Calculate max exposure with current vblank
+        current_max_us = self._calculate_max_exposure_us(self._current_vblank)
+        # Calculate absolute max exposure with MAX_VBLANK
+        absolute_max_us = self._calculate_max_exposure_us(self.MAX_VBLANK)
+
+        return {
+            "exposure_us": {
+                "min": 1000,  # 1ms minimum
+                "max": absolute_max_us,  # ~2.1 seconds with MAX_VBLANK
+                "current_max": current_max_us,  # Max with current vblank
+                "default": 10000,  # 10ms
+                "step": 1000,  # 1ms steps
+                "note": "Maximum exposure auto-adjusts vblank. Absolute max: ~2.1s"
+            },
+            "analogue_gain": {
+                "min": 1.0,
+                "max": 16.0,
+                "default": 1.0,
+                "step": 0.1,
+                "v4l2_range": "0-98 (hardware units)"
+            },
+            "digital_gain": {
+                "min": 1.0,
+                "max": 1.0,
+                "default": 1.0,
+                "step": 0.1,
+                "supported": False,
+                "note": "Not supported in V4L2-only mode"
+            },
+        }
+
     def get_camera_info(self) -> dict[str, Any]:
         """Get camera information"""
         return {
@@ -2147,6 +2214,9 @@ class V4L2Camera(CameraInterface):
             "is_initialized": self.is_initialized,
             "is_capturing": self.is_capturing,
             "v4l2_available": self._v4l2_available,
+            "current_vblank": self._current_vblank if self._v4l2_available else None,
+            "max_exposure_us": self._calculate_max_exposure_us() if self._v4l2_available else None,
+            "control_ranges": self.get_manual_control_ranges() if self._v4l2_available else {},
         }
 
     def get_video_frame(self) -> Optional[np.ndarray]:
