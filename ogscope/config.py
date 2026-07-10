@@ -501,8 +501,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=(
-            "/etc/ogscope/ogscope.env",
-            "/etc/ogscope/network.env",
+            "/data/ogscope/ogscope.env",
+            "/data/ogscope/network.env",
             ".env",
         ),
         env_file_encoding="utf-8",

@@ -22,7 +22,7 @@ set -euo pipefail
 
 # sudo 默认不传子进程环境（且 many sudoers 禁止 sudo -E），从 network.env 补全（与 systemd 同源）
 # sudo often strips env; sudoers may reject -E — load network.env (same as systemd EnvironmentFile)
-_DEFAULT_ENV="/etc/ogscope/network.env"
+_DEFAULT_ENV="/data/ogscope/network.env"
 if [[ -r "${_DEFAULT_ENV}" ]] && {
     [[ -z "${OGSCOPE_WIFI_STA_CONNECTION:-}" ]] || [[ -z "${OGSCOPE_WIFI_AP_CONNECTION:-}" ]];
 }; then

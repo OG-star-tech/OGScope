@@ -40,8 +40,8 @@ class ConfigFileUpdateBody(BaseModel):
 
 
 _CONFIG_FILE_MAP: dict[str, Path] = {
-    "ogscope": Path("/etc/ogscope/ogscope.env"),
-    "network": Path("/etc/ogscope/network.env"),
+    "ogscope": Path("/data/ogscope/ogscope.env"),
+    "network": Path("/data/ogscope/network.env"),
 }
 
 

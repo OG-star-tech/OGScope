@@ -307,8 +307,8 @@ def build_config_catalog() -> dict[str, Any]:
     return {
         "env_prefix": "OGSCOPE_",
         "env_files": {
-            "ogscope": "/etc/ogscope/ogscope.env",
-            "network": "/etc/ogscope/network.env",
+            "ogscope": "/data/ogscope/ogscope.env",
+            "network": "/data/ogscope/network.env",
             "local": ".env",
         },
         "sections": sections,
