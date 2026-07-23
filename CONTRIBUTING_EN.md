@@ -24,7 +24,7 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 ### Code contributions
 
 1. **Fork** the repository and clone your fork.
-2. **Branch from `develop`**: `git checkout develop && git pull && git checkout -b feature/your-feature-name`
+2. **Branch from `staging`**: `git checkout staging && git pull && git checkout -b feature/your-feature-name`
 3. **Dev dependencies**:
    ```bash
    poetry install
@@ -80,16 +80,16 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Stable release; merge from `develop` via PR only |
-| `develop` | **Single integration branch**; default for daily work and board sync |
-| `feature/*` | Features/refactors; branch from `develop`, delete after merge |
-| `fix/*` | Small fixes; merge to `develop`; hotfix to `main` when urgent |
+| `main` | Stable release; promote from `staging` via PR only |
+| `staging` | **Long-lived test integration branch**; default for daily work, board sync, and community validation |
+| `feature/*` | Features/refactors; branch from `staging`, delete after merge |
+| `fix/*` | Small fixes; validate through `staging`; hotfix to `main` when urgent |
 
-Flow: `feature/*` → PR → `develop` → periodic PR → `main`.
+Flow: `feature/*` / `fix/*` → PR → `staging` → validated PR → `main`.
 
-**Do not commit or push directly to `main`.** Local pre-commit blocks this; configure GitHub branch protection via [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh).
+**Do not commit or push directly to `main` or `staging`.** Local pre-commit blocks this; configure GitHub Rulesets or branch protection via [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh).
 
-**Deprecated**: `dev` and `dev-latest` dual integration branches.
+**Deprecated**: `develop`, `dev`, and `dev-latest` integration branches.
 
 ## Workflow
 
@@ -97,7 +97,7 @@ Flow: `feature/*` → PR → `develop` → periodic PR → `main`.
 2. Develop and test locally  
 3. Open a PR  
 4. Review  
-5. Merge into `develop` (and `main` for releases)
+5. Merge into `staging`, then promote to `main` by PR after validation
 
 ## Review expectations
 
