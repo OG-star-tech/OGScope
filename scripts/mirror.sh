@@ -228,6 +228,15 @@ ogscope_verify_numpy_scipy() {
     poetry run python -c "import numpy, scipy" 2>/dev/null
 }
 
+# 验证 TurboJPEG Python 绑定与系统库均可用 / Verify Python binding and system lib are usable.
+ogscope_verify_turbojpeg() {
+    poetry run python - <<'PY' >/dev/null 2>&1
+from turbojpeg import TurboJPEG
+
+TurboJPEG()
+PY
+}
+
 # 若 systemd 已存在但 ExecStart 不是当前 Poetry venv，则修正（避免 ~/.virtualenvs/ 与项目 .venv 混用）
 # If unit exists but ExecStart points elsewhere than current Poetry venv, fix it (avoids ~/.virtualenvs vs .venv mismatch)
 # 参数 / Args: $1 = unit 文件路径 / unit file path, $2 = venv 内 python 可执行文件绝对路径 / absolute path to venv python

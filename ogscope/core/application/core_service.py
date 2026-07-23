@@ -4,6 +4,7 @@ Core 标准契约应用服务 / Core standard contract application service.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,8 +18,11 @@ from ogscope.domain.camera.services import (
     stream_state_domain_service,
 )
 from ogscope.domain.system.services import system_info_service
-from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
 from ogscope.platform.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware_plane.runtime import (
+    describe_hardware_plane_profile,
+    get_hardware_plane_client,
+)
 
 
 @dataclass(slots=True)
@@ -36,15 +40,135 @@ class CoreContractService:
         self._session = CoreAnalysisSession()
 
     @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, value))
+
+    @staticmethod
+    def _build_ambient_hint(info: dict[str, Any], *, streaming: bool) -> dict[str, Any]:
+        """构造环境亮度建议遥测 / Build ambient brightness hint telemetry."""
+        lux = CoreContractService._optional_float(info.get("lux"))
+        exposure_us = CoreContractService._optional_float(
+            info.get("actual_exposure_us", info.get("exposure_us"))
+        )
+        digital_gain = CoreContractService._optional_float(
+            info.get("actual_digital_gain", info.get("digital_gain"))
+        )
+        max_exposure_us = CoreContractService._optional_float(
+            info.get("auto_exposure_max_us", info.get("frame_duration_us"))
+        )
+
+        scores: list[float] = []
+        if lux is not None and lux >= 0:
+            scores.append(CoreContractService._clamp01(1.0 - math.log10(lux + 1.0) / 2.0))
+        if exposure_us is not None and exposure_us > 0:
+            exposure_ceiling = max(max_exposure_us or 100_000.0, 1.0)
+            exposure_score = CoreContractService._clamp01(exposure_us / exposure_ceiling)
+            gain_score = 0.0
+            if digital_gain is not None:
+                gain_score = CoreContractService._clamp01((digital_gain - 1.0) / 7.0)
+            scores.append(CoreContractService._clamp01(exposure_score * 0.75 + gain_score * 0.25))
+
+        dark_score = sum(scores) / len(scores) if scores else None
+        return {
+            "available": bool(streaming and dark_score is not None),
+            "source": "camera_metadata" if dark_score is not None else "unavailable",
+            "confidence": "live" if streaming and dark_score is not None else "stale",
+            "dark_score": round(dark_score, 3) if dark_score is not None else None,
+            "lux": lux,
+            "exposure_us": int(exposure_us) if exposure_us is not None else None,
+            "digital_gain": digital_gain,
+        }
+
+    @staticmethod
     def _normalize_camera_status(status: dict[str, Any]) -> dict[str, Any]:
         """统一 Core 相机状态形状 / Normalize camera status payload shape."""
+        streaming = bool(status.get("streaming", False))
+        info = status.get("info", {}) or {}
         return {
             "connected": bool(status.get("connected", False)),
-            "streaming": bool(status.get("streaming", False)),
+            "streaming": streaming,
             "recording": bool(status.get("recording", False)),
-            "info": status.get("info", {}) or {},
+            "info": info,
+            "ambient_hint": CoreContractService._build_ambient_hint(
+                info,
+                streaming=streaming,
+            ),
             "runtime_overrides": status.get("runtime_overrides", {}) or {},
             "error": status.get("error"),
+        }
+
+    @staticmethod
+    def _network_health_in_scope(profile: dict[str, Any]) -> bool:
+        """网络是否纳入 OGScope health 评估 / Whether network affects OGScope health."""
+        if bool(profile.get("subordinate_mode")):
+            return False
+        return wifi_switch_service.is_configured()
+
+    @staticmethod
+    def _health_reasons(
+        camera_status: dict[str, Any],
+        network: dict[str, Any],
+        *,
+        network_in_health_scope: bool,
+    ) -> list[str]:
+        """稳定 health 降级原因码 / Stable machine-readable health degradation codes."""
+        reasons: list[str] = []
+        if not camera_status.get("connected", False):
+            reasons.append("camera_not_connected")
+        if not network_in_health_scope:
+            return reasons
+        net_err = network.get("error")
+        if net_err:
+            token = str(net_err).strip().lower().replace("-", "_")
+            if token and token.replace("_", "").isalnum():
+                reasons.append(f"network_{token}")
+            else:
+                reasons.append("network_error")
+        return reasons
+
+    @staticmethod
+    def _build_network_status(
+        profile: dict[str, Any],
+        system: dict[str, Any],
+    ) -> dict[str, Any]:
+        """构造 network 块：职责外仅遥测，不参与 health / Build network block with scope metadata."""
+        settings = get_settings()
+        in_health_scope = CoreContractService._network_health_in_scope(profile)
+        base: dict[str, Any] = {
+            "wireless_interface": settings.wifi_interface,
+            "signal_dbm": system.get("wifi_signal_dbm"),
+            "quality_percent": system.get("wifi_quality"),
+            "in_health_scope": in_health_scope,
+        }
+        if not in_health_scope:
+            managed_by = "external" if profile.get("subordinate_mode") else "unconfigured"
+            return {
+                **base,
+                "managed_by": managed_by,
+                "status": "delegated",
+                "mode": "unknown",
+                "active_connection": None,
+                "ap_ipv4": None,
+                "error": None,
+            }
+        wifi_raw = wifi_switch_service.get_status()
+        return {
+            **base,
+            "managed_by": "ogscope",
+            "status": "managed",
+            "mode": wifi_raw.get("MODE", "unknown"),
+            "active_connection": wifi_raw.get("ACTIVE_CONNECTION"),
+            "ap_ipv4": wifi_raw.get("AP_IPV4"),
+            "error": wifi_raw.get("error"),
         }
 
     async def start_analysis(
@@ -55,6 +179,7 @@ class CoreContractService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
         result = await realtime_solve_service.start(
@@ -63,6 +188,7 @@ class CoreContractService:
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
+            solve_context=solve_context,
         )
         self._session.running = True
         return {
@@ -103,7 +229,8 @@ class CoreContractService:
 
     async def get_system_status(self) -> dict[str, Any]:
         """系统状态与能力 / System status and capability map."""
-        wifi_raw = wifi_switch_service.get_status()
+        profile = describe_hardware_plane_profile()
+        network_in_health_scope = self._network_health_in_scope(profile)
         hardware_client = get_hardware_plane_client()
         hw_status_resp = await hardware_client.status_get()
         hw_status_data = hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
@@ -128,25 +255,17 @@ class CoreContractService:
             "memory_usage_percent": system.get("memory_usage"),
             "uptime_seconds": system.get("uptime_seconds"),
         }
-        network = {
-            "mode": wifi_raw.get("MODE", "unknown"),
-            "wireless_interface": wifi_raw.get(
-                "WIRELESS_INTERFACE", get_settings().wifi_interface
-            ),
-            "signal_dbm": system.get("wifi_signal_dbm"),
-            "quality_percent": system.get("wifi_quality"),
-            "active_connection": wifi_raw.get("ACTIVE_CONNECTION"),
-            "ap_ipv4": wifi_raw.get("AP_IPV4"),
-            "error": wifi_raw.get("error"),
-        }
-        health = "healthy"
-        if network.get("error"):
-            health = "degraded"
-        if not camera_status.get("connected", False):
-            health = "degraded"
+        network = self._build_network_status(profile, system)
+        health_reasons = self._health_reasons(
+            camera_status,
+            network,
+            network_in_health_scope=network_in_health_scope,
+        )
+        health = "healthy" if not health_reasons else "degraded"
         return {
             "success": True,
             "health": health,
+            "health_reasons": health_reasons,
             "version": __version__,
             "capabilities": capability_map(),
             "hardware_plane": {
@@ -297,7 +416,7 @@ class CoreContractService:
 
     async def get_stream_status(self) -> dict[str, Any]:
         """获取流控状态 / Get stream limiter status."""
-        stream = stream_state_domain_service.get_stream_status()
+        stream = await stream_state_domain_service.get_stream_status()
         return {
             "success": True,
             **stream,

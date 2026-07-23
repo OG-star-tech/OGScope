@@ -18,6 +18,9 @@ def test_build_config_catalog_includes_new_preview_fields() -> None:
     }
     assert "OGSCOPE_SHARED_PREVIEW_FPS" in keys
     assert "OGSCOPE_PREVIEW_JPEG_QUALITY" in keys
+    assert "OGSCOPE_PREVIEW_ENCODER" in keys
+    assert "OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US" in keys
+    assert "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE" in keys
     assert "OGSCOPE_SIMULATION_MODE" in keys
 
 

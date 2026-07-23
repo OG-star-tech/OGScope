@@ -84,6 +84,43 @@ def test_analysis_upload_and_single_image_solve(
 
 
 @pytest.mark.unit
+def test_analysis_solve_image_overlay_ext(
+    client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
+):
+    """单图解算返回扩展叠加字段（含极轴引导）/ Image solve returns overlay extension."""
+    image_path = tmp_path / "stars_polar.jpg"
+    _build_star_image(image_path)
+    with image_path.open("rb") as f:
+        up = client.post(
+            "/api/dev/analysis/upload",
+            files={"file": ("stars_polar.jpg", f, "image/jpeg")},
+        )
+    assert up.status_code == 200
+
+    resp = client.post(
+        "/api/dev/analysis/solve/image",
+        json={
+            "input_name": "stars_polar.jpg",
+            "hint_ra_deg": 45.0,
+            "hint_dec_deg": 70.0,
+            "overlay_topn_count": 2,
+            "enable_polar_guide": True,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("success") is True
+    row = data.get("result") or {}
+    ext = row.get("overlay_ext") or {}
+    labels = ext.get("labels_topn") or []
+    assert isinstance(labels, list)
+    assert len(labels) >= 1
+    guide = ext.get("polar_guide")
+    assert isinstance(guide, dict)
+    assert "delta_px" in guide
+
+
+@pytest.mark.unit
 def test_analysis_extract_preview(
     client, temp_analysis_dir, monkeypatch, tmp_path: Path
 ):

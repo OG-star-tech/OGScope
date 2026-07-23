@@ -10,7 +10,9 @@
 #   OGSCOPE_SKIP_PLATE_DB=1 — 不复制 default_database.npz / Skip Tetra3 pattern DB copy
 #   OGSCOPE_FORCE_PLATE_DB=1 — 覆盖已存在的 data/plate_solve/default_database.npz / Overwrite pattern DB
 #   OGSCOPE_SKIP_NETWORK_SYNC=1 — 不同步 WiFi 切换脚本与 ensure-systemd（免密 sudo 不可用时可设）/ Skip WiFi script + ensure-systemd
-#   OGSCOPE_CAMERA=imx327|skip — 非交互指定摄像头 boot 配置 / Boot camera preset (non-interactive)
+#   OGSCOPE_CAMERA=imx327|skip — 指定摄像头 boot 配置 / Boot camera preset
+#   OGSCOPE_CAMERA_DEFAULT=imx327|skip — 无 TTY/非交互默认值，默认 imx327 / Default for non-TTY/non-interactive; default imx327
+#   OGSCOPE_SKIP_CAMERA_STACK=1 — 不补装 Picamera2/libcamera 运行栈 / Skip Picamera2/libcamera runtime repair
 #   OGSCOPE_SKIP_BOOT_CAMERA=1 — 不询问、不写入 /boot 摄像头配置 / Skip boot camera prompt and changes
 #   OGSCOPE_SKIP_BOOT_I2C=1 — 不写入 /boot 中 dtparam=i2c_arm=on（仍会安装 i2c-tools、仍将用户加入 i2c 组）/ Skip I2C boot dtparam; still installs i2c-tools and adds user to i2c group
 #   OGSCOPE_SKIP_JOURNALD_PERSISTENT=1 — 不同步 journald 持久化配置 / Skip journald persistent drop-in
@@ -103,8 +105,23 @@ if ! ogscope_verify_numpy_scipy; then
 fi
 echo "✅ numpy/scipy 已就绪 / numpy & scipy OK"
 
+# TurboJPEG 是预览 JPEG 加速路径；若 Poetry 未补齐，增量更新时兜底安装。
+# TurboJPEG accelerates preview JPEG encoding; board-update repairs missing binding/lib.
+if ! ogscope_verify_turbojpeg; then
+    echo "⚠️ TurboJPEG 不可用，尝试补装 libturbojpeg0 + PyTurboJPEG / TurboJPEG unavailable; installing fallback deps"
+    sudo apt update -qq
+    sudo apt install -y libturbojpeg0
+    poetry run pip install --no-cache-dir "PyTurboJPEG>=1.7,<2"
+fi
+if ogscope_verify_turbojpeg; then
+    echo "✅ TurboJPEG 编码加速已就绪 / TurboJPEG encoder ready"
+else
+    echo "⚠️ TurboJPEG 仍不可用，将自动回退 OpenCV / TurboJPEG still unavailable; OpenCV fallback will be used"
+fi
+
 echo "📦 I²C 主机依赖（与 install.sh 对齐）/ I2C host setup (aligned with install.sh)..."
 sudo apt update -qq
+ogscope_install_camera_stack_if_needed
 ogscope_i2c_host_setup_full 1
 
 VENV_PYTHON="$(poetry env info --path)/bin/python"

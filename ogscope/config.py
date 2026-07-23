@@ -95,7 +95,7 @@ class Settings(BaseSettings):
         default=720, description="图像高度 / Default capture height"
     )
     camera_fps: int = Field(
-        default=5, description="预览与调试默认帧率 / Default preview FPS"
+        default=8, description="传感器目标帧率 / Target sensor FPS"
     )
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
@@ -112,6 +112,40 @@ class Settings(BaseSettings):
         le=2.0,
         description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
     )
+    camera_auto_exposure_max_us: int = Field(
+        default=2_000_000,
+        ge=10_000,
+        le=10_000_000,
+        description="自动曝光最长帧周期 us，暗场允许降帧 / Max auto-exposure frame duration in us",
+    )
+    camera_ae_flicker_mode: str = Field(
+        default="off",
+        description="AE 防闪烁模式 off/50hz/60hz / AE flicker mode: off/50hz/60hz",
+    )
+    camera_noise_reduction_mode: str = Field(
+        default="fast",
+        description="降噪语义模式 off/fast/high_quality / Semantic noise reduction mode",
+    )
+    camera_lores_enabled: bool = Field(
+        default=True,
+        description="启用低分辨率辅助流用于统计 / Enable lores helper stream for stats",
+    )
+    camera_lores_width: int = Field(
+        default=320,
+        ge=64,
+        le=1280,
+        description="低分辨率辅助流宽度 / Lores helper stream width",
+    )
+    camera_lores_height: int = Field(
+        default=240,
+        ge=48,
+        le=720,
+        description="低分辨率辅助流高度 / Lores helper stream height",
+    )
+    camera_lores_format: str = Field(
+        default="YUV420",
+        description="低分辨率辅助流格式 / Lores helper stream format",
+    )
     camera_flip_horizontal: bool = Field(
         default=False,
         description="相机输出水平镜像；与预览/解算同坐标系 / Camera output horizontal flip",
@@ -119,6 +153,26 @@ class Settings(BaseSettings):
     camera_flip_vertical: bool = Field(
         default=False,
         description="相机输出垂直镜像；与预览/解算同坐标系 / Camera output vertical flip",
+    )
+    camera_white_balance_mode: str = Field(
+        default="auto",
+        description="白平衡模式 auto/manual/night / White balance mode: auto/manual/night",
+    )
+    camera_white_balance_gain_r: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=3.0,
+        description="手动白平衡红色增益 / Manual white-balance red gain",
+    )
+    camera_white_balance_gain_b: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=3.0,
+        description="手动白平衡蓝色增益 / Manual white-balance blue gain",
+    )
+    camera_night_mode: bool = Field(
+        default=False,
+        description="启动时应用夜间白平衡标记 / Apply night white-balance mode on startup",
     )
 
     # 显示屏配置 / Display configuration
@@ -244,8 +298,8 @@ class Settings(BaseSettings):
         description="大尺度背景减除：小图长边上限（像素），越小越快 / Large-scale BG downsample max side",
     )
     star_analysis_target_fps: float = Field(
-        default=2 / 3,
-        description="星空分析目标帧率（约 1.5 秒 1 帧），仅用于前端节流 / Target star-analysis FPS for UI throttle (~1.5s per frame)",
+        default=0.5,
+        description="星空分析目标帧率（默认 2 秒 1 帧）/ Target star-analysis FPS (one frame per 2 seconds)",
     )
     star_analysis_min_interval_ms: int = Field(
         default=2000,
@@ -300,10 +354,14 @@ class Settings(BaseSettings):
         description="共享预览/MJPEG 目标帧率 / Target FPS for shared preview and MJPEG",
     )
     preview_jpeg_quality: int = Field(
-        default=75,
+        default=65,
         ge=1,
         le=100,
         description="共享抓帧 JPEG 质量 / JPEG quality for shared frame grabber",
+    )
+    preview_encoder: str = Field(
+        default="auto",
+        description="预览编码器 auto/turbojpeg/opencv / Preview encoder: auto/turbojpeg/opencv",
     )
     debug_preview_min_interval_ms: int = Field(
         default=150,
@@ -326,6 +384,18 @@ class Settings(BaseSettings):
         description=(
             "连续抓帧失败多少次后标记离线 / Consecutive grab failures before marking offline"
         ),
+    )
+    camera_idle_shutdown_sec: float = Field(
+        default=20.0,
+        ge=0.0,
+        le=300.0,
+        description="无消费者后相机热驻留秒数 / Camera warm-idle timeout after the last consumer",
+    )
+    camera_frame_stale_timeout_sec: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=60.0,
+        description="超过该时间无成功帧时重新探测 / Re-probe after no successful frame for this duration",
     )
     keep_raw_cache: bool = Field(
         default=False,
@@ -389,24 +459,6 @@ class Settings(BaseSettings):
         default="192.168.4.1",
         description="AP 模式下前端提示用的主机地址（不含端口）/ AP URL hint host without port",
     )
-    wifi_emergency_gpio_enabled: bool = Field(
-        default=False,
-        description="启用短接 GPIO 强制切 STA / Enable GPIO short-to-STA recovery",
-    )
-    wifi_emergency_pin_out_bcm: int = Field(
-        default=22,
-        description="应急检测：输出低电平（BCM）/ Emergency: output LOW (BCM)",
-    )
-    wifi_emergency_pin_in_bcm: int = Field(
-        default=23,
-        description="应急检测：上拉输入（BCM）/ Emergency: input with pull-up (BCM)",
-    )
-    wifi_emergency_hold_seconds: float = Field(
-        default=2.0,
-        ge=0.5,
-        le=30.0,
-        description="短接持续多久触发 STA / Hold time before forcing STA",
-    )
     device_id_suffix: str = Field(
         default="",
         description="设备后缀（network.env 中 OGSCOPE_DEVICE_ID_SUFFIX）/ Device id suffix from network.env",
@@ -455,6 +507,55 @@ class Settings(BaseSettings):
         if text in {"0", "false", "no", "off"}:
             return False
         return value  # type: ignore[return-value]
+
+    @field_validator("camera_white_balance_mode", mode="before")
+    @classmethod
+    def _parse_camera_white_balance_mode(cls, value: object) -> str:
+        """校验白平衡模式，非法值回退 auto / Validate WB mode and fall back to auto."""
+        text = str(value or "auto").strip().lower()
+        if text in {
+            "auto",
+            "daylight",
+            "cloudy",
+            "tungsten",
+            "fluorescent",
+            "indoor",
+            "manual",
+            "night",
+        }:
+            return text
+        return "auto"
+
+    @field_validator("camera_ae_flicker_mode", mode="before")
+    @classmethod
+    def _parse_camera_ae_flicker_mode(cls, value: object) -> str:
+        """校验防闪烁模式 / Validate AE flicker mode."""
+        text = str(value or "off").strip().lower().replace("_", "")
+        if text in {"50", "50hz"}:
+            return "50hz"
+        if text in {"60", "60hz"}:
+            return "60hz"
+        return "off"
+
+    @field_validator("camera_noise_reduction_mode", mode="before")
+    @classmethod
+    def _parse_camera_noise_reduction_mode(cls, value: object) -> str:
+        """校验降噪语义模式 / Validate semantic noise reduction mode."""
+        text = str(value or "fast").strip().lower().replace("-", "_")
+        aliases = {"hq": "high_quality", "highquality": "high_quality", "0": "off"}
+        text = aliases.get(text, text)
+        if text in {"off", "fast", "high_quality"}:
+            return text
+        return "fast"
+
+    @field_validator("preview_encoder", mode="before")
+    @classmethod
+    def _parse_preview_encoder(cls, value: object) -> str:
+        """校验预览编码器偏好 / Validate preview encoder preference."""
+        text = str(value or "auto").strip().lower()
+        if text in {"auto", "turbojpeg", "opencv"}:
+            return text
+        return "auto"
 
     @model_validator(mode="after")
     def _apply_development_mode_defaults(self) -> "Settings":

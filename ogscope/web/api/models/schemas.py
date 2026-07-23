@@ -19,6 +19,9 @@ class CameraSettings(BaseModel):
     saturation: Optional[float] = 1.0  # 饱和度 / saturation
     sharpness: Optional[float] = 1.0  # 锐度 / sharpness
     noiseReduction: Optional[int] = 0  # 降噪级别 (0-4) / Noise reduction level (0-4)
+    noiseReductionMode: Optional[str] = None  # 语义降噪模式 / Semantic NR mode
+    aeFlickerMode: Optional[str] = None  # AE 防闪烁 / AE flicker mode
+    autoExposureMaxUs: Optional[int] = None  # 自动曝光最长帧周期 / Max auto-exposure frame duration
     whiteBalanceMode: Optional[str] = "auto"  # 白平衡模式 / white balance mode
     whiteBalanceGainR: Optional[float] = 1.0  # 白平衡红色增益 / white balance red gain
     whiteBalanceGainB: Optional[float] = 1.0  # 白平衡蓝色增益 / white balance blue gain
@@ -191,6 +194,50 @@ class CentroidParamsPayload(BaseModel):
         return v
 
 
+class SolveObserverContext(BaseModel):
+    """Observer context for sensor-assisted solve / 传感器辅助解算的观测者上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    latitude_deg: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    longitude_deg: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    altitude_m: Optional[float] = None
+    time_utc: Optional[str] = None
+    source: Optional[str] = None
+
+
+class SolveOrientationContext(BaseModel):
+    """Orientation context for sensor-assisted solve / 传感器辅助解算的指向上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    azimuth_deg: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    altitude_deg: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    heading_deg: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    source: Optional[str] = None
+
+
+class SolveContextQuality(BaseModel):
+    """Validity flags for sensor-assisted solve / 传感器辅助解算的有效性标记。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gps_valid: bool = False
+    time_valid: bool = False
+    heading_valid: bool = False
+    mount_valid: bool = False
+
+
+class SolveContextPayload(BaseModel):
+    """Optional sensor context from ZenitAPA / ZenitAPA 提供的可选传感器上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    observer: Optional[SolveObserverContext] = None
+    orientation: Optional[SolveOrientationContext] = None
+    quality: Optional[SolveContextQuality] = None
+
+
 class AnalysisSolveImageRequest(BaseModel):
     """单图解算请求（JSON body）/ Single-image plate solve request."""
 
@@ -202,6 +249,7 @@ class AnalysisSolveImageRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_context: Optional[SolveContextPayload] = None
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
@@ -214,6 +262,15 @@ class AnalysisSolveImageRequest(BaseModel):
         ge=1,
         le=5,
         description="1=mild … 5=aggressive dense+collinear rejection",
+    )
+    # 叠加与引导选项（可选，未提供则使用后端默认）/ Optional overlay & guidance options
+    overlay_topn_count: Optional[int] = Field(
+        default=None,
+        description="自动标注的星点数量上限（Top-N），未填用服务器默认 / Max number of stars to label (Top-N); server default if omitted",
+    )
+    enable_polar_guide: Optional[bool] = Field(
+        default=None,
+        description="是否计算极轴引导信息；未填用服务器默认 / Whether to compute polar guide info; server default if omitted",
     )
 
 
@@ -353,6 +410,7 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = None
+    solve_context: Optional[SolveContextPayload] = None
     solve_profile: Optional[Literal["speed", "balanced", "robust"]] = None
     centroid: Optional[CentroidParamsPayload] = None
     max_image_side: Optional[int] = None
@@ -407,6 +465,7 @@ class CoreStartAnalysisRequest(BaseModel):
     fov_estimate: Optional[float] = None
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = Field(default=None, ge=200, le=120000)
+    solve_context: Optional[SolveContextPayload] = None
 
 
 class CoreAnalysisControlResponse(BaseModel):
@@ -435,6 +494,7 @@ class CoreSystemStatusResponse(BaseModel):
 
     success: bool
     health: str
+    health_reasons: list[str] = Field(default_factory=list)
     version: str
     capabilities: dict[str, bool]
     system: dict[str, Any]
@@ -492,6 +552,7 @@ class CoreCameraStatusResponse(BaseModel):
     streaming: bool
     recording: bool
     info: dict[str, Any] = Field(default_factory=dict)
+    ambient_hint: dict[str, Any] = Field(default_factory=dict)
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
@@ -504,6 +565,31 @@ class CoreStreamStatusResponse(BaseModel):
     active_clients: int
     frame_fetch_timeout_ms: int
     target_preview_fps: int
+    sensor_target_fps: float = 0.0
+    preview_target_fps: int = 0
+    actual_capture_fps: float = 0.0
+    actual_preview_fps: float = 0.0
+    actual_exposure_us: int = 0
+    frame_duration_us: int = 0
+    preview_consumers: int = 0
+    analysis_consumers: int = 0
+    recording_consumers: int = 0
+    jpeg_average_encode_ms: float = 0.0
+    jpeg_cached_bytes: int = 0
+    preview_encoder: str = ""
+    jpeg_encode_failures: int = 0
+    jpeg_source_format: str = ""
+    camera_driver: str = ""
+    camera_backend: str = ""
+    lores_enabled: bool = False
+    lores_available: bool = False
+    lores_width: int = 0
+    lores_height: int = 0
+    lores_format: str = ""
+    throttle_reason: Optional[str] = None
+    process_rss_kb: int = 0
+    process_swap_kb: int = 0
+    cma_free_kb: int = 0
 
 
 class CoreVideoFileEntry(BaseModel):

@@ -44,6 +44,9 @@ rsync -a --delete \
     --exclude "__pycache__/" \
     --exclude ".pytest_cache/" \
     --exclude "web/spa/node_modules/" \
+    --exclude "uploads/" \
+    --exclude "logs/" \
+    --exclude "data/" \
     "${SOURCE_DIR}/" "${DEPLOY_DIR}/"
 
 INSTALL_SCRIPT="${DEPLOY_DIR}/scripts/install.sh"
