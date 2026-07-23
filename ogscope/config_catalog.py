@@ -10,7 +10,9 @@ from ogscope.config import Settings
 
 ConfigFileScope = Literal["ogscope", "network", "both"]
 
-_CATALOG_SECTIONS: tuple[tuple[str, str, str, ConfigFileScope, tuple[str, ...]], ...] = (
+_CATALOG_SECTIONS: tuple[
+    tuple[str, str, str, ConfigFileScope, tuple[str, ...]], ...
+] = (
     (
         "basic",
         "基础",

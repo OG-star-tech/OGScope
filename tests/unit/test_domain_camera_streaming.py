@@ -35,7 +35,9 @@ class _FakeLimiter:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_build_camera_mjpeg_stream_rejects_when_limit_reached(monkeypatch) -> None:
+async def test_build_camera_mjpeg_stream_rejects_when_limit_reached(
+    monkeypatch,
+) -> None:
     limiter = _FakeLimiter(can_acquire=False)
     monkeypatch.setattr(streaming_mod, "get_mjpeg_stream_limiter", lambda: limiter)
 
@@ -60,6 +62,7 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
 
     class _FakeSettings:
         stream_mjpeg_frame_fetch_timeout_ms = 1000
+        shared_preview_fps = 8
 
     monkeypatch.setattr(streaming_mod, "get_settings", lambda: _FakeSettings())
 
@@ -77,7 +80,9 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
     manager = _FakeManager()
     monkeypatch.setattr(streaming_mod, "get_camera_manager", lambda: manager)
 
-    async def _fake_get_stream_frame_bytes(fmt: str, quality: int, *, since_frame_id: int):
+    async def _fake_get_stream_frame_bytes(
+        fmt: str, quality: int, *, since_frame_id: int
+    ):
         _ = fmt, quality, since_frame_id
         return 200, b"abc", 1
 

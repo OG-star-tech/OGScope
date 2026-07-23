@@ -194,11 +194,15 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     monkeypatch.setattr(
         core_service.core_contract_service, "get_camera_status", _fake_camera_status
     )
-    monkeypatch.setattr(core_service.core_contract_service, "tune_camera", _fake_camera_tune)
+    monkeypatch.setattr(
+        core_service.core_contract_service, "tune_camera", _fake_camera_tune
+    )
     monkeypatch.setattr(
         core_service.core_contract_service, "start_camera", _fake_start_camera
     )
-    monkeypatch.setattr(core_service.core_contract_service, "stop_camera", _fake_stop_camera)
+    monkeypatch.setattr(
+        core_service.core_contract_service, "stop_camera", _fake_stop_camera
+    )
     monkeypatch.setattr(
         core_service.core_contract_service, "get_stream_status", _fake_stream_status
     )

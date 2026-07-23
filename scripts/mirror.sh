@@ -424,6 +424,41 @@ ogscope_report_plate_solve_database_status() {
 # 增量更新：同步网络相关工件（与近期 wifi-nm / systemd 文档一致）
 # Board update: sync network artifacts (matches wifi-nm + systemd docs)
 # 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
+#             $2 = 服务用户名（可选，默认 $USER）/ service user (optional, default $USER)
+# 环境 / Env: OGSCOPE_SKIP_NETWORK_SYNC=1 跳过；需 sudo（免密或交互）/ skip; requires sudo
+ogscope_install_config_write_artifacts() {
+    local project_dir="${1:?}"
+    local run_user="${2:-${USER:-}}"
+    local src="${project_dir}/scripts/ogscope-config-write.sh"
+    local dst="/usr/local/bin/ogscope-config-write"
+    local sudoers="/etc/sudoers.d/ogscope-config"
+
+    if [ ! -f "${src}" ]; then
+        echo "⚠️  未找到 ${src}，跳过 config-write / Missing config-write script"
+        return 0
+    fi
+
+    echo "📝 安装 Web 配置写入助手 / Installing config-write helper → ${dst} ..."
+    sudo install -m 755 "${src}" "${dst}"
+
+    if [ -z "${run_user}" ]; then
+        echo "⚠️  未设置服务用户，跳过 ogscope-config sudoers / No service user; skip config sudoers"
+        return 0
+    fi
+
+    umask 077
+    sudo tee "${sudoers}.tmp" >/dev/null <<EOF
+# OGScope Web 配置页免密写入 / Passwordless config write for Web UI
+${run_user} ALL=(ALL) NOPASSWD: ${dst}
+EOF
+    sudo chmod 440 "${sudoers}.tmp"
+    sudo mv "${sudoers}.tmp" "${sudoers}"
+    echo "✅ 已写入 ${sudoers}（用户 ${run_user}）/ Config sudoers installed"
+}
+
+# 增量更新：同步网络相关工件（与近期 wifi-nm / systemd 文档一致）
+# Board update: sync network artifacts (matches wifi-nm + systemd docs)
+# 参数 / Args: $1 = 项目根目录绝对路径 / absolute project root
 # 环境 / Env: OGSCOPE_SKIP_NETWORK_SYNC=1 跳过；需 sudo（免密或交互）/ skip; requires sudo
 ogscope_sync_network_board_artifacts_if_needed() {
     local project_dir="${1:?}"
@@ -463,6 +498,7 @@ ogscope_sync_network_board_artifacts_if_needed() {
     if sudo -n true 2>/dev/null; then
         sudo env OGSCOPE_SERVICE_USER="${USER}" "${init_script}" ensure-systemd \
             || echo "⚠️  ensure-systemd 失败；可手动: sudo env OGSCOPE_SERVICE_USER=\$USER ${init_script} ensure-systemd"
+        ogscope_install_config_write_artifacts "${project_dir}" "${USER}"
     else
         echo "⚠️  无法免密 sudo，未运行 ensure-systemd；若 Web WiFi 异常请手动执行上述命令（见 docs/development/wifi-nm.md）"
         echo "⚠️  Non-interactive sudo unavailable; run ensure-systemd manually if WiFi/API issues"

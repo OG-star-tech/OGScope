@@ -43,7 +43,9 @@ class HardwarePlaneClient:
         self._daemon = daemon
         self._default_timeout_ms = max(50, int(default_timeout_ms))
         self._remote_sensor_transport = remote_sensor_transport
-        self._remote_sensor_enabled = bool(remote_sensor_enabled and remote_sensor_transport)
+        self._remote_sensor_enabled = bool(
+            remote_sensor_enabled and remote_sensor_transport
+        )
         self._runtime_profile = dict(runtime_profile or {})
 
     async def _call(
@@ -108,4 +110,3 @@ class HardwarePlaneClient:
     def runtime_profile(self) -> dict[str, Any]:
         """运行时角色信息 / Runtime role profile."""
         return dict(self._runtime_profile)
-
