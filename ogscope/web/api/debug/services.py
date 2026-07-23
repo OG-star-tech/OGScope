@@ -45,6 +45,13 @@ _CAMERA_ENV_KEY_MAP = {
     "analogue_gain": "OGSCOPE_CAMERA_GAIN",
     "flip_horizontal": "OGSCOPE_CAMERA_FLIP_HORIZONTAL",
     "flip_vertical": "OGSCOPE_CAMERA_FLIP_VERTICAL",
+    "white_balance_mode": "OGSCOPE_CAMERA_WHITE_BALANCE_MODE",
+    "white_balance_gain_r": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_R",
+    "white_balance_gain_b": "OGSCOPE_CAMERA_WHITE_BALANCE_GAIN_B",
+    "night_mode": "OGSCOPE_CAMERA_NIGHT_MODE",
+    "auto_exposure_max_us": "OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US",
+    "ae_flicker_mode": "OGSCOPE_CAMERA_AE_FLICKER_MODE",
+    "noise_reduction_mode": "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE",
 }
 
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
@@ -432,8 +439,17 @@ class DebugCameraService:
             stem = generate_capture_stem("IMG", camera_info)
             image_path = DEBUG_CAPTURES_DIR / f"{stem}.jpg"
 
-            # 保存图像 / save image
-            success = cv2.imwrite(str(image_path), image)
+            # 相机输出为 RGB888，OpenCV 写文件前需要转 BGR，避免红蓝通道互换。
+            # Camera output is RGB888; convert to BGR before OpenCV writes files to avoid R/B swap.
+            image_for_write = image
+            try:
+                if getattr(image, "ndim", 0) == 3 and int(image.shape[2]) >= 3:
+                    image_for_write = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            except Exception:
+                image_for_write = image
+
+            # 保存图像 / Save image
+            success = cv2.imwrite(str(image_path), image_for_write)
             if not success:
                 raise Exception("图像保存失败")
 
@@ -532,9 +548,9 @@ class DebugCameraService:
             except ImportError:
                 pass
 
-            camera = get_camera_instance()
-            if not camera or not camera.is_capturing:
-                raise Exception("相机未运行")
+            manager = get_camera_manager()
+            await manager.acquire_recording_consumer()
+            camera = manager.get_camera_instance()
 
             try:
                 import cv2
@@ -611,8 +627,10 @@ class DebugCameraService:
                     "path": str(video_path),
                 }
             except ImportError:
+                await manager.release_recording_consumer()
                 raise Exception("OpenCV未安装")
             except Exception as e:
+                await manager.release_recording_consumer()
                 raise Exception(f"录制启动失败: {str(e)}")
 
     @staticmethod
@@ -679,6 +697,7 @@ class DebugCameraService:
             recording_media_filename = None
             recording_codec_fourcc = "MJPG"
             recording_container = "AVI"
+            await get_camera_manager().release_recording_consumer()
 
         return {
             "success": True,
@@ -946,9 +965,20 @@ class DebugCameraService:
                     )
 
             # 更新降噪设置 / Update noise reduction settings
-            if "noiseReduction" in settings:
+            if "noiseReductionMode" in settings:
+                if hasattr(camera, "set_noise_reduction_mode"):
+                    camera.set_noise_reduction_mode(settings["noiseReductionMode"])
+            if "noiseReduction" in settings and "noiseReductionMode" not in settings:
                 if hasattr(camera, "set_noise_reduction"):
                     camera.set_noise_reduction(settings["noiseReduction"])
+
+            # 更新 libcamera 高级控制 / Update advanced libcamera controls
+            if "aeFlickerMode" in settings:
+                if hasattr(camera, "set_ae_flicker_mode"):
+                    camera.set_ae_flicker_mode(settings["aeFlickerMode"])
+            if "autoExposureMaxUs" in settings and settings["autoExposureMaxUs"]:
+                if hasattr(camera, "set_auto_exposure_max_us"):
+                    camera.set_auto_exposure_max_us(settings["autoExposureMaxUs"])
 
             # 更新白平衡设置 / Update white balance settings
             if "whiteBalanceMode" in settings:
@@ -977,8 +1007,28 @@ class DebugCameraService:
                 overrides["digital_gain"] = settings["digitalGain"]
             if "autoExposure" in settings:
                 overrides["auto_exposure"] = bool(settings["autoExposure"])
+            if "noiseReductionMode" in settings:
+                overrides["noise_reduction_mode"] = settings["noiseReductionMode"]
+            elif "noiseReduction" in settings:
+                # 兼容旧控制台数值降噪 / Compat numeric NR control from legacy console.
+                level = int(settings.get("noiseReduction") or 0)
+                overrides["noise_reduction_mode"] = (
+                    "off" if level <= 0 else "fast" if level <= 2 else "high_quality"
+                )
+            if "aeFlickerMode" in settings:
+                overrides["ae_flicker_mode"] = settings["aeFlickerMode"]
+            if "autoExposureMaxUs" in settings:
+                overrides["auto_exposure_max_us"] = settings["autoExposureMaxUs"]
             if "colorMode" in settings:
                 overrides["color_mode"] = settings["colorMode"]
+            if "whiteBalanceMode" in settings:
+                overrides["white_balance_mode"] = settings["whiteBalanceMode"]
+                overrides["white_balance_gain_r"] = settings.get(
+                    "whiteBalanceGainR", 1.0
+                )
+                overrides["white_balance_gain_b"] = settings.get(
+                    "whiteBalanceGainB", 1.0
+                )
             if overrides:
                 get_camera_manager().update_runtime_overrides(overrides)
 
@@ -1062,6 +1112,13 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         if camera.set_white_balance(mode, gain_r, gain_b):
+            get_camera_manager().update_runtime_overrides(
+                {
+                    "white_balance_mode": mode,
+                    "white_balance_gain_r": float(gain_r),
+                    "white_balance_gain_b": float(gain_b),
+                }
+            )
             return {
                 "success": True,
                 **i18n_payload(
@@ -1101,6 +1158,24 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         if camera.set_night_mode(enabled):
+            overrides = {"night_mode": bool(enabled)}
+            if enabled:
+                overrides.update(
+                    {
+                        "white_balance_mode": "night",
+                        "white_balance_gain_r": 1.1,
+                        "white_balance_gain_b": 0.9,
+                    }
+                )
+            else:
+                overrides.update(
+                    {
+                        "white_balance_mode": "auto",
+                        "white_balance_gain_r": 1.0,
+                        "white_balance_gain_b": 1.0,
+                    }
+                )
+            get_camera_manager().update_runtime_overrides(overrides)
             mode_text = "启用" if enabled else "关闭"
             return {
                 "success": True,

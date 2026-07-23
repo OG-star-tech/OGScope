@@ -8,8 +8,8 @@ import asyncio
 import subprocess
 
 from ogscope.config import get_settings
-from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 from ogscope.domain.network import nmcli_services as net_impl
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
 
 
 class WifiDomainService:
@@ -27,7 +27,9 @@ class WifiDomainService:
         ap_connection = data.get("AP_CONNECTION", settings.wifi_ap_connection)
         ap_ipv4 = data.get("AP_IPV4") or None
         ap_url_hint = (
-            f"http://{settings.wifi_ap_url_host}:{settings.port}" if mode == "ap" else None
+            f"http://{settings.wifi_ap_url_host}:{settings.port}"
+            if mode == "ap"
+            else None
         )
         message = data.get("error")
         suffix = settings.device_id_suffix or None
@@ -58,7 +60,9 @@ class WifiDomainService:
 
     async def scan_wifi(self):
         settings = get_settings()
-        return await asyncio.to_thread(net_impl.nmcli_wifi_scan, settings.wifi_interface)
+        return await asyncio.to_thread(
+            net_impl.nmcli_wifi_scan, settings.wifi_interface
+        )
 
     async def list_profiles(self):
         settings = get_settings()
@@ -68,7 +72,9 @@ class WifiDomainService:
         settings = get_settings()
         if not wifi_switch_service.is_configured():
             raise RuntimeError("wifi_not_configured")
-        await asyncio.to_thread(net_impl.nmcli_modify_sta_to_ssid, settings, ssid, password)
+        await asyncio.to_thread(
+            net_impl.nmcli_modify_sta_to_ssid, settings, ssid, password
+        )
         await asyncio.to_thread(wifi_switch_service.switch, "sta")
         net_impl.schedule_sta_rollback_watch()
         return self.build_wifi_status()
@@ -83,7 +89,9 @@ class WifiDomainService:
         if name == settings.wifi_sta_connection:
             await asyncio.to_thread(wifi_switch_service.switch, "sta")
         else:
-            await asyncio.to_thread(net_impl.nm_down_if_exists, settings.wifi_ap_connection)
+            await asyncio.to_thread(
+                net_impl.nm_down_if_exists, settings.wifi_ap_connection
+            )
             await asyncio.to_thread(net_impl.nmcli_activate_connection, settings, name)
         net_impl.schedule_sta_rollback_watch()
         return self.build_wifi_status()
@@ -115,4 +123,3 @@ __all__ = [
     "TimeoutExpired",
     "CalledProcessError",
 ]
-

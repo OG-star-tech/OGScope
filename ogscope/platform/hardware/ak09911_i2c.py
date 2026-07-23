@@ -204,7 +204,9 @@ def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
             time.sleep(0.006 * (read_try + 1))
     if data is None:
         if last_io is not None:
-            raise RuntimeError(_err_ctx("hxl_read", last_io, addr7).to_text()) from last_io
+            raise RuntimeError(
+                _err_ctx("hxl_read", last_io, addr7).to_text()
+            ) from last_io
         raise RuntimeError("hxl_read unknown error")
     try:
         _ = smbus.read_byte_data(addr7, REG_ST2)
@@ -215,7 +217,9 @@ def _measure_body_smbus(smbus: Any, addr7: int) -> Ak09911Measurement:
             try:
                 _ = smbus.read_byte_data(addr7, REG_ST2)
             except OSError as exc2:
-                raise RuntimeError(_err_ctx("st2_read", exc2, addr7).to_text()) from exc2
+                raise RuntimeError(
+                    _err_ctx("st2_read", exc2, addr7).to_text()
+                ) from exc2
         else:
             raise RuntimeError(_err_ctx("st2_read", exc, addr7).to_text()) from exc
     hx, hy, hz = _combine_hxl_6(data)
@@ -303,7 +307,9 @@ def measure_heading_with_cad_fallback(
     )
 
 
-def measure_single(bus: int, addr7: int) -> tuple[Ak09911Measurement | None, str | None]:
+def measure_single(
+    bus: int, addr7: int
+) -> tuple[Ak09911Measurement | None, str | None]:
     path = ensure_i2c_dev_node(bus)
     if path is None:
         return None, f"missing {i2c_dev_path(bus)}"

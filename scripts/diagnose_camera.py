@@ -4,10 +4,12 @@
 用于检查相机初始化、启动和运行状态
 """
 import asyncio
-import httpx
+import importlib.util
 import json
 import sys
 from pathlib import Path
+
+import httpx
 
 BASE_URL = "http://localhost:8000/api/debug/camera"
 
@@ -76,7 +78,7 @@ async def test_preview(client):
         content_type = response.headers.get("content-type", "")
         content_length = len(response.content)
 
-        print(f"✅ 预览响应:")
+        print("✅ 预览响应:")
         print(f"  - Content-Type: {content_type}")
         print(f"  - Content-Length: {content_length} bytes")
 
@@ -137,31 +139,25 @@ async def check_system_dependencies():
     print("\n🔧 检查系统依赖...")
 
     # 检查 Picamera2 / Check Picamera2
-    try:
-        import picamera2
-
+    if importlib.util.find_spec("picamera2") is not None:
         print("✅ Picamera2 已安装")
-    except ImportError:
+    else:
         print("❌ Picamera2 未安装")
         print("   请运行: sudo apt install python3-picamera2")
         return False
 
     # 检查 OpenCV / Check OpenCV
-    try:
-        import cv2
-
+    if importlib.util.find_spec("cv2") is not None:
         print("✅ OpenCV 已安装")
-    except ImportError:
+    else:
         print("⚠️  OpenCV 未安装 (直方图功能需要)")
         print("   请运行: sudo apt install python3-opencv")
         print("   或: pip install opencv-python-headless")
 
     # 检查 NumPy / Check NumPy
-    try:
-        import numpy
-
+    if importlib.util.find_spec("numpy") is not None:
         print("✅ NumPy 已安装")
-    except ImportError:
+    else:
         print("❌ NumPy 未安装")
         return False
 

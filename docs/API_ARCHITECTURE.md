@@ -17,6 +17,7 @@
 1. 业务逻辑放在 `domain/*` 或 `core/application/*`，`routes.py` 仅做 HTTP 适配。
 2. 对外稳定能力使用 `/api/core/v1/*`；开发者域使用 `/api/dev/*`。
 3. 同步更新契约文档：`docs/contracts/core-rest-v1.md` / `core-rest-v1_EN.md`，`dev-rest-v1.md` / `dev-rest-v1_EN.md`。
+4. 若新增调试页字段、相机遥测或分析结果 `overlay_ext`，同时更新 `docs/DEBUG_CONSOLE.md` / `DEBUG_CONSOLE_EN.md`。
 
 开发板部署总览见 [开发指南](development/README.md)（[English](development/README_EN.md)）。提交前自检见下文第 5 节。
 
@@ -90,6 +91,7 @@ HTTP Request
    - `docs/contracts/core-rest-v1.md`、`docs/contracts/core-rest-v1_EN.md`
    - `docs/contracts/dev-rest-v1.md`、`docs/contracts/dev-rest-v1_EN.md`
    - `docs/contracts/core-compatibility-matrix.md`（若涉及版本/路径策略）
+7. 调试控制台字段、相机管线遥测与分析扩展字段已同步到调试文档。
 
 ## 6) 快速验证命令
 

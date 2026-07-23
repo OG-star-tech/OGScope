@@ -10,7 +10,9 @@ from ogscope.config import Settings
 
 ConfigFileScope = Literal["ogscope", "network", "both"]
 
-_CATALOG_SECTIONS: tuple[tuple[str, str, str, ConfigFileScope, tuple[str, ...]], ...] = (
+_CATALOG_SECTIONS: tuple[
+    tuple[str, str, str, ConfigFileScope, tuple[str, ...]], ...
+] = (
     (
         "basic",
         "基础",
@@ -66,8 +68,19 @@ _CATALOG_SECTIONS: tuple[tuple[str, str, str, ConfigFileScope, tuple[str, ...]],
             "camera_gain",
             "camera_ae_polar_preset",
             "camera_ae_exposure_value",
+            "camera_auto_exposure_max_us",
+            "camera_ae_flicker_mode",
+            "camera_noise_reduction_mode",
+            "camera_lores_enabled",
+            "camera_lores_width",
+            "camera_lores_height",
+            "camera_lores_format",
             "camera_flip_horizontal",
             "camera_flip_vertical",
+            "camera_white_balance_mode",
+            "camera_white_balance_gain_r",
+            "camera_white_balance_gain_b",
+            "camera_night_mode",
         ),
     ),
     (
@@ -78,9 +91,12 @@ _CATALOG_SECTIONS: tuple[tuple[str, str, str, ConfigFileScope, tuple[str, ...]],
         (
             "shared_preview_fps",
             "preview_jpeg_quality",
+            "preview_encoder",
             "debug_preview_min_interval_ms",
             "camera_probe_timeout_sec",
             "camera_grab_failures_offline",
+            "camera_idle_shutdown_sec",
+            "camera_frame_stale_timeout_sec",
             "keep_raw_cache",
             "stream_max_mjpeg_clients",
             "stream_mjpeg_frame_fetch_timeout_ms",
@@ -177,10 +193,6 @@ _CATALOG_SECTIONS: tuple[tuple[str, str, str, ConfigFileScope, tuple[str, ...]],
             "wifi_ap_connection",
             "wifi_interface",
             "wifi_ap_url_host",
-            "wifi_emergency_gpio_enabled",
-            "wifi_emergency_pin_out_bcm",
-            "wifi_emergency_pin_in_bcm",
-            "wifi_emergency_hold_seconds",
             "device_id_suffix",
             "wifi_ap_ssid",
             "wifi_sta_rollback_timeout_seconds",

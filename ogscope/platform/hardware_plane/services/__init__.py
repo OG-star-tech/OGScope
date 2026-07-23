@@ -7,4 +7,3 @@ from ogscope.platform.hardware_plane.services.hmi import HmiService
 from ogscope.platform.hardware_plane.services.sensor_hub import SensorHubService
 
 __all__ = ["CameraPlaneService", "HmiService", "SensorHubService"]
-

@@ -8,4 +8,3 @@ from ogscope.platform.hardware_plane.transport.jsonrpc_uds import (
 )
 
 __all__ = ["JsonRpcUdsServer", "JsonRpcUdsClient"]
-

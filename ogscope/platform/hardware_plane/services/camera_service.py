@@ -88,4 +88,3 @@ class CameraPlaneService:
             frame.pop("payload", None)
             return frame
         return {"accepted": False, "message": f"unsupported action: {action}"}
-

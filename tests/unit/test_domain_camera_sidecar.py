@@ -39,4 +39,3 @@ def test_merge_capture_sidecar_does_not_override_existing_fields() -> None:
     merge_capture_sidecar_into_info(info, capture_info)
 
     assert info["resolution"] == "640x480"
-
