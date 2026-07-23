@@ -2,9 +2,9 @@
 大尺度背景减除单元测试 / Unit tests for large-scale background flattening.
 """
 
+import cv2
 import numpy as np
 import pytest
-import cv2
 
 from ogscope.algorithms.plate_solve.solver import subtract_large_scale_background_bgr
 

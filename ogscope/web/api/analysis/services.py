@@ -389,9 +389,7 @@ class AnalysisService:
         )
         overlay_ext: dict[str, Any] = {}
         try:
-            overlay_ext["labels_topn"] = self._build_topn_labels(
-                row, topn_count=topn
-            )
+            overlay_ext["labels_topn"] = self._build_topn_labels(row, topn_count=topn)
         except Exception:
             overlay_ext["labels_topn"] = []
         if enable_polar:
@@ -1040,8 +1038,7 @@ class AnalysisService:
                 "next_allowed_in_ms": max(
                     0,
                     int(
-                        effective_interval_ms
-                        - (time.perf_counter() - t_total) * 1000.0
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
                     ),
                 ),
             }
@@ -1063,8 +1060,7 @@ class AnalysisService:
                 "next_allowed_in_ms": max(
                     0,
                     int(
-                        effective_interval_ms
-                        - (time.perf_counter() - t_total) * 1000.0
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
                     ),
                 ),
             }
@@ -1417,9 +1413,7 @@ class AnalysisService:
                 ),
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
-                "next_allowed_in_ms": max(
-                    0, int(effective_interval_ms - elapsed_ms)
-                ),
+                "next_allowed_in_ms": max(0, int(effective_interval_ms - elapsed_ms)),
             }
         except asyncio.TimeoutError:
             return {
@@ -1442,8 +1436,7 @@ class AnalysisService:
                 "next_allowed_in_ms": max(
                     0,
                     int(
-                        effective_interval_ms
-                        - (time.perf_counter() - t_total) * 1000.0
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
                     ),
                 ),
             }

@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ogscope.config import get_settings
-from ogscope.platform.hardware_plane.runtime import describe_hardware_plane_profile
 from ogscope.platform.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware_plane.runtime import describe_hardware_plane_profile
 
 
 def _module_available(module_name: str) -> bool:

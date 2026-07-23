@@ -28,7 +28,9 @@ class PreviewEncoder(Protocol):
         self, frame: Any, *, quality: int = 75, source_format: str = "RGB888"
     ) -> EncodedImage | None: ...
 
-    def encode_png(self, frame: Any, *, source_format: str = "RGB888") -> bytes | None: ...
+    def encode_png(
+        self, frame: Any, *, source_format: str = "RGB888"
+    ) -> bytes | None: ...
 
 
 class OpenCVEncoder:
@@ -111,7 +113,9 @@ class TurboJPEGEncoder:
     ) -> EncodedImage | None:
         """编码 JPEG；TurboJPEG 支持直接输入 RGB/BGR / Encode JPEG from RGB/BGR."""
         fmt = str(source_format or "RGB888").upper()
-        pixel_format = self._tjpf_bgr if fmt in {"BGR888", "BGR", "BGR24"} else self._tjpf_rgb
+        pixel_format = (
+            self._tjpf_bgr if fmt in {"BGR888", "BGR", "BGR24"} else self._tjpf_rgb
+        )
         try:
             data = self._jpeg.encode(
                 frame,

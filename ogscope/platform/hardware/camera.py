@@ -343,7 +343,14 @@ class IMX327MIPICamera(CameraInterface):
         if isinstance(value, int):
             return "off" if value <= 0 else "fast" if value <= 2 else "high_quality"
         text = str(value or "fast").strip().lower().replace("-", "_")
-        aliases = {"0": "off", "1": "fast", "2": "fast", "3": "high_quality", "4": "high_quality", "hq": "high_quality"}
+        aliases = {
+            "0": "off",
+            "1": "fast",
+            "2": "fast",
+            "3": "high_quality",
+            "4": "high_quality",
+            "hq": "high_quality",
+        }
         text = aliases.get(text, text)
         return text if text in {"off", "fast", "high_quality"} else "fast"
 
@@ -435,7 +442,9 @@ class IMX327MIPICamera(CameraInterface):
             # Picamera2/libcamera 版本间枚举名有差异；找不到枚举时用整数 fallback，禁止传 None。
             # Enum names differ across Picamera2/libcamera versions; fall back to ints and never pass None.
             updates["AeFlickerMode"] = (
-                enum_value if enum_value is not None else (1 if mode in {"50hz", "60hz"} else 0)
+                enum_value
+                if enum_value is not None
+                else (1 if mode in {"50hz", "60hz"} else 0)
             )
         if mode in {"50hz", "60hz"} and self._control_supported("AeFlickerPeriod"):
             updates["AeFlickerPeriod"] = 10_000 if mode == "50hz" else 8_333
@@ -464,7 +473,9 @@ class IMX327MIPICamera(CameraInterface):
                 return cfg
             except Exception as e:
                 self._lores_available = False
-                logger.debug("lores 流不可用，回退主流配置 / Lores unavailable, fallback: %s", e)
+                logger.debug(
+                    "lores 流不可用，回退主流配置 / Lores unavailable, fallback: %s", e
+                )
         self._lores_available = False
         return self.camera.create_video_configuration(
             main=main,
@@ -479,7 +490,10 @@ class IMX327MIPICamera(CameraInterface):
             lores = request.make_array("lores")
             if lores is None:
                 return
-            if len(getattr(lores, "shape", ())) == 2 and lores.shape[0] >= self.lores_height:
+            if (
+                len(getattr(lores, "shape", ())) == 2
+                and lores.shape[0] >= self.lores_height
+            ):
                 y_plane = lores[: self.lores_height, :]
             elif len(getattr(lores, "shape", ())) >= 3:
                 y_plane = lores[..., 0]
@@ -1120,9 +1134,7 @@ class IMX327MIPICamera(CameraInterface):
                 "actual_exposure_us": int(
                     metadata.get("ExposureTime", self.exposure_us) or 0
                 ),
-                "frame_duration_us": int(
-                    metadata.get("FrameDuration", 0) or 0
-                ),
+                "frame_duration_us": int(metadata.get("FrameDuration", 0) or 0),
                 "frame_duration_limits": list(
                     self._frame_duration_limits or self._compute_frame_duration_limits()
                 ),
@@ -1245,7 +1257,9 @@ class IMX327MIPICamera(CameraInterface):
 
     def set_noise_reduction(self, level: int) -> bool:
         """兼容旧级别接口并映射到语义模式 / Compat level API mapped to semantic NR mode."""
-        return self.set_noise_reduction_mode(self._normalize_noise_reduction_mode(level))
+        return self.set_noise_reduction_mode(
+            self._normalize_noise_reduction_mode(level)
+        )
 
     def set_noise_reduction_mode(self, mode: str) -> bool:
         """设置语义降噪模式 / Set semantic noise-reduction mode."""
@@ -1268,7 +1282,11 @@ class IMX327MIPICamera(CameraInterface):
             logger.error("相机未初始化")
             return False
         text = str(mode or "off").lower().replace("_", "")
-        self.ae_flicker_mode = "50hz" if text in {"50", "50hz"} else "60hz" if text in {"60", "60hz"} else "off"
+        self.ae_flicker_mode = (
+            "50hz"
+            if text in {"50", "50hz"}
+            else "60hz" if text in {"60", "60hz"} else "off"
+        )
         self._apply_ae_flicker_controls()
         return True
 
@@ -1291,7 +1309,14 @@ class IMX327MIPICamera(CameraInterface):
 
         try:
             mode = str(mode or "auto").lower()
-            if mode in {"auto", "daylight", "cloudy", "tungsten", "fluorescent", "indoor"}:
+            if mode in {
+                "auto",
+                "daylight",
+                "cloudy",
+                "tungsten",
+                "fluorescent",
+                "indoor",
+            }:
                 self.white_balance_mode = mode
                 self.white_balance_gain_r = 1.0
                 self.white_balance_gain_b = 1.0

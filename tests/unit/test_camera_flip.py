@@ -131,7 +131,9 @@ def test_encode_frame_preserves_rgb_channel_order() -> None:
 
 
 @pytest.mark.unit
-def test_preview_encoder_falls_back_to_opencv_when_turbojpeg_missing(monkeypatch) -> None:
+def test_preview_encoder_falls_back_to_opencv_when_turbojpeg_missing(
+    monkeypatch,
+) -> None:
     """TurboJPEG 缺失时必须安全回退 / Missing TurboJPEG must safely fall back."""
     monkeypatch.setitem(sys.modules, "turbojpeg", types.SimpleNamespace())
 

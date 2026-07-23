@@ -93,10 +93,9 @@ def horizontal_to_equatorial(
     lat_r = math.radians(latitude_deg)
     alt_r = math.radians(altitude_deg)
     az_r = math.radians(azimuth_deg)
-    sin_dec = (
-        math.sin(alt_r) * math.sin(lat_r)
-        + math.cos(alt_r) * math.cos(lat_r) * math.cos(az_r)
-    )
+    sin_dec = math.sin(alt_r) * math.sin(lat_r) + math.cos(alt_r) * math.cos(
+        lat_r
+    ) * math.cos(az_r)
     dec_r = math.asin(max(-1.0, min(1.0, sin_dec)))
     ha_r = math.atan2(
         -math.sin(az_r) * math.cos(alt_r),
@@ -120,10 +119,9 @@ def angular_separation_deg(
     dec1 = math.radians(dec1_deg)
     ra2 = math.radians(ra2_deg)
     dec2 = math.radians(dec2_deg)
-    cos_sep = (
-        math.sin(dec1) * math.sin(dec2)
-        + math.cos(dec1) * math.cos(dec2) * math.cos(ra1 - ra2)
-    )
+    cos_sep = math.sin(dec1) * math.sin(dec2) + math.cos(dec1) * math.cos(
+        dec2
+    ) * math.cos(ra1 - ra2)
     return math.degrees(math.acos(max(-1.0, min(1.0, cos_sep))))
 
 
@@ -169,11 +167,7 @@ def predict_from_solve_context(
         or az is None
     ):
         return {"sensor_status": "unavailable"}
-    if not (
-        -90.0 <= lat <= 90.0
-        and -180.0 <= lon <= 180.0
-        and -90.0 <= alt <= 90.0
-    ):
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and -90.0 <= alt <= 90.0):
         return {"sensor_status": "unavailable"}
     if not (mount_valid or heading_valid):
         return {"sensor_status": "unavailable"}

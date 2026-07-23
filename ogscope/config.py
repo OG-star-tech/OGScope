@@ -94,9 +94,7 @@ class Settings(BaseSettings):
     camera_height: int = Field(
         default=720, description="图像高度 / Default capture height"
     )
-    camera_fps: int = Field(
-        default=8, description="传感器目标帧率 / Target sensor FPS"
-    )
+    camera_fps: int = Field(default=8, description="传感器目标帧率 / Target sensor FPS")
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
     )
