@@ -21,7 +21,9 @@ class CameraSettings(BaseModel):
     noiseReduction: Optional[int] = 0  # 降噪级别 (0-4) / Noise reduction level (0-4)
     noiseReductionMode: Optional[str] = None  # 语义降噪模式 / Semantic NR mode
     aeFlickerMode: Optional[str] = None  # AE 防闪烁 / AE flicker mode
-    autoExposureMaxUs: Optional[int] = None  # 自动曝光最长帧周期 / Max auto-exposure frame duration
+    autoExposureMaxUs: Optional[int] = (
+        None  # 自动曝光最长帧周期 / Max auto-exposure frame duration
+    )
     whiteBalanceMode: Optional[str] = "auto"  # 白平衡模式 / white balance mode
     whiteBalanceGainR: Optional[float] = 1.0  # 白平衡红色增益 / white balance red gain
     whiteBalanceGainB: Optional[float] = 1.0  # 白平衡蓝色增益 / white balance blue gain

@@ -173,7 +173,9 @@ class CameraManager:
                 frame, quality=int(self._jpeg_quality), source_format=source_format
             )
         except Exception as exc:
-            self._logger.debug("OpenCV 回退编码失败 / OpenCV fallback encode failed: %s", exc)
+            self._logger.debug(
+                "OpenCV 回退编码失败 / OpenCV fallback encode failed: %s", exc
+            )
             return None
 
     def _read_frame_sync(self):
@@ -288,7 +290,9 @@ class CameraManager:
         if self._has_consumers():
             return
         self._cancel_idle_shutdown()
-        self._idle_shutdown_task = asyncio.create_task(self._idle_shutdown_after_delay())
+        self._idle_shutdown_task = asyncio.create_task(
+            self._idle_shutdown_after_delay()
+        )
 
     async def _idle_shutdown_after_delay(self) -> None:
         """热驻留结束后释放相机 / Release camera after the warm-idle period."""
@@ -689,7 +693,9 @@ class CameraManager:
         actual_capture_fps = self._rate(self._capture_timestamps)
         actual_preview_fps = self._rate(self._jpeg_timestamps)
         sensor_target_fps = float(info.get("fps", 0) or 0)
-        exposure_us = int(info.get("actual_exposure_us", info.get("exposure_us", 0)) or 0)
+        exposure_us = int(
+            info.get("actual_exposure_us", info.get("exposure_us", 0)) or 0
+        )
         frame_duration_us = int(info.get("frame_duration_us", 0) or 0)
         throttle_reason = None
         if (
@@ -710,11 +716,11 @@ class CameraManager:
             "preview_consumers": int(self._preview_consumers),
             "analysis_consumers": int(self._analysis_consumers),
             "recording_consumers": int(self._recording_consumers),
-            "jpeg_average_encode_ms": round(
-                sum(self._jpeg_encode_ms) / len(self._jpeg_encode_ms), 2
-            )
-            if self._jpeg_encode_ms
-            else 0.0,
+            "jpeg_average_encode_ms": (
+                round(sum(self._jpeg_encode_ms) / len(self._jpeg_encode_ms), 2)
+                if self._jpeg_encode_ms
+                else 0.0
+            ),
             "jpeg_cached_bytes": len(self._latest_jpeg or b""),
             "preview_encoder": self._last_jpeg_encoder,
             "jpeg_encode_failures": int(self._jpeg_encode_failures),

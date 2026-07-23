@@ -15,8 +15,8 @@ from starlette.requests import Request
 from ogscope.config import get_settings
 from ogscope.domain.camera.services import camera_domain_service
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
-from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 from ogscope.web.camera_shared import get_camera_manager
+from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 
 
 async def build_camera_mjpeg_stream(

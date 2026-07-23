@@ -68,14 +68,20 @@ class CoreContractService:
 
         scores: list[float] = []
         if lux is not None and lux >= 0:
-            scores.append(CoreContractService._clamp01(1.0 - math.log10(lux + 1.0) / 2.0))
+            scores.append(
+                CoreContractService._clamp01(1.0 - math.log10(lux + 1.0) / 2.0)
+            )
         if exposure_us is not None and exposure_us > 0:
             exposure_ceiling = max(max_exposure_us or 100_000.0, 1.0)
-            exposure_score = CoreContractService._clamp01(exposure_us / exposure_ceiling)
+            exposure_score = CoreContractService._clamp01(
+                exposure_us / exposure_ceiling
+            )
             gain_score = 0.0
             if digital_gain is not None:
                 gain_score = CoreContractService._clamp01((digital_gain - 1.0) / 7.0)
-            scores.append(CoreContractService._clamp01(exposure_score * 0.75 + gain_score * 0.25))
+            scores.append(
+                CoreContractService._clamp01(exposure_score * 0.75 + gain_score * 0.25)
+            )
 
         dark_score = sum(scores) / len(scores) if scores else None
         return {
@@ -150,7 +156,9 @@ class CoreContractService:
             "in_health_scope": in_health_scope,
         }
         if not in_health_scope:
-            managed_by = "external" if profile.get("subordinate_mode") else "unconfigured"
+            managed_by = (
+                "external" if profile.get("subordinate_mode") else "unconfigured"
+            )
             return {
                 **base,
                 "managed_by": managed_by,
