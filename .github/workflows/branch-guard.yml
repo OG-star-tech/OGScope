@@ -1,18 +1,37 @@
-# 分支策略守卫：禁止直接向 main 推送非合并提交
-# Branch guard: reject direct (non-merge) pushes to main
+# 分支策略守卫：main 只能由 staging PR 晋级
+# Branch guard: main can only be promoted from staging PRs
 #
-# 说明 / Note: 本地 pre-commit 的 no-commit-to-branch 防本地误提交；
-# 本 workflow 在 push 已发生后标记 CI 失败，需配合 GitHub Branch protection 才能真正阻断。
-# Local pre-commit blocks local commits; this flags CI after push — use branch protection to block pushes.
+# 说明 / Note: push 守卫是兜底；真正阻断直接更新依赖 GitHub Rulesets。
+# Push guard is a fallback; GitHub Rulesets are what block direct updates.
 
 name: Branch Guard
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
+  require-staging-source:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 main PR 来源 / Check main PR source
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${HEAD_REF}" == "staging" ]]; then
+            echo "Allowed: staging -> main"
+            exit 0
+          fi
+          echo "::error::main 只能从 staging 分支通过 PR 晋级，当前来源：${HEAD_REF}"
+          echo "::error::PRs to main must come from staging. Current source: ${HEAD_REF}"
+          exit 1
+
   block-direct-push-to-main:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: 检查是否为合并提交 / Check merge commit
@@ -29,6 +48,6 @@ jobs:
             echo "Allowed merge to main."
             exit 0
           fi
-          echo "::error::禁止直接向 main 推送。请先合入 develop，再通过 PR 合入 main。"
-          echo "::error::Direct push to main is not allowed. Merge to develop first, then open a PR to main."
+          echo "::error::禁止直接向 main 推送。请先合入 staging，再通过 PR 合入 main。"
+          echo "::error::Direct push to main is not allowed. Merge to staging first, then open a PR to main."
           exit 1
