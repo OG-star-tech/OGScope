@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -53,7 +53,9 @@ def test_sensor_prediction_matches_zenith_at_equator() -> None:
     """赤道天顶预测应落在赤纬 0 附近 / Equator zenith predicts near Dec 0."""
     row = {"status": "MATCH_FOUND", "ra_deg": 0.0, "dec_deg": 0.0}
     context = _solve_context()
-    expected_ra = local_sidereal_time_deg(0.0, datetime(2000, 1, 1, 12, tzinfo=UTC))
+    expected_ra = local_sidereal_time_deg(
+        0.0, datetime(2000, 1, 1, 12, tzinfo=timezone.utc)
+    )
     row["ra_deg"] = expected_ra
     attach_sensor_prediction(row, context)
 
