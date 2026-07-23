@@ -8,7 +8,9 @@ import importlib.util
 from dataclasses import dataclass
 from typing import Any
 
-from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
+from ogscope.config import get_settings
+from ogscope.platform.hardware.wifi_switch import wifi_switch_service
+from ogscope.platform.hardware_plane.runtime import describe_hardware_plane_profile
 
 
 def _module_available(module_name: str) -> bool:
@@ -35,10 +37,16 @@ class CapabilitySnapshot:
 
 def detect_capabilities() -> CapabilitySnapshot:
     """检测当前运行能力 / Detect runtime capabilities."""
+    profile = describe_hardware_plane_profile(get_settings())
+    network_managed = (
+        not bool(profile.get("subordinate_mode"))
+        and wifi_switch_service.is_configured()
+        and _module_available("ogscope.domain.network.services")
+    )
     return CapabilitySnapshot(
         analysis=_module_available("ogscope.domain.analysis.services"),
         camera=_module_available("ogscope.platform.hardware.camera"),
-        network=_module_available("ogscope.domain.network.services"),
+        network=network_managed,
     )
 
 
@@ -49,6 +57,8 @@ def capability_map() -> dict[str, Any]:
 
 async def capability_inventory() -> list[dict[str, Any]]:
     """返回硬件平面能力清单 / Return hardware-plane capability inventory."""
+    from ogscope.platform.hardware_plane.runtime import get_hardware_plane_client
+
     client = get_hardware_plane_client()
     resp = await client.capability_list()
     if not resp.get("success"):

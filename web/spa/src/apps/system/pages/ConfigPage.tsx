@@ -8,6 +8,8 @@ type ConfigFileItem = {
   path: string;
   exists: boolean;
   writable: boolean;
+  writable_direct?: boolean;
+  writable_via_sudo?: boolean;
   content: string;
   error?: string | null;
 };
@@ -288,6 +290,21 @@ export function ConfigPage() {
     return label ? (isZh ? label.zh : label.en) : fileId;
   };
 
+  const writableHint = (file: ConfigFileItem) => {
+    if (!file.writable) {
+      return isZh
+        ? "不可写：请运行 sudo ./scripts/ogscope-network-init.sh ensure-config"
+        : "Not writable: run sudo ./scripts/ogscope-network-init.sh ensure-config";
+    }
+    if (file.writable_via_sudo && !file.writable_direct) {
+      return isZh ? "可写（经 sudo 助手）" : "Writable (via sudo helper)";
+    }
+    if (file.writable_direct) {
+      return isZh ? "可写（直接）" : "Writable (direct)";
+    }
+    return isZh ? "可写" : "Writable";
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header>
@@ -360,8 +377,7 @@ export function ConfigPage() {
                 <div>
                   <p className="font-mono text-xs text-on-surface">{activeFile.path}</p>
                   <p className="text-xs text-on-surface-variant">
-                    {isZh ? "可写" : "Writable"}: {String(activeFile.writable)} · {isZh ? "存在" : "Exists"}:{" "}
-                    {String(activeFile.exists)}
+                    {writableHint(activeFile)} · {isZh ? "存在" : "Exists"}: {String(activeFile.exists)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

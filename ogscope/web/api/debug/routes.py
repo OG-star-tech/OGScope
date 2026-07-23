@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+from ogscope.config import get_settings
 from ogscope.core.application import core_contract_service
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.domain.camera.services import (
@@ -35,9 +36,6 @@ _MJPEG_LIMIT_DETAIL = (
     "MJPEG stream limit reached; close other previews or tabs / "
     "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
 )
-
-_DEFAULT_PREVIEW_JPEG_QUALITY = 75
-
 
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
 
@@ -106,12 +104,13 @@ async def _streaming_response_debug_camera_mjpeg(
 @router.get("/debug/camera/stream")
 async def stream_debug_camera(
     request: Request,
-    quality: int = Query(_DEFAULT_PREVIEW_JPEG_QUALITY, ge=10, le=100),
+    quality: int | None = Query(None, ge=10, le=100),
 ):
     """MJPEG 实时流 - 可配置压缩质量 / MJPEG live streaming - configurable compression quality"""
     try:
+        effective_quality = int(quality or get_settings().preview_jpeg_quality)
         return await _streaming_response_debug_camera_mjpeg(
-            request, image_format="jpeg", quality=quality
+            request, image_format="jpeg", quality=effective_quality
         )
     except HTTPException:
         raise
@@ -233,6 +232,15 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
         return await DebugCameraService.set_fps(fps)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/camera/preview-fps")
+async def set_camera_preview_fps(fps: int = Query(..., ge=1, le=30)):
+    """独立设置共享预览帧率 / Set shared preview FPS independently."""
+    from ogscope.web.camera_shared import get_camera_manager
+
+    applied = get_camera_manager().set_preview_fps(fps)
+    return {"success": True, "preview_target_fps": applied}
 
 
 @router.post("/debug/camera/settings")

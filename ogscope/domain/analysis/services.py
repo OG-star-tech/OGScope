@@ -29,7 +29,9 @@ class AnalysisDomainService:
         return path, media or "application/octet-stream"
 
     @staticmethod
-    def parse_frame_upload_payload(payload: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def parse_frame_upload_payload(
+        payload: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         obj = json.loads(payload)
         if not isinstance(obj, dict):
             raise ValueError("payload 必须为 JSON 对象 / payload must be a JSON object")
@@ -51,4 +53,3 @@ class AnalysisDomainService:
 analysis_domain_service = AnalysisDomainService()
 
 __all__ = ["analysis_domain_service", "AnalysisDomainService"]
-

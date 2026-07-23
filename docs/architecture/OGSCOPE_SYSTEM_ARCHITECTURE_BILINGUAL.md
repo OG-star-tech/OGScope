@@ -54,7 +54,6 @@ flowchart TD
   subgraph peripheralLayer["外围硬件层 / Peripheral Hardware Layer"]
     cameraHw["相机 / Camera IMX327"]
     wifiHw["网络模块 / WiFi and NetworkManager"]
-    gpioHw["应急GPIO / Emergency GPIO"]
     magnetometerHw["磁力计（规划） / Magnetometer (Planned)"]
     gpsHw["GPS（规划） / GPS (Planned)"]
     gyroHw["陀螺仪（规划） / Gyroscope (Planned)"]

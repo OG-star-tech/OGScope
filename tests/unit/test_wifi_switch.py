@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 from ogscope.config import Settings
-from ogscope.platform.hardware.wifi_switch import WifiSwitchService, _parse_status_output
+from ogscope.platform.hardware.wifi_switch import (
+    WifiSwitchService,
+    _parse_status_output,
+)
 
 
 @pytest.mark.unit
@@ -119,7 +122,9 @@ def test_network_api(client, monkeypatch) -> None:
         _ = mode
         return network_routes.wifi_domain_service.build_wifi_status()
 
-    monkeypatch.setattr(network_routes.wifi_domain_service, "switch_mode", _fake_switch_mode)
+    monkeypatch.setattr(
+        network_routes.wifi_domain_service, "switch_mode", _fake_switch_mode
+    )
 
     response = client.get("/api/network/wifi")
     assert response.status_code == 200
@@ -139,7 +144,9 @@ def test_network_wifi_scan_api(client, monkeypatch) -> None:
     async def _fake_scan_wifi():
         return [{"ssid": "Home", "signal": 80, "security": "WPA2"}], None
 
-    monkeypatch.setattr(network_routes.wifi_domain_service, "scan_wifi", _fake_scan_wifi)
+    monkeypatch.setattr(
+        network_routes.wifi_domain_service, "scan_wifi", _fake_scan_wifi
+    )
 
     response = client.get("/api/network/wifi/scan")
     assert response.status_code == 200
@@ -163,7 +170,9 @@ def test_network_profiles_api(client, monkeypatch) -> None:
             }
         ]
 
-    monkeypatch.setattr(network_routes.wifi_domain_service, "list_profiles", _fake_profiles)
+    monkeypatch.setattr(
+        network_routes.wifi_domain_service, "list_profiles", _fake_profiles
+    )
     response = client.get("/api/network/wifi/profiles")
     assert response.status_code == 200
     data = response.json()

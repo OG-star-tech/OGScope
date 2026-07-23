@@ -24,6 +24,9 @@ class FakeCamera:
         self.exposure_us = 10000
         self.analogue_gain = 1.0
         self.digital_gain = 1.0
+        self.noise_reduction_mode = "fast"
+        self.ae_flicker_mode = "off"
+        self.auto_exposure_max_us = 2_000_000
 
     def get_camera_info(self):
         return {
@@ -41,6 +44,19 @@ class FakeCamera:
             "exposure_us": self.exposure_us,
             "analogue_gain": self.analogue_gain,
             "digital_gain": self.digital_gain,
+            "noise_reduction_mode": self.noise_reduction_mode,
+            "ae_flicker_mode": self.ae_flicker_mode,
+            "auto_exposure_max_us": self.auto_exposure_max_us,
+            "driver": "fake",
+            "backend": "unit-test",
+            "lores_enabled": False,
+            "lores_available": False,
+            "capabilities": {
+                "awb_modes": ["auto", "manual", "night"],
+                "noise_reduction_modes": ["off", "fast", "high_quality"],
+                "ae_flicker": False,
+                "manual_digital_gain": True,
+            },
         }
 
     def start_capture(self):
@@ -92,6 +108,19 @@ class FakeCamera:
         return True
 
     def set_noise_reduction(self, level):
+        self.noise_reduction_mode = "off" if int(level) <= 0 else "fast"
+        return True
+
+    def set_noise_reduction_mode(self, mode):
+        self.noise_reduction_mode = str(mode)
+        return True
+
+    def set_ae_flicker_mode(self, mode):
+        self.ae_flicker_mode = str(mode)
+        return True
+
+    def set_auto_exposure_max_us(self, value):
+        self.auto_exposure_max_us = int(value)
         return True
 
     def set_white_balance(self, mode, gain_r=1.0, gain_b=1.0):
@@ -221,6 +250,9 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
         "saturation": 1.0,
         "sharpness": 1.0,
         "noiseReduction": 1,
+        "noiseReductionMode": "high_quality",
+        "aeFlickerMode": "50hz",
+        "autoExposureMaxUs": 1000000,
         "whiteBalanceMode": "auto",
         "whiteBalanceGainR": 1.0,
         "whiteBalanceGainB": 1.0,
@@ -232,11 +264,16 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
     body = response.json()
     assert body["success"] is True
     assert body["settings"]["exposure"] == 12000
+    assert fake_camera_env.noise_reduction_mode == "high_quality"
+    assert fake_camera_env.ae_flicker_mode == "50hz"
+    assert fake_camera_env.auto_exposure_max_us == 1000000
 
 
 @pytest.mark.unit
 def test_debug_camera_auto_exposure_switch_success(client, fake_camera_env):
-    response = client.post("/api/dev/debug/camera/auto-exposure", params={"enabled": False})
+    response = client.post(
+        "/api/dev/debug/camera/auto-exposure", params={"enabled": False}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True

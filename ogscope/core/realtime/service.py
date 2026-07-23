@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
+from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.star_extract import StarExtractor, StarPoint
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.web.camera_shared import get_camera_manager
@@ -45,6 +47,11 @@ class RealtimeSolveService:
         self._fov_estimate: float | None = None
         self._fov_max_error: float | None = None
         self._solve_timeout_ms: int | None = None
+        self._solve_context: Any | None = None
+        self._analysis_interval_sec = max(
+            float(settings.star_analysis_min_interval_ms) / 1000.0,
+            1.0 / max(0.01, float(settings.star_analysis_target_fps)),
+        )
 
     async def start(
         self,
@@ -53,6 +60,7 @@ class RealtimeSolveService:
         fov_estimate: float | None = None,
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
         if self.state.running:
@@ -67,6 +75,7 @@ class RealtimeSolveService:
         self._fov_estimate = fov_estimate
         self._fov_max_error = fov_max_error
         self._solve_timeout_ms = solve_timeout_ms
+        self._solve_context = solve_context
         self.state = RealtimeState(running=True)
         self._previous_stars = None
         self._task = asyncio.create_task(self._loop())
@@ -96,8 +105,15 @@ class RealtimeSolveService:
 
     async def _loop(self) -> None:
         """后台循环 / Background loop"""
+        last_started_mono = 0.0
+        last_frame_id = -1
         while self.state.running:
             try:
+                remaining = self._analysis_interval_sec - (
+                    time.monotonic() - last_started_mono
+                )
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
                 manager = get_camera_manager()
                 cam = manager.get_camera_instance()
                 if not cam or not getattr(cam, "is_capturing", False):
@@ -106,13 +122,18 @@ class RealtimeSolveService:
                 # 必须与共享预览走同一套读锁 + 线程卸载，禁止在事件循环线程里直接 capture_array
                 # Must share the same read lock as shared preview; never call capture_array on the event-loop thread.
                 try:
-                    frame, _fid, _ts = await manager.get_raw_frame()
+                    frame, frame_id, _ts = await manager.get_raw_frame()
                 except RuntimeError:
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.1)
                     continue
                 if frame is None:
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(0.1)
                     continue
+                if frame_id == last_frame_id:
+                    await asyncio.sleep(0.05)
+                    continue
+                last_frame_id = frame_id
+                last_started_mono = time.monotonic()
                 stars = self.extractor.extract(frame)
                 self.state.frame_count += 1
 
@@ -129,7 +150,6 @@ class RealtimeSolveService:
                     self._apply_solve_result(solved)
                     self.state.fullsolve_count += 1
                 self._previous_stars = stars
-                await asyncio.sleep(0.02)
             except Exception as exc:  # noqa: BLE001
                 self.state.last_error = str(exc)
                 await asyncio.sleep(0.1)
@@ -153,7 +173,9 @@ class RealtimeSolveService:
 
     def _apply_solve_result(self, solved: SolveResult) -> None:
         """写入解算结果 / Persist solve result"""
-        self.state.last_result = solved.to_dict()
+        row = solved.to_dict()
+        attach_sensor_prediction(row, self._solve_context)
+        self.state.last_result = row
         self._hint_ra = solved.ra_deg
         self._hint_dec = solved.dec_deg
 

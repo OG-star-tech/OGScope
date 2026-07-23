@@ -35,7 +35,12 @@ def _smbus_read_wia(bus: int, addr7: int) -> dict[str, Any]:
     try:
         from smbus2 import SMBus
     except ImportError:
-        return {"ok": False, "error": "smbus2 not installed", "wia1": None, "wia2": None}
+        return {
+            "ok": False,
+            "error": "smbus2 not installed",
+            "wia1": None,
+            "wia2": None,
+        }
 
     path = f"/dev/i2c-{bus}"
     if not os.path.exists(path):
@@ -60,9 +65,7 @@ def _smbus_read_wia(bus: int, addr7: int) -> dict[str, Any]:
     wia1, wia2, err = _read()
     if err:
         return {"ok": False, "error": err, "wia1": None, "wia2": None}
-    match = (
-        wia1 == _AKM_WIA1 and wia2 is not None and int(wia2) in _KNOWN_WIA2
-    )
+    match = wia1 == _AKM_WIA1 and wia2 is not None and int(wia2) in _KNOWN_WIA2
     return {
         "ok": True,
         "error": None,
@@ -96,6 +99,7 @@ def _smbus_read_wia_first_matching(
 
 class MagnetometerDebugService:
     """AK09911 系列探针与总线扫描 / AK09911 family probe and bus scan."""
+
     _xy_calib: dict[tuple[int, int], dict[str, Any]] = {}
     _heading_mode: dict[tuple[int, int], str] = {}
     _heading_locked: dict[tuple[int, int], dict[str, Any]] = {}
@@ -226,14 +230,22 @@ class MagnetometerDebugService:
                 d = ((d + 180.0) % 360.0) - 180.0
                 unwrapped += d
                 prev_u = unwrapped
-        trend = unwrapped - ((math.degrees(math.atan2(
-            *MagnetometerDebugService._pair_values(
-                axes,
-                float(hx_hist[0]) - cx,
-                float(hy_hist[0]) - cy,
-                float(hz_hist[0]) - cz,
+        trend = unwrapped - (
+            (
+                math.degrees(
+                    math.atan2(
+                        *MagnetometerDebugService._pair_values(
+                            axes,
+                            float(hx_hist[0]) - cx,
+                            float(hy_hist[0]) - cy,
+                            float(hz_hist[0]) - cz,
+                        )
+                    )
+                )
+                + 360.0
             )
-        )) + 360.0) % 360.0)
+            % 360.0
+        )
         sign = 1 if trend >= 0 else -1
 
         locked = {
@@ -284,7 +296,11 @@ class MagnetometerDebugService:
             "addr_7bit": int(k[1]),
             "addr_7bit_hex": f"0x{int(k[1]):02x}",
             "samples": int(float(st.get("samples", 0.0))),
-            "span_xyz": {"x": round(span_x, 3), "y": round(span_y, 3), "z": round(span_z, 3)},
+            "span_xyz": {
+                "x": round(span_x, 3),
+                "y": round(span_y, 3),
+                "z": round(span_z, 3),
+            },
             "locked": locked,
         }
 
@@ -416,9 +432,7 @@ class MagnetometerDebugService:
                     _smbus_read_wia_first_matching, b, addr7
                 )
             results.append({"bus": b, "addr_7bit_used": int(used), **w})
-        any_ok = any(
-            r.get("ok") and r.get("matches_ak099xx") for r in results
-        )
+        any_ok = any(r.get("ok") and r.get("matches_ak099xx") for r in results)
         return {
             "success": any_ok,
             "addr_7bit": int(addr7),
@@ -530,9 +544,8 @@ class MagnetometerDebugService:
             lz = hz - float(c.get("z", cz))
             la, lb = MagnetometerDebugService._pair_values(axes_locked, lx, ly, lz)
             heading_deg_locked = (
-                (math.degrees(math.atan2(sign_locked * la, lb)) + offset_locked + 360.0)
-                % 360.0
-            )
+                math.degrees(math.atan2(sign_locked * la, lb)) + offset_locked + 360.0
+            ) % 360.0
             heading_deg = heading_deg_locked
             heading_source = f"locked_{axes_locked}"
         return {
@@ -548,7 +561,9 @@ class MagnetometerDebugService:
             "heading_raw_deg": round(heading_raw_deg, 2),
             "heading_calibrated_deg": round(heading_cal_deg, 2),
             "heading_auto_deg": round(heading_auto_deg, 2),
-            "heading_locked_deg": None if heading_deg_locked is None else round(heading_deg_locked, 2),
+            "heading_locked_deg": (
+                None if heading_deg_locked is None else round(heading_deg_locked, 2)
+            ),
             "heading_source": heading_source,
             "heading_axes_auto": auto_axes,
             "heading_mode": mode,
@@ -580,4 +595,3 @@ class MagnetometerDebugService:
             "calibration_samples": int(float(st.get("samples", 0.0))),
             "calibration_locked": locked,
         }
-
