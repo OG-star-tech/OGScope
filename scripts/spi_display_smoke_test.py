@@ -44,7 +44,10 @@ def main() -> int:
     try:
         from ogscope.platform.hardware.st7796_spi import ST7796SPI
     except ImportError as e:
-        print("缺少依赖：在树莓派上 poetry install（需 spidev、RPi.GPIO）/ Missing deps:", e)
+        print(
+            "缺少依赖：在树莓派上 poetry install（需 spidev、RPi.GPIO）/ Missing deps:",
+            e,
+        )
         return 1
 
     from PIL import Image, ImageDraw, ImageFont

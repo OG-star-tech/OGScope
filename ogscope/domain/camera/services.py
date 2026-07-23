@@ -8,13 +8,12 @@ import logging
 import time
 from typing import Any
 
-from fastapi import HTTPException
 from fastapi.responses import Response
 from starlette.requests import Request
 
-from ogscope.platform.adapters.debug_services import get_debug_services_module
 from ogscope.config import get_settings
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
+from ogscope.platform.adapters.debug_services import get_debug_services_module
 
 logger = logging.getLogger(__name__)
 
@@ -137,14 +136,18 @@ class FileDomainService:
 class StreamStateDomainService:
     """流状态门面 / Stream state facade."""
 
-    def get_stream_status(self) -> dict[str, int]:
+    async def get_stream_status(self) -> dict[str, Any]:
         limiter = get_mjpeg_stream_limiter()
         settings = get_settings()
+        from ogscope.web.camera_shared import get_camera_manager
+
+        metrics = await get_camera_manager().stream_metrics()
         return {
             "max_clients": int(limiter.max_clients),
             "active_clients": int(limiter.active_clients),
             "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
-            "target_preview_fps": int(settings.shared_preview_fps),
+            "target_preview_fps": int(metrics["preview_target_fps"]),
+            **metrics,
         }
 
 
@@ -173,11 +176,15 @@ class DebugCameraService:
 
     @staticmethod
     async def clear_runtime_overrides():
-        return await _debug_services_module().DebugCameraService.clear_runtime_overrides()
+        return (
+            await _debug_services_module().DebugCameraService.clear_runtime_overrides()
+        )
 
     @staticmethod
     async def apply_runtime_overrides_as_defaults():
-        return await _debug_services_module().DebugCameraService.apply_runtime_overrides_as_defaults()
+        return (
+            await _debug_services_module().DebugCameraService.apply_runtime_overrides_as_defaults()
+        )
 
     @staticmethod
     async def start_camera():
@@ -229,7 +236,9 @@ class DebugCameraService:
 
     @staticmethod
     async def update_settings(settings: dict[str, Any]):
-        return await _debug_services_module().DebugCameraService.update_settings(settings)
+        return await _debug_services_module().DebugCameraService.update_settings(
+            settings
+        )
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
@@ -251,19 +260,27 @@ class DebugCameraService:
 
     @staticmethod
     async def apply_night_mode_preset():
-        return await _debug_services_module().DebugCameraService.apply_night_mode_preset()
+        return (
+            await _debug_services_module().DebugCameraService.apply_night_mode_preset()
+        )
 
     @staticmethod
     async def save_current_settings_backup():
-        return await _debug_services_module().DebugCameraService.save_current_settings_backup()
+        return (
+            await _debug_services_module().DebugCameraService.save_current_settings_backup()
+        )
 
     @staticmethod
     async def restore_settings_backup():
-        return await _debug_services_module().DebugCameraService.restore_settings_backup()
+        return (
+            await _debug_services_module().DebugCameraService.restore_settings_backup()
+        )
 
     @staticmethod
     async def set_color_mode(color_mode: str):
-        return await _debug_services_module().DebugCameraService.set_color_mode(color_mode)
+        return await _debug_services_module().DebugCameraService.set_color_mode(
+            color_mode
+        )
 
     @staticmethod
     async def set_white_balance(mode: str, gain_r: float, gain_b: float):
@@ -307,11 +324,16 @@ class DebugPresetService:
 
     @staticmethod
     async def apply_preset(preset_name: str):
-        return await _debug_services_module().DebugPresetService.apply_preset(preset_name)
+        return await _debug_services_module().DebugPresetService.apply_preset(
+            preset_name
+        )
 
     @staticmethod
     async def delete_preset(preset_name: str):
-        return await _debug_services_module().DebugPresetService.delete_preset(preset_name)
+        return await _debug_services_module().DebugPresetService.delete_preset(
+            preset_name
+        )
+
 
 __all__ = [
     "DebugCameraService",
@@ -323,4 +345,3 @@ __all__ = [
     "file_domain_service",
     "stream_state_domain_service",
 ]
-

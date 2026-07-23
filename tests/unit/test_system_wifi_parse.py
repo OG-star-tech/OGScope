@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from ogscope.web.api.system import services as system_services
 from ogscope.web.api.system.services import SystemInfoService
 
 _WIRELESS_SAMPLE = """Inter-| sta-|   Quality        |   Discarded packets

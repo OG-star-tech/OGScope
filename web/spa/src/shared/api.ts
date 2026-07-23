@@ -279,6 +279,7 @@ export type LabPublicSettings = {
   camera_width: number;
   camera_height: number;
   camera_fps: number;
+  shared_preview_fps?: number;
   solver_fov_deg: number;
   solver_max_image_side: number;
   solver_large_scale_bg_downsample?: number;

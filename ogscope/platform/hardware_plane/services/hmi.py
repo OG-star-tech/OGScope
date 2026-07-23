@@ -73,9 +73,13 @@ class HmiService:
                 "display_disabled：在环境变量或 .env 中设置 OGSCOPE_DISPLAY_ENABLED=true"
             )
         if settings.display_type.lower() != "st7796":
-            raise RuntimeError(f"unsupported display_type: {settings.display_type!r} (expected st7796)")
+            raise RuntimeError(
+                f"unsupported display_type: {settings.display_type!r} (expected st7796)"
+            )
         if sys.platform != "linux":
-            raise RuntimeError("ST7796 仅支持 Linux（树莓派）/ ST7796 requires Linux (Raspberry Pi)")
+            raise RuntimeError(
+                "ST7796 仅支持 Linux（树莓派）/ ST7796 requires Linux (Raspberry Pi)"
+            )
         if self._display is not None:
             return self._display
         from ogscope.platform.hardware.st7796_spi import ST7796SPI

@@ -19,9 +19,9 @@ def client():
 @pytest.fixture
 def temp_debug_dir(monkeypatch, tmp_path: Path):
     """将调试目录重定向到临时目录，避免污染用户目录。 / Redirect the debug directory to a temporary directory to avoid polluting the user directory."""
-    from ogscope.web.api.debug import services as debug_services
     from ogscope.domain import shared as domain_shared_pkg
     from ogscope.domain.shared import filesystem as shared_fs
+    from ogscope.web.api.debug import services as debug_services
 
     debug_root = tmp_path / "dev_captures"
     debug_root.mkdir(parents=True, exist_ok=True)
@@ -32,7 +32,9 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
     if hasattr(debug_services, "DEBUG_CAPTURES_DIR"):
         monkeypatch.setattr(debug_services, "DEBUG_CAPTURES_DIR", debug_root)
     if hasattr(domain_shared_pkg, "filesystem"):
-        monkeypatch.setattr(domain_shared_pkg.filesystem, "DEV_CAPTURES_DIR", debug_root)
+        monkeypatch.setattr(
+            domain_shared_pkg.filesystem, "DEV_CAPTURES_DIR", debug_root
+        )
     monkeypatch.setattr(debug_services, "is_recording", False)
     monkeypatch.setattr(debug_services, "recording_task", None)
     monkeypatch.setattr(debug_services, "recording_stem", None)

@@ -63,4 +63,3 @@ class SensorHubService:
             self._running = True
             return {"accepted": True, "message": "sensor hub restarted"}
         return {"accepted": False, "message": f"unsupported action: {action}"}
-

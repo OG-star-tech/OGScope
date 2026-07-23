@@ -25,6 +25,7 @@ from ogscope.algorithms.plate_solve import (
     centroid_extraction_preview,
     merge_centroid_params,
 )
+from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.star_extract import StarExtractor
 from ogscope.config import (
     effective_solver_max_image_side,
@@ -191,8 +192,8 @@ class AnalysisService:
                     "gate_reason": "previous request still running",
                     "next_allowed_in_ms": 0,
                 }
-            if state.last_finished_mono > 0:
-                elapsed = now - state.last_finished_mono
+            if state.last_started_mono > 0 and state.last_finished_mono > 0:
+                elapsed = now - state.last_started_mono
                 if elapsed < interval:
                     wait_ms = max(0, int((interval - elapsed) * 1000.0))
                     return {
@@ -224,9 +225,9 @@ class AnalysisService:
         self, requested_ms: int | None
     ) -> tuple[int, int]:
         """解析实时解算间隔并按系统上下限裁剪 / Resolve realtime interval with server bounds."""
-        if requested_ms is None:
-            return 0, 0
         settings = get_settings()
+        if requested_ms is None:
+            requested_ms = round(1000.0 / max(0.01, settings.star_analysis_target_fps))
         min_interval_ms = int(settings.star_analysis_min_interval_ms)
         max_interval_ms = int(settings.star_analysis_max_interval_ms)
         requested_interval_ms = int(requested_ms)
@@ -333,10 +334,12 @@ class AnalysisService:
         east_deg = d_ra * math.cos(math.radians(dec_center))
         north_deg = d_dec
         roll_rad = math.radians(roll)
-        x_deg = east_deg * math.cos(roll_rad) + north_deg * math.sin(roll_rad)
-        y_deg = -east_deg * math.sin(roll_rad) + north_deg * math.cos(roll_rad)
+        # Image x right, y down; Tetra3 Roll is CCW from image up (y→0).
+        x_deg = east_deg * math.cos(roll_rad) - north_deg * math.sin(roll_rad)
+        y_deg = east_deg * math.sin(roll_rad) + north_deg * math.cos(roll_rad)
 
-        px_per_deg = (min(w, h) / max(fov, 1e-6)) if fov > 0 else 1.0
+        # Tetra3 FOV is horizontal; scale pixels per degree by frame width.
+        px_per_deg = (w / max(fov, 1e-6)) if fov > 0 else 1.0
         dx_px = x_deg * px_per_deg
         dy_px = -y_deg * px_per_deg
         cx = w * 0.5
@@ -365,6 +368,36 @@ class AnalysisService:
             "delta_px": {"dx": dx_px, "dy": dy_px},
             "angular_sep_deg": angular_sep_deg,
         }
+
+    def _attach_overlay_ext(
+        self,
+        row: dict[str, Any],
+        *,
+        overlay_topn_count: int | None = None,
+        enable_polar_guide: bool | None = None,
+    ) -> None:
+        """为解算结果附加 overlay_ext（Top-N 标注与极轴引导）/ Attach overlay_ext to solve row."""
+        topn = (
+            int(overlay_topn_count)
+            if overlay_topn_count is not None
+            else self._overlay_topn_default
+        )
+        enable_polar = (
+            bool(enable_polar_guide)
+            if enable_polar_guide is not None
+            else self._polar_guide_default
+        )
+        overlay_ext: dict[str, Any] = {}
+        try:
+            overlay_ext["labels_topn"] = self._build_topn_labels(row, topn_count=topn)
+        except Exception:
+            overlay_ext["labels_topn"] = []
+        if enable_polar:
+            try:
+                overlay_ext["polar_guide"] = self._build_polar_guide(row)
+            except Exception:
+                overlay_ext["polar_guide"] = None
+        row["overlay_ext"] = overlay_ext
 
     def _centroid_params_from_payload(
         self, payload: CentroidParamsPayload | None
@@ -637,6 +670,7 @@ class AnalysisService:
                 max_stars=max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
 
         def _run_two_stage() -> list[dict[str, Any]]:
@@ -659,6 +693,7 @@ class AnalysisService:
                 max_stars=speed_max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
             row0 = first[0] if first else None
             if row0 and row0.get("status") == "MATCH_FOUND":
@@ -688,6 +723,7 @@ class AnalysisService:
                 max_stars=robust_max_stars,
                 large_scale_bg_subtract=ls_bg,
                 centroid_rejection_level=cr_lv,
+                solve_context=body.solve_context,
             )
             if second:
                 second[0]["solve_profile"] = "robust"
@@ -713,6 +749,11 @@ class AnalysisService:
         if row and detail_level != "full":
             row.pop("tetra", None)
         if row:
+            self._attach_overlay_ext(
+                row,
+                overlay_topn_count=getattr(body, "overlay_topn_count", None),
+                enable_polar_guide=getattr(body, "enable_polar_guide", None),
+            )
             self._lab.update_last_solve(
                 source.name,
                 self._metrics_from_solve_row(row),
@@ -966,6 +1007,7 @@ class AnalysisService:
                     self._clamp_centroid_rejection_level(
                         solve_params.centroid_rejection_level
                     ),
+                    solve_context=solve_params.solve_context,
                 )
 
             hard_timeout_sec = max(
@@ -975,30 +1017,11 @@ class AnalysisService:
                 loop.run_in_executor(self._solver_executor, _run),
                 timeout=hard_timeout_sec,
             )
-            # 统一 overlay_ext 结构，便于前端复用渲染逻辑
-            topn = (
-                int(overlay_topn_count)
-                if overlay_topn_count is not None
-                else self._overlay_topn_default
+            self._attach_overlay_ext(
+                row,
+                overlay_topn_count=overlay_topn_count,
+                enable_polar_guide=enable_polar_guide,
             )
-            enable_polar = (
-                bool(enable_polar_guide)
-                if enable_polar_guide is not None
-                else self._polar_guide_default
-            )
-            overlay_ext: dict[str, Any] = {}
-            try:
-                overlay_ext["labels_topn"] = self._build_topn_labels(
-                    row, topn_count=topn
-                )
-            except Exception:
-                overlay_ext["labels_topn"] = []
-            if enable_polar:
-                try:
-                    overlay_ext["polar_guide"] = self._build_polar_guide(row)
-                except Exception:
-                    overlay_ext["polar_guide"] = None
-            row["overlay_ext"] = overlay_ext
             row["solve_profile"] = effective_profile
             row["t_backend_total_ms"] = round(
                 (time.perf_counter() - t_total) * 1000.0, 3
@@ -1012,6 +1035,12 @@ class AnalysisService:
                 "gate_status": "SOLVED",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         except asyncio.TimeoutError:
             return {
@@ -1028,6 +1057,12 @@ class AnalysisService:
                 "gate_reason": "outer request timeout",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         finally:
             await self._leave_realtime_gate("file_upload")
@@ -1118,6 +1153,7 @@ class AnalysisService:
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
         centroid_rejection_level: int | None = None,
+        solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """BGR 帧送 Tetra3 解算 / Plate-solve one BGR frame."""
         cr_level = self._clamp_centroid_rejection_level(
@@ -1145,7 +1181,9 @@ class AnalysisService:
             large_scale_bg_subtract=large_scale_bg_subtract,
             centroid_rejection_level=cr_level,
         )
-        return {"frame_index": 0, **solved.to_dict()}
+        row = {"frame_index": 0, **solved.to_dict()}
+        attach_sensor_prediction(row, solve_context)
+        return row
 
     def _analyze_image(
         self,
@@ -1160,6 +1198,7 @@ class AnalysisService:
         max_stars: int | None = None,
         large_scale_bg_subtract: bool = False,
         centroid_rejection_level: int | None = None,
+        solve_context: Any | None = None,
     ) -> list[dict[str, Any]]:
         """分析单图 / Analyze image"""
         t_total = time.perf_counter()
@@ -1180,6 +1219,7 @@ class AnalysisService:
             max_stars=max_stars,
             large_scale_bg_subtract=large_scale_bg_subtract,
             centroid_rejection_level=centroid_rejection_level,
+            solve_context=solve_context,
         )
         row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
         row["t_backend_total_ms"] = round((time.perf_counter() - t_total) * 1000.0, 3)
@@ -1317,7 +1357,9 @@ class AnalysisService:
             )
             loop = asyncio.get_running_loop()
 
-            cr_frame = self._clamp_centroid_rejection_level(body.centroid_rejection_level)
+            cr_frame = self._clamp_centroid_rejection_level(
+                body.centroid_rejection_level
+            )
 
             def _run() -> dict[str, Any]:
                 return self._solve_bgr_to_row(
@@ -1332,6 +1374,7 @@ class AnalysisService:
                     max_stars,
                     bool(body.large_scale_bg_subtract),
                     cr_frame,
+                    solve_context=body.solve_context,
                 )
 
             hard_timeout_sec = max(
@@ -1342,29 +1385,11 @@ class AnalysisService:
                 timeout=hard_timeout_sec,
             )
             # 二次分析与极轴引导（失败降级，不影响基础解算）
-            topn = (
-                int(body.overlay_topn_count)
-                if getattr(body, "overlay_topn_count", None) is not None
-                else self._overlay_topn_default
+            self._attach_overlay_ext(
+                row,
+                overlay_topn_count=getattr(body, "overlay_topn_count", None),
+                enable_polar_guide=getattr(body, "enable_polar_guide", None),
             )
-            enable_polar = (
-                bool(body.enable_polar_guide)
-                if getattr(body, "enable_polar_guide", None) is not None
-                else self._polar_guide_default
-            )
-            overlay_ext: dict[str, Any] = {}
-            try:
-                overlay_ext["labels_topn"] = self._build_topn_labels(
-                    row, topn_count=topn
-                )
-            except Exception:
-                overlay_ext["labels_topn"] = []
-            if enable_polar:
-                try:
-                    overlay_ext["polar_guide"] = self._build_polar_guide(row)
-                except Exception:
-                    overlay_ext["polar_guide"] = None
-            row["overlay_ext"] = overlay_ext
             if t_open_decode_ms is not None:
                 row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
             elapsed_ms = (time.perf_counter() - t_total) * 1000.0
@@ -1388,7 +1413,7 @@ class AnalysisService:
                 ),
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
-                "next_allowed_in_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(0, int(effective_interval_ms - elapsed_ms)),
             }
         except asyncio.TimeoutError:
             return {
@@ -1408,7 +1433,12 @@ class AnalysisService:
                 "gate_reason": "outer request timeout",
                 "requested_interval_ms": requested_interval_ms,
                 "effective_interval_ms": effective_interval_ms,
-                "next_allowed_in_ms": effective_interval_ms,
+                "next_allowed_in_ms": max(
+                    0,
+                    int(
+                        effective_interval_ms - (time.perf_counter() - t_total) * 1000.0
+                    ),
+                ),
             }
         finally:
             await self._leave_realtime_gate(gate_source_key)
@@ -1430,6 +1460,7 @@ class AnalysisService:
             "camera_width": s.camera_width,
             "camera_height": s.camera_height,
             "camera_fps": s.camera_fps,
+            "shared_preview_fps": s.shared_preview_fps,
             "solver_fov_deg": s.solver_fov_deg,
             "solver_max_image_side": s.solver_max_image_side,
             "solver_large_scale_bg_downsample": s.solver_large_scale_bg_downsample,

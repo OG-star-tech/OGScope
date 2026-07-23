@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePath
 
-DEV_CAPTURES_DIR = Path.home() / "dev_captures"
+DEV_CAPTURES_DIR = Path("/tmp/dev_captures")
 DEV_CAPTURES_DIR.mkdir(exist_ok=True)
 
 IMAGE_EXTENSIONS = {
@@ -39,4 +39,3 @@ def ensure_safe_basename(filename: str) -> str:
     if "/" in safe_name or "\\" in safe_name:
         raise ValueError("invalid filename")
     return safe_name
-

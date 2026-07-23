@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from ogscope.domain.analysis.services import analysis_domain_service
+from ogscope.web.api.analysis.services import analysis_service
 from ogscope.web.api.models.schemas import (
     AnalysisBatchSolveRequest,
     AnalysisExperimentCreate,
@@ -19,7 +20,6 @@ from ogscope.web.api.models.schemas import (
     AnalysisSolveVideoFrameRequest,
     ImportFromDebugRequest,
 )
-from ogscope.web.api.analysis.services import analysis_service
 
 router = APIRouter()
 
@@ -287,7 +287,9 @@ async def solve_uploaded_frame(
     """上传单帧 JPEG/PNG 并解算 / Solve a single uploaded frame (multipart)."""
     try:
         raw = await file.read()
-        payload_dict, extras = analysis_domain_service.parse_frame_upload_payload(payload)
+        payload_dict, extras = analysis_domain_service.parse_frame_upload_payload(
+            payload
+        )
         data = AnalysisSolveImageRequest.model_validate(payload_dict)
         return await analysis_service.solve_uploaded_frame(
             image_bytes=raw,

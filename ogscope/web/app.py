@@ -101,31 +101,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 "相机自动启动失败，将按需延迟启动 / Camera auto-start failed, fallback to lazy start: {}",
                 e,
             )
-    phase_elapsed_ms = int((asyncio.get_running_loop().time() - phase_p0_started) * 1000)
+    phase_elapsed_ms = int(
+        (asyncio.get_running_loop().time() - phase_p0_started) * 1000
+    )
     logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
-
-    try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import (
-            wifi_emergency_gpio_monitor,
-        )
-
-        wifi_emergency_gpio_monitor.start()
-    except Exception as e:
-        logger.warning("应急 GPIO 启动失败 / Emergency GPIO start failed: {}", e)
 
     yield
 
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
     shutdown_started = asyncio.get_running_loop().time()
-    try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import (
-            wifi_emergency_gpio_monitor,
-        )
-
-        wifi_emergency_gpio_monitor.stop()
-    except Exception as e:
-        logger.warning("应急 GPIO 停止异常 / Emergency GPIO stop error: {}", e)
     try:
         from ogscope.utils.environment import should_use_simulation_mode
 
@@ -141,8 +126,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.warning(
             "硬件平面停止超时或异常 / Hardware plane stop timeout or error: {}", e
         )
-    shutdown_elapsed_ms = int((asyncio.get_running_loop().time() - shutdown_started) * 1000)
-    logger.info("退出阶段完成 / Shutdown cleanup finished in {} ms", shutdown_elapsed_ms)
+    shutdown_elapsed_ms = int(
+        (asyncio.get_running_loop().time() - shutdown_started) * 1000
+    )
+    logger.info(
+        "退出阶段完成 / Shutdown cleanup finished in {} ms", shutdown_elapsed_ms
+    )
 
 
 # API 文档分组标签 / API documentation group tags
@@ -267,6 +256,7 @@ async def _guard_subordinate_dev_routes(request: Request, call_next):
             status_code=403,
         )
     return await call_next(request)
+
 
 # 挂载静态文件 / Mount static files
 if bool(hardware_profile["enable_ui"]) and settings.static_dir.exists():
@@ -438,7 +428,9 @@ def _filtered_openapi_schema(*, mode: str) -> dict:
     filtered_paths: dict[str, dict] = {}
     if mode == "core":
         filtered_paths = {
-            path: data for path, data in paths.items() if path.startswith("/api/core/v1/")
+            path: data
+            for path, data in paths.items()
+            if path.startswith("/api/core/v1/")
         }
     elif mode == "dev":
         filtered_paths = {

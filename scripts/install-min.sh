@@ -60,7 +60,8 @@ if [ "${OGSCOPE_MIN_SKIP_APT:-0}" != "1" ]; then
         python3-dev \
         git \
         curl \
-        build-essential
+        build-essential \
+        libturbojpeg0
 fi
 
 if ! command -v poetry >/dev/null 2>&1; then
@@ -90,6 +91,17 @@ else
 fi
 
 poetry "${INSTALL_ARGS[@]}"
+
+if ! ogscope_verify_turbojpeg; then
+    echo "⚠️ TurboJPEG 不可用，尝试补装 libturbojpeg0 + PyTurboJPEG / TurboJPEG unavailable; installing fallback deps"
+    sudo apt install -y libturbojpeg0
+    poetry run pip install --no-cache-dir "PyTurboJPEG>=1.7,<2"
+fi
+if ogscope_verify_turbojpeg; then
+    echo "✅ TurboJPEG 编码加速已就绪 / TurboJPEG encoder ready"
+else
+    echo "⚠️ TurboJPEG 仍不可用，将自动回退 OpenCV / TurboJPEG still unavailable; OpenCV fallback will be used"
+fi
 
 VENV_PATH="$(poetry env info --path)"
 VENV_PYTHON="${VENV_PATH}/bin/python"
@@ -121,6 +133,8 @@ fi
 sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 
+ogscope_install_config_write_artifacts "${PROJECT_DIR}" "${USER}"
+
 echo "⚙️ 写入 systemd 服务 / Writing systemd service..."
 sudo tee "${SERVICE_PATH}" >/dev/null <<EOF
 [Unit]
@@ -151,4 +165,3 @@ echo "✅ 最小安装完成 / Minimal installation completed"
 echo "   服务状态 / Service: sudo systemctl status ${SERVICE_NAME}"
 echo "   健康检查 / Health: curl -s http://127.0.0.1:8000/health"
 ogscope_report_plate_solve_database_status "${PROJECT_DIR}"
-
