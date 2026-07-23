@@ -39,4 +39,3 @@ def ensure_safe_basename(filename: str) -> str:
     if "/" in safe_name or "\\" in safe_name:
         raise ValueError("invalid filename")
     return safe_name
-

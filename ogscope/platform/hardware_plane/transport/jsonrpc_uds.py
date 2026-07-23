@@ -96,13 +96,18 @@ class JsonRpcUdsClient:
                 "method": method,
                 "params": params or {},
             }
-            writer.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+            writer.write(
+                (json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8")
+            )
             await asyncio.wait_for(writer.drain(), timeout=budget_s)
             line = await asyncio.wait_for(reader.readline(), timeout=budget_s)
             if not line:
-                return {"success": False, "error": {"message": "empty response"}, "data": {}}
+                return {
+                    "success": False,
+                    "error": {"message": "empty response"},
+                    "data": {},
+                }
             return json.loads(line.decode("utf-8", errors="ignore"))
         finally:
             writer.close()
             await writer.wait_closed()
-

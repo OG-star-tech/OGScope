@@ -293,6 +293,8 @@ else
     sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 fi
 
+ogscope_install_config_write_artifacts "${PROJECT_DIR}" "${USER}"
+
 # ExecStart 使用 poetry env info --path（与 virtualenvs.in-project=true 时即项目 .venv），勿手写 ~/.virtualenvs/
 # ExecStart uses poetry env path (project .venv when in-project=true); do not hardcode ~/.virtualenvs/
 echo "⚙️ 写入 systemd: ${SERVICE_PATH}"

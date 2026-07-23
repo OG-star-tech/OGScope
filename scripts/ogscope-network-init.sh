@@ -30,6 +30,10 @@ SWITCH_SRC="${SCRIPT_DIR}/ogscope-wifi-switch.sh"
 SWITCH_DST="/usr/local/bin/ogscope-wifi-switch"
 SUDOERS_D="/etc/sudoers.d/ogscope-wifi"
 SUDOERS_NMCLI="/etc/sudoers.d/ogscope-nmcli"
+SUDOERS_CONFIG="/etc/sudoers.d/ogscope-config"
+CONFIG_WRITE_SRC="${SCRIPT_DIR}/ogscope-config-write.sh"
+CONFIG_WRITE_DST="/usr/local/bin/ogscope-config-write"
+OGSCOPE_ENV_FILE="${ENV_DIR}/ogscope.env"
 # systemd drop-in：老部署主 unit 可能无 EnvironmentFile / Drop-in for units missing EnvironmentFile
 SYSTEMD_DROPIN_DIR="/etc/systemd/system/ogscope.service.d"
 SYSTEMD_NETWORK_ENV_CONF="${SYSTEMD_DROPIN_DIR}/ogscope-network-env.conf"
@@ -104,8 +108,47 @@ write_sudoers_nmcli() {
     ok "已写入 ${SUDOERS_NMCLI}（免密 ${nmcli_bin}，Web「激活」已保存 WiFi 等）"
 }
 
+install_config_write_script() {
+    if [[ ! -f "${CONFIG_WRITE_SRC}" ]]; then
+        die "未找到 ${CONFIG_WRITE_SRC} / Config write script missing"
+    fi
+    install -m 755 "${CONFIG_WRITE_SRC}" "${CONFIG_WRITE_DST}"
+    ok "已安装 ${CONFIG_WRITE_DST}"
+}
+
+write_sudoers_config() {
+    local run_user="${OGSCOPE_SERVICE_USER:-${SUDO_USER:-}}"
+    if [[ -z "${run_user}" ]]; then
+        info "未设置 OGSCOPE_SERVICE_USER/SUDO_USER，跳过 config sudoers / Skipping config sudoers"
+        return 0
+    fi
+    umask 077
+    cat >"${SUDOERS_CONFIG}.tmp" <<EOF
+# OGScope Web 配置页免密写入 / Passwordless config write for Web UI
+${run_user} ALL=(ALL) NOPASSWD: ${CONFIG_WRITE_DST}
+EOF
+    chmod 440 "${SUDOERS_CONFIG}.tmp"
+    mv "${SUDOERS_CONFIG}.tmp" "${SUDOERS_CONFIG}"
+    ok "已写入 ${SUDOERS_CONFIG}（用户 ${run_user}）"
+}
+
+normalize_config_env_permissions() {
+    local run_user="${OGSCOPE_SERVICE_USER:-${SUDO_USER:-}}"
+    if [[ -z "${run_user}" ]]; then
+        return 0
+    fi
+    local f
+    for f in "${OGSCOPE_ENV_FILE}" "${ENV_FILE}"; do
+        [[ -f "${f}" ]] || continue
+        chown "root:${run_user}" "${f}" 2>/dev/null || true
+        chmod 640 "${f}" 2>/dev/null || true
+    done
+    ok "已规范化 ogscope.env / network.env 权限为 root:${run_user} 640"
+}
+
 write_network_env() {
     local suffix="$1"
+    local run_user="${OGSCOPE_SERVICE_USER:-${SUDO_USER:-}}"
     umask 077
     cat >"${ENV_FILE}.tmp" <<EOF
 # OGScope 网络环境（由 ogscope-network-init.sh 生成，勿提交仓库）
@@ -116,7 +159,10 @@ OGSCOPE_WIFI_INTERFACE=${IFACE}
 OGSCOPE_DEVICE_ID_SUFFIX=${suffix}
 OGSCOPE_WIFI_AP_SSID=OGScope_${suffix}
 EOF
-    chmod 600 "${ENV_FILE}.tmp"
+    if [[ -n "${run_user}" ]]; then
+        chown "root:${run_user}" "${ENV_FILE}.tmp" 2>/dev/null || true
+    fi
+    chmod 640 "${ENV_FILE}.tmp"
     mv "${ENV_FILE}.tmp" "${ENV_FILE}"
     ok "已写入 ${ENV_FILE}"
 }
@@ -252,6 +298,9 @@ cmd_init() {
     ensure_ogscope_systemd_network_env
     write_sudoers
     write_sudoers_nmcli
+    install_config_write_script
+    write_sudoers_config
+    normalize_config_env_permissions
     set_hostname_avahi "${suffix}"
 
     ok "init 完成。请 systemctl restart ogscope 并连接热点 OGScope_${suffix} / init done"
@@ -276,7 +325,18 @@ cmd_ensure_systemd() {
     fi
     ensure_ogscope_systemd_network_env
     write_sudoers_nmcli
+    install_config_write_script
+    write_sudoers_config
+    normalize_config_env_permissions
     info "请执行: sudo systemctl restart ogscope / Please run: sudo systemctl restart ogscope"
+}
+
+cmd_ensure_config() {
+    require_root
+    install_config_write_script
+    write_sudoers_config
+    normalize_config_env_permissions
+    ok "config-write 与 sudoers 已就绪 / config-write and sudoers ready"
 }
 
 cmd_diag() {
@@ -287,6 +347,8 @@ cmd_diag() {
     [[ -f "${SWITCH_DST}" ]] && ok "切换脚本: ${SWITCH_DST}" || echo "⚠️  无 ${SWITCH_DST}"
     [[ -f "${SUDOERS_D}" ]] && ok "sudoers: ${SUDOERS_D}" || echo "⚠️  无 sudoers"
     [[ -f "${SUDOERS_NMCLI}" ]] && ok "sudoers nmcli: ${SUDOERS_NMCLI}" || echo "⚠️  无 ${SUDOERS_NMCLI}（Web 激活 WiFi 可能报 Not authorized）"
+    [[ -f "${SUDOERS_CONFIG}" ]] && ok "sudoers config: ${SUDOERS_CONFIG}" || echo "⚠️  无 ${SUDOERS_CONFIG}（Web 配置页可能无法保存）"
+    [[ -x "${CONFIG_WRITE_DST}" ]] && ok "config-write: ${CONFIG_WRITE_DST}" || echo "⚠️  无 ${CONFIG_WRITE_DST}"
     command -v avahi-daemon >/dev/null && ok "avahi-daemon 已安装" || echo "⚠️  avahi-daemon 未安装"
     if command -v nmcli >/dev/null; then
         nmcli connection show "${AP_NAME}" >/dev/null 2>&1 && ok "连接 ${AP_NAME} 存在" || echo "⚠️  无 ${AP_NAME}"
@@ -346,9 +408,10 @@ main() {
     init) cmd_init "${1:-}" ;;
     diag) cmd_diag ;;
     ensure-systemd) cmd_ensure_systemd ;;
+    ensure-config) cmd_ensure_config ;;
     reset) cmd_reset "${1:-}" ;;
     *)
-        echo "Usage: sudo $0 init [--yes] | diag | ensure-systemd | reset [--yes]" >&2
+        echo "Usage: sudo $0 init [--yes] | diag | ensure-systemd | ensure-config | reset [--yes]" >&2
         exit 1
         ;;
     esac

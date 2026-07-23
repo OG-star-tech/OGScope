@@ -153,6 +153,8 @@ fi
 sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 sudo chmod 640 "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
 
+ogscope_install_config_write_artifacts "${PROJECT_DIR}" "${USER}"
+
 chmod +x "${PROJECT_DIR}/scripts/ogscope-network-boot.sh" 2>/dev/null || true
 ogscope_sync_network_boot_unit_if_needed "${PROJECT_DIR}"
 

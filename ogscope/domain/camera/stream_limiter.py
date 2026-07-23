@@ -52,4 +52,3 @@ def get_mjpeg_stream_limiter() -> MjpegStreamLimiter:
     if _limiter is None:
         _limiter = MjpegStreamLimiter(get_settings().stream_max_mjpeg_clients)
     return _limiter
-

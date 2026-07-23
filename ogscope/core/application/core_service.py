@@ -233,7 +233,9 @@ class CoreContractService:
         network_in_health_scope = self._network_health_in_scope(profile)
         hardware_client = get_hardware_plane_client()
         hw_status_resp = await hardware_client.status_get()
-        hw_status_data = hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
+        hw_status_data = (
+            hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
+        )
         camera_service_status = (
             hw_status_data.get("services", {}).get("camera", {})
             if isinstance(hw_status_data, dict)
@@ -269,15 +271,21 @@ class CoreContractService:
             "version": __version__,
             "capabilities": capability_map(),
             "hardware_plane": {
-                "started": bool(hw_status_data.get("started", False))
-                if isinstance(hw_status_data, dict)
-                else False,
-                "metrics": hw_status_data.get("metrics", {})
-                if isinstance(hw_status_data, dict)
-                else {},
-                "services": hw_status_data.get("services", {})
-                if isinstance(hw_status_data, dict)
-                else {},
+                "started": (
+                    bool(hw_status_data.get("started", False))
+                    if isinstance(hw_status_data, dict)
+                    else False
+                ),
+                "metrics": (
+                    hw_status_data.get("metrics", {})
+                    if isinstance(hw_status_data, dict)
+                    else {}
+                ),
+                "services": (
+                    hw_status_data.get("services", {})
+                    if isinstance(hw_status_data, dict)
+                    else {}
+                ),
             },
             "system": system,
             "camera": {"success": True, **camera_status},
@@ -297,9 +305,15 @@ class CoreContractService:
         status = await camera_domain_service.get_status()
         normalized = self._normalize_camera_status(status)
         if hp_camera:
-            normalized["connected"] = bool(hp_camera.get("connected", normalized["connected"]))
-            normalized["streaming"] = bool(hp_camera.get("streaming", normalized["streaming"]))
-            normalized["recording"] = bool(hp_camera.get("recording", normalized["recording"]))
+            normalized["connected"] = bool(
+                hp_camera.get("connected", normalized["connected"])
+            )
+            normalized["streaming"] = bool(
+                hp_camera.get("streaming", normalized["streaming"])
+            )
+            normalized["recording"] = bool(
+                hp_camera.get("recording", normalized["recording"])
+            )
         return {"success": True, **normalized}
 
     async def start_camera(self) -> dict[str, Any]:
@@ -341,7 +355,9 @@ class CoreContractService:
             applied["auto_exposure"] = bool(auto_exposure)
 
         if payload.get("exposure_us") is not None:
-            await camera_domain_service.update_settings({"exposure": payload["exposure_us"]})
+            await camera_domain_service.update_settings(
+                {"exposure": payload["exposure_us"]}
+            )
             applied["exposure_us"] = int(payload["exposure_us"])
 
         if payload.get("analogue_gain") is not None:

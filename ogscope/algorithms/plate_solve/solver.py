@@ -348,9 +348,7 @@ class PlateSolver:
             sorted_stars = sorted(stars, key=lambda s: s.flux, reverse=True)
             cyx = np.array([[s.y, s.x] for s in sorted_stars], dtype=np.float64)
             overlay = (
-                _make_solve_overlay(
-                    {}, cyx, None, (height, width), (height, width)
-                )
+                _make_solve_overlay({}, cyx, None, (height, width), (height, width))
                 if len(cyx) > 0
                 else None
             )
