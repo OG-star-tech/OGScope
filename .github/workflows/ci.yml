@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, staging ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, staging ]
 
 jobs:
   test:
@@ -93,4 +93,3 @@ jobs:
 
     - name: 运行 Black
       run: poetry run black --check ogscope tests
-
