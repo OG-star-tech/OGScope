@@ -104,28 +104,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     phase_elapsed_ms = int((asyncio.get_running_loop().time() - phase_p0_started) * 1000)
     logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
 
-    try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import (
-            wifi_emergency_gpio_monitor,
-        )
-
-        wifi_emergency_gpio_monitor.start()
-    except Exception as e:
-        logger.warning("应急 GPIO 启动失败 / Emergency GPIO start failed: {}", e)
-
     yield
 
     # 关闭时执行 / Execute on shutdown
     logger.info("清理资源...")
     shutdown_started = asyncio.get_running_loop().time()
-    try:
-        from ogscope.platform.hardware.wifi_emergency_gpio import (
-            wifi_emergency_gpio_monitor,
-        )
-
-        wifi_emergency_gpio_monitor.stop()
-    except Exception as e:
-        logger.warning("应急 GPIO 停止异常 / Emergency GPIO stop error: {}", e)
     try:
         from ogscope.utils.environment import should_use_simulation_mode
 

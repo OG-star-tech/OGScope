@@ -27,6 +27,7 @@ numpy = ">=2,<3"
 opencv-python-headless = ">=4.12,<5"
 pillow = ">=10,<13"
 scipy = ">=1.10,<1.17"
+PyTurboJPEG = ">=1.7,<2"
 
 # 相机支持 (Raspberry Pi MIPI)
 # picamera2 = "^0.3.0"       # 树莓派 MIPI 相机支持 (仅Linux)
@@ -176,4 +177,3 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-

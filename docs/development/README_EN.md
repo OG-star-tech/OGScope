@@ -93,7 +93,7 @@ sudo journalctl -u ogscope -f
 
 | Symptom                  | Where to look                                                          |
 | ------------------------ | ---------------------------------------------------------------------- |
-| `ImportError: picamera2` | Install camera stack with `apt`; venv from `install.sh` (**§1.2, §3**) |
+| `ImportError: picamera2` | Re-run `install.sh` or `board-update.sh` to repair camera stack; scripts configure the venv (**§1.2, §3**) |
 | PEP 668                  | Use project `.venv` only; do not mix into system Python (**§1.2**)     |
 | Service fails to start   | `WorkingDirectory`, `ExecStart`, `journalctl` (**§10**)                |
 
@@ -168,6 +168,9 @@ chmod +x scripts/install.sh
 
 OGScope depends on board-level camera stack (`picamera2`/`libcamera`) in
 addition to Poetry packages.
+`scripts/install.sh` and `scripts/board-update.sh` both try to install
+`python3-picamera2` and available `rpicam/libcamera` tools. If the target board
+is not IMX327, set `OGSCOPE_CAMERA=skip` to skip the boot overlay write.
 
 Typical requirements:
 
@@ -316,7 +319,9 @@ Notes:
 
 - if only templates/static files changed, `poetry install` is usually not needed
 - if service file changed, run `sudo systemctl daemon-reload` first
+- the script repairs the Picamera2/libcamera camera runtime; without a TTY or with `OGSCOPE_NONINTERACTIVE=1`, it writes the IMX327 boot overlay by default. Use `OGSCOPE_CAMERA=skip` or `OGSCOPE_SKIP_BOOT_CAMERA=1` to skip it
 - the script syncs `**ExecStart**` for the main `ogscope` unit and, if installed, `**ogscope-network-boot.service**` (when the project directory path changed); if the boot unit was never installed, that step is skipped
+- `scripts/sync_board_code.sh` is the developer-machine-to-board convenience sync: it uploads source with `rsync`, then runs `scripts/board-update.sh` on the board while preserving runtime data such as `uploads/`, `logs/`, and `data/`. Use it for frequent iteration; use `install.sh` / `bootstrap.sh` for full reinstall, system dependency changes, or first-time service-unit installation.
 
 ### 6.3 Uninstall service and local environment (`scripts/uninstall.sh`)
 
@@ -461,6 +466,7 @@ To reduce mistaken submissions as the architecture grows, verify all items below
   - `docs/contracts/core-rest-v1.md` / `docs/contracts/core-rest-v1_EN.md`
   - `docs/contracts/dev-rest-v1.md` / `docs/contracts/dev-rest-v1_EN.md`
   - `docs/contracts/core-compatibility-matrix.md` (inline bilingual, single file)
+6. If debug-console fields, camera-pipeline telemetry, or analysis-result `overlay_ext` changes, update `docs/DEBUG_CONSOLE.md` / `docs/DEBUG_CONSOLE_EN.md` and the matching contract docs.
 
 ## 10. Troubleshooting Checklist
 
@@ -487,4 +493,3 @@ sudo journalctl -u ogscope -f
 # ./scripts/uninstall.sh
 # OGSCOPE_UNINSTALL_CONFIRM=1 ./scripts/uninstall.sh
 ```
-

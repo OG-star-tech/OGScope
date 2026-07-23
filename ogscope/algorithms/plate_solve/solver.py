@@ -176,11 +176,15 @@ def subtract_large_scale_background_bgr(
     bg_small = cv2.GaussianBlur(small, (0, 0), sigmaX=sigma_s, sigmaY=sigma_s)
     bg = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
     mean_gray = float(np.mean(gray))
-    corr = gray - bg + mean_gray
-    corr = np.clip(corr, 1e-3, 255.0)
-    ratio = corr / np.maximum(gray, 1e-3)
-    ratio = np.clip(ratio, 0.0, 4.0)
-    out = frame_bgr.astype(np.float32) * ratio[..., np.newaxis]
+    # 复用背景数组承载校正亮度和比例，减少两张全画幅float32临时图
+    # Reuse the background buffer for corrected luminance and ratio to drop two float32 frames.
+    np.subtract(gray, bg, out=bg)
+    bg += mean_gray
+    np.clip(bg, 1e-3, 255.0, out=bg)
+    np.maximum(gray, 1e-3, out=gray)
+    np.divide(bg, gray, out=bg)
+    np.clip(bg, 0.0, 4.0, out=bg)
+    out = frame_bgr.astype(np.float32) * bg[..., np.newaxis]
     return np.clip(np.round(out), 0, 255).astype(np.uint8)
 
 

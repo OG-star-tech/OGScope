@@ -667,7 +667,7 @@ export default function AnalysisLabApp() {
         stopCameraSolveLoop();
       } else if (fromLoop) {
         clearCameraSolveSchedule();
-        const wait = Math.max(50, Number(effInt ?? starAnalysisIntervalMs));
+        const wait = Math.max(50, Number(nextAllowed ?? effInt ?? starAnalysisIntervalMs));
         cameraSolveTimeoutRef.current = window.setTimeout(() => {
           cameraSolveTimeoutRef.current = null;
           if (cameraSolveRunningRef.current) void runCameraFrameSolve(true);
@@ -749,7 +749,7 @@ export default function AnalysisLabApp() {
       setLastRoundTripMs(performance.now() - t0);
       if (fromLoop) {
         clearFileSolveSchedule();
-        const wait = Math.max(50, Number(effInt ?? starAnalysisIntervalMs));
+        const wait = Math.max(50, Number(nextAllowed ?? effInt ?? starAnalysisIntervalMs));
         fileSolveTimeoutRef.current = window.setTimeout(() => {
           fileSolveTimeoutRef.current = null;
           if (fileSolveRunningRef.current) void runVideoFileSolve(true);
@@ -2301,6 +2301,9 @@ export default function AnalysisLabApp() {
                           max: intervalMaxMs,
                           effective: starAnalysisIntervalMs,
                         })}
+                      </p>
+                      <p className="text-[9px] leading-snug text-on-surface-variant/80">
+                        {t("params.solveIntervalIndependent")}
                       </p>
                       {view === "lab_video" && (
                         <label className="mt-2 block">

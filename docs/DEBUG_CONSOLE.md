@@ -9,9 +9,9 @@ OGScope 调试控制台是一个专为开发者设计的相机调试工具，提
 ## 🚀 功能特性
 
 ### 📷 实时预览
-- 15fps 实时相机预览
+- 低内存板优先的实时相机预览，目标帧率由 `preview_target_fps` 与运行时节流共同决定
 - 支持启动/停止预览
-- 实时状态显示
+- 实时状态显示：采集帧率、预览帧率、曝光、消费者数量、编码器与内存压力
 
 ### 📸 拍摄控制
 - **单张拍摄**: 拍摄高质量照片并自动保存
@@ -23,6 +23,10 @@ OGScope 调试控制台是一个专为开发者设计的相机调试工具，提
 - **曝光时间**: 1ms - 100ms (微秒级调节)
 - **模拟增益**: 1x - 16x (0.1x步进)
 - **数字增益**: 1x - 4x (0.1x步进)
+- **白平衡**: `auto` / `manual` / `night`，手动模式可设置红/蓝增益
+- **自动曝光上限**: `camera_auto_exposure_max_us` 控制暗场最长帧周期
+- **防闪烁与降噪**: 支持 AE flicker 与语义降噪模式
+- **预览编码器**: `auto` / `turbojpeg` / `opencv`
 - **实时应用**: 参数修改立即生效
 - **一键重置**: 恢复到默认设置
 
@@ -157,6 +161,21 @@ python -m ogscope.web.app
 - `POST /api/dev/debug/camera/settings` - 更新相机设置
 - `POST /api/dev/debug/camera/reset` - 重置到默认设置
 
+当前相机状态还会返回调试字段：
+
+| 字段 | 说明 |
+|------|------|
+| `sensor_target_fps` / `preview_target_fps` | 传感器与预览目标帧率 |
+| `actual_capture_fps` / `actual_preview_fps` | 实测采集与预览帧率 |
+| `actual_exposure_us` / `frame_duration_us` | 当前曝光与帧周期 |
+| `preview_consumers` / `analysis_consumers` / `recording_consumers` | 预览、分析、录制消费者数量 |
+| `jpeg_average_encode_ms` / `jpeg_cached_bytes` | JPEG 编码耗时与缓存大小 |
+| `throttle_reason` | 当前节流原因，例如低内存或无消费者 |
+| `process_rss_kb` / `process_swap_kb` / `cma_free_kb` | 进程内存、swap 与 CMA 可用量 |
+| `preview_encoder` / `jpeg_source_format` | 当前预览编码器和输入格式 |
+| `camera_driver` / `camera_backend` | 相机驱动与后端名称 |
+| `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format` | 低分辨率辅助流状态 |
+
 ### 预设管理
 - `GET /api/dev/debug/camera/presets` - 获取预设列表
 - `POST /api/dev/debug/camera/presets` - 保存预设
@@ -192,6 +211,26 @@ python scripts/test_debug_console.py --test deps
 2. **权限要求**: 相机访问需要适当的系统权限
 3. **存储空间**: 确保有足够的存储空间保存拍摄文件
 4. **网络访问**: 调试控制台通过Web界面访问，确保网络连接正常
+5. **32 位系统**: OpenCV、SciPy、PyTurboJPEG 在 32 位系统上可能没有合适 wheel，优先使用系统包或 piwheels；低内存板建议降低预览帧率并启用自动编码器选择。
+
+## 🧩 相机管线配置
+
+这些配置可通过环境变量或配置文件进入运行时。名称与 `ogscope/config.py` 一致：
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `camera_idle_shutdown_sec` | `20.0` | 无消费者后相机热驻留时间，超时后释放采集 |
+| `camera_frame_stale_timeout_sec` | `5.0` | 超过该时间没有成功帧时重新探测 |
+| `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
+| `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | 手动白平衡红/蓝增益 |
+| `camera_night_mode` | `false` | 启动时应用夜间白平衡标记 |
+| `camera_auto_exposure_max_us` | `2000000` | 自动曝光最长帧周期，暗场允许降低帧率 |
+| `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
+| `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
+| `camera_lores_enabled` | `true` | 启用低分辨率辅助流统计 |
+| `camera_lores_width` / `camera_lores_height` | `320` / `240` | 低分辨率辅助流尺寸 |
+| `camera_lores_format` | `YUV420` | 低分辨率辅助流格式 |
+| `preview_encoder` | `auto` | `auto` / `turbojpeg` / `opencv` |
 
 ## 🐛 故障排除
 

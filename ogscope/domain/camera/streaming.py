@@ -16,6 +16,7 @@ from ogscope.config import get_settings
 from ogscope.domain.camera.services import camera_domain_service
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
+from ogscope.web.camera_shared import get_camera_manager
 
 
 async def build_camera_mjpeg_stream(
@@ -40,12 +41,13 @@ async def build_camera_mjpeg_stream(
         raise HTTPException(status_code=503, detail=limit_detail)
     boundary = "frame"
     settings = get_settings()
-    min_emit_interval = 1.0 / max(1, int(settings.shared_preview_fps))
     fetch_timeout_s = settings.stream_mjpeg_frame_fetch_timeout_ms / 1000.0
     content_type = "image/jpeg" if image_format.lower() == "jpeg" else "image/png"
 
     async def frame_generator():
+        manager = get_camera_manager()
         try:
+            await manager.acquire_preview_consumer()
             last_snap_frame_id = -1
             last_emit_mono = 0.0
             while True:
@@ -70,6 +72,7 @@ async def build_camera_mjpeg_stream(
                         break
                     continue
                 now = time.monotonic()
+                min_emit_interval = 1.0 / max(1, manager.preview_target_fps)
                 wait = last_emit_mono + min_emit_interval - now
                 if wait > 0 and not await mjpeg_sleep_or_disconnect(request, wait):
                     break
@@ -89,10 +92,10 @@ async def build_camera_mjpeg_stream(
                     + b"\r\n"
                 )
         finally:
+            await manager.release_preview_consumer()
             await limiter.release()
 
     return StreamingResponse(
         frame_generator(),
         media_type=f"multipart/x-mixed-replace; boundary={boundary}",
     )
-
