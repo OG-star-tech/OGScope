@@ -21,4 +21,3 @@ __all__ = [
     "start_hardware_plane",
     "stop_hardware_plane",
 ]
-

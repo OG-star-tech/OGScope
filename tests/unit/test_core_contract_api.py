@@ -19,6 +19,82 @@ def test_core_system_status(client) -> None:
     assert "system" in data
     assert "hardware_plane" in data
     assert "hardware_plane" in data
+    assert "health_reasons" in data
+    assert isinstance(data["health_reasons"], list)
+    if data["health"] == "healthy":
+        assert data["health_reasons"] == []
+    else:
+        assert len(data["health_reasons"]) >= 1
+
+
+@pytest.mark.unit
+def test_core_system_status_health_reasons() -> None:
+    """health_reasons 反映相机与网络降级 / health_reasons reflect camera and network degradation."""
+    from ogscope.core.application.core_service import CoreContractService
+
+    reasons = CoreContractService._health_reasons(
+        CoreContractService._normalize_camera_status(
+            {"connected": False, "error": "Camera not initialized"},
+        ),
+        {"error": "wifi_not_configured"},
+        network_in_health_scope=True,
+    )
+    assert "camera_not_connected" in reasons
+    assert "network_wifi_not_configured" in reasons
+
+
+@pytest.mark.unit
+def test_core_system_status_health_reasons_ignore_delegated_network() -> None:
+    """职责外网络不参与 health / Delegated network does not affect health."""
+    from ogscope.core.application.core_service import CoreContractService
+
+    reasons = CoreContractService._health_reasons(
+        CoreContractService._normalize_camera_status({"connected": True}),
+        {"error": "wifi_not_configured"},
+        network_in_health_scope=False,
+    )
+    assert reasons == []
+
+
+@pytest.mark.unit
+def test_core_camera_ambient_hint_from_metadata() -> None:
+    """相机 metadata 生成环境亮度建议 / Camera metadata builds ambient hint."""
+    from ogscope.core.application.core_service import CoreContractService
+
+    normalized = CoreContractService._normalize_camera_status(
+        {
+            "connected": True,
+            "streaming": True,
+            "recording": False,
+            "info": {
+                "lux": 4.0,
+                "actual_exposure_us": 80_000,
+                "auto_exposure_max_us": 100_000,
+                "actual_digital_gain": 2.0,
+            },
+        }
+    )
+
+    hint = normalized["ambient_hint"]
+    assert hint["available"] is True
+    assert hint["source"] == "camera_metadata"
+    assert 0.0 <= hint["dark_score"] <= 1.0
+    assert hint["exposure_us"] == 80_000
+
+
+@pytest.mark.unit
+def test_core_system_status_network_delegated_when_subordinate(monkeypatch) -> None:
+    """subordinate 下 network 标记 delegated 且不降级 / Subordinate marks network delegated."""
+    from ogscope.core.application.core_service import CoreContractService
+
+    network = CoreContractService._build_network_status(
+        {"role": "subordinate", "subordinate_mode": True},
+        {"wifi_signal_dbm": -50.0, "wifi_quality": 88.0},
+    )
+    assert network["managed_by"] == "external"
+    assert network["in_health_scope"] is False
+    assert network["error"] is None
+    assert network["signal_dbm"] == -50.0
 
 
 @pytest.mark.unit
@@ -118,11 +194,15 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     monkeypatch.setattr(
         core_service.core_contract_service, "get_camera_status", _fake_camera_status
     )
-    monkeypatch.setattr(core_service.core_contract_service, "tune_camera", _fake_camera_tune)
+    monkeypatch.setattr(
+        core_service.core_contract_service, "tune_camera", _fake_camera_tune
+    )
     monkeypatch.setattr(
         core_service.core_contract_service, "start_camera", _fake_start_camera
     )
-    monkeypatch.setattr(core_service.core_contract_service, "stop_camera", _fake_stop_camera)
+    monkeypatch.setattr(
+        core_service.core_contract_service, "stop_camera", _fake_stop_camera
+    )
     monkeypatch.setattr(
         core_service.core_contract_service, "get_stream_status", _fake_stream_status
     )

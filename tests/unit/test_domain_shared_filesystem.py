@@ -34,4 +34,3 @@ def test_ensure_safe_basename_accepts_valid_names(name: str) -> None:
 def test_ensure_safe_basename_rejects_invalid_names(name: str) -> None:
     with pytest.raises(ValueError):
         ensure_safe_basename(name)
-

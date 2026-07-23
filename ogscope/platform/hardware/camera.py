@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ogscope.domain.camera.driver import CameraCapabilities, LinuxpyV4L2Driver
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,6 +71,13 @@ class IMX327MIPICamera(CameraInterface):
         self.camera = None
         self.is_initialized = False
         self.is_capturing = False
+        self._last_metadata: dict[str, Any] = {}
+        self.driver_name = "picamera2-imx327"
+        self.backend_name = "picamera2/libcamera"
+        self.output_pixel_format = "RGB888"
+        self._frame_duration_limits: tuple[int, int] | None = None
+        self._lores_available = False
+        self._last_lores_stats: dict[str, Any] = {}
 
         # 相机参数 / Camera parameters
         requested_width = int(config.get("width", 640))
@@ -90,6 +99,16 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_mode = config.get("white_balance_mode", "auto")
         self.white_balance_gain_r = config.get("white_balance_gain_r", 1.0)
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
+        self.night_mode = bool(config.get("night_mode", False))
+        self.auto_exposure_max_us = int(config.get("auto_exposure_max_us", 2_000_000))
+        self.ae_flicker_mode = str(config.get("ae_flicker_mode", "off")).lower()
+        self.noise_reduction_mode = self._normalize_noise_reduction_mode(
+            config.get("noise_reduction_mode", config.get("noise_reduction", "fast"))
+        )
+        self.lores_enabled = bool(config.get("lores_enabled", True))
+        self.lores_width = self._align_even(int(config.get("lores_width", 320)))
+        self.lores_height = self._align_even(int(config.get("lores_height", 240)))
+        self.lores_format = str(config.get("lores_format", "YUV420"))
         # 采样模式与尺寸（supersample: 采集分辨率可高于输出分辨率） / Sampling mode and size (supersample: acquisition resolution can be higher than output resolution)
         self.sampling_mode = config.get(
             "sampling_mode", "native"
@@ -310,12 +329,222 @@ class IMX327MIPICamera(CameraInterface):
             value=border_value,
         )
 
+    def _camera_controls(self) -> dict[str, Any]:
+        """读取 libcamera 控制表；测试桩缺失时返回空表 / Read libcamera controls; empty for test doubles."""
+        return getattr(self.camera, "camera_controls", None) or {}
+
+    def _control_supported(self, name: str) -> bool:
+        """控制项能力检查 / Check whether a camera control is supported."""
+        return name in self._camera_controls()
+
+    @staticmethod
+    def _normalize_noise_reduction_mode(value: Any) -> str:
+        """归一化降噪语义模式 / Normalize semantic noise-reduction mode."""
+        if isinstance(value, int):
+            return "off" if value <= 0 else "fast" if value <= 2 else "high_quality"
+        text = str(value or "fast").strip().lower().replace("-", "_")
+        aliases = {
+            "0": "off",
+            "1": "fast",
+            "2": "fast",
+            "3": "high_quality",
+            "4": "high_quality",
+            "hq": "high_quality",
+        }
+        text = aliases.get(text, text)
+        return text if text in {"off", "fast", "high_quality"} else "fast"
+
+    @staticmethod
+    def _enum_value(enum_obj: Any, *names: str) -> Any | None:
+        """安全读取 libcamera 枚举值 / Safely read a libcamera enum value."""
+        for name in names:
+            if hasattr(enum_obj, name):
+                return getattr(enum_obj, name)
+        return None
+
+    def _target_frame_period_us(self) -> int:
+        """目标帧周期 us / Target frame period in microseconds."""
+        return max(1, int(round(1_000_000.0 / max(1.0, float(self.fps)))))
+
+    def _compute_frame_duration_limits(self) -> tuple[int, int]:
+        """生成帧周期限制；自动曝光允许长曝光降帧 / Build frame-duration limits."""
+        target_us = self._target_frame_period_us()
+        if self.auto_exposure:
+            max_us = max(target_us, int(self.auto_exposure_max_us))
+            return target_us, max_us
+        fixed_us = max(target_us, int(self.exposure_us))
+        return fixed_us, fixed_us
+
+    def _apply_frame_duration_controls(self) -> None:
+        """优先应用 FrameDurationLimits，失败时回退 FrameRate / Prefer FrameDurationLimits, fallback to FrameRate."""
+        if not self.camera:
+            return
+        limits = self._compute_frame_duration_limits()
+        self._frame_duration_limits = limits
+        if self._control_supported("FrameDurationLimits"):
+            try:
+                self.camera.set_controls({"FrameDurationLimits": limits})
+                return
+            except Exception as e:
+                logger.debug("FrameDurationLimits 未生效，回退 FrameRate: %s", e)
+        try:
+            self.camera.set_controls({"FrameRate": float(self.fps)})
+        except Exception:
+            pass
+
+    def _noise_reduction_control_value(self) -> Any:
+        """将语义模式映射到 libcamera 降噪枚举/整数 / Map semantic NR mode to libcamera value."""
+        try:
+            from picamera2 import controls as pcc
+
+            enum_obj = getattr(pcc, "draft", pcc)
+            enum_obj = getattr(enum_obj, "NoiseReductionModeEnum", enum_obj)
+            if self.noise_reduction_mode == "off":
+                val = self._enum_value(enum_obj, "Off")
+                return 0 if val is None else val
+            if self.noise_reduction_mode == "high_quality":
+                val = self._enum_value(enum_obj, "HighQuality", "HighQualityMode")
+                return 2 if val is None else val
+            val = self._enum_value(enum_obj, "Fast", "Minimal")
+            return 1 if val is None else val
+        except Exception:
+            return {"off": 0, "fast": 1, "high_quality": 2}[self.noise_reduction_mode]
+
+    def _apply_noise_reduction_controls(self) -> None:
+        """应用降噪模式；不支持时安全跳过 / Apply NR mode; safely skip unsupported controls."""
+        if not self.camera or not self._control_supported("NoiseReductionMode"):
+            return
+        try:
+            self.camera.set_controls(
+                {"NoiseReductionMode": self._noise_reduction_control_value()}
+            )
+        except Exception as e:
+            logger.debug("降噪控制未生效 / Noise reduction control skipped: %s", e)
+
+    def _apply_ae_flicker_controls(self) -> None:
+        """应用 AE 防闪烁；不支持时安全跳过 / Apply AE flicker controls when supported."""
+        if not self.camera:
+            return
+        mode = str(self.ae_flicker_mode or "off").lower()
+        updates: dict[str, Any] = {}
+        if self._control_supported("AeFlickerMode"):
+            try:
+                from picamera2 import controls as pcc
+
+                enum_obj = getattr(pcc, "AeFlickerModeEnum", pcc)
+                enum_value = (
+                    self._enum_value(enum_obj, "Manual", "FlickerManual")
+                    if mode in {"50hz", "60hz"}
+                    else self._enum_value(enum_obj, "Off", "FlickerOff")
+                )
+            except Exception:
+                enum_value = None
+            # Picamera2/libcamera 版本间枚举名有差异；找不到枚举时用整数 fallback，禁止传 None。
+            # Enum names differ across Picamera2/libcamera versions; fall back to ints and never pass None.
+            updates["AeFlickerMode"] = (
+                enum_value
+                if enum_value is not None
+                else (1 if mode in {"50hz", "60hz"} else 0)
+            )
+        if mode in {"50hz", "60hz"} and self._control_supported("AeFlickerPeriod"):
+            updates["AeFlickerPeriod"] = 10_000 if mode == "50hz" else 8_333
+        if updates:
+            try:
+                self.camera.set_controls(updates)
+            except Exception as e:
+                logger.debug("AE 防闪烁控制未生效 / AE flicker control skipped: %s", e)
+
+    def _create_video_configuration(self) -> Any:
+        """创建含可选 lores 的视频配置 / Create video config with optional lores stream."""
+        if not self.camera:
+            raise RuntimeError("camera missing")
+        main = {"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+        if self.lores_enabled:
+            try:
+                cfg = self.camera.create_video_configuration(
+                    main=main,
+                    lores={
+                        "size": (self.lores_width, self.lores_height),
+                        "format": self.lores_format,
+                    },
+                    buffer_count=self.PREVIEW_BUFFER_COUNT,
+                )
+                self._lores_available = True
+                return cfg
+            except Exception as e:
+                self._lores_available = False
+                logger.debug(
+                    "lores 流不可用，回退主流配置 / Lores unavailable, fallback: %s", e
+                )
+        self._lores_available = False
+        return self.camera.create_video_configuration(
+            main=main,
+            buffer_count=self.PREVIEW_BUFFER_COUNT,
+        )
+
+    def _collect_lores_stats(self, request: Any) -> None:
+        """从 lores 流提取轻量亮度统计 / Extract lightweight luminance stats from lores stream."""
+        if not self._lores_available:
+            return
+        try:
+            lores = request.make_array("lores")
+            if lores is None:
+                return
+            if (
+                len(getattr(lores, "shape", ())) == 2
+                and lores.shape[0] >= self.lores_height
+            ):
+                y_plane = lores[: self.lores_height, :]
+            elif len(getattr(lores, "shape", ())) >= 3:
+                y_plane = lores[..., 0]
+            else:
+                y_plane = lores
+            self._last_lores_stats = {
+                "mean": float(np.mean(y_plane)),
+                "min": int(np.min(y_plane)),
+                "max": int(np.max(y_plane)),
+            }
+        except Exception as e:
+            logger.debug("读取 lores 统计失败 / Failed to read lores stats: %s", e)
+
+    def _camera_capabilities(self) -> dict[str, Any]:
+        """汇总相机能力供 API/UI 降级 / Summarize camera capabilities for API/UI fallback."""
+        cc = self._camera_controls()
+        caps = CameraCapabilities(
+            driver=self.driver_name,
+            backend=self.backend_name,
+            lores_stream=bool(self._lores_available),
+            lores_width=self.lores_width if self._lores_available else 0,
+            lores_height=self.lores_height if self._lores_available else 0,
+            lores_format=self.lores_format if self._lores_available else "",
+            ae_flicker=("AeFlickerMode" in cc or "AeFlickerPeriod" in cc),
+            manual_digital_gain="DigitalGain" in cc,
+            autofocus=any(k.startswith("Af") for k in cc),
+            hdr=any("Hdr" in k or "HDR" in k for k in cc),
+        )
+        return {
+            "driver": caps.driver,
+            "backend": caps.backend,
+            "lores_stream": caps.lores_stream,
+            "lores_width": caps.lores_width,
+            "lores_height": caps.lores_height,
+            "lores_format": caps.lores_format,
+            "awb_modes": list(caps.awb_modes),
+            "ae_flicker": caps.ae_flicker,
+            "noise_reduction_modes": list(caps.noise_reduction_modes),
+            "manual_digital_gain": caps.manual_digital_gain,
+            "autofocus": caps.autofocus,
+            "hdr": caps.hdr,
+        }
+
     def _apply_polar_auto_exposure_controls(self) -> None:
         """libcamera AE 预设：暗部优先、矩阵测光、偏长曝光、EV；失败项跳过 / AE preset; skip unsupported controls."""
         if not self.camera or not self.auto_exposure:
             return
         if not self.ae_polar_preset:
             try:
+                self._apply_frame_duration_controls()
+                self._apply_ae_flicker_controls()
                 self.camera.set_controls({"AeEnable": True})
             except Exception as e:
                 logger.debug("AeEnable only: %s", e)
@@ -341,6 +570,8 @@ class IMX327MIPICamera(CameraInterface):
                 updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
 
         try:
+            self._apply_frame_duration_controls()
+            self._apply_ae_flicker_controls()
             self.camera.set_controls(updates)
             logger.info(
                 "已应用电子极轴镜 AE 预设 (Shadows/Matrix/Long, EV≈%.2f)",
@@ -356,6 +587,51 @@ class IMX327MIPICamera(CameraInterface):
                 except Exception as err:
                     logger.debug("AE 控制 %s 未生效: %s", key, err)
 
+    def _white_balance_controls(self) -> dict[str, Any]:
+        """生成白平衡控制；auto 必须真正打开 AWB / Build WB controls; auto must really enable AWB."""
+        mode = str(self.white_balance_mode or "auto").lower()
+        if mode == "manual":
+            return {
+                "AwbEnable": False,
+                "ColourGains": (
+                    float(self.white_balance_gain_r),
+                    float(self.white_balance_gain_b),
+                ),
+            }
+        if mode == "night":
+            self.white_balance_gain_r = 1.1
+            self.white_balance_gain_b = 0.9
+            return {"AwbEnable": False, "ColourGains": (1.1, 0.9)}
+        updates: dict[str, Any] = {"AwbEnable": True}
+        mode_aliases = {
+            "auto": "Auto",
+            "daylight": "Daylight",
+            "cloudy": "Cloudy",
+            "tungsten": "Tungsten",
+            "fluorescent": "Fluorescent",
+            "indoor": "Indoor",
+        }
+        if mode not in mode_aliases:
+            mode = "auto"
+        self.white_balance_mode = mode
+        if self._control_supported("AwbMode"):
+            try:
+                from picamera2 import controls as pcc
+
+                enum_obj = getattr(pcc, "AwbModeEnum", pcc)
+                enum_value = self._enum_value(enum_obj, mode_aliases[mode])
+                if enum_value is not None:
+                    updates["AwbMode"] = enum_value
+            except Exception:
+                pass
+        return updates
+
+    def _apply_white_balance_controls(self) -> None:
+        """重放白平衡控制，避免配置重建后回到错误状态 / Replay WB controls after reconfiguration."""
+        if not self.camera:
+            return
+        self.camera.set_controls(self._white_balance_controls())
+
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
         try:
@@ -363,18 +639,9 @@ class IMX327MIPICamera(CameraInterface):
 
             self.camera = Picamera2()
 
-            # 统一使用RGB888格式，颜色模式转换在图像处理阶段进行 / RGB888 format is uniformly used, and color mode conversion is performed in the image processing stage.
-            # 这样可以保持相机配置的一致性，避免格式兼容性问题 / This maintains consistency in camera configuration and avoids format compatibility issues
-            main_format = "RGB888"
-
-            # 配置相机 / Configure camera
-            camera_config = self.camera.create_video_configuration(
-                main={
-                    "size": (self.capture_width, self.capture_height),
-                    "format": main_format,
-                },
-                buffer_count=self.PREVIEW_BUFFER_COUNT,
-            )
+            # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
+            # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
+            camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
 
@@ -384,9 +651,8 @@ class IMX327MIPICamera(CameraInterface):
                 "ExposureTime": self.exposure_us,
                 "AnalogueGain": self.analogue_gain,
                 "AeEnable": self.auto_exposure,
-                "AwbEnable": False,  # 禁用自动白平衡 / Disable automatic white balance
-                "NoiseReductionMode": 0,  # 禁用降噪以获得原始数据 / Disable noise reduction to get raw data
             }
+            controls.update(self._white_balance_controls())
             try:
                 self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
             except Exception:
@@ -395,6 +661,10 @@ class IMX327MIPICamera(CameraInterface):
 
             if self.auto_exposure:
                 self._apply_polar_auto_exposure_controls()
+            else:
+                self._apply_frame_duration_controls()
+            self._apply_noise_reduction_controls()
+            self._apply_ae_flicker_controls()
 
             self.is_initialized = True
             logger.info("IMX327 MIPI 相机初始化成功")
@@ -416,23 +686,8 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
-            # 使用视频配置以获得更高实时性 / Use video configuration for greater real-time performance
-            try:
-                video_config = self.camera.create_video_configuration(
-                    main={
-                        "size": (self.capture_width, self.capture_height),
-                        "format": "RGB888",
-                    },
-                    buffer_count=self.PREVIEW_BUFFER_COUNT,
-                )
-                self.camera.configure(video_config)
-            except Exception as e:
-                logger.warning(f"视频配置失败，回退到当前配置: {e}")
-            # 设置目标帧率（若固件支持） / Set target frame rate (if supported by firmware)
-            try:
-                self.camera.set_controls({"FrameRate": self.fps})
-            except Exception:
-                pass
+            # 设置帧周期（优先 FrameDurationLimits） / Set frame period (prefer FrameDurationLimits).
+            self._apply_frame_duration_controls()
 
             # 重新配置后重放曝光控制，避免状态漂移到驱动默认值 / Replay exposure control after reconfiguration to avoid state drift to driver defaults
             try:
@@ -450,6 +705,9 @@ class IMX327MIPICamera(CameraInterface):
                         )
                     except Exception:
                         self.camera.set_controls(controls)
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_ae_flicker_controls()
             except Exception as e:
                 logger.warning(f"重放曝光控制失败，使用驱动默认控制: {e}")
 
@@ -486,8 +744,15 @@ class IMX327MIPICamera(CameraInterface):
             return None
 
         try:
-            # 捕获图像 / capture image
-            image = self.camera.capture_array()
+            # 同一请求读取图像与元数据，避免额外等待下一帧
+            # Read image and metadata from one request to avoid waiting for another frame.
+            request = self.camera.capture_request()
+            try:
+                image = request.make_array("main")
+                self._last_metadata = dict(request.get_metadata() or {})
+                self._collect_lores_stats(request)
+            finally:
+                request.release()
 
             # 如果是 RAW 格式，需要转换为 RGB / If it is RAW format, it needs to be converted to RGB
             if len(image.shape) == 2:  # RAW 格式 / RAW format
@@ -528,6 +793,11 @@ class IMX327MIPICamera(CameraInterface):
                 # 转换为3通道灰度图像（保持兼容性） / Convert to 3-channel grayscale image (maintain compatibility)
                 image = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
                 logger.debug("应用黑白模式转换")
+
+            if isinstance(image, np.ndarray) and not image.flags["C_CONTIGUOUS"]:
+                # 旋转/镜像可能产生负 stride 视图，编码器会被迫慢速复制；这里统一整理为连续内存。
+                # Rotation/flip may create negative-stride views; make contiguous before encoding/analysis.
+                image = np.ascontiguousarray(image)
 
             return image
 
@@ -596,7 +866,7 @@ class IMX327MIPICamera(CameraInterface):
             and self.sampling_mode == effective_mode
         ):
             try:
-                self.camera.set_controls({"FrameRate": self.fps})
+                self._apply_frame_duration_controls()
             except Exception:
                 pass
             return True
@@ -621,13 +891,7 @@ class IMX327MIPICamera(CameraInterface):
                 if was_capturing and not self.stop_capture():
                     return False
                 try:
-                    video_config = self.camera.create_video_configuration(
-                        main={
-                            "size": (self.capture_width, self.capture_height),
-                            "format": "RGB888",
-                        },
-                        buffer_count=self.PREVIEW_BUFFER_COUNT,
-                    )
+                    video_config = self._create_video_configuration()
                     self.camera.configure(video_config)
                 except Exception:
                     still_cfg = self.camera.create_still_configuration(
@@ -638,9 +902,15 @@ class IMX327MIPICamera(CameraInterface):
                     )
                     self.camera.configure(still_cfg)
             try:
-                self.camera.set_controls({"FrameRate": self.fps})
+                self._apply_frame_duration_controls()
             except Exception:
                 pass
+            try:
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_ae_flicker_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             if need_reconfig and was_capturing:
                 return self.start_capture()
@@ -662,11 +932,7 @@ class IMX327MIPICamera(CameraInterface):
             return False
         try:
             self.fps = int(max(1, fps))
-            try:
-                self.camera.set_controls({"FrameRate": self.fps})
-            except Exception:
-                # 不支持动态设置时也返回 True，后续通过重配生效 / True is also returned when dynamic setting is not supported, and will take effect later through reconfiguration.
-                pass
+            self._apply_frame_duration_controls()
             logger.info(f"帧率设置为: {self.fps}fps")
             return True
         except Exception as e:
@@ -683,6 +949,7 @@ class IMX327MIPICamera(CameraInterface):
             self.camera.set_controls({"AeEnable": False, "ExposureTime": exposure_us})
             self.exposure_us = exposure_us
             self.auto_exposure = False
+            self._apply_frame_duration_controls()
             logger.info(f"曝光时间设置为: {exposure_us}μs")
             return True
         except Exception as e:
@@ -712,6 +979,7 @@ class IMX327MIPICamera(CameraInterface):
             self.analogue_gain = analogue_gain
             self.digital_gain = digital_gain
             self.auto_exposure = False
+            self._apply_frame_duration_controls()
             logger.info(f"增益设置为: 模拟={analogue_gain}, 数字={digital_gain}")
             return True
         except Exception as e:
@@ -730,6 +998,7 @@ class IMX327MIPICamera(CameraInterface):
                 self._apply_polar_auto_exposure_controls()
             else:
                 self.camera.set_controls({"AeEnable": False})
+            self._apply_frame_duration_controls()
 
             # 关闭自动曝光时，立即重放当前手动参数，确保状态一致 / When auto-exposure is turned off, the current manual parameters are immediately replayed to ensure consistent status.
             if not enabled:
@@ -771,9 +1040,7 @@ class IMX327MIPICamera(CameraInterface):
             return False
         self.flip_horizontal = bool(flip_horizontal)
         self.flip_vertical = bool(flip_vertical)
-        logger.info(
-            f"图像镜像: 水平={self.flip_horizontal}, 垂直={self.flip_vertical}"
-        )
+        logger.info(f"图像镜像: 水平={self.flip_horizontal}, 垂直={self.flip_vertical}")
         return True
 
     def set_sampling_mode(self, mode: str) -> bool:
@@ -817,13 +1084,7 @@ class IMX327MIPICamera(CameraInterface):
                 return False
 
             try:
-                video_config = self.camera.create_video_configuration(
-                    main={
-                        "size": (self.capture_width, self.capture_height),
-                        "format": "RGB888",
-                    },
-                    buffer_count=self.PREVIEW_BUFFER_COUNT,
-                )
+                video_config = self._create_video_configuration()
                 self.camera.configure(video_config)
             except Exception:
                 still_cfg = self.camera.create_still_configuration(
@@ -835,9 +1096,15 @@ class IMX327MIPICamera(CameraInterface):
                 self.camera.configure(still_cfg)
 
             try:
-                self.camera.set_controls({"FrameRate": self.fps})
+                self._apply_frame_duration_controls()
             except Exception:
                 pass
+            try:
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_ae_flicker_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             if was_capturing:
                 return self.start_capture()
@@ -854,14 +1121,33 @@ class IMX327MIPICamera(CameraInterface):
 
         try:
             camera_properties = self.camera.camera_properties
+            metadata = self._last_metadata or {}
+            capabilities = self._camera_capabilities()
             return {
+                "driver": self.driver_name,
+                "backend": self.backend_name,
+                "capabilities": capabilities,
                 "sensor": camera_properties.get("Model", "Unknown"),
                 "resolution": f"{self.width}x{self.height}",
                 "fps": self.fps,
                 "exposure_us": self.exposure_us,
+                "actual_exposure_us": int(
+                    metadata.get("ExposureTime", self.exposure_us) or 0
+                ),
+                "frame_duration_us": int(metadata.get("FrameDuration", 0) or 0),
+                "frame_duration_limits": list(
+                    self._frame_duration_limits or self._compute_frame_duration_limits()
+                ),
                 "analogue_gain": self.analogue_gain,
                 "digital_gain": self.digital_gain,
+                "actual_digital_gain": metadata.get("DigitalGain"),
                 "auto_exposure": self.auto_exposure,
+                "auto_exposure_max_us": self.auto_exposure_max_us,
+                "ae_flicker_mode": self.ae_flicker_mode,
+                "noise_reduction_mode": self.noise_reduction_mode,
+                "noise_reduction": {"off": 0, "fast": 1, "high_quality": 2}.get(
+                    self.noise_reduction_mode, 1
+                ),
                 "auto_gain": self.auto_gain,
                 "rotation": self.rotation,
                 "flip_horizontal": self.flip_horizontal,
@@ -877,8 +1163,22 @@ class IMX327MIPICamera(CameraInterface):
                 "white_balance_mode": self.white_balance_mode,
                 "white_balance_gain_r": self.white_balance_gain_r,
                 "white_balance_gain_b": self.white_balance_gain_b,
+                "actual_white_balance_gains": metadata.get("ColourGains"),
+                "awb_enabled": self.white_balance_mode
+                in {"auto", "daylight", "cloudy", "tungsten", "fluorescent", "indoor"},
+                "colour_temperature": metadata.get("ColourTemperature"),
+                "lux": metadata.get("Lux"),
+                "sensor_timestamp": metadata.get("SensorTimestamp"),
+                "sensor_black_levels": metadata.get("SensorBlackLevels"),
+                "night_mode": self.night_mode,
                 "ae_polar_preset": self.ae_polar_preset,
                 "ae_exposure_value": self.ae_exposure_value,
+                "lores_enabled": self.lores_enabled,
+                "lores_available": self._lores_available,
+                "lores_width": self.lores_width,
+                "lores_height": self.lores_height,
+                "lores_format": self.lores_format,
+                "lores_stats": self._last_lores_stats,
                 "control_ranges": self.get_manual_control_ranges(),
             }
         except Exception as e:
@@ -902,9 +1202,7 @@ class IMX327MIPICamera(CameraInterface):
             gain_level = self.analogue_gain * self.digital_gain
 
             # 根据曝光时间判断夜间模式 / Determine night mode based on exposure time
-            night_mode = (
-                self.exposure_us > 30000
-            )  # 曝光时间超过30ms认为是夜间模式 / Exposure time longer than 30ms is considered night mode
+            night_mode = bool(self.night_mode)
 
             # 计算曝光充足度（基于曝光时间） / Calculate exposure adequacy (based on exposure time)
             # 假设10ms为基准曝光时间 / Assume 10ms as the base exposure time
@@ -958,20 +1256,48 @@ class IMX327MIPICamera(CameraInterface):
             }
 
     def set_noise_reduction(self, level: int) -> bool:
-        """设置降噪级别 (0-4) / Set noise reduction level (0-4)"""
+        """兼容旧级别接口并映射到语义模式 / Compat level API mapped to semantic NR mode."""
+        return self.set_noise_reduction_mode(
+            self._normalize_noise_reduction_mode(level)
+        )
+
+    def set_noise_reduction_mode(self, mode: str) -> bool:
+        """设置语义降噪模式 / Set semantic noise-reduction mode."""
         if not self.is_initialized:
             logger.error("相机未初始化")
             return False
 
         try:
-            # 将级别映射到相机控制参数 / Map levels to camera control parameters
-            noise_reduction_mode = min(max(level, 0), 4)
-            self.camera.set_controls({"NoiseReductionMode": noise_reduction_mode})
-            logger.info(f"降噪级别设置为: {noise_reduction_mode}")
+            self.noise_reduction_mode = self._normalize_noise_reduction_mode(mode)
+            self._apply_noise_reduction_controls()
+            logger.info(f"降噪模式设置为: {self.noise_reduction_mode}")
             return True
         except Exception as e:
-            logger.error(f"设置降噪级别失败: {e}")
+            logger.error(f"设置降噪模式失败: {e}")
             return False
+
+    def set_ae_flicker_mode(self, mode: str) -> bool:
+        """设置 AE 防闪烁模式 / Set AE flicker mode."""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+        text = str(mode or "off").lower().replace("_", "")
+        self.ae_flicker_mode = (
+            "50hz"
+            if text in {"50", "50hz"}
+            else "60hz" if text in {"60", "60hz"} else "off"
+        )
+        self._apply_ae_flicker_controls()
+        return True
+
+    def set_auto_exposure_max_us(self, value: int) -> bool:
+        """设置自动曝光最长帧周期 / Set maximum auto-exposure frame duration."""
+        if not self.is_initialized:
+            logger.error("相机未初始化")
+            return False
+        self.auto_exposure_max_us = max(10_000, min(10_000_000, int(value)))
+        self._apply_frame_duration_controls()
+        return True
 
     def set_white_balance(
         self, mode: str, gain_r: float = 1.0, gain_b: float = 1.0
@@ -982,26 +1308,30 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
-            if mode == "auto":
-                self.camera.set_controls({"AwbEnable": True})
-                self.white_balance_mode = "auto"
-                logger.info("白平衡设置为自动模式")
+            mode = str(mode or "auto").lower()
+            if mode in {
+                "auto",
+                "daylight",
+                "cloudy",
+                "tungsten",
+                "fluorescent",
+                "indoor",
+            }:
+                self.white_balance_mode = mode
+                self.white_balance_gain_r = 1.0
+                self.white_balance_gain_b = 1.0
+                self._apply_white_balance_controls()
+                logger.info(f"白平衡设置为模式: {mode}")
             elif mode == "manual":
-                self.camera.set_controls(
-                    {"AwbEnable": False, "ColourGains": (gain_r, gain_b)}
-                )
                 self.white_balance_mode = "manual"
                 self.white_balance_gain_r = gain_r
                 self.white_balance_gain_b = gain_b
+                self._apply_white_balance_controls()
                 logger.info(f"白平衡设置为手动模式: R={gain_r}, B={gain_b}")
             elif mode == "night":
                 # 夜间模式：稍微偏暖色调 / Night mode: Slightly warmer tones
-                self.camera.set_controls(
-                    {"AwbEnable": False, "ColourGains": (1.1, 0.9)}
-                )
                 self.white_balance_mode = "night"
-                self.white_balance_gain_r = 1.1
-                self.white_balance_gain_b = 0.9
+                self._apply_white_balance_controls()
                 logger.info("白平衡设置为夜间模式")
             else:
                 logger.error(f"不支持的白平衡模式: {mode}")
@@ -1067,19 +1397,20 @@ class IMX327MIPICamera(CameraInterface):
         try:
             if enabled:
                 # 夜间模式：提高增益，延长曝光时间，调整白平衡 / Night mode: increase gain, extend exposure time, adjust white balance
+                self.exposure_us = max(self.exposure_us, 30000)
+                self.analogue_gain = max(self.analogue_gain, 4.0)
+                self.white_balance_mode = "night"
+                self.noise_reduction_mode = "fast"
                 self.camera.set_controls(
                     {
-                        "ExposureTime": max(
-                            self.exposure_us, 30000
-                        ),  # 至少30ms / At least 30ms
-                        "AnalogueGain": max(
-                            self.analogue_gain, 4.0
-                        ),  # 至少4x增益 / At least 4x gain
-                        "AwbEnable": False,
-                        "ColourGains": (1.1, 0.9),  # 偏暖色调 / warmer tones
-                        "NoiseReductionMode": 2,  # 中等降噪 / Moderate noise reduction
+                        "ExposureTime": self.exposure_us,
+                        "AnalogueGain": self.analogue_gain,
                     }
                 )
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_frame_duration_controls()
+                self.night_mode = True
                 logger.info("夜间模式已启用")
             else:
                 # 关闭夜间模式：恢复默认设置 / Turn off night mode: restore default settings
@@ -1087,10 +1418,15 @@ class IMX327MIPICamera(CameraInterface):
                     {
                         "ExposureTime": self.exposure_us,
                         "AnalogueGain": self.analogue_gain,
-                        "AwbEnable": True,  # 恢复自动白平衡 / Restore automatic white balance
-                        "NoiseReductionMode": 0,  # 关闭降噪 / Turn off noise reduction
                     }
                 )
+                self.white_balance_mode = "auto"
+                self.white_balance_gain_r = 1.0
+                self.white_balance_gain_b = 1.0
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_frame_duration_controls()
+                self.night_mode = False
                 logger.info("夜间模式已关闭")
 
             return True
@@ -1117,22 +1453,17 @@ class IMX327MIPICamera(CameraInterface):
             # 更新颜色模式 / Update color mode
             self.color_mode = color_mode
 
-            # 对于颜色模式，我们统一使用RGB888格式，在图像处理阶段进行转换 / For color mode, we uniformly use the RGB888 format and convert it during the image processing stage.
-            # 这样可以保持相机配置的一致性，避免格式兼容性问题 / This maintains consistency in camera configuration and avoids format compatibility issues
-            main_format = "RGB888"
-
-            camera_config = self.camera.create_still_configuration(
-                main={
-                    "size": (self.capture_width, self.capture_height),
-                    "format": main_format,
-                },
-                raw={
-                    "size": (self.capture_width, self.capture_height),
-                    "format": "SRGGB12",
-                },
-            )
+            # 颜色模式只影响输出转换，不改变主流 RGB888 配置 / Color mode only changes output conversion.
+            camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
+            try:
+                self._apply_white_balance_controls()
+                self._apply_noise_reduction_controls()
+                self._apply_ae_flicker_controls()
+                self._apply_frame_duration_controls()
+            except Exception as e:
+                logger.warning(f"重放白平衡控制失败（忽略）: {e}")
 
             # 如果之前在捕获，重新开始 / If capturing before, start again
             if was_capturing:
@@ -1156,6 +1487,9 @@ class CameraFactory:
         """创建相机实例 / Create camera instance"""
         if camera_type == "imx327_mipi":
             return IMX327MIPICamera(config)
+        if camera_type in {"linuxpy_v4l2", "v4l2_linuxpy"}:
+            # 预留自定义 Linux 入口；树莓派 CSI 默认仍走 Picamera2 / Reserved custom-Linux hook; Pi CSI stays Picamera2.
+            return LinuxpyV4L2Driver(config)  # type: ignore[return-value]
         else:
             logger.error(f"不支持的相机类型: {camera_type}")
             return None

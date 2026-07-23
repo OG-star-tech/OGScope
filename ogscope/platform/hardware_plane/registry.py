@@ -55,9 +55,8 @@ class CapabilityRegistry:
     def list_records(self) -> list[CapabilityRecord]:
         """列出所有能力 / List all capabilities."""
         with self._lock:
-            return [record for record in self._records.values()]
+            return list(self._records.values())
 
     def as_dict_list(self) -> list[dict[str, Any]]:
         """字典列表表示 / Dict-list representation."""
         return [record.to_dict() for record in self.list_records()]
-

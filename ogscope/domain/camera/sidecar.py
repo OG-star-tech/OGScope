@@ -41,4 +41,3 @@ def merge_capture_sidecar_into_info(
             if key not in capture_info:
                 capture_info[key] = value
     info.update(capture_info)
-

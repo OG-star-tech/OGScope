@@ -25,7 +25,9 @@ router = APIRouter()
     "/core/v1/analysis/start",
     response_model=CoreAnalysisControlResponse,
 )
-async def core_start_analysis(body: CoreStartAnalysisRequest) -> CoreAnalysisControlResponse:
+async def core_start_analysis(
+    body: CoreStartAnalysisRequest,
+) -> CoreAnalysisControlResponse:
     """开始分析（Core 标准契约）/ Start analysis (Core contract)."""
     try:
         data = await core_contract_service.start_analysis(
@@ -34,6 +36,7 @@ async def core_start_analysis(body: CoreStartAnalysisRequest) -> CoreAnalysisCon
             fov_estimate=body.fov_estimate,
             fov_max_error=body.fov_max_error,
             solve_timeout_ms=body.solve_timeout_ms,
+            solve_context=body.solve_context,
         )
         return CoreAnalysisControlResponse(**data)
     except Exception as exc:  # noqa: BLE001
@@ -113,7 +116,9 @@ async def core_camera_stop() -> CoreCameraControlResponse:
 async def core_camera_tune(payload: CoreCameraTuneRequest) -> CoreCameraControlResponse:
     """微调相机参数（Core 标准契约）/ Tune camera settings (Core contract)."""
     try:
-        data = await core_contract_service.tune_camera(payload.model_dump(exclude_none=True))
+        data = await core_contract_service.tune_camera(
+            payload.model_dump(exclude_none=True)
+        )
         return CoreCameraControlResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc

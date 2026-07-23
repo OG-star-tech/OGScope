@@ -46,10 +46,34 @@ type CameraInfo = {
   saturation?: number;
   sharpness?: number;
   noise_reduction?: number;
+  noise_reduction_mode?: string;
+  ae_flicker_mode?: string;
+  auto_exposure_max_us?: number;
   white_balance_mode?: string;
   white_balance_gain_r?: number;
   white_balance_gain_b?: number;
   color_mode?: string;
+  actual_digital_gain?: number;
+  colour_temperature?: number;
+  lux?: number;
+  frame_duration_limits?: number[];
+  lores_enabled?: boolean;
+  lores_available?: boolean;
+  lores_width?: number;
+  lores_height?: number;
+  lores_format?: string;
+  capabilities?: {
+    awb_modes?: string[];
+    ae_flicker?: boolean;
+    noise_reduction_modes?: string[];
+    manual_digital_gain?: boolean;
+    lores_stream?: boolean;
+    autofocus?: boolean;
+    hdr?: boolean;
+    [key: string]: unknown;
+  };
+  driver?: string;
+  backend?: string;
   rotation?: number;
   flip_horizontal?: boolean;
   flip_vertical?: boolean;
@@ -69,6 +93,35 @@ type CameraStatus = {
   runtime_overrides?: Record<string, unknown>;
 };
 
+type StreamMetrics = {
+  target_preview_fps?: number;
+  sensor_target_fps?: number;
+  preview_target_fps?: number;
+  actual_capture_fps?: number;
+  actual_preview_fps?: number;
+  actual_exposure_us?: number;
+  frame_duration_us?: number;
+  preview_consumers?: number;
+  analysis_consumers?: number;
+  recording_consumers?: number;
+  jpeg_average_encode_ms?: number;
+  jpeg_cached_bytes?: number;
+  preview_encoder?: string;
+  jpeg_encode_failures?: number;
+  jpeg_source_format?: string;
+  camera_driver?: string;
+  camera_backend?: string;
+  lores_enabled?: boolean;
+  lores_available?: boolean;
+  lores_width?: number;
+  lores_height?: number;
+  lores_format?: string;
+  throttle_reason?: string | null;
+  process_rss_kb?: number;
+  process_swap_kb?: number;
+  cma_free_kb?: number;
+};
+
 type CameraForm = {
   exposure: number;
   gain: number;
@@ -79,6 +132,9 @@ type CameraForm = {
   saturation: number;
   sharpness: number;
   noiseReduction: number;
+  noiseReductionMode: string;
+  aeFlickerMode: string;
+  autoExposureMaxUs: number;
   whiteBalanceMode: string;
   whiteBalanceGainR: number;
   whiteBalanceGainB: number;
@@ -126,7 +182,7 @@ type DebugFileInfo = {
   fps?: number;
 };
 
-const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1080"] as const;
+const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1020"] as const;
 const ROTATION_PRESETS = [0, 90, 180, 270] as const;
 const FILE_PAGE_SIZE = 12;
 
@@ -229,7 +285,8 @@ export function CameraConsoleApp() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [recordBusy, setRecordBusy] = useState(false);
   const [captureBusy, setCaptureBusy] = useState(false);
-  const [fpsValue, setFpsValue] = useState("5");
+  const [fpsValue, setFpsValue] = useState("8");
+  const [previewFpsValue, setPreviewFpsValue] = useState("8");
   const [resValue, setResValue] = useState("1280x720");
   const [samplingMode, setSamplingMode] = useState("supersample");
   const [runtimeDirty, setRuntimeDirty] = useState(false);
@@ -242,7 +299,7 @@ export function CameraConsoleApp() {
   /** 最近约 1s 内画面像素变化次数（rAF 采样）/ ~1s sliding window from pixel deltas */
   const [liveFps, setLiveFps] = useState(0);
   /** 与 OGSCOPE_SHARED_PREVIEW_FPS 一致：共享抓帧与 MJPEG 最小帧间隔 / Env stream pacing cap */
-  const [streamPacingFps, setStreamPacingFps] = useState<number | null>(null);
+  const [streamMetrics, setStreamMetrics] = useState<StreamMetrics | null>(null);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [rotationValue, setRotationValue] = useState(180);
   const [flipHorizontal, setFlipHorizontal] = useState(false);
@@ -257,6 +314,9 @@ export function CameraConsoleApp() {
     saturation: 1.0,
     sharpness: 1.0,
     noiseReduction: 0,
+    noiseReductionMode: "fast",
+    aeFlickerMode: "off",
+    autoExposureMaxUs: 2000000,
     whiteBalanceMode: "auto",
     whiteBalanceGainR: 1.0,
     whiteBalanceGainB: 1.0,
@@ -357,14 +417,14 @@ export function CameraConsoleApp() {
     setPreviewBusy(true);
     setErr(null);
     try {
-      // 先卸载预览，释放长连接，再通知后端停止 / Release stream before stop API
+      // 仅卸载预览流，后端会释放消费者并让相机热驻留后延迟关闭。
+      // Only detach the preview stream; backend releases the consumer and keeps the camera warm briefly.
       clearReconnectTimer();
       setPreviewActive(false);
       previewActiveRef.current = false;
       setPreviewStreamHint(null);
       setPreviewStreamIsBusy(false);
       resetStreamStats();
-      setStatus((prev) => (prev ? { ...prev, streaming: false, recording: false } : prev));
       if (imgRef.current) {
         imgRef.current.onload = null;
         imgRef.current.onerror = null;
@@ -372,10 +432,7 @@ export function CameraConsoleApp() {
         imgRef.current.removeAttribute("src");
       }
       setStreamNonce(Date.now());
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      await requestJson("/api/debug/camera/stop", { method: "POST" });
       setNotice(t("cam.notice.previewStop"));
-      await updateCameraStatus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -423,6 +480,10 @@ export function CameraConsoleApp() {
     try {
       const fps = clamp(parseInt(fpsValue, 10) || 5, 1, 60);
       await requestJson(`/api/debug/camera/fps?fps=${fps}`, { method: "POST" });
+      const previewFps = clamp(parseInt(previewFpsValue, 10) || 8, 1, 30);
+      await requestJson(`/api/debug/camera/preview-fps?fps=${previewFps}`, {
+        method: "POST",
+      });
       const [w, h] = resValue.split("x").map((x) => parseInt(x, 10));
       if (w && h) {
         await requestJson(`/api/debug/camera/size?width=${w}&height=${h}`, { method: "POST" });
@@ -457,25 +518,22 @@ export function CameraConsoleApp() {
   const applyModeSettings = async () => {
     setErr(null);
     try {
-      await requestJson(`/api/debug/camera/auto-exposure?enabled=${form.autoExposure ? "true" : "false"}`, {
+      await requestJson("/api/debug/camera/settings", {
         method: "POST",
-      });
-      await requestJson(
-        `/api/debug/camera/white-balance?mode=${encodeURIComponent(form.whiteBalanceMode)}&gain_r=${form.whiteBalanceGainR}&gain_b=${form.whiteBalanceGainB}`,
-        { method: "POST" },
-      );
-      await requestJson(`/api/debug/camera/color-mode?color_mode=${encodeURIComponent(form.colorMode)}`, {
-        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
       setNotice(t("cam.notice.modeApplied"));
+      setFormDirty(false);
       await updateCameraStatus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const syncFormFromStatus = (info: CameraInfo | undefined) => {
+  const syncFormFromStatus = (info: CameraInfo | undefined, options?: { syncRuntime?: boolean }) => {
     if (!info) return;
+    const syncRuntime = options?.syncRuntime ?? true;
     setForm({
       exposure: clamp(Math.round(toNum(info.exposure_us, 5000)), 100, 120000),
       gain: clamp(toNum(info.analogue_gain, 1.0), 1.0, 24.0),
@@ -486,15 +544,22 @@ export function CameraConsoleApp() {
       saturation: clamp(toNum(info.saturation, 1.0), 0, 2),
       sharpness: clamp(toNum(info.sharpness, 1.0), 0, 2),
       noiseReduction: clamp(Math.round(toNum(info.noise_reduction, 0)), 0, 4),
+      noiseReductionMode: String(info.noise_reduction_mode ?? "fast"),
+      aeFlickerMode: String(info.ae_flicker_mode ?? "off"),
+      autoExposureMaxUs: clamp(Math.round(toNum(info.auto_exposure_max_us, 2000000)), 10000, 10000000),
       whiteBalanceMode: String(info.white_balance_mode ?? "auto"),
       whiteBalanceGainR: clamp(toNum(info.white_balance_gain_r, 1.0), 0.1, 3.0),
       whiteBalanceGainB: clamp(toNum(info.white_balance_gain_b, 1.0), 0.1, 3.0),
       colorMode: String(info.color_mode ?? "color"),
     });
-    setFpsValue(String(Math.round(toNum(info.fps, 5))));
-    setResValue(`${Math.round(toNum(info.width, 1280))}x${Math.round(toNum(info.height, 720))}`);
-    setSamplingMode(String(info.sampling_mode ?? "supersample"));
-    setRuntimeDirty(false);
+    if (syncRuntime) {
+      // 用户修改运行时参数但尚未应用时，轮询状态不应把选项弹回旧值。
+      // Do not let status polling snap runtime controls back while the user has unapplied edits.
+      setFpsValue(String(Math.round(toNum(info.fps, 8))));
+      setResValue(`${Math.round(toNum(info.width, 1280))}x${Math.round(toNum(info.height, 720))}`);
+      setSamplingMode(String(info.sampling_mode ?? "supersample"));
+      setRuntimeDirty(false);
+    }
     setRotationValue(clamp(Math.round(toNum(info.rotation, 180)), 0, 270));
     setFlipHorizontal(Boolean(info.flip_horizontal));
     setFlipVertical(Boolean(info.flip_vertical));
@@ -846,8 +911,8 @@ export function CameraConsoleApp() {
 
   useEffect(() => {
     if (!status?.info || formDirty) return;
-    syncFormFromStatus(status.info);
-  }, [status?.info, formDirty]);
+    syncFormFromStatus(status.info, { syncRuntime: !runtimeDirty });
+  }, [status?.info, formDirty, runtimeDirty]);
 
   useEffect(() => {
     if (!status?.recording) {
@@ -950,7 +1015,7 @@ export function CameraConsoleApp() {
 
   useEffect(() => {
     if (!previewActive) {
-      setStreamPacingFps(null);
+      setStreamMetrics(null);
       return;
     }
     let cancelled = false;
@@ -961,11 +1026,16 @@ export function CameraConsoleApp() {
           credentials: "same-origin",
         });
         if (!res.ok || cancelled) return;
-        const j = (await res.json()) as { target_preview_fps?: number };
-        const v = Number(j.target_preview_fps ?? 0);
-        if (!cancelled) setStreamPacingFps(Number.isFinite(v) && v >= 0 ? v : null);
+        const j = (await res.json()) as StreamMetrics;
+        if (!cancelled) {
+          setStreamMetrics(j);
+          const v = Number(j.preview_target_fps ?? j.target_preview_fps ?? 0);
+          if (Number.isFinite(v) && v > 0 && !runtimeDirty) {
+            setPreviewFpsValue(String(Math.round(v)));
+          }
+        }
       } catch {
-        if (!cancelled) setStreamPacingFps(null);
+        if (!cancelled) setStreamMetrics(null);
       }
     };
     void pull();
@@ -974,7 +1044,7 @@ export function CameraConsoleApp() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [previewActive]);
+  }, [previewActive, runtimeDirty]);
 
   useEffect(() => {
     if (!notice) return;
@@ -994,6 +1064,14 @@ export function CameraConsoleApp() {
   const streamSrc = previewActive ? `${debugApi("/camera/stream")}?t=${streamNonce}` : "";
   const exposureLocked = form.autoExposure;
   const wbManual = form.whiteBalanceMode === "manual";
+  const caps = status?.info?.capabilities ?? {};
+  const wbModeOptions = Array.isArray(caps.awb_modes) && caps.awb_modes.length > 0
+    ? caps.awb_modes
+    : ["auto", "daylight", "cloudy", "tungsten", "fluorescent", "indoor", "manual", "night"];
+  const nrModeOptions = Array.isArray(caps.noise_reduction_modes) && caps.noise_reduction_modes.length > 0
+    ? caps.noise_reduction_modes
+    : ["off", "fast", "high_quality"];
+  const digitalGainWritable = caps.manual_digital_gain !== false;
   const nightModeEnabled = Boolean(status?.info?.night_mode);
   const isStreaming = previewActive;
   const canStartPreview = !previewBusy && !previewActive && !Boolean(status?.recording);
@@ -1140,7 +1218,7 @@ export function CameraConsoleApp() {
                 </p>
               </div>
               <div className="shrink-0 font-mono text-xs text-on-surface-variant">
-                {t("cam.preview.state")}: {status?.streaming ? t("cam.state.streaming") : t("cam.state.idle")}
+                {t("cam.preview.state")}: {previewActive ? t("cam.state.streaming") : t("cam.state.idle")}
               </div>
             </div>
             {previewStreamHint && !previewActive && (
@@ -1260,7 +1338,9 @@ export function CameraConsoleApp() {
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-4">
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.frameFps")}: </span>
-                <span className="font-mono text-on-surface">{liveFps.toFixed(2)}</span>
+                <span className="font-mono text-on-surface">
+                  {Number(streamMetrics?.actual_preview_fps ?? liveFps).toFixed(2)}
+                </span>
                 <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
                   {t("cam.stats.fpsMeasureNote")}
                 </p>
@@ -1272,12 +1352,52 @@ export function CameraConsoleApp() {
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.streamPacingFps")}: </span>
                 <span className="font-mono text-on-surface">
-                  {streamPacingFps != null ? String(streamPacingFps) : "—"}
+                  {streamMetrics?.preview_target_fps ?? streamMetrics?.target_preview_fps ?? "—"}
                 </span>
                 <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
                   {t("cam.stats.streamPacingHint")}
                 </p>
               </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.captureFps")}: </span>
+                <span className="font-mono text-on-surface">
+                  {Number(streamMetrics?.actual_capture_fps ?? 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.encodeMs")}: </span>
+                <span className="font-mono text-on-surface">
+                  {Number(streamMetrics?.jpeg_average_encode_ms ?? 0).toFixed(1)} ms
+                </span>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.encoder")}: </span>
+                <span className="font-mono text-on-surface">
+                  {String(streamMetrics?.preview_encoder ?? "—")}
+                </span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {`${streamMetrics?.jpeg_source_format ?? "RGB888"} / fail ${streamMetrics?.jpeg_encode_failures ?? 0}`}
+                </p>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.consumers")}: </span>
+                <span className="font-mono text-on-surface">
+                  {`${streamMetrics?.preview_consumers ?? 0}/${streamMetrics?.analysis_consumers ?? 0}/${streamMetrics?.recording_consumers ?? 0}`}
+                </span>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.cameraMemory")}: </span>
+                <span className="font-mono text-on-surface">
+                  {`${Math.round(Number(streamMetrics?.process_rss_kb ?? 0) / 1024)} / ${Math.round(Number(streamMetrics?.process_swap_kb ?? 0) / 1024)} MB`}
+                </span>
+              </div>
+              {streamMetrics?.throttle_reason === "auto_exposure_long" && (
+                <div className="rounded border border-tertiary/40 bg-tertiary-container/20 px-2 py-1.5 text-left text-tertiary">
+                  {t("cam.stats.longExposureThrottle", {
+                    exposure: Math.round(Number(streamMetrics.actual_exposure_us ?? 0) / 1000),
+                  })}
+                </div>
+              )}
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.uptime")}: </span>
                 <span className="font-mono text-on-surface">{streamStartedAtRef.current != null ? `${Math.max(0, Math.round((performance.now() - streamStartedAtRef.current) / 1000))}s` : "0s"}</span>
@@ -1285,6 +1405,20 @@ export function CameraConsoleApp() {
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.system.sensor")}: </span>
                 <span className="font-mono">{String(status?.info?.sensor ?? "—")}</span>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.driver")}: </span>
+                <span className="font-mono">{String(status?.info?.driver ?? streamMetrics?.camera_driver ?? "—")}</span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {`${status?.info?.backend ?? streamMetrics?.camera_backend ?? "—"} · lores ${status?.info?.lores_available || streamMetrics?.lores_available ? "on" : "off"}`}
+                </p>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.stats.metadata")}: </span>
+                <span className="font-mono">{status?.info?.lux != null ? `${Number(status.info.lux).toFixed(1)} lux` : "—"}</span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {status?.info?.colour_temperature != null ? `${Math.round(Number(status.info.colour_temperature))}K` : "—"}
+                </p>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.controls.resolution")}: </span>
@@ -1419,9 +1553,15 @@ export function CameraConsoleApp() {
               <div className="space-y-3 text-xs">
                 <div className="grid grid-cols-2 gap-2">
                   <label className="block">
-                    {t("cam.controls.fps")}
+                    {t("cam.controls.sensorFps")}
                     <input value={fpsValue} onChange={(e) => { setFpsValue(e.target.value); setRuntimeDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
                   </label>
+                  <label className="block">
+                    {t("cam.controls.previewFps")}
+                    <input value={previewFpsValue} onChange={(e) => { setPreviewFpsValue(e.target.value); setRuntimeDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
                   <label className="block">
                     {t("cam.controls.sampling")}
                     <select value={samplingMode} onChange={(e) => { setSamplingMode(e.target.value); setRuntimeDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5">
@@ -1465,13 +1605,25 @@ export function CameraConsoleApp() {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <ParamSlider label={t("cam.controls.exposure")} value={form.exposure} min={100} max={120000} step={100} unit="us" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposure: v })); }} />
                 <ParamSlider label={t("cam.controls.gain")} value={form.gain} min={1} max={24} step={0.1} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, gain: Number(v.toFixed(1)) })); }} />
-                <ParamSlider label={t("cam.controls.digitalGain")} value={form.digitalGain} min={1} max={8} step={0.1} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, digitalGain: Number(v.toFixed(1)) })); }} />
-                <ParamSlider label={t("cam.controls.noiseReduction")} value={form.noiseReduction} min={0} max={4} step={1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, noiseReduction: Math.round(v) })); }} />
+                <ParamSlider label={t("cam.controls.digitalGain")} value={form.digitalGain} min={1} max={8} step={0.1} disabled={exposureLocked || !digitalGainWritable} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, digitalGain: Number(v.toFixed(1)) })); }} />
+                <label className="block">
+                  {t("cam.controls.noiseReductionMode")}
+                  <select value={form.noiseReductionMode} onChange={(e) => { setFormDirty(true); setForm((p) => ({ ...p, noiseReductionMode: e.target.value })); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5">
+                    {nrModeOptions.map((mode) => (
+                      <option key={mode} value={mode}>{t(`cam.controls.nr.${mode}`)}</option>
+                    ))}
+                  </select>
+                </label>
                 <ParamSlider label={t("cam.controls.contrast")} value={form.contrast} min={0} max={2} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, contrast: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.brightness")} value={form.brightness} min={-1} max={1} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, brightness: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.saturation")} value={form.saturation} min={0} max={2} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, saturation: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.sharpness")} value={form.sharpness} min={0} max={2} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, sharpness: Number(v.toFixed(1)) })); }} />
               </div>
+              {!digitalGainWritable && (
+                <p className="mt-2 text-[11px] text-on-surface-variant">
+                  {t("cam.controls.digitalGainReadOnly")}: <span className="font-mono">{Number(status?.info?.actual_digital_gain ?? form.digitalGain).toFixed(2)}</span>
+                </p>
+              )}
               <div className="mt-2">
                 <button
                   type="button"
@@ -1504,10 +1656,22 @@ export function CameraConsoleApp() {
                 <label className="block">
                   {t("cam.controls.whiteBalance")}
                   <select value={form.whiteBalanceMode} onChange={(e) => { setForm((p) => ({ ...p, whiteBalanceMode: e.target.value })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5">
-                    <option value="auto">{t("cam.controls.auto")}</option>
-                    <option value="manual">{t("cam.controls.manual")}</option>
-                    <option value="night">{t("cam.controls.night")}</option>
+                    {wbModeOptions.map((mode) => (
+                      <option key={mode} value={mode}>{t(`cam.controls.wb.${mode}`)}</option>
+                    ))}
                   </select>
+                </label>
+                <label className="block">
+                  {t("cam.controls.aeFlicker")}
+                  <select value={form.aeFlickerMode} onChange={(e) => { setForm((p) => ({ ...p, aeFlickerMode: e.target.value })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5">
+                    <option value="off">{t("cam.controls.off")}</option>
+                    <option value="50hz">50 Hz</option>
+                    <option value="60hz">60 Hz</option>
+                  </select>
+                </label>
+                <label className="block">
+                  {t("cam.controls.maxAeFrame")}
+                  <input type="number" min={10000} max={10000000} step={10000} value={form.autoExposureMaxUs} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxUs: clamp(parseInt(e.target.value, 10) || 2000000, 10000, 10000000) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
                 </label>
                 <ParamSlider label="R Gain" value={form.whiteBalanceGainR} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainR: Number(v.toFixed(1)) })); setFormDirty(true); }} />
                 <ParamSlider label="B Gain" value={form.whiteBalanceGainB} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainB: Number(v.toFixed(1)) })); setFormDirty(true); }} />
