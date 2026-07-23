@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 DEFAULT_SENSOR_MATCH_THRESHOLD_DEG = 25.0
@@ -41,13 +41,13 @@ def _parse_utc(value: Any) -> datetime | None:
     else:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def julian_date(when_utc: datetime) -> float:
     """Julian date from UTC datetime / UTC 时间转儒略日."""
-    dt = when_utc.astimezone(UTC)
+    dt = when_utc.astimezone(timezone.utc)
     year = dt.year
     month = dt.month
     day = dt.day
