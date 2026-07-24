@@ -68,6 +68,48 @@ async def test_ensure_started_succeeds_when_frames_available() -> None:
 
 
 @pytest.mark.asyncio
+async def test_status_uses_successful_raw_probe_without_jpeg_grabber() -> None:
+    """冷启动探测帧应直接建立流健康状态 / Cold-start raw probe must establish stream health."""
+    manager = CameraManager()
+    manager._probe_timeout_sec = 0.5
+    camera = _FrameCamera()
+    manager.attach_camera_instance(camera)
+
+    await manager.ensure_started()
+    assert manager._frame_id == 0
+
+    status = await manager.status()
+    assert status["connected"] is True
+    assert status["streaming"] is True
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_stale_camera_reprobe_restores_status_without_jpeg_grabber() -> None:
+    """过期采集重新探测后应一次恢复 / A stale capture should recover after one re-probe."""
+    manager = CameraManager()
+    manager._probe_timeout_sec = 0.5
+    manager._stale_timeout_sec = 0.5
+    camera = _FrameCamera()
+    manager.attach_camera_instance(camera)
+
+    await manager.ensure_started()
+    manager._last_capture_success_mono -= 2.0
+
+    idle_status = await manager.status()
+    assert idle_status["connected"] is True
+    assert idle_status["streaming"] is True
+
+    await manager.ensure_started()
+
+    status = await manager.status()
+    assert camera.read_count == 2
+    assert status["connected"] is True
+    assert status["streaming"] is True
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_ensure_started_fast_path_does_not_probe_again() -> None:
     """新鲜相机重复ensure不应额外抓帧 / Fresh repeated ensure must not grab another frame."""
     manager = CameraManager()
