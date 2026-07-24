@@ -329,13 +329,21 @@ class CoreContractService:
         hardware_client = get_hardware_plane_client()
         hp_result = await hardware_client.device_command("camera", "start")
         result = await camera_domain_service.start()
+        status = await self.get_camera_status()
+        ready = bool(status.get("connected")) and bool(status.get("streaming"))
+        message = str(result.get("message", ""))
+        if not ready:
+            message = str(status.get("error") or message or "camera did not become ready")
         return {
-            "success": bool(result.get("success", True)),
-            "message": result.get("message", ""),
-            "info": {},
+            "success": bool(result.get("success", True)) and ready,
+            "message": message,
+            "info": status.get("info", {}),
             "applied": {
                 "action": "start",
                 "hardware_plane_ok": bool(hp_result.get("success", False)),
+                "ready": ready,
+                "connected": bool(status.get("connected")),
+                "streaming": bool(status.get("streaming")),
             },
         }
 

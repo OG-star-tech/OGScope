@@ -71,6 +71,7 @@ class CameraManager:
         self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
         self._last_capture_success_mono = 0.0
+        self._has_successful_capture = False
         self._preview_consumers = 0
         self._analysis_consumers = 0
         self._recording_consumers = 0
@@ -187,6 +188,7 @@ class CameraManager:
                 now = time.monotonic()
                 self._capture_sequence += 1
                 self._last_capture_success_mono = now
+                self._has_successful_capture = True
                 self._capture_timestamps.append(now)
             return frame
 
@@ -228,6 +230,7 @@ class CameraManager:
                 return
             if self._camera is None:
                 self._health_error = None
+                self._has_successful_capture = False
                 self._camera = await asyncio.to_thread(self._create_camera_sync)
                 if self._camera is None:
                     self._health_error = "相机初始化失败 / Camera init failed"
@@ -343,6 +346,7 @@ class CameraManager:
                 )
             self._camera = None
             self._last_capture_success_mono = 0.0
+            self._has_successful_capture = False
             with self._frame_lock:
                 self._latest_raw = None
                 self._latest_jpeg = None
@@ -446,6 +450,8 @@ class CameraManager:
         self._camera = None
         self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
+        self._last_capture_success_mono = 0.0
+        self._has_successful_capture = False
         with self._frame_lock:
             self._latest_raw = None
             self._latest_jpeg = None
@@ -556,7 +562,10 @@ class CameraManager:
             }
         initialized = bool(getattr(cam, "is_initialized", False))
         capturing = bool(getattr(cam, "is_capturing", False))
-        has_frames = self._frame_id > 0
+        # 空闲相机不会持续抓帧；一次成功探测即可证明流已建立，实际使用时 ensure_started 会再次探测。
+        # Idle cameras do not grab continuously; one successful probe proves stream setup,
+        # while ensure_started re-probes before the next real consumer uses it.
+        has_successful_capture = self._has_successful_capture
         within_grace = (
             self._stream_started_at > 0
             and (time.time() - self._stream_started_at) <= self._probe_timeout_sec
@@ -564,7 +573,7 @@ class CameraManager:
         offline = (
             bool(self._health_error)
             or self._consecutive_grab_failures >= self._max_grab_failures
-            or (capturing and not has_frames and not within_grace)
+            or (capturing and not has_successful_capture and not within_grace)
         )
         if offline:
             reason = self._health_error
@@ -582,7 +591,7 @@ class CameraManager:
         info = await asyncio.to_thread(cam.get_camera_info)
         return {
             "connected": initialized and capturing,
-            "streaming": capturing and (has_frames or within_grace),
+            "streaming": capturing and (has_successful_capture or within_grace),
             "info": info,
             "runtime_overrides": self._runtime_overrides,
         }
