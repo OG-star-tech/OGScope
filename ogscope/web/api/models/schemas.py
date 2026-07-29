@@ -231,7 +231,7 @@ class SolveContextQuality(BaseModel):
 
 
 class SolveContextPayload(BaseModel):
-    """Optional sensor context from ZenitAPA / ZenitAPA 提供的可选传感器上下文。"""
+    """外部系统提供的可选传感器上下文 / Optional external sensor context."""
 
     model_config = ConfigDict(extra="forbid")
 

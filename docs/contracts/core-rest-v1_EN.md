@@ -69,6 +69,8 @@ This document defines the **minimal stable REST surface** for callers integratin
 - `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
   - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
 - `POST /api/core/v1/camera/start`
+  - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`
+  - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames
 - `POST /api/core/v1/camera/stop`
 
 MJPEG stream, stream control status, and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) are **only** on developer paths (not duplicated under `/api/core/v1/`):

@@ -87,7 +87,7 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 
 Flow: `feature/*` / `fix/*` → PR → `staging` → validated PR → `main`.
 
-**Do not commit or push directly to `main` or `staging`.** Local pre-commit blocks this; configure GitHub Rulesets or branch protection via [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh).
+**Do not commit or push directly to `main` or `staging`.** Local pre-commit blocks this; configure GitHub Rulesets or branch protection via [.github/scripts/apply-branch-protection.sh](.github/scripts/apply-branch-protection.sh).
 
 **Deprecated**: `develop`, `dev`, and `dev-latest` integration branches.
 

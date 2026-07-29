@@ -40,5 +40,6 @@
 
 ### E 工具与贡献
 
+- [脚本编写与调用规范](development/SCRIPT_STANDARDS.md) | [English](development/SCRIPT_STANDARDS_EN.md)
 - [调试控制台](DEBUG_CONSOLE.md) | [English](DEBUG_CONSOLE_EN.md)
 - [贡献指南](../CONTRIBUTING.md) | [English](../CONTRIBUTING_EN.md)

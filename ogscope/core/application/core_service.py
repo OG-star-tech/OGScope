@@ -333,7 +333,9 @@ class CoreContractService:
         ready = bool(status.get("connected")) and bool(status.get("streaming"))
         message = str(result.get("message", ""))
         if not ready:
-            message = str(status.get("error") or message or "camera did not become ready")
+            message = str(
+                status.get("error") or message or "camera did not become ready"
+            )
         return {
             "success": bool(result.get("success", True)) and ready,
             "message": message,

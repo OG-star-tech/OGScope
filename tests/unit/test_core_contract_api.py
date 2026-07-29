@@ -83,6 +83,48 @@ def test_core_camera_ambient_hint_from_metadata() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
+    """启动成功仍须确认真实流就绪 / A successful command still requires stream readiness."""
+    from ogscope.core.application import core_service
+
+    class _HardwareClient:
+        async def device_command(self, service: str, command: str) -> dict:
+            assert (service, command) == ("camera", "start")
+            return {"success": True}
+
+    async def _start() -> dict:
+        return {"success": True, "message": "start accepted"}
+
+    async def _not_ready() -> dict:
+        return {
+            "success": True,
+            "connected": True,
+            "streaming": False,
+            "info": {"model": "IMX327"},
+            "error": "camera did not report a valid stream",
+        }
+
+    service = core_service.CoreContractService()
+    monkeypatch.setattr(core_service, "get_hardware_plane_client", _HardwareClient)
+    monkeypatch.setattr(core_service.camera_domain_service, "start", _start)
+    monkeypatch.setattr(service, "get_camera_status", _not_ready)
+
+    result = await service.start_camera()
+
+    assert result["success"] is False
+    assert result["info"]["model"] == "IMX327"
+    assert result["applied"] == {
+        "action": "start",
+        "hardware_plane_ok": True,
+        "ready": False,
+        "connected": True,
+        "streaming": False,
+    }
+    assert result["message"] == "camera did not report a valid stream"
+
+
+@pytest.mark.unit
 def test_core_system_status_network_delegated_when_subordinate(monkeypatch) -> None:
     """subordinate 下 network 标记 delegated 且不降级 / Subordinate marks network delegated."""
     from ogscope.core.application.core_service import CoreContractService
