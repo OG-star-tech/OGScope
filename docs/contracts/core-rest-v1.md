@@ -70,6 +70,8 @@
   - 返回相机连接状态、流状态、runtime overrides 与可选 `ambient_hint`
   - `ambient_hint` 是环境亮度建议遥测，供上层设备做显示/交互策略参考；典型字段包括 `available`、`dark_score`（0.0 明亮到 1.0 昏暗）、`lux`、`exposure_us`、`digital_gain`
 - `POST /api/core/v1/camera/start`
+  - 仅当相机启动命令成功且状态确认 `connected=true`、`streaming=true` 时返回 `success=true`
+  - `applied` 包含 `action`、`hardware_plane_ok`、`ready`、`connected`、`streaming`；调用方应以 `ready` 判断是否可立即取帧
 - `POST /api/core/v1/camera/stop`
 
 MJPEG 连续视频流与流控状态、单帧 JPEG 预览（轮询、`since_frame_id`、调试限频）**仅**暴露于开发路径（不再在 `/api/core/v1/` 重复）：

@@ -22,7 +22,8 @@ English | [中文](README.md)
 
 ### Phase 2 - Complete Features
 - ⏳ SPI screen display
-- ⏳ Automatic plate solving
+- ✅ Tetra3 automatic plate solving
+- ✅ Realtime solve and debug console
 - ⏳ Mobile app control
 - ⏳ Calibration data management
 
@@ -43,13 +44,13 @@ English | [中文](README.md)
 - **Processor**: Raspberry Pi Zero 2W (ARM Cortex-A53)
 - **Camera**: IMX327 sensor (1920x1080)
 - **Display**: 2.4" SPI LCD (240x320)
-- **Software**: Python 3.9 + FastAPI
+- **Software**: Python 3.10+ + FastAPI
 
 ## Quick Start
 
 ### Requirements
 
-- Python 3.9+
+- Python 3.10+
 - Poetry 1.2+
 - Raspberry Pi Zero 2W (Raspberry Pi OS)
 
@@ -139,4 +140,3 @@ See [LICENSE](LICENSE) file for details.
 ## Contributing
 
 Issues and Pull Requests are welcome! See [Contributing Guide](CONTRIBUTING.md) for details.
-
