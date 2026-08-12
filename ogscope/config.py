@@ -87,7 +87,10 @@ class Settings(BaseSettings):
     log_file: Optional[Path] = Field(default=None, description="日志文件路径")
 
     # 相机配置 / Camera configuration
-    camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
+    camera_type: str = Field(
+        default="imx327_mipi",
+        description="相机类型: imx327_mipi (Picamera2/libcamera) 或 v4l2 / Camera backend",
+    )
     camera_width: int = Field(
         default=1280, description="图像宽度 / Default capture width"
     )
@@ -100,6 +103,62 @@ class Settings(BaseSettings):
     )
     camera_exposure: int = Field(default=10000, description="曝光时间(us)")
     camera_gain: float = Field(default=1.0, description="增益")
+    camera_device: str = Field(
+        default="/dev/video0", description="V4L2 视频设备 / V4L2 video device"
+    )
+    camera_v4l2_sensor_subdev: str = Field(
+        default="/dev/v4l-subdev1",
+        description="V4L2 传感器控制子设备 / V4L2 sensor control subdevice",
+    )
+    camera_v4l2_pixel_format: str = Field(
+        default="RG10", description="V4L2 RAW 像素格式 / V4L2 RAW pixel format"
+    )
+    camera_v4l2_bit_depth: int = Field(
+        default=10, ge=8, le=16, description="V4L2 RAW 位深 / V4L2 RAW bit depth"
+    )
+    camera_v4l2_bayer_pattern: str = Field(
+        default="RGGB", description="V4L2 Bayer 排列 / V4L2 Bayer pattern"
+    )
+    camera_v4l2_active_width: int = Field(
+        default=1920, ge=160, description="传感器有效宽度 / Sensor active width"
+    )
+    camera_v4l2_active_height: int = Field(
+        default=1080, ge=120, description="传感器有效高度 / Sensor active height"
+    )
+    camera_v4l2_line_duration_us: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="行周期覆盖值；0 表示从控件推导 / Line duration override; 0 derives it",
+    )
+    camera_v4l2_gain_db_per_step: float = Field(
+        default=0.3,
+        gt=0.0,
+        description="模拟增益控件每步 dB / Analogue-gain dB per control step",
+    )
+    camera_v4l2_auto_gain_max: float = Field(
+        default=16.0,
+        ge=1.0,
+        le=64.0,
+        description="软件 AE 最大模拟增益 / Software AE maximum analogue gain",
+    )
+    camera_v4l2_ae_target_background: float = Field(
+        default=0.035,
+        ge=0.005,
+        le=0.25,
+        description="夜空背景目标亮度 / Night-sky background target",
+    )
+    camera_v4l2_ae_target_highlight: float = Field(
+        default=0.45,
+        ge=0.05,
+        le=0.95,
+        description="星点高分位目标亮度 / Star-highlight percentile target",
+    )
+    camera_v4l2_ae_highlight_percentile: float = Field(
+        default=99.8,
+        ge=95.0,
+        le=99.99,
+        description="软件 AE 星点分位 / Software AE star percentile",
+    )
     camera_ae_polar_preset: bool = Field(
         default=True,
         description="自动曝光时启用电子极轴镜 AE 预设 (Shadows/Matrix/Long+EV) / AE polar-scope preset",
@@ -523,6 +582,20 @@ class Settings(BaseSettings):
         }:
             return text
         return "auto"
+
+    @field_validator("camera_type", mode="before")
+    @classmethod
+    def _parse_camera_type(cls, value: object) -> str:
+        """限制产品可选相机后端 / Restrict selectable product camera backends."""
+        text = str(value or "imx327_mipi").strip().lower()
+        return text if text in {"imx327_mipi", "v4l2"} else "imx327_mipi"
+
+    @field_validator("camera_v4l2_bayer_pattern", mode="before")
+    @classmethod
+    def _parse_camera_v4l2_bayer_pattern(cls, value: object) -> str:
+        """校验 Bayer 排列 / Validate Bayer pattern."""
+        text = str(value or "RGGB").strip().upper()
+        return text if text in {"RGGB", "BGGR", "GRBG", "GBRG"} else "RGGB"
 
     @field_validator("camera_ae_flicker_mode", mode="before")
     @classmethod

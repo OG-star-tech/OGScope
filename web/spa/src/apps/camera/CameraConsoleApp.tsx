@@ -57,6 +57,19 @@ type CameraInfo = {
   colour_temperature?: number;
   lux?: number;
   frame_duration_limits?: number[];
+  ae_state?: string;
+  ae_error_stops?: number;
+  auto_exposure_engine?: string;
+  luminance_stats?: {
+    background?: number;
+    highlight?: number;
+    saturation_fraction?: number;
+  };
+  control_ranges?: {
+    exposure_us?: { min?: number; max?: number; step?: number };
+    analogue_gain?: { min?: number; max?: number; step?: number };
+    digital_gain?: { min?: number; max?: number; step?: number; supported?: boolean };
+  };
   lores_enabled?: boolean;
   lores_available?: boolean;
   lores_width?: number;
@@ -64,6 +77,9 @@ type CameraInfo = {
   lores_format?: string;
   capabilities?: {
     awb_modes?: string[];
+    auto_exposure?: boolean;
+    software_auto_exposure?: boolean;
+    manual_exposure?: boolean;
     ae_flicker?: boolean;
     noise_reduction_modes?: string[];
     manual_digital_gain?: boolean;
@@ -534,11 +550,16 @@ export function CameraConsoleApp() {
   const syncFormFromStatus = (info: CameraInfo | undefined, options?: { syncRuntime?: boolean }) => {
     if (!info) return;
     const syncRuntime = options?.syncRuntime ?? true;
+    const exposureMin = Math.max(1, Math.round(toNum(info.control_ranges?.exposure_us?.min, 100)));
+    const exposureMax = Math.max(exposureMin, Math.round(toNum(info.control_ranges?.exposure_us?.max, 120000)));
+    const gainMin = Math.max(0.1, toNum(info.control_ranges?.analogue_gain?.min, 1.0));
+    const gainMax = Math.max(gainMin, toNum(info.control_ranges?.analogue_gain?.max, 24.0));
+    const autoExposureSupported = info.capabilities?.auto_exposure === true || info.auto_exposure !== undefined;
     setForm({
-      exposure: clamp(Math.round(toNum(info.exposure_us, 5000)), 100, 120000),
-      gain: clamp(toNum(info.analogue_gain, 1.0), 1.0, 24.0),
+      exposure: clamp(Math.round(toNum(info.exposure_us, 5000)), exposureMin, exposureMax),
+      gain: clamp(toNum(info.analogue_gain, 1.0), gainMin, gainMax),
       digitalGain: clamp(toNum(info.digital_gain, 1.0), 1.0, 8.0),
-      autoExposure: Boolean(info.auto_exposure ?? true),
+      autoExposure: autoExposureSupported && Boolean(info.auto_exposure),
       contrast: clamp(toNum(info.contrast, 1.0), 0, 2),
       brightness: clamp(toNum(info.brightness, 0.0), -1, 1),
       saturation: clamp(toNum(info.saturation, 1.0), 0, 2),
@@ -1063,9 +1084,10 @@ export function CameraConsoleApp() {
   }, [files.length, filePage]);
 
   const streamSrc = previewActive ? `${debugApi("/camera/stream")}?t=${streamNonce}` : "";
-  const exposureLocked = form.autoExposure;
-  const wbManual = form.whiteBalanceMode === "manual";
   const caps = status?.info?.capabilities ?? {};
+  const autoExposureSupported = caps.auto_exposure === true || status?.info?.auto_exposure !== undefined;
+  const exposureLocked = autoExposureSupported && form.autoExposure;
+  const wbManual = form.whiteBalanceMode === "manual";
   const wbModeOptions = Array.isArray(caps.awb_modes) && caps.awb_modes.length > 0
     ? caps.awb_modes
     : ["auto", "daylight", "cloudy", "tungsten", "fluorescent", "indoor", "manual", "night"];
@@ -1073,6 +1095,17 @@ export function CameraConsoleApp() {
     ? caps.noise_reduction_modes
     : ["off", "fast", "high_quality"];
   const digitalGainWritable = caps.manual_digital_gain !== false;
+  const exposureRange = status?.info?.control_ranges?.exposure_us;
+  const gainRange = status?.info?.control_ranges?.analogue_gain;
+  const exposureMin = Math.max(1, Math.round(toNum(exposureRange?.min, 100)));
+  const exposureMax = Math.max(exposureMin, Math.round(toNum(exposureRange?.max, 120000)));
+  const exposureStep = Math.max(
+    exposureMax >= 1_000_000 ? 1000 : exposureMax >= 100_000 ? 100 : 1,
+    Math.round(toNum(exposureRange?.step, 100)),
+  );
+  const gainMin = Math.max(0.1, toNum(gainRange?.min, 1));
+  const gainMax = Math.max(gainMin, toNum(gainRange?.max, 24));
+  const gainStep = Math.max(0.01, toNum(gainRange?.step, 0.1));
   const nightModeEnabled = Boolean(status?.info?.night_mode);
   const isStreaming = previewActive;
   const canStartPreview = !previewBusy && !previewActive && !Boolean(status?.recording);
@@ -1428,6 +1461,11 @@ export function CameraConsoleApp() {
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.preview.mode")}: </span>
                 <span className="font-mono">{status?.info?.auto_exposure ? t("cam.controls.auto") : t("cam.controls.manual")}</span>
+                {status?.info?.ae_state && (
+                  <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                    {`AE ${status.info.ae_state}${status.info.auto_exposure_engine ? ` · ${status.info.auto_exposure_engine}` : ""}`}
+                  </p>
+                )}
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1604,8 +1642,8 @@ export function CameraConsoleApp() {
               )}
               {exposureLocked && <p className="mb-2 text-[11px] text-on-surface-variant">{t("cam.controls.lockedByAe")}</p>}
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <ParamSlider label={t("cam.controls.exposure")} value={form.exposure} min={100} max={120000} step={100} unit="us" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposure: v })); }} />
-                <ParamSlider label={t("cam.controls.gain")} value={form.gain} min={1} max={24} step={0.1} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, gain: Number(v.toFixed(1)) })); }} />
+                <ParamSlider label={t("cam.controls.exposure")} value={form.exposure} min={exposureMin} max={exposureMax} step={exposureStep} unit="us" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposure: v })); }} />
+                <ParamSlider label={t("cam.controls.gain")} value={form.gain} min={gainMin} max={gainMax} step={gainStep} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, gain: Number(v.toFixed(2)) })); }} />
                 <ParamSlider label={t("cam.controls.digitalGain")} value={form.digitalGain} min={1} max={8} step={0.1} disabled={exposureLocked || !digitalGainWritable} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, digitalGain: Number(v.toFixed(1)) })); }} />
                 <label className="block">
                   {t("cam.controls.noiseReductionMode")}
@@ -1642,8 +1680,8 @@ export function CameraConsoleApp() {
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <label className="block">
                   {t("cam.controls.autoExposure")}
-                  <select value={form.autoExposure ? "auto" : "manual"} onChange={(e) => { setForm((p) => ({ ...p, autoExposure: e.target.value === "auto" })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5">
-                    <option value="auto">{t("cam.controls.auto")}</option>
+                  <select disabled={!autoExposureSupported} value={form.autoExposure ? "auto" : "manual"} onChange={(e) => { setForm((p) => ({ ...p, autoExposure: e.target.value === "auto" })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5 disabled:opacity-50">
+                    {autoExposureSupported && <option value="auto">{t("cam.controls.auto")}</option>}
                     <option value="manual">{t("cam.controls.manual")}</option>
                   </select>
                 </label>
@@ -1672,7 +1710,7 @@ export function CameraConsoleApp() {
                 </label>
                 <label className="block">
                   {t("cam.controls.maxAeFrame")}
-                  <input type="number" min={10000} max={10000000} step={10000} value={form.autoExposureMaxUs} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxUs: clamp(parseInt(e.target.value, 10) || 2000000, 10000, 10000000) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
+                  <input disabled={!autoExposureSupported} type="number" min={10000} max={10000000} step={10000} value={form.autoExposureMaxUs} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxUs: clamp(parseInt(e.target.value, 10) || 2000000, 10000, 10000000) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5 disabled:opacity-50" />
                 </label>
                 <ParamSlider label="R Gain" value={form.whiteBalanceGainR} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainR: Number(v.toFixed(1)) })); setFormDirty(true); }} />
                 <ParamSlider label="B Gain" value={form.whiteBalanceGainB} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainB: Number(v.toFixed(1)) })); setFormDirty(true); }} />

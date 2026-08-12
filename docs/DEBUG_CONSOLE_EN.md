@@ -174,6 +174,11 @@ These settings enter runtime through environment variables or config files. Name
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
+| `camera_type` | `imx327_mipi` | Product-default Picamera2/libcamera; `v4l2` explicitly enables RAW software AE |
+| `camera_device` / `camera_v4l2_sensor_subdev` | `/dev/video0` / `/dev/v4l-subdev1` | V4L2 RAW data and sensor-control nodes |
+| `camera_v4l2_bit_depth` / `camera_v4l2_bayer_pattern` | `10` / `RGGB` | RAW unpacking and demosaic parameters |
+| `camera_v4l2_auto_gain_max` | `16.0` | Maximum analogue gain for V4L2 software AE |
+| `camera_v4l2_ae_target_background` / `camera_v4l2_ae_target_highlight` | `0.035` / `0.45` | Night-sky background and star-percentile targets |
 | `camera_idle_shutdown_sec` | `20.0` | Warm-idle timeout after the last consumer |
 | `camera_frame_stale_timeout_sec` | `5.0` | Re-probe when no successful frame arrives within this duration |
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |

@@ -517,6 +517,9 @@ class IMX327MIPICamera(CameraInterface):
             lores_width=self.lores_width if self._lores_available else 0,
             lores_height=self.lores_height if self._lores_available else 0,
             lores_format=self.lores_format if self._lores_available else "",
+            auto_exposure=True,
+            software_auto_exposure=False,
+            manual_exposure=True,
             ae_flicker=("AeFlickerMode" in cc or "AeFlickerPeriod" in cc),
             manual_digital_gain="DigitalGain" in cc,
             autofocus=any(k.startswith("Af") for k in cc),
@@ -530,6 +533,9 @@ class IMX327MIPICamera(CameraInterface):
             "lores_height": caps.lores_height,
             "lores_format": caps.lores_format,
             "awb_modes": list(caps.awb_modes),
+            "auto_exposure": caps.auto_exposure,
+            "software_auto_exposure": caps.software_auto_exposure,
+            "manual_exposure": caps.manual_exposure,
             "ae_flicker": caps.ae_flicker,
             "noise_reduction_modes": list(caps.noise_reduction_modes),
             "manual_digital_gain": caps.manual_digital_gain,
@@ -1487,6 +1493,12 @@ class CameraFactory:
         """创建相机实例 / Create camera instance"""
         if camera_type == "imx327_mipi":
             return IMX327MIPICamera(config)
+        if camera_type == "v4l2":
+            # V4L2 RAW 使用独立软件 AE，避免把固定曝光伪装成自动曝光。
+            # V4L2 RAW uses dedicated software AE instead of pretending fixed exposure is auto.
+            from ogscope.platform.hardware.v4l2_camera import V4L2RawCamera
+
+            return V4L2RawCamera(config)  # type: ignore[return-value]
         if camera_type in {"linuxpy_v4l2", "v4l2_linuxpy"}:
             # 预留自定义 Linux 入口；树莓派 CSI 默认仍走 Picamera2 / Reserved custom-Linux hook; Pi CSI stays Picamera2.
             return LinuxpyV4L2Driver(config)  # type: ignore[return-value]

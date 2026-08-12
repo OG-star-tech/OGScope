@@ -29,6 +29,9 @@ class CameraCapabilities:
     lores_height: int = 0
     lores_format: str = ""
     awb_modes: tuple[str, ...] = ("auto", "manual", "night")
+    auto_exposure: bool = False
+    software_auto_exposure: bool = False
+    manual_exposure: bool = True
     ae_flicker: bool = False
     noise_reduction_modes: tuple[str, ...] = ("off", "fast", "high_quality")
     manual_digital_gain: bool = False

@@ -20,6 +20,7 @@
 - [WiFi / NetworkManager](development/wifi-nm.md) | [English](development/wifi-nm_EN.md)
 - [星空解算数据](development/plate-solve-data.md)（段内中英）
 - [服务稳定性与内存](development/ogscope-service-hardening.md)（段内中英）
+- [V4L2 夜空自动曝光](development/v4l2-auto-exposure.md)（中英双语）
 - [硬件清单 BOM](hardware/bom.md) | [English](hardware/bom_EN.md)
 
 ### C API、契约与质量

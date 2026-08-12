@@ -101,7 +101,36 @@ class CameraManager:
 
         settings = get_settings()
         base = {
-            "type": "imx327_mipi",
+            # Picamera2/libcamera 是默认产品路径；显式配置时才启用 V4L2 RAW。
+            # Picamera2/libcamera is the product default; V4L2 RAW requires explicit opt-in.
+            "type": settings.camera_type,
+            "device": getattr(settings, "camera_device", "/dev/video0"),
+            "v4l2_sensor_subdev": getattr(
+                settings, "camera_v4l2_sensor_subdev", "/dev/v4l-subdev1"
+            ),
+            "v4l2_pixel_format": getattr(settings, "camera_v4l2_pixel_format", "RG10"),
+            "v4l2_bit_depth": getattr(settings, "camera_v4l2_bit_depth", 10),
+            "v4l2_bayer_pattern": getattr(
+                settings, "camera_v4l2_bayer_pattern", "RGGB"
+            ),
+            "v4l2_active_width": getattr(settings, "camera_v4l2_active_width", 1920),
+            "v4l2_active_height": getattr(settings, "camera_v4l2_active_height", 1080),
+            "v4l2_line_duration_us": getattr(
+                settings, "camera_v4l2_line_duration_us", 0.0
+            ),
+            "v4l2_gain_db_per_step": getattr(
+                settings, "camera_v4l2_gain_db_per_step", 0.3
+            ),
+            "v4l2_auto_gain_max": getattr(settings, "camera_v4l2_auto_gain_max", 16.0),
+            "v4l2_ae_target_background": getattr(
+                settings, "camera_v4l2_ae_target_background", 0.035
+            ),
+            "v4l2_ae_target_highlight": getattr(
+                settings, "camera_v4l2_ae_target_highlight", 0.45
+            ),
+            "v4l2_ae_highlight_percentile": getattr(
+                settings, "camera_v4l2_ae_highlight_percentile", 99.8
+            ),
             "width": settings.camera_width,
             "height": settings.camera_height,
             "fps": max(1, int(getattr(settings, "camera_fps", 5) or 5)),
@@ -375,6 +404,12 @@ class CameraManager:
         if camera is None:
             return
         try:
+            # 驱动级 close() 负责释放 V4L2 fd；旧 Picamera2 驱动仍使用内层对象关闭。
+            # Driver-level close() releases V4L2 fds; the legacy Picamera2 driver uses its inner object.
+            close_driver = getattr(camera, "close", None)
+            if callable(close_driver):
+                close_driver()
+                return
             inner_camera = getattr(camera, "camera", None)
             if inner_camera is not None and hasattr(inner_camera, "close"):
                 inner_camera.close()

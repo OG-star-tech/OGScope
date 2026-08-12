@@ -20,6 +20,7 @@ English | [中文](README.md)
 - [WiFi / NetworkManager](development/wifi-nm_EN.md) | [中文](development/wifi-nm.md)
 - [Plate-solve data](development/plate-solve-data.md) (inline bilingual sections)
 - [Service stability / memory](development/ogscope-service-hardening.md) (inline bilingual sections)
+- [V4L2 night-sky auto exposure](development/v4l2-auto-exposure.md) (bilingual)
 - [Hardware BOM](hardware/bom_EN.md) | [中文](hardware/bom.md)
 
 ### C API and quality
