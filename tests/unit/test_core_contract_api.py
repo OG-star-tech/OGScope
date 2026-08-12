@@ -295,6 +295,31 @@ def test_core_video_info_rejects_invalid_filename(client) -> None:
 
 
 @pytest.mark.unit
+def test_core_camera_preview_stream_is_product_contract(client, monkeypatch) -> None:
+    """Core 预览应暴露稳定 MJPEG 契约 / Core preview exposes stable MJPEG contract."""
+    from fastapi.responses import StreamingResponse
+
+    from ogscope.web.api.core import routes as core_routes
+
+    async def _fake_stream(*_args, **_kwargs):
+        async def _frames():
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\ntest\r\n"
+
+        return StreamingResponse(
+            _frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    monkeypatch.setattr(core_routes, "build_camera_mjpeg_stream", _fake_stream)
+
+    resp = client.get("/api/core/v1/camera/preview/stream?quality=75")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("multipart/x-mixed-replace")
+    assert b"Content-Type: image/jpeg" in resp.content
+
+
+@pytest.mark.unit
 def test_docs_are_split_between_core_and_dev(client) -> None:
     """文档默认 core，dev 单独入口 / Docs split into core default and dev page."""
     docs = client.get("/docs")
@@ -330,6 +355,7 @@ def test_core_openapi_contains_required_business_endpoints(client) -> None:
         "/api/core/v1/analysis/result",
         "/api/core/v1/analysis/stop",
         "/api/core/v1/camera/status",
+        "/api/core/v1/camera/preview/stream",
     }
     assert required.issubset(paths)
     assert all(path.startswith("/api/core/v1/") for path in paths)

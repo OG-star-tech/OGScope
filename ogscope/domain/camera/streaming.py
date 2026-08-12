@@ -98,4 +98,8 @@ async def build_camera_mjpeg_stream(
     return StreamingResponse(
         frame_generator(),
         media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "X-Accel-Buffering": "no",
+        },
     )

@@ -72,10 +72,14 @@ This document defines the **minimal stable REST surface** for callers integratin
   - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`
   - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames
 - `POST /api/core/v1/camera/stop`
+- `GET /api/core/v1/camera/preview/stream?quality=75`
+  - Product MJPEG preview using the shared preview consumer and concurrency limiter
+  - `quality` ranges from `10` to `100`; omission uses the server preview-quality setting
+  - Responses are non-cacheable; the endpoint returns `503` when the client limit is reached
 
-MJPEG stream, stream control status, and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) are **only** on developer paths (not duplicated under `/api/core/v1/`):
+Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) remain developer-only:
 
-- `GET /api/dev/debug/camera/stream?quality=75` — MJPEG (JPEG)
+- `GET /api/dev/debug/camera/stream?quality=75` — developer entry backed by the shared Core preview implementation
 - `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout, target preview FPS
 - `GET /api/dev/debug/camera/preview` — single-frame preview
 
