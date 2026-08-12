@@ -522,6 +522,7 @@
   "cam.notice.needPreview": "Start preview first",
   "cam.notice.needManualForAutoAdjust": "Switch to manual exposure before auto-adjust",
   "cam.notice.autoAdjusted": "Auto-adjust completed and applied",
+  "cam.confirm.reset": "Reset camera settings on the current device?",
   "cam.confirm.deletePreset": "Delete preset {name}?",
   "cam.confirm.deleteFile": "Delete file {name}?",
   "sys.sensors.mag.calStatusPrefix": "Calibration mode:",

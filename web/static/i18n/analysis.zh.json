@@ -523,6 +523,7 @@
   "cam.notice.needPreview": "请先启动预览",
   "cam.notice.needManualForAutoAdjust": "请先切换为手动曝光再进行智能调整",
   "cam.notice.autoAdjusted": "智能调整已完成并生效",
+  "cam.confirm.reset": "将重置当前设备的相机设置。确认继续？",
   "cam.confirm.deletePreset": "确定删除预设 {name} 吗？",
   "cam.confirm.deleteFile": "确定删除文件 {name} 吗？",
   "sys.sensors.mag.calStatusPrefix": "校准状态：",
