@@ -38,6 +38,18 @@ class _FrameCamera(_NoFrameCamera):
         return np.zeros((360, 640, 3), dtype=np.uint8)
 
 
+class _ClosableFrameCamera(_FrameCamera):
+    """记录驱动级关闭 / Record driver-level close calls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        self.is_initialized = False
+
+
 @pytest.mark.asyncio
 async def test_ensure_started_fails_when_no_frames() -> None:
     manager = CameraManager()
@@ -65,6 +77,21 @@ async def test_ensure_started_succeeds_when_frames_available() -> None:
     assert status["streaming"] is True
 
     await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_calls_driver_level_close() -> None:
+    """V4L2 类驱动必须释放自己的设备句柄 / V4L2-style drivers must release their own handles."""
+    manager = CameraManager()
+    manager._probe_timeout_sec = 0.5
+    camera = _ClosableFrameCamera()
+    manager.attach_camera_instance(camera)
+
+    await manager.ensure_started()
+    await manager.stop()
+
+    assert camera.closed is True
+    assert manager.get_camera_instance() is None
 
 
 @pytest.mark.asyncio

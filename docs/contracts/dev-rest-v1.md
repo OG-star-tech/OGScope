@@ -30,6 +30,8 @@
     - `process_rss_kb` / `process_swap_kb` / `cma_free_kb`：低内存板排查指标
     - `preview_encoder` / `jpeg_source_format`：当前预览编码器与源格式
     - `camera_driver` / `camera_backend`：相机驱动与后端
+    - V4L2 软件 AE：`ae_state`、`ae_error_stops`、`luminance_stats`、`line_duration_source`
+    - 能力真值：`capabilities.auto_exposure`、`capabilities.software_auto_exposure`
     - `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format`：低分辨率支路状态
 
 ### 相机调试设置

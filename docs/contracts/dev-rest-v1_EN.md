@@ -30,6 +30,8 @@ This document describes OGScope **developer-domain** APIs (internal). They are *
     - `process_rss_kb` / `process_swap_kb` / `cma_free_kb`: low-memory-board diagnostics
     - `preview_encoder` / `jpeg_source_format`: active preview encoder and source format
     - `camera_driver` / `camera_backend`: camera driver and backend
+    - V4L2 software AE: `ae_state`, `ae_error_stops`, `luminance_stats`, and `line_duration_source`
+    - Capability truth: `capabilities.auto_exposure` and `capabilities.software_auto_exposure`
     - `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format`: low-resolution stream status
 
 ### Debug camera settings

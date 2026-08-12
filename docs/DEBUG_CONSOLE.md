@@ -219,6 +219,11 @@ python scripts/test_debug_console.py --test deps
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
+| `camera_type` | `imx327_mipi` | 产品默认 Picamera2/libcamera；显式设为 `v4l2` 才启用 RAW 软件 AE |
+| `camera_device` / `camera_v4l2_sensor_subdev` | `/dev/video0` / `/dev/v4l-subdev1` | V4L2 RAW 数据与传感器控制节点 |
+| `camera_v4l2_bit_depth` / `camera_v4l2_bayer_pattern` | `10` / `RGGB` | RAW 解包与去马赛克参数 |
+| `camera_v4l2_auto_gain_max` | `16.0` | V4L2 软件 AE 最大模拟增益 |
+| `camera_v4l2_ae_target_background` / `camera_v4l2_ae_target_highlight` | `0.035` / `0.45` | 夜空背景与星点高分位目标 |
 | `camera_idle_shutdown_sec` | `20.0` | 无消费者后相机热驻留时间，超时后释放采集 |
 | `camera_frame_stale_timeout_sec` | `5.0` | 超过该时间没有成功帧时重新探测 |
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
