@@ -609,6 +609,7 @@ export function CameraConsoleApp() {
   };
 
   const resetSettings = async () => {
+    if (!window.confirm(t("cam.confirm.reset"))) return;
     setErr(null);
     try {
       await requestJson("/api/debug/camera/reset", { method: "POST" });
@@ -1085,9 +1086,9 @@ export function CameraConsoleApp() {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       <header className="sticky top-0 z-30 border-b border-outline-variant/20 bg-surface-container-low/90 px-4 py-3 backdrop-blur">
-        <div className="flex w-full items-center justify-between gap-4">
-          <div>
-            <h1 className="font-headline text-xl font-bold text-primary">{`OGScope ${t("cam.title")}`}</h1>
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="break-words font-headline text-lg font-bold text-primary sm:text-xl">{`OGScope ${t("cam.title")}`}</h1>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <button
@@ -1112,7 +1113,7 @@ export function CameraConsoleApp() {
       </header>
 
       <main className="mx-auto grid max-w-[1880px] grid-cols-12 gap-4 p-4">
-        <aside className="order-3 col-span-12 space-y-4 xl:order-1 xl:col-span-2">
+        <aside className="order-3 col-span-12 space-y-4 2xl:order-1 2xl:col-span-2">
           <section className="rounded-xl border border-outline-variant/20 bg-surface-container p-4">
             <div className="mb-2 text-sm font-semibold uppercase tracking-wider">{t("cam.controls.tools")}</div>
             <div className="mb-2 flex flex-wrap gap-1 text-xs">
@@ -1169,7 +1170,7 @@ export function CameraConsoleApp() {
 
           <section className="rounded-xl border border-outline-variant/20 bg-surface-container p-4 text-xs">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider">{t("cam.presets.title")}</h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder={t("cam.presets.name")} className="rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
               <input value={presetDesc} onChange={(e) => setPresetDesc(e.target.value)} placeholder={t("cam.presets.desc")} className="rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
             </div>
@@ -1196,18 +1197,18 @@ export function CameraConsoleApp() {
 
         </aside>
 
-        <section className="order-1 col-span-12 grid grid-cols-12 items-start gap-4 xl:order-2 xl:col-span-10">
-          <div className="col-span-12 space-y-4 xl:col-span-9">
+        <section className="order-1 col-span-12 grid grid-cols-12 items-start gap-4 2xl:order-2 2xl:col-span-10">
+          <div className="col-span-12 space-y-4 2xl:col-span-9">
           <section className="self-start rounded-xl border border-outline-variant/20 bg-surface-container p-4">
-            <div className="mb-2 grid grid-cols-3 gap-2 text-xs">
+            <div className="mb-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1">
-                CPU: <span className="font-mono">{Number(sysInfo?.cpu_usage ?? 0).toFixed(1)}%</span>
+                CPU: <span className="font-mono">{sysInfo?.cpu_usage == null ? "—" : `${Number(sysInfo.cpu_usage).toFixed(1)}%`}</span>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1">
-                MEM: <span className="font-mono">{Number(sysInfo?.memory_usage ?? 0).toFixed(1)}%</span>
+                MEM: <span className="font-mono">{sysInfo?.memory_usage == null ? "—" : `${Number(sysInfo.memory_usage).toFixed(1)}%`}</span>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1">
-                TEMP: <span className="font-mono">{Number(sysInfo?.temperature ?? 0).toFixed(1)}°C</span>
+                TEMP: <span className="font-mono">{sysInfo?.temperature == null ? "—" : `${Number(sysInfo.temperature).toFixed(1)}°C`}</span>
               </div>
             </div>
             <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -1547,7 +1548,7 @@ export function CameraConsoleApp() {
           </section>
           </div>
 
-          <section className="col-span-12 grid grid-cols-12 gap-4 xl:col-span-3 xl:self-start">
+          <section className="col-span-12 grid grid-cols-12 gap-4 2xl:col-span-3 2xl:self-start">
             <section className="col-span-12 rounded-xl border border-outline-variant/20 bg-surface-container p-4">
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider">{t("cam.controls.title")}</h2>
               <div className="space-y-3 text-xs">
