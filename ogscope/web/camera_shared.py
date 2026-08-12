@@ -110,6 +110,8 @@ class CameraManager:
             ),
             "v4l2_pixel_format": getattr(settings, "camera_v4l2_pixel_format", "RG10"),
             "v4l2_bit_depth": getattr(settings, "camera_v4l2_bit_depth", 10),
+            "v4l2_black_level": getattr(settings, "camera_v4l2_black_level", -1),
+            "v4l2_white_level": getattr(settings, "camera_v4l2_white_level", 0),
             "v4l2_bayer_pattern": getattr(
                 settings, "camera_v4l2_bayer_pattern", "RGGB"
             ),
@@ -130,6 +132,25 @@ class CameraManager:
             ),
             "v4l2_ae_highlight_percentile": getattr(
                 settings, "camera_v4l2_ae_highlight_percentile", 99.8
+            ),
+            "v4l2_ae_trace_enabled": bool(
+                getattr(settings, "camera_v4l2_ae_trace_enabled", False)
+            ),
+            "v4l2_ae_trace_dir": str(
+                getattr(settings, "camera_v4l2_ae_trace_dir", None)
+                or (settings.data_dir / "camera-ae-traces")
+            ),
+            "v4l2_ae_trace_max_events": getattr(
+                settings, "camera_v4l2_ae_trace_max_events", 2_000
+            ),
+            "v4l2_ae_trace_raw_sample_interval": getattr(
+                settings, "camera_v4l2_ae_trace_raw_sample_interval", 10
+            ),
+            "v4l2_ae_trace_max_raw_samples": getattr(
+                settings, "camera_v4l2_ae_trace_max_raw_samples", 100
+            ),
+            "v4l2_ae_trace_raw_max_side": getattr(
+                settings, "camera_v4l2_ae_trace_raw_max_side", 320
             ),
             "width": settings.camera_width,
             "height": settings.camera_height,

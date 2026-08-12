@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     camera_v4l2_bit_depth: int = Field(
         default=10, ge=8, le=16, description="V4L2 RAW 位深 / V4L2 RAW bit depth"
     )
+    camera_v4l2_black_level: int = Field(
+        default=-1,
+        ge=-1,
+        le=65534,
+        description="RAW 黑电平；-1 自动读取 / RAW black level; -1 auto-detects",
+    )
+    camera_v4l2_white_level: int = Field(
+        default=0,
+        ge=0,
+        le=65535,
+        description="RAW 白电平；0 使用控件或位深 / RAW white level; 0 detects or derives",
+    )
     camera_v4l2_bayer_pattern: str = Field(
         default="RGGB", description="V4L2 Bayer 排列 / V4L2 Bayer pattern"
     )
@@ -158,6 +170,38 @@ class Settings(BaseSettings):
         ge=95.0,
         le=99.99,
         description="软件 AE 星点分位 / Software AE star percentile",
+    )
+    camera_v4l2_ae_trace_enabled: bool = Field(
+        default=False,
+        description="写入有界 AE 诊断轨迹 / Write bounded AE diagnostic traces",
+    )
+    camera_v4l2_ae_trace_dir: Optional[Path] = Field(
+        default=None,
+        description="AE 诊断目录；None 使用 data/camera-ae-traces / AE trace directory",
+    )
+    camera_v4l2_ae_trace_max_events: int = Field(
+        default=2000,
+        ge=1,
+        le=100_000,
+        description="每次 AE 轨迹最大事件数 / Max events per AE trace",
+    )
+    camera_v4l2_ae_trace_raw_sample_interval: int = Field(
+        default=10,
+        ge=1,
+        le=10_000,
+        description="每 N 帧保存一次降采样 RAW / Save sampled RAW every N frames",
+    )
+    camera_v4l2_ae_trace_max_raw_samples: int = Field(
+        default=100,
+        ge=0,
+        le=10_000,
+        description="每次轨迹最大 RAW 样本数 / Max RAW samples per trace",
+    )
+    camera_v4l2_ae_trace_raw_max_side: int = Field(
+        default=320,
+        ge=16,
+        le=2048,
+        description="诊断 RAW 样本最长边 / Diagnostic RAW sample max side",
     )
     camera_ae_polar_preset: bool = Field(
         default=True,

@@ -6,11 +6,15 @@ import logging
 import math
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import numpy as np
 
+from ogscope.domain.camera.ae_diagnostics import (
+    AutoExposureTraceLimits,
+    AutoExposureTraceRecorder,
+)
 from ogscope.domain.camera.auto_exposure import (
     AutoExposureLimits,
     NightSkyAutoExposure,
@@ -49,6 +53,14 @@ class V4L2RawCamera:
         self.sensor_subdev = str(config.get("v4l2_sensor_subdev", "/dev/v4l-subdev1"))
         self.pixel_format = str(config.get("v4l2_pixel_format", "RG10"))
         self.bit_depth = int(config.get("v4l2_bit_depth", 10))
+        self._black_level_override = int(config.get("v4l2_black_level", -1))
+        self._white_level_override = int(config.get("v4l2_white_level", 0))
+        self.black_level = 0
+        self.white_level = (1 << self.bit_depth) - 1
+        self._signal_level_sources = {
+            "black_level": "fallback",
+            "white_level": "bit_depth",
+        }
         self.bayer_pattern = str(config.get("v4l2_bayer_pattern", "RGGB")).upper()
         self.active_width = int(config.get("v4l2_active_width", 1920))
         self.active_height = int(config.get("v4l2_active_height", 1080))
@@ -74,6 +86,12 @@ class V4L2RawCamera:
 
         self.exposure_us = int(config.get("exposure_us", 10_000))
         self.analogue_gain = float(config.get("analogue_gain", 1.0))
+        self.requested_exposure_us = self.exposure_us
+        self.requested_analogue_gain = self.analogue_gain
+        self.actual_exposure_us: int | None = None
+        self.actual_analogue_gain: float | None = None
+        self._control_readback_verified = False
+        self._control_readback_error: str | None = "not_read_yet"
         self.digital_gain = 1.0
         self.auto_exposure = bool(config.get("auto_exposure", True))
         self.auto_exposure_max_us = int(config.get("auto_exposure_max_us", 2_000_000))
@@ -105,6 +123,18 @@ class V4L2RawCamera:
         self._frame_duration_us = 0
         self._ae = self._create_auto_exposure()
         self._ae.set_enabled(self.auto_exposure)
+        self._trace = AutoExposureTraceRecorder(
+            enabled=bool(config.get("v4l2_ae_trace_enabled", False)),
+            root_dir=str(config.get("v4l2_ae_trace_dir", "./data/camera-ae-traces")),
+            limits=AutoExposureTraceLimits(
+                max_events=int(config.get("v4l2_ae_trace_max_events", 2_000)),
+                raw_sample_interval=int(
+                    config.get("v4l2_ae_trace_raw_sample_interval", 10)
+                ),
+                max_raw_samples=int(config.get("v4l2_ae_trace_max_raw_samples", 100)),
+                raw_max_side=int(config.get("v4l2_ae_trace_raw_max_side", 320)),
+            ),
+        )
 
     def _create_auto_exposure(self) -> NightSkyAutoExposure:
         return NightSkyAutoExposure(
@@ -184,18 +214,30 @@ class V4L2RawCamera:
             return False
         return True
 
+    def _read_controls(self, *names: str) -> dict[str, int]:
+        """一次读取多个整数控件 / Read multiple integer controls in one call."""
+        if not names:
+            return {}
+        try:
+            result = self._run_v4l2(f"--get-ctrl={','.join(names)}")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return {}
+        if result.returncode != 0:
+            return {}
+        values: dict[str, int] = {}
+        for line in result.stdout.splitlines():
+            if ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            try:
+                values[name.strip()] = int(value.strip())
+            except ValueError:
+                continue
+        return values
+
     def _read_control(self, name: str) -> int | None:
         """读取单个整数控件 / Read one integer control."""
-        try:
-            result = self._run_v4l2(f"--get-ctrl={name}")
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return None
-        if result.returncode != 0 or ":" not in result.stdout:
-            return None
-        try:
-            return int(result.stdout.rsplit(":", 1)[1].strip())
-        except ValueError:
-            return None
+        return self._read_controls(name).get(name)
 
     def _set_control(self, name: str, value: int) -> bool:
         """写入单个整数控件 / Write one integer control."""
@@ -241,6 +283,36 @@ class V4L2RawCamera:
         self._hardware_max_exposure_us = max(
             10_000, int(max_lines * self._line_duration_us)
         )
+
+    def _resolve_signal_levels(self) -> None:
+        """解析 RAW 黑白电平并保留来源 / Resolve RAW black/white levels with provenance."""
+        max_code = (1 << max(1, self.bit_depth)) - 1
+        if self._black_level_override >= 0:
+            black = self._black_level_override
+            black_source = "config"
+        else:
+            detected_black = self._read_control("black_level")
+            black = detected_black if detected_black is not None else 0
+            black_source = (
+                "sensor_control" if detected_black is not None else "fallback"
+            )
+
+        if self._white_level_override > 0:
+            white = self._white_level_override
+            white_source = "config"
+        else:
+            detected_white = self._read_control("white_level")
+            white = detected_white if detected_white is not None else max_code
+            white_source = (
+                "sensor_control" if detected_white is not None else "bit_depth"
+            )
+
+        self.black_level = max(0, min(max_code - 1, int(black)))
+        self.white_level = max(self.black_level + 1, min(max_code, int(white)))
+        self._signal_level_sources = {
+            "black_level": black_source,
+            "white_level": white_source,
+        }
 
     @staticmethod
     def _clamp_to_control(value: int, control: V4L2ControlRange) -> int:
@@ -291,16 +363,43 @@ class V4L2RawCamera:
             requested_lines, dynamic_exposure_control
         )
         gain_control = self._gain_to_control(gain)
+        self.requested_exposure_us = int(exposure_us)
+        self.requested_analogue_gain = float(gain)
         if not self._set_control("exposure", exposure_lines):
             return False
         if not self._set_control("analogue_gain", gain_control):
             return False
 
-        self.exposure_us = max(1, int(round(exposure_lines * self._line_duration_us)))
-        self.analogue_gain = round(self._control_to_gain(gain_control), 3)
+        estimated_exposure_us = max(
+            1, int(round(exposure_lines * self._line_duration_us))
+        )
+        estimated_gain = round(self._control_to_gain(gain_control), 3)
+        readback_names = ["exposure", "analogue_gain"]
+        if vblank_control is not None:
+            readback_names.append("vertical_blanking")
+        readback = self._read_controls(*readback_names)
+        if "exposure" in readback and "analogue_gain" in readback:
+            self.actual_exposure_us = max(
+                1, int(round(readback["exposure"] * self._line_duration_us))
+            )
+            self.actual_analogue_gain = round(
+                self._control_to_gain(readback["analogue_gain"]), 3
+            )
+            self.exposure_us = self.actual_exposure_us
+            self.analogue_gain = self.actual_analogue_gain
+            self._control_readback_verified = True
+            self._control_readback_error = None
+        else:
+            self.exposure_us = estimated_exposure_us
+            self.analogue_gain = estimated_gain
+            self.actual_exposure_us = None
+            self.actual_analogue_gain = None
+            self._control_readback_verified = False
+            missing = sorted({"exposure", "analogue_gain"} - readback.keys())
+            self._control_readback_error = "missing:" + ",".join(missing)
         frame_lines = self.active_height
         if vblank_control is not None:
-            frame_lines += vblank
+            frame_lines += readback.get("vertical_blanking", vblank)
         self._frame_duration_us = max(
             self.exposure_us, int(round(frame_lines * self._line_duration_us))
         )
@@ -358,6 +457,7 @@ class V4L2RawCamera:
             if not self._discover_control_ranges():
                 return False
             self._resolve_line_duration()
+            self._resolve_signal_levels()
             enabled = self.auto_exposure
             self._ae = self._create_auto_exposure()
             self._ae.set_enabled(enabled)
@@ -366,6 +466,25 @@ class V4L2RawCamera:
             self._capture = self._create_capture()
             if self._capture is None:
                 return False
+            self._trace.start(
+                {
+                    "driver": self.driver_name,
+                    "device": self.device,
+                    "sensor_subdev": self.sensor_subdev,
+                    "pixel_format": self.pixel_format,
+                    "bit_depth": self.bit_depth,
+                    "signal_levels": {
+                        "black_level": self.black_level,
+                        "white_level": self.white_level,
+                        "sources": self._signal_level_sources,
+                    },
+                    "auto_exposure_limits": asdict(self._ae.limits),
+                    "control_ranges": {
+                        name: asdict(control)
+                        for name, control in self._control_ranges.items()
+                    },
+                }
+            )
             self.is_initialized = True
             logger.info(
                 "V4L2 软件 AE 相机初始化成功 / V4L2 software-AE camera initialized: "
@@ -395,6 +514,7 @@ class V4L2RawCamera:
         """释放 V4L2 视频节点 / Release the V4L2 video node."""
         self.is_capturing = False
         self.is_initialized = False
+        self._trace.close()
         capture = self._capture
         self._capture = None
         if capture is not None:
@@ -427,8 +547,10 @@ class V4L2RawCamera:
         """把右对齐 Bayer RAW 转为 RGB888 / Convert right-aligned Bayer RAW to RGB888."""
         import cv2
 
-        shift = max(0, self.bit_depth - 8)
-        raw8 = np.clip(raw >> shift, 0, 255).astype(np.uint8)
+        span = max(1, self.white_level - self.black_level)
+        raw8 = np.clip(
+            (raw.astype(np.float32) - self.black_level) * (255.0 / span), 0, 255
+        ).astype(np.uint8)
         codes = {
             "RGGB": cv2.COLOR_BayerRG2RGB,
             "BGGR": cv2.COLOR_BayerBG2RGB,
@@ -439,9 +561,13 @@ class V4L2RawCamera:
 
     def _observe_auto_exposure(self, raw: np.ndarray) -> None:
         """从当前 RAW 帧更新下一帧曝光 / Update the next-frame exposure from RAW."""
+        observed_exposure_us = self.exposure_us
+        observed_analogue_gain = self.analogue_gain
         stats = measure_luminance(
             raw,
             bit_depth=self.bit_depth,
+            black_level=self.black_level,
+            white_level=self.white_level,
             highlight_percentile=self._ae.limits.highlight_percentile,
         )
         decision = self._ae.observe(
@@ -460,14 +586,36 @@ class V4L2RawCamera:
             "error_stops": decision.error_stops,
             "changed": decision.changed,
         }
-        if decision.changed and not self._apply_exposure_gain(
-            decision.exposure_us, decision.analogue_gain
-        ):
-            self._last_ae = {
-                "state": "control_error",
-                "error_stops": decision.error_stops,
-                "changed": False,
-            }
+        if decision.changed:
+            if not self._apply_exposure_gain(
+                decision.exposure_us, decision.analogue_gain
+            ):
+                self._last_ae = {
+                    "state": "control_error",
+                    "error_stops": decision.error_stops,
+                    "changed": False,
+                }
+        self._trace.record(
+            {
+                "stats": asdict(stats),
+                "observed": {
+                    "exposure_us": observed_exposure_us,
+                    "analogue_gain": observed_analogue_gain,
+                },
+                "decision": asdict(decision),
+                "applied": {
+                    "requested_exposure_us": self.requested_exposure_us,
+                    "requested_analogue_gain": self.requested_analogue_gain,
+                    "estimated_exposure_us": self.exposure_us,
+                    "estimated_analogue_gain": self.analogue_gain,
+                    "actual_exposure_us": self.actual_exposure_us,
+                    "actual_analogue_gain": self.actual_analogue_gain,
+                    "readback_verified": self._control_readback_verified,
+                    "readback_error": self._control_readback_error,
+                },
+            },
+            raw,
+        )
 
     def _apply_postprocessing(self, image: np.ndarray) -> np.ndarray:
         """应用轻量 RAW 后处理和几何变换 / Apply lightweight RAW post-processing and geometry."""
@@ -709,10 +857,12 @@ class V4L2RawCamera:
             "capture_height": self.active_height,
             "fps": self.fps,
             "exposure_us": self.exposure_us,
-            "actual_exposure_us": self.exposure_us,
+            "requested_exposure_us": self.requested_exposure_us,
+            "actual_exposure_us": self.actual_exposure_us,
             "frame_duration_us": self._frame_duration_us,
             "analogue_gain": self.analogue_gain,
-            "actual_analogue_gain": self.analogue_gain,
+            "requested_analogue_gain": self.requested_analogue_gain,
+            "actual_analogue_gain": self.actual_analogue_gain,
             "digital_gain": 1.0,
             "actual_digital_gain": 1.0,
             "auto_exposure": self.auto_exposure,
@@ -722,6 +872,16 @@ class V4L2RawCamera:
             "ae_state": self._last_ae.get("state", "starting"),
             "ae_error_stops": self._last_ae.get("error_stops"),
             "luminance_stats": self._last_luminance,
+            "signal_levels": {
+                "black_level": self.black_level,
+                "white_level": self.white_level,
+                "sources": self._signal_level_sources,
+            },
+            "control_readback": {
+                "verified": self._control_readback_verified,
+                "error": self._control_readback_error,
+            },
+            "ae_trace": self._trace.status(),
             "line_duration_us": round(self._line_duration_us, 4),
             "line_duration_source": self._line_duration_source,
             "capture_format": self._capture_format,

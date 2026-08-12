@@ -158,6 +158,9 @@ captured_images/
 # Tetra3 图案库（体积大，本地或部署时放入 / Large pattern DB; copy on deploy）
 data/plate_solve/default_database.npz
 
+# 相机 AE 实测诊断（可能很大，仅本地/板端保存） / Camera AE traces (large, local/board only)
+data/camera-ae-traces/
+
 # 星表数据（太大，不提交）
 star_catalogs/*.dat
 star_catalogs/*.bin
@@ -205,4 +208,3 @@ TODO.md
 NOTES.md
 .obsidian/
 PiFinder-release
-

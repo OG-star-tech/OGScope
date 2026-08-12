@@ -53,6 +53,8 @@ def measure_luminance(
     image: np.ndarray,
     *,
     bit_depth: int = 10,
+    black_level: int | float = 0,
+    white_level: int | float | None = None,
     highlight_percentile: float = 99.8,
     max_samples: int = 32_768,
 ) -> LuminanceStats:
@@ -69,12 +71,17 @@ def measure_luminance(
     if sampled.size == 0:
         return LuminanceStats(0.0, 0.0, 0.0, 0)
 
-    if np.issubdtype(values.dtype, np.integer):
-        scale = float((1 << max(1, int(bit_depth))) - 1)
-    else:
-        observed_max = float(np.max(sampled))
-        scale = 1.0 if observed_max <= 1.0 else observed_max
-    normalized = np.clip(sampled / max(scale, 1.0), 0.0, 1.0)
+    if white_level is None:
+        if np.issubdtype(values.dtype, np.integer):
+            white_level = float((1 << max(1, int(bit_depth))) - 1)
+        else:
+            observed_max = float(np.max(sampled))
+            white_level = 1.0 if observed_max <= 1.0 else observed_max
+    black = float(black_level)
+    white = max(black + 1.0, float(white_level))
+    # 先去除传感器 pedestal 再归一化，否则暗场背景会被固定黑电平误导。
+    # Remove the sensor pedestal before normalization so fixed black level cannot bias dark scenes.
+    normalized = np.clip((sampled - black) / (white - black), 0.0, 1.0)
 
     return LuminanceStats(
         background=float(np.percentile(normalized, 50.0)),
