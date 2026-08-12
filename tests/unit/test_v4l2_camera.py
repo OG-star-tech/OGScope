@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from ogscope.config import Settings
+from ogscope.domain.camera.ae_diagnostics import load_trace_events
 from ogscope.platform.hardware.camera import CameraFactory
 from ogscope.platform.hardware.v4l2_camera import (
     V4L2ControlRange,
@@ -163,6 +164,27 @@ def test_line_duration_is_derived_from_sensor_controls(monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_signal_levels_prefer_sensor_controls_and_allow_overrides(monkeypatch) -> None:
+    camera = V4L2RawCamera({"v4l2_bit_depth": 10})
+    monkeypatch.setattr(
+        camera, "_read_control", {"black_level": 64, "white_level": 1000}.get
+    )
+
+    camera._resolve_signal_levels()
+
+    assert camera.black_level == 64
+    assert camera.white_level == 1000
+    assert camera._signal_level_sources["black_level"] == "sensor_control"
+
+    overridden = V4L2RawCamera(
+        {"v4l2_bit_depth": 10, "v4l2_black_level": 72, "v4l2_white_level": 980}
+    )
+    overridden._resolve_signal_levels()
+    assert (overridden.black_level, overridden.white_level) == (72, 980)
+    assert overridden._signal_level_sources["black_level"] == "config"
+
+
+@pytest.mark.unit
 def test_dark_raw_frame_advances_software_ae(monkeypatch) -> None:
     camera = _ready_camera()
     camera._capture = _FakeCapture(np.full((24, 32), 2, dtype=np.uint16))
@@ -188,9 +210,51 @@ def test_dark_raw_frame_advances_software_ae(monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_camera_trace_records_observation_decision_and_readback(
+    monkeypatch, tmp_path
+) -> None:
+    camera = _ready_camera(
+        v4l2_ae_trace_enabled=True,
+        v4l2_ae_trace_dir=str(tmp_path),
+        v4l2_ae_trace_raw_sample_interval=1,
+    )
+    camera._capture = _FakeCapture(np.full((24, 32), 2, dtype=np.uint16))
+    camera._trace.start({"test": True})
+    monkeypatch.setattr(camera, "_set_control", lambda *_args: True)
+    monkeypatch.setattr(
+        camera,
+        "_read_controls",
+        lambda *_names: {
+            "exposure": 2_500,
+            "analogue_gain": 0,
+            "vertical_blanking": 2_480,
+        },
+    )
+
+    assert camera.capture_image() is not None
+    camera.close()
+
+    events = load_trace_events(camera._trace.session_dir)
+    assert events[0]["observed"]["exposure_us"] == 10_000
+    assert events[0]["decision"]["exposure_us"] == 20_000
+    assert events[0]["applied"]["actual_exposure_us"] == 20_000
+    assert events[0]["applied"]["readback_verified"] is True
+    assert events[0]["raw_sample"].startswith("raw/frame-")
+
+
+@pytest.mark.unit
 def test_manual_exposure_disables_software_ae(monkeypatch) -> None:
     camera = _ready_camera()
     monkeypatch.setattr(camera, "_set_control", lambda *_args: True)
+    monkeypatch.setattr(
+        camera,
+        "_read_controls",
+        lambda *_names: {
+            "exposure": 31_250,
+            "analogue_gain": 0,
+            "vertical_blanking": 31_230,
+        },
+    )
 
     assert camera.set_exposure(250_000) is True
 
@@ -198,6 +262,25 @@ def test_manual_exposure_disables_software_ae(monkeypatch) -> None:
     assert info["auto_exposure"] is False
     assert info["ae_state"] == "manual"
     assert info["actual_exposure_us"] == 250_000
+    assert info["control_readback"]["verified"] is True
+
+
+@pytest.mark.unit
+def test_failed_control_readback_does_not_claim_actual_values(monkeypatch) -> None:
+    camera = _ready_camera()
+    monkeypatch.setattr(camera, "_set_control", lambda *_args: True)
+    monkeypatch.setattr(camera, "_read_controls", lambda *_names: {})
+
+    assert camera.set_exposure(250_000) is True
+
+    info = camera.get_camera_info()
+    assert info["exposure_us"] == 250_000
+    assert info["actual_exposure_us"] is None
+    assert info["actual_analogue_gain"] is None
+    assert info["control_readback"] == {
+        "verified": False,
+        "error": "missing:analogue_gain,exposure",
+    }
 
 
 @pytest.mark.unit

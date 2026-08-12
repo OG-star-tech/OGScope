@@ -24,6 +24,9 @@
     - `sensor_target_fps` / `preview_target_fps`：传感器与预览目标帧率
     - `actual_capture_fps` / `actual_preview_fps`：运行时采集与预览实际帧率
     - `actual_exposure_us` / `frame_duration_us`：曝光与帧时长遥测
+    - V4L2 回读失败时 `actual_exposure_us` / `actual_analogue_gain` 为 `null`；
+      `control_readback` 提供验证状态，`exposure_us` / `analogue_gain` 仅为推算应用值
+    - `signal_levels`：RAW 黑白电平及来源；`ae_trace`：有界诊断会话状态
     - `preview_consumers` / `analysis_consumers` / `recording_consumers`：消费者数量
     - `jpeg_average_encode_ms` / `jpeg_cached_bytes` / `jpeg_encode_failures`：JPEG 编码健康度
     - `throttle_reason`：运行时降速原因，空值表示未主动降速

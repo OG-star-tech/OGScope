@@ -222,8 +222,11 @@ python scripts/test_debug_console.py --test deps
 | `camera_type` | `imx327_mipi` | 产品默认 Picamera2/libcamera；显式设为 `v4l2` 才启用 RAW 软件 AE |
 | `camera_device` / `camera_v4l2_sensor_subdev` | `/dev/video0` / `/dev/v4l-subdev1` | V4L2 RAW 数据与传感器控制节点 |
 | `camera_v4l2_bit_depth` / `camera_v4l2_bayer_pattern` | `10` / `RGGB` | RAW 解包与去马赛克参数 |
+| `camera_v4l2_black_level` / `camera_v4l2_white_level` | `-1` / `0` | RAW 黑白电平；负值/0 表示从控件或位深推导 |
 | `camera_v4l2_auto_gain_max` | `16.0` | V4L2 软件 AE 最大模拟增益 |
 | `camera_v4l2_ae_target_background` / `camera_v4l2_ae_target_highlight` | `0.035` / `0.45` | 夜空背景与星点高分位目标 |
+| `camera_v4l2_ae_trace_enabled` | `false` | 显式启用有界 AE 轨迹和降采样 RAW 诊断 |
+| `camera_v4l2_ae_trace_max_events` / `camera_v4l2_ae_trace_max_raw_samples` | `2000` / `100` | 单会话诊断写盘上限 |
 | `camera_idle_shutdown_sec` | `20.0` | 无消费者后相机热驻留时间，超时后释放采集 |
 | `camera_frame_stale_timeout_sec` | `5.0` | 超过该时间没有成功帧时重新探测 |
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |

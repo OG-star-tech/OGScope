@@ -24,6 +24,9 @@ This document describes OGScope **developer-domain** APIs (internal). They are *
     - `sensor_target_fps` / `preview_target_fps`: sensor and preview target FPS
     - `actual_capture_fps` / `actual_preview_fps`: runtime capture and preview FPS
     - `actual_exposure_us` / `frame_duration_us`: exposure and frame-duration telemetry
+    - On failed V4L2 readback, `actual_exposure_us` / `actual_analogue_gain` are `null`;
+      `control_readback` reports verification while `exposure_us` / `analogue_gain` are estimates
+    - `signal_levels`: RAW black/white levels and provenance; `ae_trace`: bounded trace-session status
     - `preview_consumers` / `analysis_consumers` / `recording_consumers`: active consumers
     - `jpeg_average_encode_ms` / `jpeg_cached_bytes` / `jpeg_encode_failures`: JPEG encoder health
     - `throttle_reason`: runtime throttling reason; empty means no active throttling

@@ -24,6 +24,19 @@ def test_measure_luminance_uses_sparse_star_highlights() -> None:
 
 
 @pytest.mark.unit
+def test_measure_luminance_removes_sensor_black_level() -> None:
+    raw = np.full((40, 40), 80, dtype=np.uint16)
+    raw.reshape(-1)[::50] = 800
+
+    stats = measure_luminance(
+        raw, bit_depth=10, black_level=64, white_level=1023, highlight_percentile=99.0
+    )
+
+    assert stats.background == pytest.approx(16 / 959, rel=0.02)
+    assert stats.highlight == pytest.approx(736 / 959, rel=0.02)
+
+
+@pytest.mark.unit
 def test_dark_scene_increases_exposure_before_gain() -> None:
     ae = NightSkyAutoExposure(
         AutoExposureLimits(max_exposure_us=2_000_000, max_gain=16.0, settle_frames=0)
