@@ -43,6 +43,19 @@ This document describes OGScope **developer-domain** APIs (internal). They are *
     - `noiseReductionMode`
     - `previewEncoder`
 
+### Star focus calibration
+
+- `GET /api/dev/debug/camera/focus/metrics`
+  - Purpose: measure star sharpness from the current raw camera frame and guide manual lens focusing.
+  - Optional query parameters: `target_x` and `target_y`, both normalized to `0..1`; they must be supplied together and select the star nearest the clicked preview position.
+  - The response includes:
+    - `aggregate.median_hfd_px` / `aggregate.hfd_mad_px`: median HFD and dispersion across usable stars
+    - `aggregate.median_fwhm_px`: median FWHM across usable stars
+    - `aggregate.median_concentration`: median core-energy concentration
+    - `stars` / `selected_star`: candidate stars and the current selection
+    - `stars_detected` / `stars_measured` / `stars_used`: detection, measurement, and quality-filter counts
+  - Lower HFD and FWHM normally mean sharper focus. Treat the values as relative measurements within the same lens, exposure, gain, and target region, not as an absolute cross-device calibration.
+
 ## Analysis lab extensions
 
 - `POST /api/dev/analysis/solve/frame`

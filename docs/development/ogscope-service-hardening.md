@@ -33,4 +33,12 @@ sudo dmesg -T | grep -i -E 'oom|killed process'
 | `OGSCOPE_PREVIEW_JPEG_QUALITY` | 共享预览 JPEG 质量（与调试 MJPEG 默认质量一致）/ Shared preview JPEG quality |
 | `OGSCOPE_SHARED_PREVIEW_FPS` | 共享抓帧与 MJPEG 推送目标帧率 / Shared grabber and MJPEG pacing FPS |
 | `OGSCOPE_DEBUG_PREVIEW_MIN_INTERVAL_MS` | 调试「单帧预览」接口每客户端最小间隔（毫秒）；过短返回 304 / Min interval for `/api/dev/debug/camera/preview` per client |
+| `OGSCOPE_CAMERA_CAPTURE_TIMEOUT_SEC` | 单次 Picamera2 抓帧的硬超时，必须高于最长曝光；超时后复用未完成任务，不重复排队新请求 / Hard timeout for one Picamera2 capture; keep above maximum exposure and do not queue duplicate jobs after timeout |
 | `OGSCOPE_KEEP_RAW_CACHE` | `1` 时在共享管理器中常驻 `_latest_raw`；默认 `0` 以省内存 / Retain raw frame cache when `1` |
+
+当抓帧线程、`stop` 或 `close` 无法在限时内结束时，CameraManager 会保留原相机句柄并报告
+`restart_required=true`，禁止同一进程创建第二个 Picamera2 实例。此状态需要重启 `ogscope.service`
+来释放 libcamera 资源。/ When a capture worker, `stop`, or `close` cannot finish within
+its deadline, CameraManager retains the original handle, reports `restart_required=true`, and
+blocks a second Picamera2 instance in the same process. Restart `ogscope.service` to release the
+libcamera resources.

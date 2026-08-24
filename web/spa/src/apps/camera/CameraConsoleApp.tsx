@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Camera,
   Circle,
+  Crosshair,
   Download,
   FileText,
   FolderOpen,
   Info,
   Moon,
   Play,
+  RotateCcw,
   Save,
   Settings2,
   SlidersHorizontal,
@@ -122,6 +124,42 @@ type StreamMetrics = {
   cma_free_kb?: number;
 };
 
+type FocusStarMetric = {
+  x: number;
+  y: number;
+  hfd_px: number;
+  fwhm_px: number;
+  snr: number;
+  roundness: number;
+  concentration: number;
+  saturated: boolean;
+};
+
+type FocusMetrics = {
+  success: boolean;
+  state: "measuring" | "low_confidence" | "no_stars";
+  frame_id: number;
+  timestamp: number;
+  frame: { width: number; height: number };
+  stars_detected: number;
+  stars_measured: number;
+  stars_used: number;
+  aggregate: {
+    median_hfd_px: number;
+    hfd_mad_px: number;
+    median_fwhm_px: number;
+    median_concentration: number;
+  } | null;
+  selected_star: FocusStarMetric | null;
+  stars: FocusStarMetric[];
+  warnings: string[];
+};
+
+type FocusSample = {
+  frameId: number;
+  hfd: number;
+};
+
 type CameraForm = {
   exposure: number;
   gain: number;
@@ -205,6 +243,34 @@ function formatSize(bytes: number): string {
     idx += 1;
   }
   return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function FocusHistoryChart({ samples, emptyLabel }: { samples: FocusSample[]; emptyLabel: string }) {
+  if (samples.length < 2) {
+    return (
+      <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-outline-variant/30 text-[11px] text-on-surface-variant">
+        {emptyLabel}
+      </div>
+    );
+  }
+  const values = samples.map((sample) => sample.hfd);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(0.2, max - min);
+  const points = values
+    .map((value, index) => {
+      const x = (index / Math.max(1, values.length - 1)) * 320;
+      const y = 76 - ((value - min) / spread) * 60;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg viewBox="0 0 320 88" className="h-24 w-full rounded-lg border border-outline-variant/20 bg-black/25" role="img">
+      <line x1="0" y1="76" x2="320" y2="76" stroke="currentColor" opacity="0.18" />
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" className="text-primary" />
+      <circle cx="320" cy={points.split(" ").at(-1)?.split(",")[1] ?? "44"} r="4" fill="currentColor" className="text-primary" />
+    </svg>
+  );
 }
 
 /**
@@ -300,6 +366,13 @@ export function CameraConsoleApp() {
   const [liveFps, setLiveFps] = useState(0);
   /** 与 OGSCOPE_SHARED_PREVIEW_FPS 一致：共享抓帧与 MJPEG 最小帧间隔 / Env stream pacing cap */
   const [streamMetrics, setStreamMetrics] = useState<StreamMetrics | null>(null);
+  const [focusActive, setFocusActive] = useState(false);
+  const [focusBusy, setFocusBusy] = useState(false);
+  const [focusMetrics, setFocusMetrics] = useState<FocusMetrics | null>(null);
+  const [focusHistory, setFocusHistory] = useState<FocusSample[]>([]);
+  const [focusBestHfd, setFocusBestHfd] = useState<number | null>(null);
+  const [focusTarget, setFocusTarget] = useState<{ x: number; y: number } | null>(null);
+  const [focusError, setFocusError] = useState<string | null>(null);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [rotationValue, setRotationValue] = useState(180);
   const [flipHorizontal, setFlipHorizontal] = useState(false);
@@ -342,6 +415,7 @@ export function CameraConsoleApp() {
   const histogramCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const recordTickRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const focusRequestInFlightRef = useRef(false);
   const previewActiveRef = useRef(false);
   const streamStartedAtRef = useRef<number | null>(null);
   const fpsFrameTsRef = useRef<number[]>([]);
@@ -375,8 +449,8 @@ export function CameraConsoleApp() {
     }
   };
 
-  const startPreview = async () => {
-    if (previewBusy) return;
+  const startPreview = async (): Promise<boolean> => {
+    if (previewBusy) return false;
     setPreviewBusy(true);
     setErr(null);
     setPreviewStreamHint(null);
@@ -391,12 +465,12 @@ export function CameraConsoleApp() {
       if (probe === "busy") {
         setPreviewStreamHint(t("cam.err.streamBusy"));
         setPreviewStreamIsBusy(true);
-        return;
+        return false;
       }
       if (probe === "fail") {
         setPreviewStreamHint(t("cam.err.streamProbeFailed"));
         setPreviewStreamIsBusy(false);
-        return;
+        return false;
       }
       setPreviewActive(true);
       previewActiveRef.current = true;
@@ -405,11 +479,74 @@ export function CameraConsoleApp() {
       streamStartedAtRef.current = performance.now();
       setStreamNonce(nonce);
       await updateCameraStatus();
+      return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setPreviewBusy(false);
     }
+  };
+
+  const startFocusCalibration = async () => {
+    if (focusBusy) return;
+    setFocusBusy(true);
+    setFocusError(null);
+    try {
+      const ready = previewActive || (await startPreview());
+      if (!ready) return;
+      setFocusMetrics(null);
+      setFocusHistory([]);
+      setFocusBestHfd(null);
+      setFocusTarget(null);
+      setHistCollapsed(true);
+      setFocusActive(true);
+      window.setTimeout(() => {
+        document.getElementById("focus-calibration-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    } finally {
+      setFocusBusy(false);
+    }
+  };
+
+  const stopFocusCalibration = () => {
+    setFocusActive(false);
+    setFocusError(null);
+  };
+
+  const resetFocusBest = () => {
+    setFocusHistory([]);
+    setFocusBestHfd(null);
+    setFocusError(null);
+  };
+
+  const handleFocusPreviewClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!focusActive || !imgRef.current) return;
+    if ((event.target as HTMLElement).closest("button, label, input")) return;
+    const image = imgRef.current;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const naturalWidth = image.naturalWidth || focusMetrics?.frame.width || 0;
+    const naturalHeight = image.naturalHeight || focusMetrics?.frame.height || 0;
+    if (naturalWidth <= 0 || naturalHeight <= 0) return;
+    const scale = Math.min(rect.width / naturalWidth, rect.height / naturalHeight);
+    const shownWidth = naturalWidth * scale;
+    const shownHeight = naturalHeight * scale;
+    const offsetX = (rect.width - shownWidth) / 2;
+    const offsetY = (rect.height - shownHeight) / 2;
+    const x = (event.clientX - rect.left - offsetX) / shownWidth;
+    const y = (event.clientY - rect.top - offsetY) / shownHeight;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    setFocusTarget({ x, y });
+    setFocusHistory([]);
+    setFocusBestHfd(null);
+    setFocusError(null);
+  };
+
+  const resumeFocusAutoSelection = () => {
+    setFocusTarget(null);
+    setFocusHistory([]);
+    setFocusBestHfd(null);
+    setFocusError(null);
   };
 
   const stopPreview = async () => {
@@ -940,8 +1077,55 @@ export function CameraConsoleApp() {
     previewActiveRef.current = previewActive;
     if (!previewActive) {
       clearReconnectTimer();
+      setFocusActive(false);
     }
   }, [previewActive]);
+
+  useEffect(() => {
+    if (!focusActive || !previewActive) return;
+    let cancelled = false;
+    const pullFocus = async () => {
+      if (focusRequestInFlightRef.current || document.hidden) return;
+      focusRequestInFlightRef.current = true;
+      try {
+        const params = new URLSearchParams();
+        if (focusTarget) {
+          params.set("target_x", focusTarget.x.toFixed(6));
+          params.set("target_y", focusTarget.y.toFixed(6));
+        }
+        const suffix = params.size > 0 ? `?${params.toString()}` : "";
+        const result = await requestJson<FocusMetrics>(
+          `${debugApi("/camera/focus/metrics")}${suffix}`,
+          { cache: "no-store" },
+        );
+        if (cancelled) return;
+        setFocusMetrics(result);
+        setFocusError(null);
+        const hfd = focusTarget
+          ? result.selected_star?.hfd_px
+          : result.aggregate?.median_hfd_px;
+        if (typeof hfd === "number" && Number.isFinite(hfd)) {
+          setFocusHistory((previous) => {
+            if (previous.at(-1)?.frameId === result.frame_id) return previous;
+            return [...previous, { frameId: result.frame_id, hfd }].slice(-60);
+          });
+          setFocusBestHfd((previous) => previous == null ? hfd : Math.min(previous, hfd));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFocusError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        focusRequestInFlightRef.current = false;
+      }
+    };
+    void pullFocus();
+    const timer = window.setInterval(pullFocus, 850);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [focusActive, previewActive, focusTarget?.x, focusTarget?.y]);
 
   // MJPEG 在 <img> 上通常不按帧触发 onLoad；勿用 lastFrameTime 做断流重连以免与单槽位冲突导致 503
   // MJPEG <img> rarely fires onLoad per frame; do not watchdog-reconnect on lastFrameTime (503 with single slot)
@@ -1079,6 +1263,41 @@ export function CameraConsoleApp() {
   const canStopPreview = !previewBusy && previewActive;
   const canCapture = !previewBusy && !captureBusy && isStreaming;
   const canRecordToggle = !previewBusy && !recordBusy && isStreaming;
+  const focusSelectedMetric = focusTarget ? focusMetrics?.selected_star : null;
+  const focusHfd = focusTarget
+    ? focusSelectedMetric?.hfd_px ?? null
+    : focusMetrics?.aggregate?.median_hfd_px ?? null;
+  const focusFwhm = focusTarget
+    ? focusSelectedMetric?.fwhm_px ?? null
+    : focusMetrics?.aggregate?.median_fwhm_px ?? null;
+  const focusConcentration = focusTarget
+    ? focusSelectedMetric?.concentration ?? null
+    : focusMetrics?.aggregate?.median_concentration ?? null;
+  const focusDeltaPercent = focusHfd != null && focusBestHfd != null && focusBestHfd > 0
+    ? ((focusHfd - focusBestHfd) / focusBestHfd) * 100
+    : null;
+  const focusRecent = focusHistory.slice(-3).map((sample) => sample.hfd);
+  const focusPrevious = focusHistory.slice(-6, -3).map((sample) => sample.hfd);
+  const focusAverage = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  let focusGuidanceKey = "cam.focus.guidance.collecting";
+  if (focusMetrics?.state === "no_stars") {
+    focusGuidanceKey = "cam.focus.guidance.noStars";
+  } else if (focusHistory.length >= 5 && focusDeltaPercent != null && focusDeltaPercent <= 3) {
+    focusGuidanceKey = "cam.focus.guidance.best";
+  } else if (focusRecent.length === 3 && focusPrevious.length === 3) {
+    const trend = focusAverage(focusRecent) - focusAverage(focusPrevious);
+    const threshold = Math.max(0.04, focusAverage(focusPrevious) * 0.02);
+    focusGuidanceKey = trend < -threshold
+      ? "cam.focus.guidance.improving"
+      : trend > threshold
+        ? "cam.focus.guidance.worsening"
+        : "cam.focus.guidance.steady";
+  }
+  const focusConfidenceKey = (focusMetrics?.stars_used ?? 0) >= 5
+    ? "cam.focus.confidence.high"
+    : (focusMetrics?.stars_used ?? 0) >= 3
+      ? "cam.focus.confidence.medium"
+      : "cam.focus.confidence.low";
   const totalFilePages = Math.max(1, Math.ceil(files.length / FILE_PAGE_SIZE));
   const filePageClamped = Math.min(filePage, totalFilePages);
   const fileStart = (filePageClamped - 1) * FILE_PAGE_SIZE;
@@ -1218,8 +1437,19 @@ export function CameraConsoleApp() {
                   {t("cam.hint.mjpegSingleStream")}
                 </p>
               </div>
-              <div className="shrink-0 font-mono text-xs text-on-surface-variant">
-                {t("cam.preview.state")}: {previewActive ? t("cam.state.streaming") : t("cam.state.idle")}
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={focusBusy || previewBusy || Boolean(status?.recording)}
+                  onClick={() => focusActive ? stopFocusCalibration() : void startFocusCalibration()}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${focusActive ? "border border-primary/50 text-primary" : "bg-primary-container text-on-primary-container"}`}
+                >
+                  <Crosshair className="mr-1 inline h-3.5 w-3.5" />
+                  {focusActive ? t("cam.focus.finish") : t("cam.focus.start")}
+                </button>
+                <span className="font-mono text-xs text-on-surface-variant">
+                  {t("cam.preview.state")}: {previewActive ? t("cam.state.streaming") : t("cam.state.idle")}
+                </span>
               </div>
             </div>
             {previewStreamHint && !previewActive && (
@@ -1239,7 +1469,10 @@ export function CameraConsoleApp() {
                 )}
               </div>
             )}
-            <div className="relative aspect-video overflow-hidden rounded border border-outline-variant/20 bg-black">
+            <div
+              className={`relative aspect-video overflow-hidden rounded border border-outline-variant/20 bg-black ${focusActive ? "cursor-crosshair" : ""}`}
+              onClick={handleFocusPreviewClick}
+            >
               {previewActive && previewStreamHint && (
                 <div
                   className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 px-4 text-center"
@@ -1304,6 +1537,43 @@ export function CameraConsoleApp() {
                   </button>
                 </div>
               )}
+              {previewActive && focusActive && focusMetrics?.frame ? (
+                <svg
+                  className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+                  viewBox={`0 0 ${focusMetrics.frame.width} ${focusMetrics.frame.height}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  aria-hidden="true"
+                >
+                  {focusMetrics.stars.map((star, index) => {
+                    const selected = focusMetrics.selected_star
+                      && Math.abs(focusMetrics.selected_star.x - star.x) < 1
+                      && Math.abs(focusMetrics.selected_star.y - star.y) < 1;
+                    return (
+                      <circle
+                        key={`${focusMetrics.frame_id}-${index}`}
+                        cx={star.x}
+                        cy={star.y}
+                        r={selected ? 16 : 10}
+                        fill="none"
+                        stroke={selected ? "#facc15" : "#38bdf8"}
+                        strokeWidth={selected ? 3 : 2}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    );
+                  })}
+                  {focusTarget ? (
+                    <g
+                      transform={`translate(${focusTarget.x * focusMetrics.frame.width} ${focusTarget.y * focusMetrics.frame.height})`}
+                      stroke="#facc15"
+                      strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
+                    >
+                      <line x1="-12" y1="0" x2="12" y2="0" />
+                      <line x1="0" y1="-12" x2="0" y2="12" />
+                    </g>
+                  ) : null}
+                </svg>
+              ) : null}
               {status?.recording && (
                 <div className="absolute right-3 top-3 flex items-center gap-2 rounded bg-black/60 px-2 py-1 text-xs text-error">
                   <Circle className="h-3.5 w-3.5 fill-current" /> {t("cam.state.rec")}
@@ -1336,6 +1606,136 @@ export function CameraConsoleApp() {
                 </div>
               )}
             </div>
+            <section id="focus-calibration-panel" className={`mt-3 scroll-mt-20 rounded-xl border p-3 ${focusActive ? "border-primary/45 bg-primary-container/10" : "border-outline-variant/20 bg-surface-container-low"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Crosshair className="h-5 w-5 text-primary" />
+                    <h3 className="text-sm font-semibold">{t("cam.focus.title")}</h3>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${focusActive ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"}`}>
+                      {focusActive ? t("cam.focus.active") : t("cam.focus.idle")}
+                    </span>
+                  </div>
+                  <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-on-surface-variant">
+                    {t("cam.focus.intro")}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {!focusActive ? (
+                    <button
+                      type="button"
+                      disabled={focusBusy || previewBusy || Boolean(status?.recording)}
+                      onClick={() => void startFocusCalibration()}
+                      className="rounded-lg bg-primary-container px-3 py-2 text-xs font-medium text-on-primary-container disabled:opacity-50"
+                    >
+                      <Crosshair className="mr-1 inline h-4 w-4" />
+                      {focusBusy ? t("cam.focus.starting") : t("cam.focus.start")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopFocusCalibration}
+                      className="rounded-lg border border-error/50 px-3 py-2 text-xs text-error"
+                    >
+                      {t("cam.focus.finish")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!focusActive}
+                    onClick={resetFocusBest}
+                    className="rounded-lg border border-outline-variant/40 px-3 py-2 text-xs disabled:opacity-40"
+                  >
+                    <RotateCcw className="mr-1 inline h-3.5 w-3.5" />
+                    {t("cam.focus.resetBest")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!focusActive || focusTarget == null}
+                    onClick={resumeFocusAutoSelection}
+                    className="rounded-lg border border-outline-variant/40 px-3 py-2 text-xs disabled:opacity-40"
+                  >
+                    {t("cam.focus.autoSelect")}
+                  </button>
+                </div>
+              </div>
+
+              {focusActive ? (
+                <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg border border-primary/30 bg-black/20 p-3 sm:col-span-2">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">
+                        {t(focusTarget ? "cam.focus.currentHfd.single" : "cam.focus.currentHfd.multi")}
+                      </div>
+                      <div className="mt-1 flex items-end gap-2">
+                        <span className="font-mono text-3xl font-semibold text-primary">{focusHfd == null ? "—" : focusHfd.toFixed(2)}</span>
+                        <span className="pb-1 text-xs text-on-surface-variant">px · {t("cam.focus.lowerBetter")}</span>
+                      </div>
+                      <p className="mt-2 rounded-md border border-outline-variant/20 bg-surface-container-low/70 px-2 py-1.5 text-xs font-medium">
+                        {t(focusGuidanceKey)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.bestHfd")}</div>
+                      <div className="mt-1 font-mono text-xl">{focusBestHfd == null ? "—" : `${focusBestHfd.toFixed(2)} px`}</div>
+                      <div className="mt-1 text-[11px] text-on-surface-variant">
+                        {focusDeltaPercent == null ? "—" : `+${Math.max(0, focusDeltaPercent).toFixed(1)}%`}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.stars")}</div>
+                      <div className="mt-1 font-mono text-xl">{focusMetrics?.stars_used ?? 0} / {focusMetrics?.stars_detected ?? 0}</div>
+                      <div className="mt-1 text-[11px] text-on-surface-variant">{t(focusConfidenceKey)}</div>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.fwhm")}</div>
+                      <div className="mt-1 font-mono text-lg">{focusFwhm == null ? "—" : `${focusFwhm.toFixed(2)} px`}</div>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.concentration")}</div>
+                      <div className="mt-1 font-mono text-lg">{focusConcentration == null ? "—" : `${(focusConcentration * 100).toFixed(0)}%`}</div>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.selectedStar")}</div>
+                      <div className="mt-1 font-mono text-lg">{focusMetrics?.selected_star ? `HFD ${focusMetrics.selected_star.hfd_px.toFixed(2)}` : "—"}</div>
+                      <div className="mt-1 text-[11px] text-on-surface-variant">
+                        {focusTarget ? t("cam.focus.manualTarget") : t("cam.focus.autoTarget")}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-outline-variant/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.stability")}</div>
+                      <div className="mt-1 font-mono text-lg">{focusMetrics?.aggregate ? `±${focusMetrics.aggregate.hfd_mad_px.toFixed(2)} px` : "—"}</div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
+                      <span>{t("cam.focus.history")}</span>
+                      <span>{t("cam.focus.clickHint")}</span>
+                    </div>
+                    <FocusHistoryChart samples={focusHistory} emptyLabel={t("cam.focus.historyEmpty")} />
+                    {focusError ? (
+                      <p className="rounded-lg border border-error/35 bg-error-container/15 px-3 py-2 text-xs text-error" role="alert">{focusError}</p>
+                    ) : null}
+                    {focusMetrics?.warnings.includes("saturated_stars_rejected") ? (
+                      <p className="rounded-lg border border-tertiary/35 bg-tertiary-container/15 px-3 py-2 text-[11px] text-tertiary">
+                        {t("cam.focus.warning.saturated")}
+                      </p>
+                    ) : null}
+                    {focusMetrics?.warnings.includes("target_star_not_found") ? (
+                      <p className="rounded-lg border border-tertiary/35 bg-tertiary-container/15 px-3 py-2 text-[11px] text-tertiary">
+                        {t("cam.focus.warning.targetNotFound")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-2 text-[11px] text-on-surface-variant sm:grid-cols-3">
+                  <div className="rounded-lg border border-outline-variant/20 px-3 py-2">1. {t("cam.focus.step.start")}</div>
+                  <div className="rounded-lg border border-outline-variant/20 px-3 py-2">2. {t("cam.focus.step.adjust")}</div>
+                  <div className="rounded-lg border border-outline-variant/20 px-3 py-2">3. {t("cam.focus.step.lock")}</div>
+                </div>
+              )}
+            </section>
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-4">
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.frameFps")}: </span>

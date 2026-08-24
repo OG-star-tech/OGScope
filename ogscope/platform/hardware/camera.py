@@ -6,6 +6,7 @@
 
 import logging
 from abc import ABC, abstractmethod
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any, Optional
 
 import numpy as np
@@ -78,6 +79,7 @@ class IMX327MIPICamera(CameraInterface):
         self._frame_duration_limits: tuple[int, int] | None = None
         self._lores_available = False
         self._last_lores_stats: dict[str, Any] = {}
+        self._pending_capture_job = None
 
         # 相机参数 / Camera parameters
         requested_width = int(config.get("width", 640))
@@ -101,6 +103,9 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
         self.night_mode = bool(config.get("night_mode", False))
         self.auto_exposure_max_us = int(config.get("auto_exposure_max_us", 2_000_000))
+        self.capture_timeout_sec = max(
+            0.5, float(config.get("capture_timeout_sec", 4.0))
+        )
         self.ae_flicker_mode = str(config.get("ae_flicker_mode", "off")).lower()
         self.noise_reduction_mode = self._normalize_noise_reduction_mode(
             config.get("noise_reduction_mode", config.get("noise_reduction", "fast"))
@@ -727,6 +732,7 @@ class IMX327MIPICamera(CameraInterface):
         try:
             self.camera.stop()
             self.is_capturing = False
+            self._pending_capture_job = None
             logger.info("相机停止捕获")
             return True
         except Exception as e:
@@ -744,9 +750,22 @@ class IMX327MIPICamera(CameraInterface):
             return None
 
         try:
-            # 同一请求读取图像与元数据，避免额外等待下一帧
-            # Read image and metadata from one request to avoid waiting for another frame.
-            request = self.camera.capture_request()
+            # 使用 Picamera2 异步任务并限制等待时间，避免 libcamera 卡住后永久占用抓帧线程。
+            # Use a bounded Picamera2 job so a stuck libcamera request cannot hold the grabber forever.
+            if self._pending_capture_job is None:
+                self._pending_capture_job = self.camera.capture_request(wait=False)
+            job = self._pending_capture_job
+            try:
+                request = self.camera.wait(job, timeout=self.capture_timeout_sec)
+            except FutureTimeoutError:
+                logger.error(
+                    "相机抓帧超时（%.2fs），等待生命周期管理器回收 / "
+                    "Camera capture timed out after %.2fs; lifecycle recovery required",
+                    self.capture_timeout_sec,
+                    self.capture_timeout_sec,
+                )
+                return None
+            self._pending_capture_job = None
             try:
                 image = request.make_array("main")
                 self._last_metadata = dict(request.get_metadata() or {})
@@ -802,6 +821,7 @@ class IMX327MIPICamera(CameraInterface):
             return image
 
         except Exception as e:
+            self._pending_capture_job = None
             logger.error(f"捕获图像失败: {e}")
             return None
 

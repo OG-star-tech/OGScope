@@ -94,6 +94,7 @@ _CATALOG_SECTIONS: tuple[
             "preview_encoder",
             "debug_preview_min_interval_ms",
             "camera_probe_timeout_sec",
+            "camera_capture_timeout_sec",
             "camera_grab_failures_offline",
             "camera_idle_shutdown_sec",
             "camera_frame_stale_timeout_sec",

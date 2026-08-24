@@ -2,6 +2,7 @@
 
 import sys
 import types
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import numpy as np
 import pytest
@@ -73,6 +74,45 @@ class _FakePicamera2:
         self.controls_log.append(dict(controls))
 
 
+class _FakeCompletedRequest:
+    """最小完成请求替身 / Minimal completed-request test double."""
+
+    def __init__(self) -> None:
+        self.released = False
+
+    def make_array(self, _stream: str) -> np.ndarray:
+        return np.zeros((720, 1280, 3), dtype=np.uint8)
+
+    def get_metadata(self) -> dict:
+        return {"ExposureTime": 10000}
+
+    def release(self) -> None:
+        self.released = True
+
+
+class _AsyncCapturePicamera:
+    """记录异步抓帧和有限等待 / Track asynchronous capture and bounded waits."""
+
+    def __init__(self, *, time_out: bool = False) -> None:
+        self.time_out = time_out
+        self.capture_calls = 0
+        self.wait_timeouts: list[float] = []
+        self.job = object()
+        self.request = _FakeCompletedRequest()
+
+    def capture_request(self, *, wait: bool):
+        assert wait is False
+        self.capture_calls += 1
+        return self.job
+
+    def wait(self, job, timeout: float):
+        assert job is self.job
+        self.wait_timeouts.append(timeout)
+        if self.time_out:
+            raise FutureTimeoutError
+        return self.request
+
+
 @pytest.mark.unit
 def test_initialize_auto_white_balance_really_enables_awb(monkeypatch) -> None:
     fake = _FakePicamera2()
@@ -110,6 +150,41 @@ def test_initialize_manual_white_balance_sets_colour_gains(monkeypatch) -> None:
         item.get("AwbEnable") is False and item.get("ColourGains") == (1.4, 1.8)
         for item in fake.controls_log
     )
+
+
+@pytest.mark.unit
+def test_capture_uses_picamera_job_with_bounded_wait() -> None:
+    fake = _AsyncCapturePicamera()
+    cam = IMX327MIPICamera(_minimal_config(capture_timeout_sec=3.5))
+    cam.camera = fake
+    cam.is_initialized = True
+    cam.is_capturing = True
+
+    frame = cam.capture_image()
+
+    assert frame is not None
+    assert fake.capture_calls == 1
+    assert fake.wait_timeouts == [3.5]
+    assert fake.request.released is True
+    assert cam._pending_capture_job is None
+
+
+@pytest.mark.unit
+def test_capture_timeout_reuses_pending_job_instead_of_queueing_another() -> None:
+    fake = _AsyncCapturePicamera(time_out=True)
+    cam = IMX327MIPICamera(_minimal_config(capture_timeout_sec=0.5))
+    cam.camera = fake
+    cam.is_initialized = True
+    cam.is_capturing = True
+
+    assert cam.capture_image() is None
+    assert fake.capture_calls == 1
+    assert cam._pending_capture_job is fake.job
+
+    fake.time_out = False
+    assert cam.capture_image() is not None
+    assert fake.capture_calls == 1
+    assert cam._pending_capture_job is None
 
 
 @pytest.mark.unit

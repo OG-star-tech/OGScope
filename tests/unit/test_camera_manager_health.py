@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import numpy as np
 import pytest
@@ -36,6 +37,28 @@ class _FrameCamera(_NoFrameCamera):
     def get_video_frame(self):
         self.read_count += 1
         return np.zeros((360, 640, 3), dtype=np.uint8)
+
+
+class _CloseProbe:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _SlowStopCamera(_FrameCamera):
+    """模拟底层 stop 暂时卡住 / Simulate a temporarily stuck low-level stop."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.camera = _CloseProbe()
+        self.is_capturing = True
+
+    def stop_capture(self) -> bool:
+        time.sleep(0.08)
+        self.is_capturing = False
+        return True
 
 
 @pytest.mark.asyncio
@@ -146,3 +169,51 @@ def test_preview_fps_is_independent_runtime_setting() -> None:
     manager = CameraManager()
     assert manager.set_preview_fps(12) == 12
     assert manager._target_fps == 12
+
+
+@pytest.mark.asyncio
+async def test_stop_timeout_keeps_camera_handle_and_blocks_reacquire() -> None:
+    """stop 超时后不得丢弃仍占用 libcamera 的实例 / Keep the handle after stop timeout."""
+    manager = CameraManager()
+    camera = _SlowStopCamera()
+    manager.attach_camera_instance(camera)
+    manager._stop_timeout_sec = 0.01
+
+    await manager.stop()
+
+    assert manager.get_camera_instance() is camera
+    status = await manager.status()
+    assert status["connected"] is False
+    assert status["restart_required"] is True
+    with pytest.raises(RuntimeError, match="restart required|重启服务"):
+        await manager.ensure_started()
+
+    # 让首次 stop 工作线程收尾，再确认一次显式 stop 可以安全释放。
+    # Let the first stop worker drain, then verify an explicit retry can release safely.
+    await asyncio.sleep(0.1)
+    manager._stop_timeout_sec = 0.2
+    await manager.stop()
+    assert manager.get_camera_instance() is None
+    assert camera.camera.closed is True
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_timeout_marks_restart_required_and_stops_grabber() -> None:
+    """重配置超时后不得恢复抓帧 / Do not resume the grabber after reconfigure timeout."""
+    manager = CameraManager()
+    camera = _FrameCamera()
+    manager.attach_camera_instance(camera)
+    camera.is_capturing = True
+
+    def _slow_reconfigure() -> bool:
+        time.sleep(0.08)
+        return True
+
+    with pytest.raises(asyncio.TimeoutError):
+        await manager.reconfigure_camera(
+            "slow_test", _slow_reconfigure, timeout_sec=0.01
+        )
+
+    assert manager._restart_required is True
+    assert manager._grabber_task is None
+    await asyncio.sleep(0.1)
