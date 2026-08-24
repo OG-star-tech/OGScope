@@ -175,6 +175,28 @@ async def get_debug_camera_preview(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/debug/camera/focus/metrics")
+async def get_debug_camera_focus_metrics(
+    target_x: float | None = Query(default=None, ge=0.0, le=1.0),
+    target_y: float | None = Query(default=None, ge=0.0, le=1.0),
+):
+    """测量星点焦点质量，坐标为归一化画幅位置 / Measure focus with normalized target coordinates."""
+    if (target_x is None) != (target_y is None):
+        raise HTTPException(
+            status_code=422,
+            detail="target_x and target_y must be provided together / 目标坐标必须成对提供",
+        )
+    try:
+        return await camera_domain_service.get_focus_metrics(
+            target_x=target_x,
+            target_y=target_y,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/debug/camera/capture")
 async def capture_debug_image():
     """拍摄单张图片 / Take a single picture"""

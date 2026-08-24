@@ -915,7 +915,12 @@ class DebugCameraService:
         if not hasattr(camera, "set_auto_exposure"):
             raise Exception("当前相机不支持自动曝光切换")
 
-        if not camera.set_auto_exposure(bool(enabled)):
+        applied = await get_camera_manager().reconfigure_camera(
+            "set_auto_exposure",
+            lambda: camera.set_auto_exposure(bool(enabled)),
+            timeout_sec=10.0,
+        )
+        if not applied:
             raise Exception("设置自动曝光模式失败")
 
         get_camera_manager().update_runtime_overrides({"auto_exposure": bool(enabled)})
@@ -933,70 +938,77 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         try:
-            # 优先处理自动曝光开关，避免自动 / Prioritize the automatic exposure switch to avoid automatic
-            auto_exposure = settings.get(
-                "autoExposure", getattr(camera, "auto_exposure", False)
-            )
-            if hasattr(camera, "set_auto_exposure"):
-                camera.set_auto_exposure(bool(auto_exposure))
+            # 整组设置在同一个相机事务中执行，避免与 capture_request 并发访问 libcamera。
+            # Apply the full settings batch in one camera transaction to avoid racing capture_request.
+            def _apply_settings_sync() -> bool:
+                auto_exposure = settings.get(
+                    "autoExposure", getattr(camera, "auto_exposure", False)
+                )
+                if hasattr(camera, "set_auto_exposure"):
+                    camera.set_auto_exposure(bool(auto_exposure))
 
-            # 更新基础相机参数 / Update basic camera parameters
-            if not auto_exposure and "exposure" in settings:
-                camera.set_exposure(settings["exposure"])
+                if not auto_exposure and "exposure" in settings:
+                    camera.set_exposure(settings["exposure"])
 
-            if not auto_exposure and "gain" in settings and "digitalGain" in settings:
-                camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
-            elif not auto_exposure and "gain" in settings:
-                camera.set_gain(settings["gain"])
+                if (
+                    not auto_exposure
+                    and "gain" in settings
+                    and "digitalGain" in settings
+                ):
+                    camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
+                elif not auto_exposure and "gain" in settings:
+                    camera.set_gain(settings["gain"])
 
-            # 更新图像增强参数 / Update image enhancement parameters
-            if any(
-                key in settings
-                for key in ["contrast", "brightness", "saturation", "sharpness"]
-            ):
-                contrast = settings.get("contrast", 1.0)
-                brightness = settings.get("brightness", 0.0)
-                saturation = settings.get("saturation", 1.0)
-                sharpness = settings.get("sharpness", 1.0)
-
-                if hasattr(camera, "set_image_enhancement"):
+                if any(
+                    key in settings
+                    for key in ["contrast", "brightness", "saturation", "sharpness"]
+                ) and hasattr(camera, "set_image_enhancement"):
                     camera.set_image_enhancement(
-                        contrast, brightness, saturation, sharpness
+                        settings.get("contrast", 1.0),
+                        settings.get("brightness", 0.0),
+                        settings.get("saturation", 1.0),
+                        settings.get("sharpness", 1.0),
                     )
 
-            # 更新降噪设置 / Update noise reduction settings
-            if "noiseReductionMode" in settings:
-                if hasattr(camera, "set_noise_reduction_mode"):
+                if "noiseReductionMode" in settings and hasattr(
+                    camera, "set_noise_reduction_mode"
+                ):
                     camera.set_noise_reduction_mode(settings["noiseReductionMode"])
-            if "noiseReduction" in settings and "noiseReductionMode" not in settings:
-                if hasattr(camera, "set_noise_reduction"):
+                elif "noiseReduction" in settings and hasattr(
+                    camera, "set_noise_reduction"
+                ):
                     camera.set_noise_reduction(settings["noiseReduction"])
 
-            # 更新 libcamera 高级控制 / Update advanced libcamera controls
-            if "aeFlickerMode" in settings:
-                if hasattr(camera, "set_ae_flicker_mode"):
+                if "aeFlickerMode" in settings and hasattr(
+                    camera, "set_ae_flicker_mode"
+                ):
                     camera.set_ae_flicker_mode(settings["aeFlickerMode"])
-            if "autoExposureMaxUs" in settings and settings["autoExposureMaxUs"]:
-                if hasattr(camera, "set_auto_exposure_max_us"):
+                if (
+                    "autoExposureMaxUs" in settings
+                    and settings["autoExposureMaxUs"]
+                    and hasattr(camera, "set_auto_exposure_max_us")
+                ):
                     camera.set_auto_exposure_max_us(settings["autoExposureMaxUs"])
 
-            # 更新白平衡设置 / Update white balance settings
-            if "whiteBalanceMode" in settings:
-                mode = settings["whiteBalanceMode"]
-                gain_r = settings.get("whiteBalanceGainR", 1.0)
-                gain_b = settings.get("whiteBalanceGainB", 1.0)
-
-                if hasattr(camera, "set_white_balance"):
-                    camera.set_white_balance(mode, gain_r, gain_b)
-
-            # 更新颜色模式设置 / Update color mode settings
-            if "colorMode" in settings:
-                if hasattr(camera, "set_color_mode"):
-                    await get_camera_manager().reconfigure_camera(
-                        "update_color_mode",
-                        lambda: camera.set_color_mode(settings["colorMode"]),
-                        timeout_sec=10.0,
+                if "whiteBalanceMode" in settings and hasattr(
+                    camera, "set_white_balance"
+                ):
+                    camera.set_white_balance(
+                        settings["whiteBalanceMode"],
+                        settings.get("whiteBalanceGainR", 1.0),
+                        settings.get("whiteBalanceGainB", 1.0),
                     )
+
+                if "colorMode" in settings and hasattr(camera, "set_color_mode"):
+                    camera.set_color_mode(settings["colorMode"])
+                return True
+
+            logging.getLogger(__name__).info(
+                "camera_settings_apply fields=%s", ",".join(sorted(settings))
+            )
+            await get_camera_manager().reconfigure_camera(
+                "update_settings", _apply_settings_sync, timeout_sec=10.0
+            )
 
             overrides: dict[str, Any] = {}
             if "exposure" in settings:

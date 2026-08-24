@@ -13,6 +13,13 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - Start/stop preview
 - Live status: capture FPS, preview FPS, exposure, consumers, encoder, and memory pressure
 
+### Star focus calibration
+- Start a guided focusing session and continuously measure multi-star HFD and FWHM.
+- Follow plain-language guidance such as keep turning, near best, or wrong direction.
+- Track the best HFD and recent trend for the current session; lower is normally sharper.
+- Click a star in the preview to lock it, or return to automatic multi-star aggregation.
+- Saturated, low-SNR, and badly shaped candidates are excluded to avoid misleading scores.
+
 ### Capture
 - **Still capture**: high-quality photos with auto-save
 - **Video recording**: manual duration, MP4
@@ -68,10 +75,11 @@ Browser: `http://localhost:8000/debug`
 
 1. **Start preview** — click Start, wait for init, view stream.
 2. **Tune parameters** — Parameters tab, adjust sliders, Apply.
-3. **Capture still** — Capture tab, Capture photo; files under `~/dev_captures/`.
-4. **Record video** — Start recording, stop when done.
-5. **Presets** — Presets tab: name, description, Save; Apply from cards.
-6. **Files** — Files tab: list, download, details.
+3. **Calibrate focus (optional)** — start focus calibration, rotate the lens slowly, and minimize HFD. Click a preview star when you want to lock the target.
+4. **Capture still** — Capture tab, Capture photo; files under `~/dev_captures/`.
+5. **Record video** — Start recording, stop when done.
+6. **Presets** — Presets tab: name, description, Save; Apply from cards.
+7. **Files** — Files tab: list, download, details.
 
 ### Keyboard shortcuts
 
@@ -115,6 +123,7 @@ Browser: `http://localhost:8000/debug`
 - `POST /api/dev/debug/camera/start`
 - `POST /api/dev/debug/camera/stop`
 - `GET /api/dev/debug/camera/preview`
+- `GET /api/dev/debug/camera/focus/metrics`
 
 ### Capture
 - `POST /api/dev/debug/camera/capture`

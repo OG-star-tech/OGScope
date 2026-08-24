@@ -239,6 +239,54 @@ def test_debug_camera_image_quality_success(client, fake_camera_env):
 
 
 @pytest.mark.unit
+def test_debug_camera_focus_metrics_success(client, fake_camera_env, monkeypatch):
+    from ogscope.domain.camera import services as camera_services
+
+    async def _focus_metrics(*, target_x=None, target_y=None):
+        return {
+            "success": True,
+            "state": "measuring",
+            "frame_id": 10,
+            "timestamp": 1.0,
+            "frame": {"width": 640, "height": 360},
+            "stars_detected": 4,
+            "stars_measured": 4,
+            "stars_used": 4,
+            "aggregate": {
+                "median_hfd_px": 2.4,
+                "hfd_mad_px": 0.2,
+                "median_fwhm_px": 2.5,
+                "median_concentration": 0.7,
+            },
+            "selected_star": None,
+            "stars": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(
+        camera_services.camera_domain_service,
+        "get_focus_metrics",
+        _focus_metrics,
+    )
+    response = client.get(
+        "/api/dev/debug/camera/focus/metrics",
+        params={"target_x": 0.5, "target_y": 0.5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["aggregate"]["median_hfd_px"] == 2.4
+
+
+@pytest.mark.unit
+def test_debug_camera_focus_metrics_requires_coordinate_pair(client):
+    response = client.get(
+        "/api/dev/debug/camera/focus/metrics", params={"target_x": 0.5}
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
 def test_debug_camera_update_settings_success(client, fake_camera_env):
     payload = {
         "exposure": 12000,

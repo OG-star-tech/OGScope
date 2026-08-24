@@ -43,6 +43,19 @@
     - `noiseReductionMode`
     - `previewEncoder`
 
+### 星点焦点校准
+
+- `GET /api/dev/debug/camera/focus/metrics`
+  - 用途：基于当前原始相机帧计算实时星点锐度，引导用户手动调整镜头焦距。
+  - 可选查询参数：`target_x` 与 `target_y`，均为 `0..1` 归一化坐标；必须成对提供，用于锁定预览画面中点击的星点。
+  - 响应包含：
+    - `aggregate.median_hfd_px` / `aggregate.hfd_mad_px`：可用星点的 HFD 中位数与离散度
+    - `aggregate.median_fwhm_px`：可用星点的 FWHM 中位数
+    - `aggregate.median_concentration`：星点核心能量集中度
+    - `stars` / `selected_star`：候选星点及当前选择
+    - `stars_detected` / `stars_measured` / `stars_used`：检测、测量与质量筛选计数
+  - HFD 与 FWHM 越低通常表示越锐利；这些数值只适合在同一镜头、曝光、增益与目标区域下做相对比较，不是跨设备绝对标定值。
+
 ## 分析实验扩展
 
 - `POST /api/dev/analysis/solve/frame`

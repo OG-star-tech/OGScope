@@ -375,6 +375,15 @@ class Settings(BaseSettings):
         le=30.0,
         description="相机探测超时（秒）/ Camera probe timeout in seconds",
     )
+    camera_capture_timeout_sec: float = Field(
+        default=4.0,
+        ge=0.5,
+        le=120.0,
+        description=(
+            "单次相机抓帧硬超时（秒）；应高于允许的最长曝光 / "
+            "Hard timeout for one camera frame; keep above the longest allowed exposure"
+        ),
+    )
     camera_grab_failures_offline: int = Field(
         default=3,
         ge=1,
