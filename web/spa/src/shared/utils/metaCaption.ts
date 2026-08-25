@@ -15,12 +15,10 @@ function str(x: unknown): string | null {
   return null;
 }
 
-/** 曝光微秒转可读 / exposure_us to readable */
+/** 曝光微秒统一显示为秒 / Always display exposure_us in seconds. */
 function formatExposureUs(us: unknown): string | null {
   if (typeof us !== "number" || us <= 0) return null;
-  if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)} s`;
-  if (us >= 1000) return `${(us / 1000).toFixed(0)} ms`;
-  return `${us} µs`;
+  return `${(us / 1_000_000).toFixed(4)} s`;
 }
 
 export function buildMetaCaptionRows(

@@ -11,7 +11,6 @@ from typing import Any
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
-from ogscope.algorithms.star_extract import StarExtractor, StarPoint
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.web.camera_shared import get_camera_manager
 
@@ -32,7 +31,7 @@ class RealtimeSolveService:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.extractor = StarExtractor(max_stars=effective_solver_max_stars(settings))
+        self._max_stars = effective_solver_max_stars(settings)
         self.solver = PlateSolver(
             fov_deg=settings.solver_fov_deg,
             fov_max_error_deg=settings.solver_fov_max_error_deg,
@@ -40,7 +39,7 @@ class RealtimeSolveService:
         )
         self.state = RealtimeState()
         self._task: asyncio.Task[None] | None = None
-        self._previous_stars: list[StarPoint] | None = None
+        self._has_fullsolve = False
         self._hint_ra = settings.solver_hint_ra_deg
         self._hint_dec = settings.solver_hint_dec_deg
         self._fullsolve_interval = max(1, settings.solver_fullsolve_interval_frames)
@@ -77,7 +76,7 @@ class RealtimeSolveService:
         self._solve_timeout_ms = solve_timeout_ms
         self._solve_context = solve_context
         self.state = RealtimeState(running=True)
-        self._previous_stars = None
+        self._has_fullsolve = False
         self._task = asyncio.create_task(self._loop())
         return {"success": True, "message": "实时解算已启动 / Realtime solver started"}
 
@@ -134,22 +133,27 @@ class RealtimeSolveService:
                     continue
                 last_frame_id = frame_id
                 last_started_mono = time.monotonic()
-                stars = self.extractor.extract(frame)
                 self.state.frame_count += 1
 
                 use_fullsolve = (
                     self.state.frame_count % self._fullsolve_interval == 0
-                    or self._previous_stars is None
+                    or not self._has_fullsolve
+                    or str((self.state.last_result or {}).get("status") or "")
+                    != "MATCH_FOUND"
                 )
                 if use_fullsolve:
                     solved = await asyncio.to_thread(
                         self._solve_frame_sync,
                         frame,
-                        stars,
                     )
                     self._apply_solve_result(solved)
                     self.state.fullsolve_count += 1
-                self._previous_stars = stars
+                    # ``solve_from_bgr_frame`` is the authoritative production
+                    # image pipeline.  Keep only a sentinel here; StarExtractor
+                    # remains available for focus metrics and lightweight counts.
+                    # ``solve_from_bgr_frame`` 是生产解算权威图像管线；这里只保留哨兵。
+                    # StarExtractor 仍用于焦点指标和轻量星点计数。
+                    self._has_fullsolve = True
             except Exception as exc:  # noqa: BLE001
                 self.state.last_error = str(exc)
                 await asyncio.sleep(0.1)
@@ -157,12 +161,11 @@ class RealtimeSolveService:
     def _solve_frame_sync(
         self,
         frame: Any,
-        stars: list[StarPoint],
     ) -> SolveResult:
         """同步解算单帧（线程池中调用）/ Sync solve for one frame."""
-        return self.solver.solve(
-            stars=stars,
-            frame_shape=frame.shape,
+        return self.solver.solve_from_bgr_frame(
+            frame_bgr=frame,
+            max_stars=self._max_stars,
             hint_ra_deg=self._hint_ra,
             hint_dec_deg=self._hint_dec,
             solve_source="realtime",

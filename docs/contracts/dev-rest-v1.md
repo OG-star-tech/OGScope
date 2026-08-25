@@ -42,6 +42,7 @@
     - `aeFlickerMode`
     - `noiseReductionMode`
     - `previewEncoder`
+  - 开发 UI 的曝光输入与普通摘要统一显示为秒；提交到现有 API、预设和侧车时仍换算并保留 `exposure_us` / `autoExposureMaxUs` 微秒字段，避免破坏兼容性。
 
 ### 星点焦点校准
 
@@ -57,6 +58,13 @@
   - HFD 与 FWHM 越低通常表示越锐利；这些数值只适合在同一镜头、曝光、增益与目标区域下做相对比较，不是跨设备绝对标定值。
 
 ## 分析实验扩展
+
+### 解算管线边界
+
+- `/api/core/v1/analysis/*` 与 `/api/dev/analysis/*` 保留不同的产品/实验接口职责，但两者的当前帧星图解算统一使用 `PlateSolver.solve_from_bgr_frame()` 的 Tetra 提星与匹配管线。
+- 开发接口可覆盖提星参数和实验分档；Core 使用服务端生产默认值，不向上层暴露实验分档。
+- `StarExtractor` 仍用于焦点校准、轻量星点计数和性能基线，不作为产品级 plate solve 的权威提星结果。
+- 历史的 Core `StarExtractor -> PlateSolver.solve()` 组合已停止使用；这是内部实现迁移，不弃用任何 `/api/core/v1/*` 或 `/api/dev/*` HTTP 路径。
 
 - `POST /api/dev/analysis/solve/frame`
 - `POST /api/dev/analysis/solve/frame_upload`
