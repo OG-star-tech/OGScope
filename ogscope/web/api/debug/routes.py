@@ -197,6 +197,24 @@ async def get_debug_camera_focus_metrics(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/debug/camera/focus/session/start")
+async def start_debug_camera_focus_session():
+    """锁定焦点测量相机参数 / Lock camera controls for stable focus measurement."""
+    try:
+        return await DebugCameraService.start_focus_session()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/debug/camera/focus/session/stop")
+async def stop_debug_camera_focus_session():
+    """恢复焦点测量前相机参数 / Restore controls from before focus measurement."""
+    try:
+        return await DebugCameraService.stop_focus_session()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/debug/camera/capture")
 async def capture_debug_image():
     """拍摄单张图片 / Take a single picture"""

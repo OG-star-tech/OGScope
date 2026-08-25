@@ -40,7 +40,9 @@ async function requestJson<T>(
 
 type CameraInfo = {
   exposure_us?: number;
+  actual_exposure_us?: number;
   analogue_gain?: number;
+  actual_analogue_gain?: number;
   digital_gain?: number;
   auto_exposure?: boolean;
   contrast?: number;
@@ -130,9 +132,13 @@ type FocusStarMetric = {
   hfd_px: number;
   fwhm_px: number;
   snr: number;
+  peak_snr: number;
   roundness: number;
   concentration: number;
+  aperture_radius_px: number;
   saturated: boolean;
+  undersampled: boolean;
+  source: "auto" | "target";
 };
 
 type FocusMetrics = {
@@ -144,6 +150,17 @@ type FocusMetrics = {
   stars_detected: number;
   stars_measured: number;
   stars_used: number;
+  detection: {
+    pipeline: string;
+    noise_sigma: number;
+    threshold: number;
+    components: number;
+    rejected_large: number;
+    rejected_weak: number;
+    target_forced: boolean;
+    measurement_rejections: Record<string, number>;
+    quality_rejections: Record<string, number>;
+  };
   aggregate: {
     median_hfd_px: number;
     hfd_mad_px: number;
@@ -438,6 +455,7 @@ export function CameraConsoleApp() {
   const recordTickRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const focusRequestInFlightRef = useRef(false);
+  const focusSessionActiveRef = useRef(false);
   const previewActiveRef = useRef(false);
   const streamStartedAtRef = useRef<number | null>(null);
   const fpsFrameTsRef = useRef<number[]>([]);
@@ -517,6 +535,26 @@ export function CameraConsoleApp() {
     try {
       const ready = previewActive || (await startPreview());
       if (!ready) return;
+      const session = await requestJson<{
+        active: boolean;
+        locked: {
+          exposure: number;
+          gain: number;
+          digitalGain: number;
+          noiseReductionMode: string;
+        };
+      }>(debugApi("/camera/focus/session/start"), { method: "POST" });
+      focusSessionActiveRef.current = session.active;
+      setForm((previous) => ({
+        ...previous,
+        autoExposure: false,
+        exposureSeconds: exposureUsToSeconds(session.locked.exposure, 5000),
+        gain: session.locked.gain,
+        digitalGain: session.locked.digitalGain,
+        noiseReduction: 0,
+        noiseReductionMode: session.locked.noiseReductionMode,
+      }));
+      setFormDirty(false);
       setFocusMetrics(null);
       setFocusHistory([]);
       setFocusBestHfd(null);
@@ -526,14 +564,49 @@ export function CameraConsoleApp() {
       window.setTimeout(() => {
         document.getElementById("focus-calibration-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 0);
+    } catch (error) {
+      setFocusError(error instanceof Error ? error.message : String(error));
     } finally {
       setFocusBusy(false);
     }
   };
 
-  const stopFocusCalibration = () => {
+  const stopFocusCalibration = async () => {
+    if (focusBusy) return;
+    setFocusBusy(true);
     setFocusActive(false);
     setFocusError(null);
+    try {
+      if (focusSessionActiveRef.current) {
+        const session = await requestJson<{
+          restored: boolean;
+          restored_settings?: {
+            autoExposure: boolean;
+            exposure: number;
+            gain: number;
+            digitalGain: number;
+            noiseReductionMode: string;
+          };
+        }>(debugApi("/camera/focus/session/stop"), { method: "POST" });
+        focusSessionActiveRef.current = false;
+        if (session.restored_settings) {
+          setForm((previous) => ({
+            ...previous,
+            autoExposure: session.restored_settings!.autoExposure,
+            exposureSeconds: exposureUsToSeconds(session.restored_settings!.exposure, 5000),
+            gain: session.restored_settings!.gain,
+            digitalGain: session.restored_settings!.digitalGain,
+            noiseReductionMode: session.restored_settings!.noiseReductionMode,
+            noiseReduction: session.restored_settings!.noiseReductionMode === "off" ? 0 : 1,
+          }));
+          setFormDirty(false);
+        }
+      }
+    } catch (error) {
+      setFocusError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFocusBusy(false);
+    }
   };
 
   const resetFocusBest = () => {
@@ -1100,8 +1173,15 @@ export function CameraConsoleApp() {
     if (!previewActive) {
       clearReconnectTimer();
       setFocusActive(false);
+      if (focusSessionActiveRef.current) void stopFocusCalibration();
     }
   }, [previewActive]);
+
+  useEffect(() => () => {
+    if (!focusSessionActiveRef.current) return;
+    navigator.sendBeacon(debugApi("/camera/focus/session/stop"));
+    focusSessionActiveRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (!focusActive || !previewActive) return;
@@ -1463,11 +1543,11 @@ export function CameraConsoleApp() {
                 <button
                   type="button"
                   disabled={focusBusy || previewBusy || Boolean(status?.recording)}
-                  onClick={() => focusActive ? stopFocusCalibration() : void startFocusCalibration()}
+                  onClick={() => focusActive ? void stopFocusCalibration() : void startFocusCalibration()}
                   className={`rounded-lg px-2.5 py-1.5 text-xs font-medium disabled:opacity-50 ${focusActive ? "border border-primary/50 text-primary" : "bg-primary-container text-on-primary-container"}`}
                 >
                   <Crosshair className="mr-1 inline h-3.5 w-3.5" />
-                  {focusActive ? t("cam.focus.finish") : t("cam.focus.start")}
+                  {focusBusy ? t("cam.focus.starting") : focusActive ? t("cam.focus.finish") : t("cam.focus.start")}
                 </button>
                 <span className="font-mono text-xs text-on-surface-variant">
                   {t("cam.preview.state")}: {previewActive ? t("cam.state.streaming") : t("cam.state.idle")}
@@ -1641,6 +1721,9 @@ export function CameraConsoleApp() {
                   <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-on-surface-variant">
                     {t("cam.focus.intro")}
                   </p>
+                  {focusActive ? (
+                    <p className="mt-1 text-[10px] text-primary">{t("cam.focus.sessionLocked")}</p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!focusActive ? (
@@ -1656,7 +1739,7 @@ export function CameraConsoleApp() {
                   ) : (
                     <button
                       type="button"
-                      onClick={stopFocusCalibration}
+                      onClick={() => void stopFocusCalibration()}
                       className="rounded-lg border border-error/50 px-3 py-2 text-xs text-error"
                     >
                       {t("cam.focus.finish")}
@@ -1706,7 +1789,9 @@ export function CameraConsoleApp() {
                     </div>
                     <div className="rounded-lg border border-outline-variant/20 p-3">
                       <div className="text-[10px] uppercase tracking-wider text-on-surface-variant">{t("cam.focus.stars")}</div>
-                      <div className="mt-1 font-mono text-xl">{focusMetrics?.stars_used ?? 0} / {focusMetrics?.stars_detected ?? 0}</div>
+                      <div className="mt-1 font-mono text-xl">
+                        {focusMetrics?.stars_used ?? 0} / {focusMetrics?.stars_measured ?? 0} / {focusMetrics?.stars_detected ?? 0}
+                      </div>
                       <div className="mt-1 text-[11px] text-on-surface-variant">{t(focusConfidenceKey)}</div>
                     </div>
                     <div className="rounded-lg border border-outline-variant/20 p-3">
@@ -1746,6 +1831,25 @@ export function CameraConsoleApp() {
                     {focusMetrics?.warnings.includes("target_star_not_found") ? (
                       <p className="rounded-lg border border-tertiary/35 bg-tertiary-container/15 px-3 py-2 text-[11px] text-tertiary">
                         {t("cam.focus.warning.targetNotFound")}
+                      </p>
+                    ) : null}
+                    {focusMetrics?.warnings.includes("undersampled_stars") ? (
+                      <p className="rounded-lg border border-primary/30 bg-primary-container/10 px-3 py-2 text-[11px] text-on-surface">
+                        {t("cam.focus.warning.undersampled")}
+                      </p>
+                    ) : null}
+                    {focusMetrics?.warnings.includes("target_may_be_hot_pixel") ? (
+                      <p className="rounded-lg border border-tertiary/35 bg-tertiary-container/15 px-3 py-2 text-[11px] text-tertiary">
+                        {t("cam.focus.warning.hotPixel")}
+                      </p>
+                    ) : null}
+                    {focusMetrics?.detection ? (
+                      <p className="text-[10px] leading-relaxed text-on-surface-variant">
+                        {t("cam.focus.detectionSummary", {
+                          measured: focusMetrics.stars_measured,
+                          detected: focusMetrics.stars_detected,
+                          rejected: Object.values(focusMetrics.detection.quality_rejections).reduce((sum, value) => sum + value, 0),
+                        })}
                       </p>
                     ) : null}
                   </div>

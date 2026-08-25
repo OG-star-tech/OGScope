@@ -262,6 +262,14 @@ class DebugCameraService:
         )
 
     @staticmethod
+    async def start_focus_session():
+        return await _debug_services_module().DebugCameraService.start_focus_session()
+
+    @staticmethod
+    async def stop_focus_session():
+        return await _debug_services_module().DebugCameraService.stop_focus_session()
+
+    @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
         return await _debug_services_module().DebugCameraService.set_auto_exposure_mode(
             enabled

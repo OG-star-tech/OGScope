@@ -42,8 +42,11 @@ class FakeCamera:
             "auto_exposure": self.auto_exposure,
             "white_balance_mode": self.white_balance_mode,
             "exposure_us": self.exposure_us,
+            "actual_exposure_us": 24000,
             "analogue_gain": self.analogue_gain,
+            "actual_analogue_gain": 2.5,
             "digital_gain": self.digital_gain,
+            "actual_digital_gain": 1.3,
             "noise_reduction_mode": self.noise_reduction_mode,
             "ae_flicker_mode": self.ae_flicker_mode,
             "auto_exposure_max_us": self.auto_exposure_max_us,
@@ -155,6 +158,8 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
         return None
 
     get_camera_manager().attach_camera_instance(camera)
+    monkeypatch.setattr(debug_services, "focus_session_snapshot", None)
+    monkeypatch.setattr(debug_services, "focus_session_state_lock", None)
     monkeypatch.setattr(debug_services, "get_camera_instance", _get_camera_instance)
     monkeypatch.setattr(
         debug_services.DebugCameraService,
@@ -284,6 +289,51 @@ def test_debug_camera_focus_metrics_requires_coordinate_pair(client):
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_debug_camera_focus_session_locks_and_restores_settings(
+    client, fake_camera_env
+):
+    """焦点会话固定实测曝光并恢复原设置 / Focus session locks actual exposure and restores."""
+    start = client.post("/api/dev/debug/camera/focus/session/start")
+
+    assert start.status_code == 200, start.text
+    assert start.json()["locked"]["exposure"] == 24000
+    assert fake_camera_env.auto_exposure is False
+    assert fake_camera_env.exposure_us == 24000
+    assert fake_camera_env.analogue_gain == pytest.approx(2.5)
+    assert fake_camera_env.digital_gain == pytest.approx(1.3)
+    assert fake_camera_env.noise_reduction_mode == "off"
+
+    repeated = client.post("/api/dev/debug/camera/focus/session/start")
+    assert repeated.json()["already_active"] is True
+
+    stop = client.post("/api/dev/debug/camera/focus/session/stop")
+    assert stop.status_code == 200
+    assert stop.json()["restored"] is True
+    assert fake_camera_env.auto_exposure is True
+    assert fake_camera_env.exposure_us == 10000
+    assert fake_camera_env.analogue_gain == pytest.approx(1.0)
+    assert fake_camera_env.digital_gain == pytest.approx(1.0)
+    assert fake_camera_env.noise_reduction_mode == "fast"
+
+
+@pytest.mark.unit
+def test_debug_camera_stop_restores_active_focus_session(client, fake_camera_env):
+    """停止相机也应恢复焦点会话参数 / Stopping camera also restores focus settings."""
+    start = client.post("/api/dev/debug/camera/focus/session/start")
+    assert start.status_code == 200, start.text
+    assert fake_camera_env.auto_exposure is False
+
+    stop = client.post("/api/dev/debug/camera/stop")
+
+    assert stop.status_code == 200, stop.text
+    assert fake_camera_env.auto_exposure is True
+    assert fake_camera_env.exposure_us == 10000
+    assert fake_camera_env.analogue_gain == pytest.approx(1.0)
+    assert fake_camera_env.digital_gain == pytest.approx(1.0)
+    assert fake_camera_env.noise_reduction_mode == "fast"
 
 
 @pytest.mark.unit
