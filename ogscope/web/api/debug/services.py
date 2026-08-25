@@ -35,6 +35,9 @@ recording_fps_value: float = 15.0
 recording_media_filename: Optional[str] = None
 recording_codec_fourcc: str = "MJPG"
 recording_container: str = "AVI"
+# 焦点会话只锁定会影响星点轮廓的运行时参数，结束时恢复 / Focus session restores runtime imaging controls.
+focus_session_snapshot: Optional[dict[str, Any]] = None
+focus_session_state_lock: Optional[asyncio.Lock] = None
 
 _CAMERA_ENV_KEY_MAP = {
     "width": "OGSCOPE_CAMERA_WIDTH",
@@ -65,6 +68,14 @@ def _get_recording_state_lock() -> asyncio.Lock:
     if recording_state_lock is None:
         recording_state_lock = asyncio.Lock()
     return recording_state_lock
+
+
+def _get_focus_session_state_lock() -> asyncio.Lock:
+    """懒加载焦点会话锁 / Lazy-init focus-session lock."""
+    global focus_session_state_lock
+    if focus_session_state_lock is None:
+        focus_session_state_lock = asyncio.Lock()
+    return focus_session_state_lock
 
 
 def is_recording_active() -> bool:
@@ -326,6 +337,8 @@ class DebugCameraService:
         """停止调试相机 / Stop debugging camera"""
         camera = await asyncio.to_thread(get_camera_instance)
         _attach_manager_camera_if_needed(camera)
+        if focus_session_snapshot is not None:
+            await DebugCameraService.stop_focus_session()
         await get_camera_manager().stop()
         return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
 
@@ -1051,6 +1064,104 @@ class DebugCameraService:
             }
         except Exception as e:
             raise Exception(f"更新设置失败: {str(e)}")
+
+    @staticmethod
+    async def start_focus_session() -> dict[str, Any]:
+        """锁定曝光/增益并关闭降噪，保存可恢复快照 / Lock imaging controls with a restorable snapshot."""
+        global focus_session_snapshot
+        async with _get_focus_session_state_lock():
+            if focus_session_snapshot is not None:
+                return {
+                    "success": True,
+                    "active": True,
+                    "already_active": True,
+                    "locked": focus_session_snapshot["locked"],
+                }
+
+            camera = get_camera_instance()
+            if not camera or not camera.is_initialized:
+                raise Exception("相机未初始化")
+            info = (
+                camera.get_camera_info() if hasattr(camera, "get_camera_info") else {}
+            )
+            snapshot_settings = {
+                "autoExposure": bool(getattr(camera, "auto_exposure", False)),
+                "exposure": int(getattr(camera, "exposure_us", 10_000)),
+                "gain": float(getattr(camera, "analogue_gain", 1.0)),
+                "digitalGain": float(getattr(camera, "digital_gain", 1.0)),
+                "noiseReductionMode": str(
+                    getattr(camera, "noise_reduction_mode", "fast")
+                ),
+            }
+            locked = {
+                "autoExposure": False,
+                "exposure": max(
+                    1,
+                    int(
+                        info.get("actual_exposure_us") or snapshot_settings["exposure"]
+                    ),
+                ),
+                "gain": max(
+                    0.1,
+                    float(
+                        info.get("actual_analogue_gain") or snapshot_settings["gain"]
+                    ),
+                ),
+                "digitalGain": max(
+                    0.1,
+                    float(
+                        info.get("actual_digital_gain")
+                        or snapshot_settings["digitalGain"]
+                    ),
+                ),
+                "noiseReductionMode": "off",
+            }
+            runtime_overrides = get_camera_manager().get_runtime_overrides()
+            await DebugCameraService.update_settings(locked)
+            focus_session_snapshot = {
+                "settings": snapshot_settings,
+                "runtime_overrides": runtime_overrides,
+                "locked": locked,
+            }
+            return {
+                "success": True,
+                "active": True,
+                "already_active": False,
+                "locked": locked,
+            }
+
+    @staticmethod
+    async def stop_focus_session() -> dict[str, Any]:
+        """恢复焦点会话前的相机参数 / Restore camera controls from before focus mode."""
+        global focus_session_snapshot
+        async with _get_focus_session_state_lock():
+            snapshot = focus_session_snapshot
+            if snapshot is None:
+                return {"success": True, "active": False, "restored": False}
+
+            camera = get_camera_instance()
+            restored = bool(camera and camera.is_initialized)
+            if restored:
+                restore_settings = snapshot["settings"]
+                if restore_settings["autoExposure"]:
+                    # 先恢复手动基线，再重新开启 AE；否则批量设置会按 AE 语义跳过曝光/增益。
+                    # Restore the manual baseline before re-enabling AE; AE batches skip exposure/gain.
+                    await DebugCameraService.update_settings(
+                        {**restore_settings, "autoExposure": False}
+                    )
+                    await DebugCameraService.update_settings({"autoExposure": True})
+                else:
+                    await DebugCameraService.update_settings(restore_settings)
+            manager = get_camera_manager()
+            manager.clear_runtime_overrides()
+            manager.update_runtime_overrides(snapshot["runtime_overrides"])
+            focus_session_snapshot = None
+            return {
+                "success": True,
+                "active": False,
+                "restored": restored,
+                "restored_settings": snapshot["settings"],
+            }
 
     @staticmethod
     async def reset_camera():

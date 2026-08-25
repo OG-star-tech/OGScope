@@ -1159,6 +1159,9 @@ class IMX327MIPICamera(CameraInterface):
                     self._frame_duration_limits or self._compute_frame_duration_limits()
                 ),
                 "analogue_gain": self.analogue_gain,
+                "actual_analogue_gain": metadata.get(
+                    "AnalogueGain", self.analogue_gain
+                ),
                 "digital_gain": self.digital_gain,
                 "actual_digital_gain": metadata.get("DigitalGain"),
                 "auto_exposure": self.auto_exposure,
