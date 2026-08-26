@@ -29,6 +29,9 @@ This document defines the **minimal stable REST surface** for callers integratin
   - `state: "running" | "stopped"`
   - `message: str`
 
+A new `session_id` is generated whenever analysis starts from the stopped state;
+upstream consumers should ignore results from an older session.
+
 ### 2) Get Analysis Result
 
 - `GET /api/core/v1/analysis/result`

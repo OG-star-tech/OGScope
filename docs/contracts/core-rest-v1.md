@@ -29,6 +29,8 @@
   - `state: "running" | "stopped"`
   - `message: str`
 
+每次从停止状态启动分析时都会生成新的 `session_id`；上层应忽略旧会话结果。
+
 ### 2) Get Analysis Result
 
 - `GET /api/core/v1/analysis/result`
