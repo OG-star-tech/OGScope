@@ -85,3 +85,25 @@ def test_sensor_prediction_unavailable_when_time_invalid() -> None:
     attach_sensor_prediction(row, context)
 
     assert row["sensor_prediction"]["sensor_status"] == "unavailable"
+
+
+def test_sensor_prediction_unavailable_when_time_is_stale() -> None:
+    """过期观测时间不得参与预测 / Stale observation time cannot drive prediction."""
+    context = _solve_context()
+    context["quality"]["time_fresh"] = False
+    row = {"status": "MATCH_FOUND", "ra_deg": 0.0, "dec_deg": 0.0}
+    attach_sensor_prediction(row, context)
+
+    assert row["status"] == "MATCH_FOUND"
+    assert row["sensor_prediction"]["sensor_status"] == "unavailable"
+
+
+def test_sensor_prediction_unavailable_without_camera_pose_calibration() -> None:
+    """未标定光轴不得参与预测 / Uncalibrated camera pose cannot drive prediction."""
+    context = _solve_context()
+    context["quality"]["camera_pose_calibrated"] = False
+    row = {"status": "MATCH_FOUND", "ra_deg": 0.0, "dec_deg": 0.0}
+    attach_sensor_prediction(row, context)
+
+    assert row["status"] == "MATCH_FOUND"
+    assert row["sensor_prediction"]["sensor_status"] == "unavailable"

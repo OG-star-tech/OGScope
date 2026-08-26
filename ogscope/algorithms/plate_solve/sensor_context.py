@@ -148,8 +148,12 @@ def predict_from_solve_context(
 
     gps_valid = bool(quality.get("gps_valid"))
     time_valid = bool(quality.get("time_valid"))
+    time_fresh_raw = quality.get("time_fresh")
+    time_fresh = time_valid if time_fresh_raw is None else bool(time_fresh_raw)
     mount_valid = bool(quality.get("mount_valid"))
     heading_valid = bool(quality.get("heading_valid"))
+    camera_pose_raw = quality.get("camera_pose_calibrated")
+    camera_pose_calibrated = True if camera_pose_raw is None else bool(camera_pose_raw)
     lat = _optional_float(observer.get("latitude_deg"))
     lon = _optional_float(observer.get("longitude_deg"))
     when = _parse_utc(observer.get("time_utc"))
@@ -160,6 +164,8 @@ def predict_from_solve_context(
     if (
         not gps_valid
         or not time_valid
+        or not time_fresh
+        or not camera_pose_calibrated
         or lat is None
         or lon is None
         or when is None
