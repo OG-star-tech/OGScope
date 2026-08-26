@@ -23,6 +23,10 @@ This document defines the **minimal stable REST surface** for callers integratin
   - `fov_estimate`
   - `fov_max_error`
   - `solve_timeout_ms`
+  - `solve_context`: optional observer and orientation context. When
+    `quality.time_fresh=false` or `quality.camera_pose_calibrated=false`, OGScope
+    returns `sensor_status=unavailable` for diagnostics without changing the
+    plate solver's `MATCH_FOUND` result.
 - Response:
   - `success: bool`
   - `session_id: str`

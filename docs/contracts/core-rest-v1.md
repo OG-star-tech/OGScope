@@ -23,6 +23,9 @@
   - `fov_estimate`
   - `fov_max_error`
   - `solve_timeout_ms`
+  - `solve_context`：可选的观测者与姿态上下文。`quality.time_fresh=false` 或
+    `quality.camera_pose_calibrated=false` 时仅返回 `sensor_status=unavailable` 诊断，
+    不影响星图本身的 `MATCH_FOUND` 结果。
 - 响应：
   - `success: bool`
   - `session_id: str`
