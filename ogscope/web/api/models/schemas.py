@@ -226,8 +226,10 @@ class SolveContextQuality(BaseModel):
 
     gps_valid: bool = False
     time_valid: bool = False
+    time_fresh: Optional[bool] = None
     heading_valid: bool = False
     mount_valid: bool = False
+    camera_pose_calibrated: Optional[bool] = None
 
 
 class SolveContextPayload(BaseModel):
