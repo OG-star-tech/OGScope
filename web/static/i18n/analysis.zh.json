@@ -479,6 +479,7 @@
   "cam.controls.applyColor": "应用颜色模式",
   "cam.controls.applyMode": "应用模式设置",
   "cam.controls.lockedByAe": "自动曝光开启时，曝光与增益参数锁定。",
+  "cam.controls.manualExposureFpsLimit": "手动曝光 {exposure} 秒时，实际采集帧率最高约 {fps} FPS。",
   "cam.controls.lockedByWb": "当前非手动白平衡模式，R/B 增益参数锁定。",
   "cam.controls.pendingChanges": "有未应用的参数修改",
   "cam.controls.tools": "工具",
