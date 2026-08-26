@@ -179,6 +179,9 @@ class RealtimeSolveService:
         row = solved.to_dict()
         attach_sensor_prediction(row, self._solve_context)
         self.state.last_result = row
+        # A later completed frame supersedes a transient capture/solve exception.
+        # 后续完成的帧应清除瞬时采集或解算异常，避免上层永久看到旧错误。
+        self.state.last_error = ""
         self._hint_ra = solved.ra_deg
         self._hint_dec = solved.dec_deg
 
