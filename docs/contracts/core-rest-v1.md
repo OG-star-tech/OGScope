@@ -23,6 +23,10 @@
   - `fov_estimate`
   - `fov_max_error`
   - `solve_timeout_ms`
+  - `solve_context`（可选传感器上下文）
+    - `quality.time_fresh`：可选；显式为 `false` 时不使用该时间做传感器预测
+    - `quality.camera_pose_calibrated`：可选；显式为 `false` 时不使用机械轴角做光轴预测
+    - 两个字段缺失时保持旧客户端行为；字段为 `false` 只禁用传感器预测，不否决星图解算结果
 - 响应：
   - `success: bool`
   - `session_id: str`

@@ -23,6 +23,10 @@ This document defines the **minimal stable REST surface** for callers integratin
   - `fov_estimate`
   - `fov_max_error`
   - `solve_timeout_ms`
+  - `solve_context` (optional sensor context)
+    - `quality.time_fresh`: optional; when explicitly `false`, time is not used for sensor prediction
+    - `quality.camera_pose_calibrated`: optional; when explicitly `false`, mount angles are not used as camera-pose prediction
+    - Omitting both fields preserves legacy-client behavior; `false` disables sensor prediction only and never rejects a plate-solve result
 - Response:
   - `success: bool`
   - `session_id: str`

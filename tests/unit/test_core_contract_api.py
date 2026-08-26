@@ -144,8 +144,10 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     """开始-查询-结束分析生命周期 / Start-result-stop lifecycle."""
     from ogscope.core.application import core_service
 
+    received: dict = {}
+
     async def _fake_start(**kwargs):  # noqa: ANN003
-        _ = kwargs
+        received.update(kwargs)
         return {"success": True, "message": "started"}
 
     async def _fake_status():
@@ -164,9 +166,25 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     monkeypatch.setattr(core_service.realtime_solve_service, "get_status", _fake_status)
     monkeypatch.setattr(core_service.realtime_solve_service, "stop", _fake_stop)
 
-    start = client.post("/api/core/v1/analysis/start", json={})
+    start = client.post(
+        "/api/core/v1/analysis/start",
+        json={
+            "solve_context": {
+                "quality": {
+                    "gps_valid": True,
+                    "time_valid": True,
+                    "time_fresh": False,
+                    "heading_valid": True,
+                    "mount_valid": True,
+                    "camera_pose_calibrated": False,
+                }
+            }
+        },
+    )
     assert start.status_code == 200
     assert start.json()["state"] == "running"
+    assert received["solve_context"].quality.time_fresh is False
+    assert received["solve_context"].quality.camera_pose_calibrated is False
 
     result = client.get("/api/core/v1/analysis/result")
     assert result.status_code == 200
