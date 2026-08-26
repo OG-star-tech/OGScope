@@ -102,7 +102,9 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_gain_r = config.get("white_balance_gain_r", 1.0)
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
         self.night_mode = bool(config.get("night_mode", False))
-        self.auto_exposure_max_us = int(config.get("auto_exposure_max_us", 2_000_000))
+        self.auto_exposure_max_us = max(
+            10_000, min(500_000, int(config.get("auto_exposure_max_us", 500_000)))
+        )
         self.capture_timeout_sec = max(
             0.5, float(config.get("capture_timeout_sec", 4.0))
         )
@@ -1318,7 +1320,7 @@ class IMX327MIPICamera(CameraInterface):
         if not self.is_initialized:
             logger.error("相机未初始化")
             return False
-        self.auto_exposure_max_us = max(10_000, min(10_000_000, int(value)))
+        self.auto_exposure_max_us = max(10_000, min(500_000, int(value)))
         self._apply_frame_duration_controls()
         return True
 

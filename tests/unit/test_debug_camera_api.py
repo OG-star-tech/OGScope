@@ -350,7 +350,7 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
         "noiseReduction": 1,
         "noiseReductionMode": "high_quality",
         "aeFlickerMode": "50hz",
-        "autoExposureMaxUs": 1000000,
+        "autoExposureMaxUs": 500000,
         "whiteBalanceMode": "auto",
         "whiteBalanceGainR": 1.0,
         "whiteBalanceGainB": 1.0,
@@ -364,7 +364,7 @@ def test_debug_camera_update_settings_success(client, fake_camera_env):
     assert body["settings"]["exposure"] == 12000
     assert fake_camera_env.noise_reduction_mode == "high_quality"
     assert fake_camera_env.ae_flicker_mode == "50hz"
-    assert fake_camera_env.auto_exposure_max_us == 1000000
+    assert fake_camera_env.auto_exposure_max_us == 500000
 
 
 @pytest.mark.unit

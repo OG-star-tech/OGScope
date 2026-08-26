@@ -188,7 +188,7 @@ These settings enter runtime through environment variables or config files. Name
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | Manual white-balance red/blue gains |
 | `camera_night_mode` | `false` | Apply night white-balance flag at startup |
-| `camera_auto_exposure_max_us` | `2000000` | Longest AE frame duration for dark fields |
+| `camera_auto_exposure_max_us` | `500000` | Longest AE frame duration; dark scenes may fall to about 2 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | Enable the low-resolution helper stream |

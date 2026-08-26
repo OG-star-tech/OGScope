@@ -117,7 +117,7 @@ class CameraManager:
             "ae_polar_preset": settings.camera_ae_polar_preset,
             "ae_exposure_value": settings.camera_ae_exposure_value,
             "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 2_000_000
+                settings, "camera_auto_exposure_max_us", 500_000
             ),
             "capture_timeout_sec": self._capture_timeout_sec,
             "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
