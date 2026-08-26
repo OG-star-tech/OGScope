@@ -428,7 +428,7 @@ export function CameraConsoleApp() {
     noiseReduction: 0,
     noiseReductionMode: "fast",
     aeFlickerMode: "off",
-    autoExposureMaxSeconds: 2,
+    autoExposureMaxSeconds: 0.5,
     whiteBalanceMode: "auto",
     whiteBalanceGainR: 1.0,
     whiteBalanceGainB: 1.0,
@@ -767,7 +767,7 @@ export function CameraConsoleApp() {
     if (!info) return;
     const syncRuntime = options?.syncRuntime ?? true;
     setForm({
-      exposureSeconds: clamp(exposureUsToSeconds(info.exposure_us, 5000), 0.0001, 0.12),
+      exposureSeconds: clamp(exposureUsToSeconds(info.exposure_us, 5000), 0.0001, 0.5),
       gain: clamp(toNum(info.analogue_gain, 1.0), 1.0, 24.0),
       digitalGain: clamp(toNum(info.digital_gain, 1.0), 1.0, 8.0),
       autoExposure: Boolean(info.auto_exposure ?? true),
@@ -778,7 +778,7 @@ export function CameraConsoleApp() {
       noiseReduction: clamp(Math.round(toNum(info.noise_reduction, 0)), 0, 4),
       noiseReductionMode: String(info.noise_reduction_mode ?? "fast"),
       aeFlickerMode: String(info.ae_flicker_mode ?? "off"),
-      autoExposureMaxSeconds: clamp(exposureUsToSeconds(info.auto_exposure_max_us, 2000000), 0.01, 10),
+      autoExposureMaxSeconds: clamp(exposureUsToSeconds(info.auto_exposure_max_us, 500000), 0.01, 0.5),
       whiteBalanceMode: String(info.white_balance_mode ?? "auto"),
       whiteBalanceGainR: clamp(toNum(info.white_balance_gain_r, 1.0), 0.1, 3.0),
       whiteBalanceGainB: clamp(toNum(info.white_balance_gain_b, 1.0), 0.1, 3.0),
@@ -1892,6 +1892,17 @@ export function CameraConsoleApp() {
                 </span>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
+                <span className="text-on-surface-variant">{t("cam.controls.exposure")}: </span>
+                <span className="font-mono text-on-surface">
+                  {streamMetrics?.actual_exposure_us != null || status?.info?.actual_exposure_us != null
+                    ? formatExposureSeconds(streamMetrics?.actual_exposure_us ?? status?.info?.actual_exposure_us ?? 0)
+                    : "—"}
+                </span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {status?.info?.auto_exposure ? t("cam.controls.auto") : t("cam.controls.manual")}
+                </p>
+              </div>
+              <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.encodeMs")}: </span>
                 <span className="font-mono text-on-surface">
                   {Number(streamMetrics?.jpeg_average_encode_ms ?? 0).toFixed(1)} ms
@@ -2130,7 +2141,7 @@ export function CameraConsoleApp() {
               )}
               {exposureLocked && <p className="mb-2 text-[11px] text-on-surface-variant">{t("cam.controls.lockedByAe")}</p>}
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <ParamSlider label={t("cam.controls.exposure")} value={form.exposureSeconds} min={0.0001} max={0.12} step={0.0001} unit=" s" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposureSeconds: v })); }} />
+                <ParamSlider label={t("cam.controls.exposure")} value={form.exposureSeconds} min={0.0001} max={0.5} step={0.0001} unit=" s" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposureSeconds: v })); }} />
                 <ParamSlider label={t("cam.controls.gain")} value={form.gain} min={1} max={24} step={0.1} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, gain: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.digitalGain")} value={form.digitalGain} min={1} max={8} step={0.1} disabled={exposureLocked || !digitalGainWritable} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, digitalGain: Number(v.toFixed(1)) })); }} />
                 <label className="block">
@@ -2198,7 +2209,7 @@ export function CameraConsoleApp() {
                 </label>
                 <label className="block">
                   {t("cam.controls.maxAeFrame")}
-                  <input type="number" min={0.01} max={10} step={0.01} value={form.autoExposureMaxSeconds} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxSeconds: clamp(Number(e.target.value) || 2, 0.01, 10) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
+                  <input type="number" min={0.01} max={0.5} step={0.01} value={form.autoExposureMaxSeconds} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxSeconds: clamp(Number(e.target.value) || 0.5, 0.01, 0.5) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
                 </label>
                 <ParamSlider label="R Gain" value={form.whiteBalanceGainR} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainR: Number(v.toFixed(1)) })); setFormDirty(true); }} />
                 <ParamSlider label="B Gain" value={form.whiteBalanceGainB} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainB: Number(v.toFixed(1)) })); setFormDirty(true); }} />

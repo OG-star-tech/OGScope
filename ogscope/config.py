@@ -111,10 +111,10 @@ class Settings(BaseSettings):
         description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
     )
     camera_auto_exposure_max_us: int = Field(
-        default=2_000_000,
+        default=500_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 us，暗场允许降帧 / Max auto-exposure frame duration in us",
+        description="自动曝光最长帧周期 500ms，暗场允许降帧 / Max auto-exposure frame duration, capped at 500ms",
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -532,6 +532,15 @@ class Settings(BaseSettings):
         }:
             return text
         return "auto"
+
+    @field_validator("camera_auto_exposure_max_us", mode="before")
+    @classmethod
+    def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
+        """兼容旧配置并限制暗场曝光为 500ms / Keep legacy config bootable and cap AE at 500ms."""
+        try:
+            return min(500_000, int(value))
+        except (TypeError, ValueError):
+            return value
 
     @field_validator("camera_ae_flicker_mode", mode="before")
     @classmethod

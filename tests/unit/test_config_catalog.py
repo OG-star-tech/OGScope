@@ -38,3 +38,11 @@ def test_build_config_catalog_includes_new_preview_fields() -> None:
 def test_simulation_mode_tri_state(raw: str | None, expected: bool | None) -> None:
     settings = Settings(simulation_mode=raw)  # type: ignore[arg-type]
     assert settings.simulation_mode is expected
+
+
+@pytest.mark.unit
+def test_legacy_auto_exposure_ceiling_is_capped_at_half_second() -> None:
+    """旧环境值不阻止启动且会收敛到 0.5 秒 / Legacy values boot and clamp to 0.5s."""
+    settings = Settings(camera_auto_exposure_max_us=2_000_000)
+
+    assert settings.camera_auto_exposure_max_us == 500_000
