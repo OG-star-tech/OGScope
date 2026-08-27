@@ -63,7 +63,7 @@ class IMX327MIPICamera(CameraInterface):
     SENSOR_MAX_HEIGHT = 1020
     PREVIEW_BUFFER_COUNT = 2
     AE_SUPERVISOR_INTERVAL_S = 1.0
-    AE_SUPERVISOR_STEP_EV = 0.25
+    AE_SUPERVISOR_STEP_EV = 0.5
     MANUAL_CONTROL_RANGE_DEFAULTS = {
         "ExposureTime": {"min": 1000, "max": 100000, "default": 10000, "step": 1000},
         "AnalogueGain": {"min": 1.0, "max": 16.0, "default": 1.0, "step": 0.1},
@@ -135,7 +135,11 @@ class IMX327MIPICamera(CameraInterface):
         self.ae_polar_preset = bool(config.get("ae_polar_preset", True))
         self.ae_exposure_value = float(config.get("ae_exposure_value", 1.0))
         self.ae_aggressive_enabled = bool(config.get("ae_aggressive_enabled", True))
-        self._ae_effective_exposure_value = self.ae_exposure_value
+        # Start every AE session from neutral. Dark-scene supervision may then
+        # raise EV, while daylight never inherits a night-sky bias at startup.
+        # 每次 AE 会话都从中性补偿开始；暗场监督随后按需抬升 EV，白天启动时不会
+        # 继承夜空增益偏置。
+        self._ae_effective_exposure_value = 0.0
         self._ae_last_adjust_at = 0.0
 
         logger.info(
@@ -566,8 +570,17 @@ class IMX327MIPICamera(CameraInterface):
         if abs(delta) < 0.1:
             self._ae_last_adjust_at = now
             return
-        step = min(abs(delta), self.AE_SUPERVISOR_STEP_EV)
-        next_ev = current + (step if delta > 0 else -step)
+        if desired <= 0.0 and (
+            float(stats.get("p50") or 0.0) >= 180.0
+            or float(stats.get("saturated_fraction") or 0.0) >= 0.20
+        ):
+            # Broad clipping needs an immediate daylight escape; a slow EV ramp
+            # leaves the preview unusable for several frames.
+            # 大面积过曝时立即回到日间中性值；逐档回落会让预览连续多帧不可用。
+            next_ev = 0.0
+        else:
+            step = min(abs(delta), self.AE_SUPERVISOR_STEP_EV)
+            next_ev = current + (step if delta > 0 else -step)
         controls = self._camera_controls()
         try:
             if "ExposureValue" in controls:
@@ -640,11 +653,13 @@ class IMX327MIPICamera(CameraInterface):
         if hasattr(pcc, "AeExposureModeEnum"):
             updates["AeExposureMode"] = pcc.AeExposureModeEnum.Long
         ev = float(self._ae_effective_exposure_value)
-        if abs(ev) > 1e-6:
-            if "ExposureValue" in cc:
-                updates["ExposureValue"] = ev
-            elif "Brightness" in cc:
-                updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
+        # Explicitly write the neutral value too. Omitting zero can leave a
+        # previous dark-scene bias active after returning to daylight.
+        # 中性值也必须显式写入；省略零值会让此前的暗场补偿残留到白天。
+        if "ExposureValue" in cc:
+            updates["ExposureValue"] = ev
+        elif "Brightness" in cc:
+            updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
 
         try:
             self._apply_frame_duration_controls()
@@ -724,17 +739,30 @@ class IMX327MIPICamera(CameraInterface):
 
             # 设置相机控制参数 / Set camera control parameters
             # 构建控制参数，兼容部分固件未提供 DigitalGain 的情况 / Build control parameters, compatible with some firmwares that do not provide DigitalGain
-            controls = {
-                "ExposureTime": self.exposure_us,
-                "AnalogueGain": self.analogue_gain,
-                "AeEnable": self.auto_exposure,
-            }
+            controls = {"AeEnable": self.auto_exposure}
+            if not self.auto_exposure:
+                # Manual exposure/gain must not be queued together with AE.
+                # Some IMX327/libcamera combinations keep those seed values
+                # latched, which can leave daylight fixed at 10 ms and white.
+                # 自动曝光启动时不能同时排队手动曝光/增益；部分 IMX327/libcamera
+                # 组合会锁住这些初值，导致白天固定在 10 ms 并整幅过曝。
+                controls.update(
+                    {
+                        "ExposureTime": self.exposure_us,
+                        "AnalogueGain": self.analogue_gain,
+                    }
+                )
             controls.update(self._white_balance_controls())
-            try:
-                self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
-            except Exception:
-                # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is not supported, it will degenerate to not setting this item.
+            if self.auto_exposure:
                 self.camera.set_controls(controls)
+            else:
+                try:
+                    self.camera.set_controls(
+                        {**controls, "DigitalGain": self.digital_gain}
+                    )
+                except Exception:
+                    # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is unsupported, omit it.
+                    self.camera.set_controls(controls)
 
             if self.auto_exposure:
                 self._apply_polar_auto_exposure_controls()
@@ -766,11 +794,11 @@ class IMX327MIPICamera(CameraInterface):
             # 设置帧周期（优先 FrameDurationLimits） / Set frame period (prefer FrameDurationLimits).
             self._apply_frame_duration_controls()
 
-            # 重新配置后重放曝光控制，避免状态漂移到驱动默认值 / Replay exposure control after reconfiguration to avoid state drift to driver defaults
+            # 手动控制可在启动前排队；AE 必须在流启动后再次启用，确保 IMX327/libcamera
+            # 真正进入闭环而不是停留在初始化曝光。 / Manual controls may be queued
+            # before start; re-enable AE after streaming so the driver enters its loop.
             try:
-                if self.auto_exposure:
-                    self._apply_polar_auto_exposure_controls()
-                else:
+                if not self.auto_exposure:
                     controls = {
                         "AeEnable": False,
                         "ExposureTime": self.exposure_us,
@@ -790,6 +818,8 @@ class IMX327MIPICamera(CameraInterface):
 
             self.camera.start()
             self.is_capturing = True
+            if self.auto_exposure:
+                self._apply_polar_auto_exposure_controls()
             logger.info("相机开始捕获")
             return True
         except Exception as e:
@@ -1087,7 +1117,7 @@ class IMX327MIPICamera(CameraInterface):
         try:
             self.auto_exposure = enabled
             if enabled:
-                self._ae_effective_exposure_value = self.ae_exposure_value
+                self._ae_effective_exposure_value = 0.0
                 self._ae_last_adjust_at = 0.0
                 self._apply_polar_auto_exposure_controls()
             else:
