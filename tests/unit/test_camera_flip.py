@@ -318,10 +318,10 @@ def test_aggressive_ae_returns_toward_neutral_in_bright_scene() -> None:
 @pytest.mark.unit
 def test_frame_duration_limits_follow_manual_exposure() -> None:
     cam = IMX327MIPICamera(
-        _minimal_config(fps=8, auto_exposure=False, exposure_us=250_000)
+        _minimal_config(fps=8, auto_exposure=False, exposure_us=500_000)
     )
 
-    assert cam._compute_frame_duration_limits() == (250_000, 250_000)
+    assert cam._compute_frame_duration_limits() == (500_000, 500_000)
 
 
 @pytest.mark.unit

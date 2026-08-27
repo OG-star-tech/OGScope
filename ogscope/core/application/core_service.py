@@ -5,6 +5,7 @@ Core 标准契约应用服务 / Core standard contract application service.
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,6 +191,7 @@ class CoreContractService:
         solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
+        was_running = self._session.running
         result = await realtime_solve_service.start(
             hint_ra_deg=hint_ra_deg,
             hint_dec_deg=hint_dec_deg,
@@ -198,9 +200,14 @@ class CoreContractService:
             solve_timeout_ms=solve_timeout_ms,
             solve_context=solve_context,
         )
-        self._session.running = True
+        success = bool(result.get("success", True))
+        self._session.running = success
+        if success and not was_running:
+            # A unique id lets upstream consumers reject results from an older run.
+            # 唯一会话 ID 让上层能够拒绝旧一轮分析留下的结果。
+            self._session.session_id = uuid.uuid4().hex
         return {
-            "success": bool(result.get("success", True)),
+            "success": success,
             "session_id": self._session.session_id,
             "state": "running",
             "message": result.get("message", ""),

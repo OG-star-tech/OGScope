@@ -185,16 +185,23 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     assert start.json()["state"] == "running"
     assert received["solve_context"].quality.time_fresh is False
     assert received["solve_context"].quality.camera_pose_calibrated is False
+    first_session_id = start.json()["session_id"]
 
     result = client.get("/api/core/v1/analysis/result")
     assert result.status_code == 200
     body = result.json()
     assert body["state"] == "running"
     assert body["result"]["status"] == "MATCH_FOUND"
+    assert body["session_id"] == first_session_id
 
     stop = client.post("/api/core/v1/analysis/stop", json={})
     assert stop.status_code == 200
     assert stop.json()["state"] == "stopped"
+
+    restarted = client.post("/api/core/v1/analysis/start", json={})
+    assert restarted.status_code == 200
+    assert restarted.json()["session_id"] != first_session_id
+    client.post("/api/core/v1/analysis/stop", json={})
 
 
 @pytest.mark.unit

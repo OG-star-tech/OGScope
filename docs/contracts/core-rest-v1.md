@@ -26,12 +26,15 @@
   - `solve_context`（可选传感器上下文）
     - `quality.time_fresh`：可选；显式为 `false` 时不使用该时间做传感器预测
     - `quality.camera_pose_calibrated`：可选；显式为 `false` 时不使用机械轴角做光轴预测
-    - 两个字段缺失时保持旧客户端行为；字段为 `false` 只禁用传感器预测，不否决星图解算结果
+    - 两个字段缺失时保持旧客户端行为
+    - 字段为 `false` 时仅返回 `sensor_status=unavailable` 诊断，不影响星图本身的 `MATCH_FOUND` 结果
 - 响应：
   - `success: bool`
   - `session_id: str`
   - `state: "running" | "stopped"`
   - `message: str`
+
+每次从停止状态启动分析时都会生成新的 `session_id`；上层应忽略旧会话结果。
 
 ### 2) Get Analysis Result
 
