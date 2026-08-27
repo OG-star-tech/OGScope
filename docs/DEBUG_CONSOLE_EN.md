@@ -27,7 +27,7 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - **Sidecar metadata**: `.txt` parameter file per capture
 
 ### Parameters
-- **Exposure**: 1ms–100ms (fine steps)
+- **Exposure**: 0.1ms–0.6s (fine steps, aligned with the auto-exposure ceiling)
 - **Analog gain**: 1x–16x (0.1x steps)
 - **Digital gain**: 1x–4x (0.1x steps)
 - **White balance**: `auto` / `manual` / `night`; manual mode exposes red/blue gains

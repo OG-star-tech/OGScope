@@ -241,7 +241,7 @@ const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1020"] as const;
 const ROTATION_PRESETS = [0, 90, 180, 270] as const;
 const FILE_PAGE_SIZE = 12;
 const MANUAL_EXPOSURE_MIN_SECONDS = 0.0001;
-const MANUAL_EXPOSURE_MAX_SECONDS = 0.5;
+const MANUAL_EXPOSURE_MAX_SECONDS = 0.6;
 const MANUAL_EXPOSURE_STEP_SECONDS = 0.0001;
 
 function clamp(v: number, min: number, max: number): number {
@@ -430,7 +430,7 @@ function ExposureControl({
         disabled={disabled}
         aria-label={label}
         onChange={(e) => {
-          // 对数滑块兼顾短曝光精调与 0.5 秒长曝光 / Log scale preserves short-exposure precision up to 0.5 s.
+          // 对数滑块兼顾短曝光精调与 0.6 秒长曝光 / Log scale preserves short-exposure precision up to 0.6 s.
           const next = Number((10 ** Number(e.target.value)).toFixed(6));
           onChange(clamp(next, MANUAL_EXPOSURE_MIN_SECONDS, MANUAL_EXPOSURE_MAX_SECONDS));
         }}
