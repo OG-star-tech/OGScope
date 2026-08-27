@@ -220,20 +220,50 @@ def test_preview_encoder_falls_back_to_opencv_when_turbojpeg_missing(
 @pytest.mark.unit
 def test_frame_duration_limits_allow_long_auto_exposure() -> None:
     cam = IMX327MIPICamera(
-        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=500_000)
+        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=600_000)
     )
 
-    assert cam._compute_frame_duration_limits() == (125_000, 500_000)
+    assert cam._compute_frame_duration_limits() == (125_000, 600_000)
 
 
 @pytest.mark.unit
-def test_auto_exposure_ceiling_is_capped_at_half_second() -> None:
+def test_auto_exposure_ceiling_is_capped_at_six_tenths_second() -> None:
     cam = IMX327MIPICamera(
         _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=2_000_000)
     )
 
-    assert cam.auto_exposure_max_us == 500_000
-    assert cam._compute_frame_duration_limits() == (125_000, 500_000)
+    assert cam.auto_exposure_max_us == 600_000
+    assert cam._compute_frame_duration_limits() == (125_000, 600_000)
+
+
+@pytest.mark.unit
+def test_aggressive_ae_ignores_small_clipped_highlight() -> None:
+    fake = _FakePicamera2()
+    fake.camera_controls = {"ExposureValue": (-2.0, 2.0, 0.0)}
+    cam = IMX327MIPICamera(_minimal_config(auto_exposure=True, ae_exposure_value=1.0))
+    cam.camera = fake
+
+    cam._update_aggressive_auto_exposure(
+        {"p50": 20.0, "p90": 35.0, "p99": 80.0, "saturated_fraction": 0.01}
+    )
+
+    assert fake.controls_log[-1]["ExposureValue"] == pytest.approx(1.25)
+    assert cam._ae_effective_exposure_value == pytest.approx(1.25)
+
+
+@pytest.mark.unit
+def test_aggressive_ae_returns_toward_neutral_in_bright_scene() -> None:
+    fake = _FakePicamera2()
+    fake.camera_controls = {"ExposureValue": (-2.0, 2.0, 0.0)}
+    cam = IMX327MIPICamera(_minimal_config(auto_exposure=True, ae_exposure_value=1.0))
+    cam.camera = fake
+
+    cam._update_aggressive_auto_exposure(
+        {"p50": 220.0, "p90": 250.0, "p99": 255.0, "saturated_fraction": 0.25}
+    )
+
+    assert fake.controls_log[-1]["ExposureValue"] == pytest.approx(0.75)
+    assert cam._ae_effective_exposure_value == pytest.approx(0.75)
 
 
 @pytest.mark.unit

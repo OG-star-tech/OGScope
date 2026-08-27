@@ -238,7 +238,7 @@ python scripts/test_debug_console.py --test deps
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | 手动白平衡红/蓝增益 |
 | `camera_night_mode` | `false` | 启动时应用夜间白平衡标记 |
-| `camera_auto_exposure_max_us` | `500000` | 自动曝光最长帧周期，暗场最多降至约 2 fps |
+| `camera_auto_exposure_max_us` | `600000` | 自动曝光最长帧周期，暗场允许降至约 1.7 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | 启用低分辨率辅助流统计 |
