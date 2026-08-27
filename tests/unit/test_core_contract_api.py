@@ -88,12 +88,16 @@ async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
     """启动成功仍须确认真实流就绪 / A successful command still requires stream readiness."""
     from ogscope.core.application import core_service
 
+    events: list[str] = []
+
     class _HardwareClient:
         async def device_command(self, service: str, command: str) -> dict:
             assert (service, command) == ("camera", "start")
+            events.append("hardware_plane")
             return {"success": True}
 
     async def _start() -> dict:
+        events.append("camera_domain")
         return {"success": True, "message": "start accepted"}
 
     async def _not_ready() -> dict:
@@ -112,6 +116,7 @@ async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
 
     result = await service.start_camera()
 
+    assert events == ["camera_domain", "hardware_plane"]
     assert result["success"] is False
     assert result["info"]["model"] == "IMX327"
     assert result["applied"] == {
@@ -122,6 +127,51 @@ async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
         "streaming": False,
     }
     assert result["message"] == "camera did not report a valid stream"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_core_camera_tune_writes_manual_baseline_before_enabling_ae(
+    monkeypatch,
+) -> None:
+    """同时恢复 AE 时先写手动基线 / Combined AE restore writes the manual baseline first."""
+    from ogscope.core.application import core_service
+
+    events: list[tuple[str, object]] = []
+
+    async def _update_settings(settings: dict) -> dict:
+        events.append(("settings", settings))
+        return {"success": True}
+
+    async def _set_auto_exposure(enabled: bool) -> dict:
+        events.append(("auto_exposure", enabled))
+        return {"success": True}
+
+    async def _status() -> dict:
+        return {"info": {"exposure_us": 600_000, "auto_exposure": True}}
+
+    monkeypatch.setattr(
+        core_service.camera_domain_service, "update_settings", _update_settings
+    )
+    monkeypatch.setattr(
+        core_service.camera_domain_service,
+        "set_auto_exposure_mode",
+        _set_auto_exposure,
+    )
+    monkeypatch.setattr(core_service.camera_domain_service, "get_status", _status)
+
+    result = await core_service.CoreContractService().tune_camera(
+        {"exposure_us": 600_000, "auto_exposure": True}
+    )
+
+    assert events == [
+        ("settings", {"exposure": 600_000, "autoExposure": False}),
+        ("auto_exposure", True),
+    ]
+    assert result["applied"] == {
+        "exposure_us": 600_000,
+        "auto_exposure": True,
+    }
 
 
 @pytest.mark.unit
