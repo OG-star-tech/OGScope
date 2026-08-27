@@ -334,8 +334,10 @@ class CoreContractService:
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
         hardware_client = get_hardware_plane_client()
-        hp_result = await hardware_client.device_command("camera", "start")
+        # 冷启动可能超过硬件平面通用 RPC 预算；先完成真实相机启动，再同步平面状态。
+        # Cold start can exceed the generic plane RPC budget; start hardware first, then sync plane state.
         result = await camera_domain_service.start()
+        hp_result = await hardware_client.device_command("camera", "start")
         status = await self.get_camera_status()
         ready = bool(status.get("connected")) and bool(status.get("streaming"))
         message = str(result.get("message", ""))
@@ -359,8 +361,10 @@ class CoreContractService:
     async def stop_camera(self) -> dict[str, Any]:
         """停止 Core 相机 / Stop core camera."""
         hardware_client = get_hardware_plane_client()
-        hp_result = await hardware_client.device_command("camera", "stop")
+        # 先让相机域完成有界清理，避免硬件平面短 RPC 预算提前取消释放流程。
+        # Let the camera domain finish bounded cleanup before the short plane RPC can cancel it.
         result = await camera_domain_service.stop()
+        hp_result = await hardware_client.device_command("camera", "stop")
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
@@ -375,15 +379,25 @@ class CoreContractService:
         """按 Core 语义微调相机参数 / Tune camera params with core semantics."""
         applied: dict[str, Any] = {}
         auto_exposure = payload.get("auto_exposure")
-        if auto_exposure is not None:
+        exposure_us = payload.get("exposure_us")
+        restore_auto_after_exposure = bool(auto_exposure) and exposure_us is not None
+
+        if auto_exposure is not None and not restore_auto_after_exposure:
             await camera_domain_service.set_auto_exposure_mode(bool(auto_exposure))
             applied["auto_exposure"] = bool(auto_exposure)
 
-        if payload.get("exposure_us") is not None:
-            await camera_domain_service.update_settings(
-                {"exposure": payload["exposure_us"]}
-            )
-            applied["exposure_us"] = int(payload["exposure_us"])
+        if exposure_us is not None:
+            exposure_settings: dict[str, Any] = {"exposure": exposure_us}
+            if restore_auto_after_exposure:
+                # 先在手动模式写入可恢复基线，再重新开启 AE。
+                # Write the restorable manual baseline before re-enabling AE.
+                exposure_settings["autoExposure"] = False
+            await camera_domain_service.update_settings(exposure_settings)
+            applied["exposure_us"] = int(exposure_us)
+
+        if restore_auto_after_exposure:
+            await camera_domain_service.set_auto_exposure_mode(True)
+            applied["auto_exposure"] = True
 
         if payload.get("analogue_gain") is not None:
             settings: dict[str, Any] = {"gain": float(payload["analogue_gain"])}
