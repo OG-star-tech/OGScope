@@ -105,16 +105,20 @@ class Settings(BaseSettings):
         description="自动曝光时启用电子极轴镜 AE 预设 (Shadows/Matrix/Long+EV) / AE polar-scope preset",
     )
     camera_ae_exposure_value: float = Field(
-        default=0.35,
+        default=1.0,
         ge=-2.0,
         le=2.0,
         description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
     )
+    camera_ae_aggressive_enabled: bool = Field(
+        default=True,
+        description="根据暗部与高光占比动态提高极轴镜 AE / Dynamically bias polar AE toward dark detail",
+    )
     camera_auto_exposure_max_us: int = Field(
-        default=500_000,
+        default=600_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 500ms，暗场允许降帧 / Max auto-exposure frame duration, capped at 500ms",
+        description="自动曝光最长帧周期 600ms，暗场允许降帧 / Max auto-exposure frame duration, capped at 600ms",
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -536,9 +540,9 @@ class Settings(BaseSettings):
     @field_validator("camera_auto_exposure_max_us", mode="before")
     @classmethod
     def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
-        """兼容旧配置并限制暗场曝光为 500ms / Keep legacy config bootable and cap AE at 500ms."""
+        """兼容旧配置并限制暗场曝光为 600ms / Keep legacy config bootable and cap AE at 600ms."""
         try:
-            return min(500_000, int(value))
+            return min(600_000, int(value))
         except (TypeError, ValueError):
             return value
 
