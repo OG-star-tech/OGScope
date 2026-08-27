@@ -28,3 +28,17 @@ def test_core_realtime_uses_authoritative_bgr_pipeline() -> None:
         solve_timeout_ms=service._solve_timeout_ms,
     )
     service.solver.solve.assert_not_called()
+
+
+def test_completed_realtime_frame_clears_transient_error() -> None:
+    """新完成帧清除旧瞬时错误 / A completed frame clears an older transient error."""
+    service = RealtimeSolveService()
+    service.state.last_error = "temporary capture error"
+    solved = MagicMock()
+    solved.to_dict.return_value = {"status": "NO_MATCH"}
+    solved.ra_deg = None
+    solved.dec_deg = None
+
+    service._apply_solve_result(solved)
+
+    assert service.state.last_error == ""

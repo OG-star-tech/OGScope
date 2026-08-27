@@ -240,6 +240,9 @@ type DebugFileInfo = {
 const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1020"] as const;
 const ROTATION_PRESETS = [0, 90, 180, 270] as const;
 const FILE_PAGE_SIZE = 12;
+const MANUAL_EXPOSURE_MIN_SECONDS = 0.0001;
+const MANUAL_EXPOSURE_MAX_SECONDS = 0.5;
+const MANUAL_EXPOSURE_STEP_SECONDS = 0.0001;
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
@@ -372,6 +375,68 @@ function ParamSlider({
         className="w-full accent-primary"
       />
     </label>
+  );
+}
+
+function ExposureControl({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const safeValue = clamp(
+    value,
+    MANUAL_EXPOSURE_MIN_SECONDS,
+    MANUAL_EXPOSURE_MAX_SECONDS,
+  );
+  const logMin = Math.log10(MANUAL_EXPOSURE_MIN_SECONDS);
+  const logMax = Math.log10(MANUAL_EXPOSURE_MAX_SECONDS);
+
+  return (
+    <div className={`block ${disabled ? "opacity-50" : ""}`}>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span>{label}</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="number"
+            min={MANUAL_EXPOSURE_MIN_SECONDS}
+            max={MANUAL_EXPOSURE_MAX_SECONDS}
+            step={MANUAL_EXPOSURE_STEP_SECONDS}
+            value={Number(safeValue.toFixed(6))}
+            disabled={disabled}
+            aria-label={label}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (Number.isFinite(next)) {
+                onChange(clamp(next, MANUAL_EXPOSURE_MIN_SECONDS, MANUAL_EXPOSURE_MAX_SECONDS));
+              }
+            }}
+            className="w-24 rounded border border-outline-variant/30 bg-surface-container-low px-1.5 py-0.5 text-right font-mono text-[11px]"
+          />
+          <span className="font-mono text-[11px]">s</span>
+        </span>
+      </div>
+      <input
+        type="range"
+        min={logMin}
+        max={logMax}
+        step={0.001}
+        value={Math.log10(safeValue)}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(e) => {
+          // 对数滑块兼顾短曝光精调与 0.5 秒长曝光 / Log scale preserves short-exposure precision up to 0.5 s.
+          const next = Number((10 ** Number(e.target.value)).toFixed(6));
+          onChange(clamp(next, MANUAL_EXPOSURE_MIN_SECONDS, MANUAL_EXPOSURE_MAX_SECONDS));
+        }}
+        className="w-full accent-primary"
+      />
+    </div>
   );
 }
 
@@ -767,7 +832,11 @@ export function CameraConsoleApp() {
     if (!info) return;
     const syncRuntime = options?.syncRuntime ?? true;
     setForm({
-      exposureSeconds: clamp(exposureUsToSeconds(info.exposure_us, 5000), 0.0001, 0.6),
+      exposureSeconds: clamp(
+        exposureUsToSeconds(info.exposure_us, 5000),
+        MANUAL_EXPOSURE_MIN_SECONDS,
+        MANUAL_EXPOSURE_MAX_SECONDS,
+      ),
       gain: clamp(toNum(info.analogue_gain, 1.0), 1.0, 24.0),
       digitalGain: clamp(toNum(info.digital_gain, 1.0), 1.0, 8.0),
       autoExposure: Boolean(info.auto_exposure ?? true),
@@ -1351,6 +1420,15 @@ export function CameraConsoleApp() {
   const streamSrc = previewActive ? `${debugApi("/camera/stream")}?t=${streamNonce}` : "";
   const exposureLocked = form.autoExposure;
   const wbManual = form.whiteBalanceMode === "manual";
+  const sensorTargetFps = clamp(
+    parseInt(fpsValue, 10) || Math.round(toNum(status?.info?.fps, 8)),
+    1,
+    60,
+  );
+  const manualExposureFpsLimit = !form.autoExposure
+    && (1 / form.exposureSeconds) < sensorTargetFps
+    ? 1 / form.exposureSeconds
+    : null;
   const caps = status?.info?.capabilities ?? {};
   const wbModeOptions = Array.isArray(caps.awb_modes) && caps.awb_modes.length > 0
     ? caps.awb_modes
@@ -2141,7 +2219,7 @@ export function CameraConsoleApp() {
               )}
               {exposureLocked && <p className="mb-2 text-[11px] text-on-surface-variant">{t("cam.controls.lockedByAe")}</p>}
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <ParamSlider label={t("cam.controls.exposure")} value={form.exposureSeconds} min={0.0001} max={0.6} step={0.0001} unit=" s" disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposureSeconds: v })); }} />
+                <ExposureControl label={t("cam.controls.exposure")} value={form.exposureSeconds} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, exposureSeconds: v })); }} />
                 <ParamSlider label={t("cam.controls.gain")} value={form.gain} min={1} max={24} step={0.1} disabled={exposureLocked} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, gain: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.digitalGain")} value={form.digitalGain} min={1} max={8} step={0.1} disabled={exposureLocked || !digitalGainWritable} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, digitalGain: Number(v.toFixed(1)) })); }} />
                 <label className="block">
@@ -2157,6 +2235,14 @@ export function CameraConsoleApp() {
                 <ParamSlider label={t("cam.controls.saturation")} value={form.saturation} min={0} max={2} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, saturation: Number(v.toFixed(1)) })); }} />
                 <ParamSlider label={t("cam.controls.sharpness")} value={form.sharpness} min={0} max={2} step={0.1} onChange={(v) => { setFormDirty(true); setForm((p) => ({ ...p, sharpness: Number(v.toFixed(1)) })); }} />
               </div>
+              {manualExposureFpsLimit != null && (
+                <p className="mt-2 text-[11px] text-tertiary">
+                  {t("cam.controls.manualExposureFpsLimit", {
+                    exposure: form.exposureSeconds.toFixed(4),
+                    fps: manualExposureFpsLimit.toFixed(2),
+                  })}
+                </p>
+              )}
               {!digitalGainWritable && (
                 <p className="mt-2 text-[11px] text-on-surface-variant">
                   {t("cam.controls.digitalGainReadOnly")}: <span className="font-mono">{Number(status?.info?.actual_digital_gain ?? form.digitalGain).toFixed(2)}</span>

@@ -26,12 +26,16 @@ This document defines the **minimal stable REST surface** for callers integratin
   - `solve_context` (optional sensor context)
     - `quality.time_fresh`: optional; when explicitly `false`, time is not used for sensor prediction
     - `quality.camera_pose_calibrated`: optional; when explicitly `false`, mount angles are not used as camera-pose prediction
-    - Omitting both fields preserves legacy-client behavior; `false` disables sensor prediction only and never rejects a plate-solve result
+    - Omitting both fields preserves legacy-client behavior
+    - When either field is `false`, OGScope returns `sensor_status=unavailable` for diagnostics without changing the plate solver's `MATCH_FOUND` result
 - Response:
   - `success: bool`
   - `session_id: str`
   - `state: "running" | "stopped"`
   - `message: str`
+
+A new `session_id` is generated whenever analysis starts from the stopped state;
+upstream consumers should ignore results from an older session.
 
 ### 2) Get Analysis Result
 

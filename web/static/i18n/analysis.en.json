@@ -478,6 +478,7 @@
   "cam.controls.applyColor": "Apply Color Mode",
   "cam.controls.applyMode": "Apply Mode Settings",
   "cam.controls.lockedByAe": "Exposure and gain are locked while auto exposure is enabled.",
+  "cam.controls.manualExposureFpsLimit": "At {exposure} s manual exposure, actual capture is limited to about {fps} FPS.",
   "cam.controls.lockedByWb": "R/B gains are locked unless white balance is in manual mode.",
   "cam.controls.pendingChanges": "You have unapplied parameter changes",
   "cam.controls.tools": "Tools",
