@@ -5,9 +5,11 @@
 """
 
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -64,6 +66,9 @@ class IMX327MIPICamera(CameraInterface):
     PREVIEW_BUFFER_COUNT = 2
     AE_SUPERVISOR_INTERVAL_S = 1.0
     AE_SUPERVISOR_STEP_EV = 0.5
+    AUTO_EXPOSURE_MAX_US = 1_000_000
+    LUMINANCE_STATS_MAX_SAMPLES = 32_768
+    PRODUCT_TUNING_FILE = Path(__file__).with_name("tuning") / "imx327.json"
     MANUAL_CONTROL_RANGE_DEFAULTS = {
         "ExposureTime": {"min": 1000, "max": 100000, "default": 10000, "step": 1000},
         "AnalogueGain": {"min": 1.0, "max": 16.0, "default": 1.0, "step": 0.1},
@@ -80,9 +85,19 @@ class IMX327MIPICamera(CameraInterface):
         self.backend_name = "picamera2/libcamera"
         self.output_pixel_format = "RGB888"
         self._frame_duration_limits: tuple[int, int] | None = None
+        self._frame_duration_control = "not_applied"
+        self._frame_duration_control_error: str | None = None
         self._lores_available = False
         self._last_lores_stats: dict[str, Any] = {}
         self._pending_capture_job = None
+        self.tuning_file = (
+            Path(str(config["tuning_file"])).expanduser()
+            if config.get("tuning_file")
+            else None
+        )
+        self._tuning_source = "system_default"
+        self._tuning_loaded = False
+        self._tuning_error: str | None = None
 
         # 相机参数 / Camera parameters
         requested_width = int(config.get("width", 640))
@@ -106,7 +121,11 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
         self.night_mode = bool(config.get("night_mode", False))
         self.auto_exposure_max_us = max(
-            10_000, min(600_000, int(config.get("auto_exposure_max_us", 600_000)))
+            10_000,
+            min(
+                self.AUTO_EXPOSURE_MAX_US,
+                int(config.get("auto_exposure_max_us", self.AUTO_EXPOSURE_MAX_US)),
+            ),
         )
         self.capture_timeout_sec = max(
             0.5, float(config.get("capture_timeout_sec", 4.0))
@@ -395,19 +414,26 @@ class IMX327MIPICamera(CameraInterface):
     def _apply_frame_duration_controls(self) -> None:
         """优先应用 FrameDurationLimits，失败时回退 FrameRate / Prefer FrameDurationLimits, fallback to FrameRate."""
         if not self.camera:
+            self._frame_duration_control = "camera_unavailable"
             return
         limits = self._compute_frame_duration_limits()
         self._frame_duration_limits = limits
+        self._frame_duration_control_error = None
         if self._control_supported("FrameDurationLimits"):
             try:
                 self.camera.set_controls({"FrameDurationLimits": limits})
+                self._frame_duration_control = "frame_duration_limits"
                 return
             except Exception as e:
+                self._frame_duration_control_error = type(e).__name__
                 logger.debug("FrameDurationLimits 未生效，回退 FrameRate: %s", e)
         try:
             self.camera.set_controls({"FrameRate": float(self.fps)})
-        except Exception:
-            pass
+            self._frame_duration_control = "frame_rate_fallback"
+        except Exception as e:
+            self._frame_duration_control = "failed"
+            self._frame_duration_control_error = type(e).__name__
+            logger.debug("帧周期控制未生效 / Frame-duration control failed: %s", e)
 
     def _noise_reduction_control_value(self) -> Any:
         """将语义模式映射到 libcamera 降噪枚举/整数 / Map semantic NR mode to libcamera value."""
@@ -499,37 +525,84 @@ class IMX327MIPICamera(CameraInterface):
             buffer_count=self.PREVIEW_BUFFER_COUNT,
         )
 
-    def _collect_lores_stats(self, request: Any) -> None:
-        """从 lores 流提取轻量亮度统计 / Extract lightweight luminance stats from lores stream."""
-        if not self._lores_available:
+    @staticmethod
+    def _histogram_percentile(histogram: np.ndarray, percentile: float) -> int:
+        """从 8 位直方图读取最近秩百分位 / Read nearest-rank percentile from an 8-bit histogram."""
+        total = int(histogram.sum())
+        if total <= 0:
+            return 0
+        rank = max(1, int(math.ceil(total * percentile / 100.0)))
+        return int(np.searchsorted(np.cumsum(histogram), rank, side="left"))
+
+    def _luminance_stats(self, luminance: np.ndarray, *, source: str) -> dict[str, Any]:
+        """用有界采样直方图计算亮度统计 / Compute luminance stats with a bounded histogram sample."""
+        values = np.asarray(luminance)
+        if values.ndim >= 2 and values.size > self.LUMINANCE_STATS_MAX_SAMPLES:
+            stride = max(
+                1,
+                int(
+                    math.ceil(math.sqrt(values.size / self.LUMINANCE_STATS_MAX_SAMPLES))
+                ),
+            )
+            values = values[::stride, ::stride]
+        values = np.clip(values.reshape(-1), 0, 255).astype(np.uint8, copy=False)
+        histogram = np.bincount(values, minlength=256)
+        sample_count = int(histogram.sum())
+        if sample_count <= 0:
+            return {}
+        levels = np.arange(256, dtype=np.float64)
+        return {
+            "source": source,
+            "sample_count": sample_count,
+            "mean": float(np.dot(histogram, levels) / sample_count),
+            "min": int(np.flatnonzero(histogram)[0]),
+            "max": int(np.flatnonzero(histogram)[-1]),
+            "p50": float(self._histogram_percentile(histogram, 50.0)),
+            "p90": float(self._histogram_percentile(histogram, 90.0)),
+            "p99": float(self._histogram_percentile(histogram, 99.0)),
+            "p99_8": float(self._histogram_percentile(histogram, 99.8)),
+            "saturated_fraction": float(histogram[250:].sum() / sample_count),
+        }
+
+    def _collect_lores_stats(
+        self, request: Any, main_image: np.ndarray | None = None
+    ) -> None:
+        """优先从 lores 提取统计，失败时有界采样主流 / Prefer lores stats; bounded main-stream fallback."""
+        luminance: np.ndarray | None = None
+        source = "main_fallback"
+        if self._lores_available:
+            try:
+                lores = request.make_array("lores")
+                if lores is not None:
+                    if (
+                        len(getattr(lores, "shape", ())) == 2
+                        and lores.shape[0] >= self.lores_height
+                    ):
+                        luminance = lores[: self.lores_height, :]
+                    elif len(getattr(lores, "shape", ())) >= 3:
+                        luminance = lores[..., 0]
+                    else:
+                        luminance = lores
+                    source = "lores"
+            except Exception as e:
+                logger.debug(
+                    "读取 lores 统计失败，回退主流 / Lores stats failed; using main stream: %s",
+                    e,
+                )
+        if luminance is None and main_image is not None:
+            # RGB 主流用绿色通道作为低分配亮度近似；曝光监督不需要精确色度转换。
+            # Use green as a low-allocation RGB luminance proxy; AE supervision does not need chroma accuracy.
+            luminance = main_image[..., 1] if main_image.ndim >= 3 else main_image
+        if luminance is None:
             return
         try:
-            lores = request.make_array("lores")
-            if lores is None:
+            stats = self._luminance_stats(luminance, source=source)
+            if not stats:
                 return
-            if (
-                len(getattr(lores, "shape", ())) == 2
-                and lores.shape[0] >= self.lores_height
-            ):
-                y_plane = lores[: self.lores_height, :]
-            elif len(getattr(lores, "shape", ())) >= 3:
-                y_plane = lores[..., 0]
-            else:
-                y_plane = lores
-            p50, p90, p99 = np.percentile(y_plane, [50, 90, 99])
-            saturated_fraction = float(np.mean(y_plane >= 250))
-            self._last_lores_stats = {
-                "mean": float(np.mean(y_plane)),
-                "min": int(np.min(y_plane)),
-                "max": int(np.max(y_plane)),
-                "p50": float(p50),
-                "p90": float(p90),
-                "p99": float(p99),
-                "saturated_fraction": saturated_fraction,
-            }
-            self._update_aggressive_auto_exposure(self._last_lores_stats)
+            self._last_lores_stats = stats
+            self._update_aggressive_auto_exposure(stats)
         except Exception as e:
-            logger.debug("读取 lores 统计失败 / Failed to read lores stats: %s", e)
+            logger.debug("亮度统计失败 / Failed to compute luminance stats: %s", e)
 
     def _desired_aggressive_ae_ev(self, stats: dict[str, Any]) -> float:
         """按暗部与高光占比选择 AE 补偿 / Select AE bias from shadows and highlight share."""
@@ -724,12 +797,56 @@ class IMX327MIPICamera(CameraInterface):
             return
         self.camera.set_controls(self._white_balance_controls())
 
+    def _load_picamera_tuning(self, picamera_type: Any) -> dict[str, Any] | None:
+        """加载产品或显式覆盖 tuning，失败时允许系统默认回退 / Load product or override tuning with safe fallback."""
+        tuning_path = self.tuning_file or self.PRODUCT_TUNING_FILE
+        source_prefix = "override" if self.tuning_file else "product"
+        self._tuning_source = f"{source_prefix}:{tuning_path.name}"
+        loader = getattr(picamera_type, "load_tuning_file", None)
+        if not callable(loader):
+            self._tuning_source = "system_default"
+            self._tuning_error = "load_tuning_file_unavailable"
+            return None
+        try:
+            tuning = loader(tuning_path.name, dir=str(tuning_path.parent))
+            self._tuning_loaded = True
+            self._tuning_error = None
+            return tuning
+        except Exception as e:
+            # API 只报告错误类型，完整路径只进入本机日志，避免泄露部署目录。
+            # The API reports only the error type; the full local path stays in logs.
+            self._tuning_source = "system_default"
+            self._tuning_loaded = False
+            self._tuning_error = type(e).__name__
+            logger.warning(
+                "相机 tuning 加载失败，回退系统默认 / Camera tuning load failed; using system default (%s): %s",
+                tuning_path,
+                e,
+            )
+            return None
+
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
         try:
             from picamera2 import Picamera2
 
-            self.camera = Picamera2()
+            tuning = self._load_picamera_tuning(Picamera2)
+            if tuning is None:
+                self.camera = Picamera2()
+            else:
+                try:
+                    self.camera = Picamera2(tuning=tuning)
+                except TypeError as e:
+                    # 旧版 Picamera2 构造器可能不支持 tuning 参数，保持可启动并明确降级。
+                    # Older Picamera2 constructors may reject tuning; keep startup viable and report fallback.
+                    self._tuning_source = "system_default"
+                    self._tuning_loaded = False
+                    self._tuning_error = type(e).__name__
+                    logger.warning(
+                        "Picamera2 不接受产品 tuning，回退系统默认 / Picamera2 rejected product tuning; using default: %s",
+                        e,
+                    )
+                    self.camera = Picamera2()
 
             # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
             # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
@@ -871,7 +988,7 @@ class IMX327MIPICamera(CameraInterface):
             try:
                 image = request.make_array("main")
                 self._last_metadata = dict(request.get_metadata() or {})
-                self._collect_lores_stats(request)
+                self._collect_lores_stats(request, main_image=image)
             finally:
                 request.release()
 
@@ -1262,6 +1379,8 @@ class IMX327MIPICamera(CameraInterface):
                 "frame_duration_limits": list(
                     self._frame_duration_limits or self._compute_frame_duration_limits()
                 ),
+                "frame_duration_control": self._frame_duration_control,
+                "frame_duration_control_error": self._frame_duration_control_error,
                 "analogue_gain": self.analogue_gain,
                 "actual_analogue_gain": metadata.get(
                     "AnalogueGain", self.analogue_gain
@@ -1270,6 +1389,9 @@ class IMX327MIPICamera(CameraInterface):
                 "actual_digital_gain": metadata.get("DigitalGain"),
                 "auto_exposure": self.auto_exposure,
                 "auto_exposure_max_us": self.auto_exposure_max_us,
+                "tuning_source": self._tuning_source,
+                "tuning_loaded": self._tuning_loaded,
+                "tuning_error": self._tuning_error,
                 "ae_flicker_mode": self.ae_flicker_mode,
                 "noise_reduction_mode": self.noise_reduction_mode,
                 "noise_reduction": {"off": 0, "fast": 1, "high_quality": 2}.get(
@@ -1424,7 +1546,9 @@ class IMX327MIPICamera(CameraInterface):
         if not self.is_initialized:
             logger.error("相机未初始化")
             return False
-        self.auto_exposure_max_us = max(10_000, min(600_000, int(value)))
+        self.auto_exposure_max_us = max(
+            10_000, min(self.AUTO_EXPOSURE_MAX_US, int(value))
+        )
         self._apply_frame_duration_controls()
         return True
 

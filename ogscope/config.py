@@ -114,11 +114,18 @@ class Settings(BaseSettings):
         default=True,
         description="根据暗部与高光占比动态提高极轴镜 AE / Dynamically bias polar AE toward dark detail",
     )
+    camera_tuning_file: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Picamera2 tuning 覆盖路径；为空时使用随产品发布的 IMX327 tuning / "
+            "Picamera2 tuning override path; bundled IMX327 tuning is used by default"
+        ),
+    )
     camera_auto_exposure_max_us: int = Field(
-        default=600_000,
+        default=1_000_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 600ms，暗场允许降帧 / Max auto-exposure frame duration, capped at 600ms",
+        description="自动曝光最长帧周期 1s，暗场允许降帧 / Max auto-exposure frame duration, capped at 1s",
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -540,9 +547,9 @@ class Settings(BaseSettings):
     @field_validator("camera_auto_exposure_max_us", mode="before")
     @classmethod
     def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
-        """兼容旧配置并限制暗场曝光为 600ms / Keep legacy config bootable and cap AE at 600ms."""
+        """兼容旧配置并限制暗场曝光为 1s / Keep legacy config bootable and cap AE at 1s."""
         try:
-            return min(600_000, int(value))
+            return min(1_000_000, int(value))
         except (TypeError, ValueError):
             return value
 
