@@ -61,6 +61,11 @@ type CameraInfo = {
   colour_temperature?: number;
   lux?: number;
   frame_duration_limits?: number[];
+  frame_duration_control?: string;
+  frame_duration_control_error?: string | null;
+  tuning_source?: string;
+  tuning_loaded?: boolean;
+  tuning_error?: string | null;
   lores_enabled?: boolean;
   lores_available?: boolean;
   lores_width?: number;
@@ -241,7 +246,7 @@ const RES_PRESETS = ["640x360", "1280x720", "1600x900", "1920x1020"] as const;
 const ROTATION_PRESETS = [0, 90, 180, 270] as const;
 const FILE_PAGE_SIZE = 12;
 const MANUAL_EXPOSURE_MIN_SECONDS = 0.0001;
-const MANUAL_EXPOSURE_MAX_SECONDS = 0.6;
+const MANUAL_EXPOSURE_MAX_SECONDS = 1.0;
 const MANUAL_EXPOSURE_STEP_SECONDS = 0.0001;
 
 function clamp(v: number, min: number, max: number): number {
@@ -430,7 +435,7 @@ function ExposureControl({
         disabled={disabled}
         aria-label={label}
         onChange={(e) => {
-          // 对数滑块兼顾短曝光精调与 0.6 秒长曝光 / Log scale preserves short-exposure precision up to 0.6 s.
+          // 对数滑块兼顾短曝光精调与 1 秒长曝光 / Log scale preserves short-exposure precision up to 1 s.
           const next = Number((10 ** Number(e.target.value)).toFixed(6));
           onChange(clamp(next, MANUAL_EXPOSURE_MIN_SECONDS, MANUAL_EXPOSURE_MAX_SECONDS));
         }}
@@ -493,7 +498,7 @@ export function CameraConsoleApp() {
     noiseReduction: 0,
     noiseReductionMode: "fast",
     aeFlickerMode: "off",
-    autoExposureMaxSeconds: 0.6,
+    autoExposureMaxSeconds: 1.0,
     whiteBalanceMode: "auto",
     whiteBalanceGainR: 1.0,
     whiteBalanceGainB: 1.0,
@@ -847,7 +852,7 @@ export function CameraConsoleApp() {
       noiseReduction: clamp(Math.round(toNum(info.noise_reduction, 0)), 0, 4),
       noiseReductionMode: String(info.noise_reduction_mode ?? "fast"),
       aeFlickerMode: String(info.ae_flicker_mode ?? "off"),
-      autoExposureMaxSeconds: clamp(exposureUsToSeconds(info.auto_exposure_max_us, 600000), 0.01, 0.6),
+      autoExposureMaxSeconds: clamp(exposureUsToSeconds(info.auto_exposure_max_us, 1_000_000), 0.01, 1.0),
       whiteBalanceMode: String(info.white_balance_mode ?? "auto"),
       whiteBalanceGainR: clamp(toNum(info.white_balance_gain_r, 1.0), 0.1, 3.0),
       whiteBalanceGainB: clamp(toNum(info.white_balance_gain_b, 1.0), 0.1, 3.0),
@@ -2028,6 +2033,12 @@ export function CameraConsoleApp() {
                 <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
                   {`${status?.info?.backend ?? streamMetrics?.camera_backend ?? "—"} · lores ${status?.info?.lores_available || streamMetrics?.lores_available ? "on" : "off"}`}
                 </p>
+                <p className="mt-0.5 break-all text-[10px] leading-tight text-on-surface-variant/90">
+                  {`tuning ${status?.info?.tuning_source ?? "—"} · frame ${status?.info?.frame_duration_control ?? "—"}`}
+                  {status?.info?.tuning_error || status?.info?.frame_duration_control_error
+                    ? ` · fallback ${status.info.tuning_error ?? status.info.frame_duration_control_error}`
+                    : ""}
+                </p>
               </div>
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.metadata")}: </span>
@@ -2295,7 +2306,7 @@ export function CameraConsoleApp() {
                 </label>
                 <label className="block">
                   {t("cam.controls.maxAeFrame")}
-                  <input type="number" min={0.01} max={0.6} step={0.01} value={form.autoExposureMaxSeconds} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxSeconds: clamp(Number(e.target.value) || 0.6, 0.01, 0.6) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
+                  <input type="number" min={0.01} max={1} step={0.01} value={form.autoExposureMaxSeconds} onChange={(e) => { setForm((p) => ({ ...p, autoExposureMaxSeconds: clamp(Number(e.target.value) || 1, 0.01, 1) })); setFormDirty(true); }} className="mt-1 w-full rounded border border-outline-variant/30 bg-surface-container-low px-2 py-1.5" />
                 </label>
                 <ParamSlider label="R Gain" value={form.whiteBalanceGainR} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainR: Number(v.toFixed(1)) })); setFormDirty(true); }} />
                 <ParamSlider label="B Gain" value={form.whiteBalanceGainB} min={0.1} max={3} step={0.1} disabled={!wbManual} onChange={(v) => { setForm((p) => ({ ...p, whiteBalanceGainB: Number(v.toFixed(1)) })); setFormDirty(true); }} />

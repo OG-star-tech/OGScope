@@ -117,8 +117,13 @@ class CameraManager:
             "ae_polar_preset": settings.camera_ae_polar_preset,
             "ae_exposure_value": settings.camera_ae_exposure_value,
             "ae_aggressive_enabled": settings.camera_ae_aggressive_enabled,
+            "tuning_file": (
+                str(settings.camera_tuning_file)
+                if getattr(settings, "camera_tuning_file", None)
+                else None
+            ),
             "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 600_000
+                settings, "camera_auto_exposure_max_us", 1_000_000
             ),
             "capture_timeout_sec": self._capture_timeout_sec,
             "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),

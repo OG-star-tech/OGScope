@@ -268,20 +268,20 @@ def test_preview_encoder_falls_back_to_opencv_when_turbojpeg_missing(
 @pytest.mark.unit
 def test_frame_duration_limits_allow_long_auto_exposure() -> None:
     cam = IMX327MIPICamera(
-        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=600_000)
+        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=1_000_000)
     )
 
-    assert cam._compute_frame_duration_limits() == (125_000, 600_000)
+    assert cam._compute_frame_duration_limits() == (125_000, 1_000_000)
 
 
 @pytest.mark.unit
-def test_auto_exposure_ceiling_is_capped_at_six_tenths_second() -> None:
+def test_auto_exposure_ceiling_is_capped_at_one_second() -> None:
     cam = IMX327MIPICamera(
         _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=2_000_000)
     )
 
-    assert cam.auto_exposure_max_us == 600_000
-    assert cam._compute_frame_duration_limits() == (125_000, 600_000)
+    assert cam.auto_exposure_max_us == 1_000_000
+    assert cam._compute_frame_duration_limits() == (125_000, 1_000_000)
 
 
 @pytest.mark.unit

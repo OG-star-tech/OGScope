@@ -27,7 +27,7 @@ OGScope 调试控制台是一个专为开发者设计的相机调试工具，提
 - **参数记录**: 每次拍摄自动生成参数记录文件
 
 ### ⚙️ 参数设置
-- **曝光时间**: 0.1ms–0.6s（微秒级调节，与自动曝光上限一致）
+- **曝光时间**: 0.1ms–1s（微秒级调节，与自动曝光上限一致）
 - **模拟增益**: 1x - 16x (0.1x步进)
 - **数字增益**: 1x - 4x (0.1x步进)
 - **白平衡**: `auto` / `manual` / `night`，手动模式可设置红/蓝增益
@@ -238,7 +238,8 @@ python scripts/test_debug_console.py --test deps
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | 手动白平衡红/蓝增益 |
 | `camera_night_mode` | `false` | 启动时应用夜间白平衡标记 |
-| `camera_auto_exposure_max_us` | `600000` | 自动曝光最长帧周期，暗场允许降至约 1.7 fps |
+| `camera_tuning_file` | 空 | 可选 Picamera2 tuning 覆盖路径；默认加载产品内置 IMX327 tuning |
+| `camera_auto_exposure_max_us` | `1000000` | 自动曝光最长帧周期，暗场允许降至约 1 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | 启用低分辨率辅助流统计 |

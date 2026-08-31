@@ -27,7 +27,7 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - **Sidecar metadata**: `.txt` parameter file per capture
 
 ### Parameters
-- **Exposure**: 0.1ms–0.6s (fine steps, aligned with the auto-exposure ceiling)
+- **Exposure**: 0.1ms–1s (fine steps, aligned with the auto-exposure ceiling)
 - **Analog gain**: 1x–16x (0.1x steps)
 - **Digital gain**: 1x–4x (0.1x steps)
 - **White balance**: `auto` / `manual` / `night`; manual mode exposes red/blue gains
@@ -188,7 +188,8 @@ These settings enter runtime through environment variables or config files. Name
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | Manual white-balance red/blue gains |
 | `camera_night_mode` | `false` | Apply night white-balance flag at startup |
-| `camera_auto_exposure_max_us` | `600000` | Longest AE frame duration; dark scenes may fall to about 1.7 fps |
+| `camera_tuning_file` | empty | Optional Picamera2 tuning override path; the bundled IMX327 tuning is used by default |
+| `camera_auto_exposure_max_us` | `1000000` | Longest AE frame duration; dark scenes may fall to about 1 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | Enable the low-resolution helper stream |

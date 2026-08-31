@@ -69,6 +69,7 @@ _CATALOG_SECTIONS: tuple[
             "camera_ae_polar_preset",
             "camera_ae_exposure_value",
             "camera_ae_aggressive_enabled",
+            "camera_tuning_file",
             "camera_auto_exposure_max_us",
             "camera_ae_flicker_mode",
             "camera_noise_reduction_mode",
