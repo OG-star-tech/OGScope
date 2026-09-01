@@ -65,7 +65,10 @@ class CameraManager:
         self._probe_timeout_sec = max(0.5, float(settings.camera_probe_timeout_sec))
         self._capture_timeout_sec = max(0.5, float(settings.camera_capture_timeout_sec))
         self._grabber_drain_timeout_sec = self._capture_timeout_sec + 1.0
-        self._stop_timeout_sec = 4.0
+        # 停止预算必须覆盖仍在收敛的最长抓帧，否则一次正常的 1 秒 AE 首帧超时
+        # 会把 libcamera 留在不可回收状态。 / Stop must outlive an in-flight
+        # long-AE convergence frame or a recoverable startup becomes unrecoverable.
+        self._stop_timeout_sec = max(4.0, self._capture_timeout_sec + 2.0)
         self._close_timeout_sec = 2.5
         self._stale_timeout_sec = max(
             0.5, float(settings.camera_frame_stale_timeout_sec)

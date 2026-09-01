@@ -171,6 +171,14 @@ def test_preview_fps_is_independent_runtime_setting() -> None:
     assert manager._target_fps == 12
 
 
+def test_lifecycle_stop_budget_outlives_long_exposure_capture() -> None:
+    """停止预算必须覆盖长曝光抓帧收敛 / Stop budget must outlive long-AE capture."""
+    manager = CameraManager()
+
+    assert manager._capture_timeout_sec >= 8.0
+    assert manager._stop_timeout_sec >= manager._capture_timeout_sec + 2.0
+
+
 @pytest.mark.asyncio
 async def test_stop_timeout_keeps_camera_handle_and_blocks_reacquire() -> None:
     """stop 超时后不得丢弃仍占用 libcamera 的实例 / Keep the handle after stop timeout."""

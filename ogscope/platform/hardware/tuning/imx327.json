@@ -1,7 +1,7 @@
 {
     "version": 2.0,
     "target": "bcm2835",
-    "description": "OGScope 产品自维护 IMX327 tuning，长曝光曲线扩展至 1 秒 / OGScope product-owned IMX327 tuning with a one-second long-exposure curve.",
+    "description": "OGScope 产品自维护 IMX327 + 16mm F1.4 tuning，星空曲线优先快门并扩展至 1 秒 / OGScope product-owned IMX327 + 16mm F1.4 tuning with shutter-first starfield exposure up to one second.",
     "algorithms": [
         {
             "rpi.black_level":
@@ -88,7 +88,7 @@
                     "long":
                     {
                         "shutter": [ 1000, 30000, 60000, 120000, 250000, 500000, 1000000, 1000000, 1000000, 1000000 ],
-                        "gain": [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 4.0, 12.0 ]
+                        "gain": [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 4.0, 4.0 ]
                     }
                 },
                 "constraint_modes":
@@ -113,6 +113,18 @@
                             [
                                 0, 0.8,
                                 1000, 0.8
+                            ]
+                        }
+                    ],
+                    "shadows": [
+                        {
+                            "bound": "LOWER",
+                            "q_lo": 0.0,
+                            "q_hi": 0.5,
+                            "y_target":
+                            [
+                                0, 0.17,
+                                1000, 0.17
                             ]
                         }
                     ]
