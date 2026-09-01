@@ -349,9 +349,18 @@ class Settings(BaseSettings):
         ge=3000,
         le=120000,
         description=(
-            "MJPEG 循环单次取帧（含编码线程）最大等待毫秒；超时则结束流并释放名额，"
-            "避免异常断开时长时间占满并发 / Max wait per MJPEG frame fetch (incl. encode thread); "
-            "on timeout the stream ends to free slots after abnormal client disconnect"
+            "MJPEG 循环单次取帧（含编码线程）最大等待毫秒；超时表示相机取帧停滞 / "
+            "Max wait per MJPEG frame fetch (incl. encode thread); timeout means camera fetch stalled"
+        ),
+    )
+    stream_mjpeg_client_stall_timeout_ms: int = Field(
+        default=30000,
+        ge=0,
+        le=300000,
+        description=(
+            "MJPEG 下游发送无进展的最大毫秒数；至少比取帧超时多 5 秒，0=禁用 / "
+            "Max time without downstream MJPEG send progress; effectively at least 5s above "
+            "frame-fetch timeout; 0=disabled"
         ),
     )
 
