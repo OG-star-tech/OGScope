@@ -560,6 +560,25 @@ def test_analysis_camera_solve_skipped_when_recording_active(
 
 
 @pytest.mark.unit
+def test_analysis_camera_solve_yields_to_core_realtime(
+    client, temp_analysis_dir, mock_plate_solve, monkeypatch
+):
+    """正式 Core 解算运行时开发者相机解算让路 / Developer solve yields to Core realtime."""
+    from ogscope.core.realtime import realtime_solve_service
+
+    monkeypatch.setattr(realtime_solve_service.state, "running", True)
+    resp = client.post(
+        "/api/dev/analysis/solve/frame",
+        json={"source": "camera"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["gate_status"] == "SKIPPED_BUSY"
+    assert "core realtime" in data["gate_reason"]
+
+
+@pytest.mark.unit
 def test_analysis_replace_transcoded_video_updates_sidecar(
     client, temp_analysis_dir, tmp_path: Path
 ):
