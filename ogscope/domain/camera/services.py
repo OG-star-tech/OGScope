@@ -163,11 +163,24 @@ class StreamStateDomainService:
         from ogscope.web.camera_shared import get_camera_manager
 
         metrics = await get_camera_manager().stream_metrics()
+        limiter_metrics = await limiter.snapshot()
+        configured_stall_timeout_ms = int(
+            settings.stream_mjpeg_client_stall_timeout_ms
+        )
+        effective_stall_timeout_ms = (
+            max(
+                configured_stall_timeout_ms,
+                int(settings.stream_mjpeg_frame_fetch_timeout_ms) + 5000,
+            )
+            if configured_stall_timeout_ms > 0
+            else 0
+        )
         return {
             "max_clients": int(limiter.max_clients),
-            "active_clients": int(limiter.active_clients),
             "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
+            "client_stall_timeout_ms": effective_stall_timeout_ms,
             "target_preview_fps": int(metrics["preview_target_fps"]),
+            **limiter_metrics,
             **metrics,
         }
 

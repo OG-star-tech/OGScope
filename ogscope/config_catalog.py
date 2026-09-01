@@ -103,6 +103,7 @@ _CATALOG_SECTIONS: tuple[
             "keep_raw_cache",
             "stream_max_mjpeg_clients",
             "stream_mjpeg_frame_fetch_timeout_ms",
+            "stream_mjpeg_client_stall_timeout_ms",
         ),
     ),
     (

@@ -568,7 +568,13 @@ class CoreStreamStatusResponse(BaseModel):
     max_clients: int
     active_clients: int
     frame_fetch_timeout_ms: int
+    client_stall_timeout_ms: int = 0
     target_preview_fps: int
+    oldest_client_age_ms: int = 0
+    oldest_client_idle_ms: int = 0
+    released_clients_total: int = 0
+    stalled_clients_total: int = 0
+    release_reasons: dict[str, int] = Field(default_factory=dict)
     sensor_target_fps: float = 0.0
     preview_target_fps: int = 0
     actual_capture_fps: float = 0.0
