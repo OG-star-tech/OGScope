@@ -81,7 +81,10 @@ class MjpegStreamLimiter:
                     * 1000
                 ),
                 "oldest_client_idle_ms": int(
-                    max((now - state.last_progress_mono for state in states), default=0.0)
+                    max(
+                        (now - state.last_progress_mono for state in states),
+                        default=0.0,
+                    )
                     * 1000
                 ),
                 "released_clients_total": sum(self._release_reasons.values()),

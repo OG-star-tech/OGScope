@@ -24,7 +24,6 @@ from ogscope.domain.camera.stream_limiter import (
 from ogscope.web.camera_shared import get_camera_manager
 from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 
-
 _cleanup_tasks: set[asyncio.Task[Any]] = set()
 _module_logger = logging.getLogger(__name__)
 

@@ -164,9 +164,7 @@ class StreamStateDomainService:
 
         metrics = await get_camera_manager().stream_metrics()
         limiter_metrics = await limiter.snapshot()
-        configured_stall_timeout_ms = int(
-            settings.stream_mjpeg_client_stall_timeout_ms
-        )
+        configured_stall_timeout_ms = int(settings.stream_mjpeg_client_stall_timeout_ms)
         effective_stall_timeout_ms = (
             max(
                 configured_stall_timeout_ms,
