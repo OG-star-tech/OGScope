@@ -241,6 +241,7 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     )
     assert start.status_code == 200
     assert start.json()["state"] == "running"
+    assert received["session_id"] == start.json()["session_id"]
     assert received["solve_context"].quality.time_fresh is False
     assert received["solve_context"].quality.camera_pose_calibrated is False
     first_session_id = start.json()["session_id"]
