@@ -50,6 +50,8 @@ rsync -avz --delete \
   --exclude 'node_modules/' \
   --exclude '__pycache__/' \
   --exclude '.pytest_cache/' \
+  --exclude '.ruff_cache/' \
+  --exclude '.DS_Store' \
   --exclude '.coverage' \
   --exclude 'htmlcov/' \
   --exclude 'uploads/' \
