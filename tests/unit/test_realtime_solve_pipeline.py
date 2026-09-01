@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import json
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -42,3 +43,20 @@ def test_completed_realtime_frame_clears_transient_error() -> None:
     service._apply_solve_result(solved)
 
     assert service.state.last_error == ""
+
+
+def test_analysis_event_carries_session_correlation() -> None:
+    """结构化事件携带会话关联 ID / Structured events carry the session correlation ID."""
+    service = RealtimeSolveService()
+    service.state.session_id = "solve-123"
+    service.state.started_mono = 1.0
+
+    with patch("ogscope.core.realtime.service.logger") as mocked_logger:
+        service._log_event("fullsolve_finished", status="NO_MATCH", detected_stars=2)
+
+    template, payload_raw = mocked_logger.info.call_args.args
+    payload = json.loads(payload_raw)
+    assert template == "analysis_event {}"
+    assert payload["session_id"] == "solve-123"
+    assert payload["event"] == "fullsolve_finished"
+    assert payload["status"] == "NO_MATCH"
