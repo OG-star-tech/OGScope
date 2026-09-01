@@ -42,8 +42,36 @@
     - `aeFlickerMode`
     - `noiseReductionMode`
     - `previewEncoder`
+  - 开发 UI 的曝光输入与普通摘要统一显示为秒；提交到现有 API、预设和侧车时仍换算并保留 `exposure_us` / `autoExposureMaxUs` 微秒字段，避免破坏兼容性。
+
+### 星点焦点校准
+
+- `POST /api/dev/debug/camera/focus/session/start`
+  - 暂存当前相机曝光、增益和降噪设置，锁定当前实测曝光/增益并关闭降噪，使同一轮焦点趋势可比较。
+- `POST /api/dev/debug/camera/focus/session/stop`
+  - 恢复开始校准前的相机设置；重复停止安全返回未激活状态。
+- `GET /api/dev/debug/camera/focus/metrics`
+  - 用途：基于当前原始相机帧计算实时星点锐度，引导用户手动调整镜头焦距。
+  - 可选查询参数：`target_x` 与 `target_y`，均为 `0..1` 归一化坐标；必须成对提供，用于锁定预览画面中点击的星点。
+  - 响应包含：
+    - `aggregate.median_hfd_px` / `aggregate.hfd_mad_px`：可用星点的 HFD 中位数与离散度
+    - `aggregate.median_fwhm_px`：可用星点的 FWHM 中位数
+    - `aggregate.median_concentration`：星点核心能量集中度
+    - `stars` / `selected_star`：候选星点及当前选择
+    - `stars_detected` / `stars_measured` / `stars_used`：检测、测量与质量筛选计数
+    - `detection`：局部背景/噪声阈值、点击目标是否强制测量，以及分阶段淘汰计数
+    - `undersampled` / `peak_snr` / `aperture_radius_px`：小星点采样状态和自适应测光信息
+  - 自动候选使用焦点专用局部背景与噪声 σ 提取，不执行会删除单像素星点的形态学开运算；点击目标会在点击位置附近直接搜索局部峰值，不受全局候选数量限制。
+  - HFD 与 FWHM 越低通常表示越锐利；这些数值只适合在同一镜头、曝光、增益与目标区域下做相对比较，不是跨设备绝对标定值。
 
 ## 分析实验扩展
+
+### 解算管线边界
+
+- `/api/core/v1/analysis/*` 与 `/api/dev/analysis/*` 保留不同的产品/实验接口职责，但两者的当前帧星图解算统一使用 `PlateSolver.solve_from_bgr_frame()` 的 Tetra 提星与匹配管线。
+- 开发接口可覆盖提星参数和实验分档；Core 使用服务端生产默认值，不向上层暴露实验分档。
+- `StarExtractor` 仍用于焦点校准、轻量星点计数和性能基线，不作为产品级 plate solve 的权威提星结果。
+- 历史的 Core `StarExtractor -> PlateSolver.solve()` 组合已停止使用；这是内部实现迁移，不弃用任何 `/api/core/v1/*` 或 `/api/dev/*` HTTP 路径。
 
 - `POST /api/dev/analysis/solve/frame`
 - `POST /api/dev/analysis/solve/frame_upload`

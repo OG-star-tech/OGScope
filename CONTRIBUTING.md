@@ -132,7 +132,7 @@
 
 流程：`feature/*` / `fix/*` → PR → `staging` → 测试通过后 PR → `main`。
 
-**禁止直接向 `main` 或 `staging` 提交或推送**（本地 pre-commit 会拦截；remote 需配置 GitHub Rulesets 或 Branch protection，见 [.github/scripts/apply-branch-protection.sh](../.github/scripts/apply-branch-protection.sh)）。
+**禁止直接向 `main` 或 `staging` 提交或推送**（本地 pre-commit 会拦截；remote 需配置 GitHub Rulesets 或 Branch protection，见 [.github/scripts/apply-branch-protection.sh](.github/scripts/apply-branch-protection.sh)）。
 
 **已废弃**：不再使用 `develop`、`dev`、`dev-latest` 集成分支。
 

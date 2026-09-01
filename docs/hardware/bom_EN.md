@@ -27,8 +27,10 @@ English | [中文](bom.md)
 ### IMX327 module
 
 - **Sensor**: Sony IMX327
+- **Lens**: 16mm F1.4 low-light lens, 5MP optical rating, M12 mount, with IR-cut filter
 - **Resolution**: 1920×1080 (2MP)
-- **Pixel**: 2.9 µm
+- **Pixel**: 2.9 µm × 2.9 µm
+- **Field of view**: about 19.74° × 11.18° nominal at 1920×1080; about 13.01° × 7.34° product-calibrated for the default 1280×720 mode
 - **Interface**: MIPI CSI
 - **Sensitivity**: suited for polar scope use
 - **Sourcing**: Taobao / AliExpress

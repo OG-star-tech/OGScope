@@ -71,6 +71,13 @@ def test_core_camera_ambient_hint_from_metadata() -> None:
                 "actual_exposure_us": 80_000,
                 "auto_exposure_max_us": 100_000,
                 "actual_digital_gain": 2.0,
+                "optics": {
+                    "effective_fov_deg": {
+                        "width": 13.01,
+                        "height": 7.34,
+                        "source": "product_calibrated",
+                    }
+                },
             },
         }
     )
@@ -78,8 +85,101 @@ def test_core_camera_ambient_hint_from_metadata() -> None:
     hint = normalized["ambient_hint"]
     assert hint["available"] is True
     assert hint["source"] == "camera_metadata"
+    assert normalized["info"]["optics"]["effective_fov_deg"]["width"] == 13.01
     assert 0.0 <= hint["dark_score"] <= 1.0
     assert hint["exposure_us"] == 80_000
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
+    """启动成功仍须确认真实流就绪 / A successful command still requires stream readiness."""
+    from ogscope.core.application import core_service
+
+    events: list[str] = []
+
+    class _HardwareClient:
+        async def device_command(self, service: str, command: str) -> dict:
+            assert (service, command) == ("camera", "start")
+            events.append("hardware_plane")
+            return {"success": True}
+
+    async def _start() -> dict:
+        events.append("camera_domain")
+        return {"success": True, "message": "start accepted"}
+
+    async def _not_ready() -> dict:
+        return {
+            "success": True,
+            "connected": True,
+            "streaming": False,
+            "info": {"model": "IMX327"},
+            "error": "camera did not report a valid stream",
+        }
+
+    service = core_service.CoreContractService()
+    monkeypatch.setattr(core_service, "get_hardware_plane_client", _HardwareClient)
+    monkeypatch.setattr(core_service.camera_domain_service, "start", _start)
+    monkeypatch.setattr(service, "get_camera_status", _not_ready)
+
+    result = await service.start_camera()
+
+    assert events == ["camera_domain", "hardware_plane"]
+    assert result["success"] is False
+    assert result["info"]["model"] == "IMX327"
+    assert result["applied"] == {
+        "action": "start",
+        "hardware_plane_ok": True,
+        "ready": False,
+        "connected": True,
+        "streaming": False,
+    }
+    assert result["message"] == "camera did not report a valid stream"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_core_camera_tune_writes_manual_baseline_before_enabling_ae(
+    monkeypatch,
+) -> None:
+    """同时恢复 AE 时先写手动基线 / Combined AE restore writes the manual baseline first."""
+    from ogscope.core.application import core_service
+
+    events: list[tuple[str, object]] = []
+
+    async def _update_settings(settings: dict) -> dict:
+        events.append(("settings", settings))
+        return {"success": True}
+
+    async def _set_auto_exposure(enabled: bool) -> dict:
+        events.append(("auto_exposure", enabled))
+        return {"success": True}
+
+    async def _status() -> dict:
+        return {"info": {"exposure_us": 600_000, "auto_exposure": True}}
+
+    monkeypatch.setattr(
+        core_service.camera_domain_service, "update_settings", _update_settings
+    )
+    monkeypatch.setattr(
+        core_service.camera_domain_service,
+        "set_auto_exposure_mode",
+        _set_auto_exposure,
+    )
+    monkeypatch.setattr(core_service.camera_domain_service, "get_status", _status)
+
+    result = await core_service.CoreContractService().tune_camera(
+        {"exposure_us": 600_000, "auto_exposure": True}
+    )
+
+    assert events == [
+        ("settings", {"exposure": 600_000, "autoExposure": False}),
+        ("auto_exposure", True),
+    ]
+    assert result["applied"] == {
+        "exposure_us": 600_000,
+        "auto_exposure": True,
+    }
 
 
 @pytest.mark.unit
@@ -102,8 +202,10 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     """开始-查询-结束分析生命周期 / Start-result-stop lifecycle."""
     from ogscope.core.application import core_service
 
+    received: dict = {}
+
     async def _fake_start(**kwargs):  # noqa: ANN003
-        _ = kwargs
+        received.update(kwargs)
         return {"success": True, "message": "started"}
 
     async def _fake_status():
@@ -122,19 +224,43 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
     monkeypatch.setattr(core_service.realtime_solve_service, "get_status", _fake_status)
     monkeypatch.setattr(core_service.realtime_solve_service, "stop", _fake_stop)
 
-    start = client.post("/api/core/v1/analysis/start", json={})
+    start = client.post(
+        "/api/core/v1/analysis/start",
+        json={
+            "solve_context": {
+                "quality": {
+                    "gps_valid": True,
+                    "time_valid": True,
+                    "time_fresh": False,
+                    "heading_valid": True,
+                    "mount_valid": True,
+                    "camera_pose_calibrated": False,
+                }
+            }
+        },
+    )
     assert start.status_code == 200
     assert start.json()["state"] == "running"
+    assert received["session_id"] == start.json()["session_id"]
+    assert received["solve_context"].quality.time_fresh is False
+    assert received["solve_context"].quality.camera_pose_calibrated is False
+    first_session_id = start.json()["session_id"]
 
     result = client.get("/api/core/v1/analysis/result")
     assert result.status_code == 200
     body = result.json()
     assert body["state"] == "running"
     assert body["result"]["status"] == "MATCH_FOUND"
+    assert body["session_id"] == first_session_id
 
     stop = client.post("/api/core/v1/analysis/stop", json={})
     assert stop.status_code == 200
     assert stop.json()["state"] == "stopped"
+
+    restarted = client.post("/api/core/v1/analysis/start", json={})
+    assert restarted.status_code == 200
+    assert restarted.json()["session_id"] != first_session_id
+    client.post("/api/core/v1/analysis/stop", json={})
 
 
 @pytest.mark.unit
@@ -253,6 +379,31 @@ def test_core_video_info_rejects_invalid_filename(client) -> None:
 
 
 @pytest.mark.unit
+def test_core_camera_preview_stream_is_product_contract(client, monkeypatch) -> None:
+    """Core 预览应暴露稳定 MJPEG 契约 / Core preview exposes stable MJPEG contract."""
+    from fastapi.responses import StreamingResponse
+
+    from ogscope.web.api.core import routes as core_routes
+
+    async def _fake_stream(*_args, **_kwargs):
+        async def _frames():
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\ntest\r\n"
+
+        return StreamingResponse(
+            _frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    monkeypatch.setattr(core_routes, "build_camera_mjpeg_stream", _fake_stream)
+
+    resp = client.get("/api/core/v1/camera/preview/stream?quality=75")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("multipart/x-mixed-replace")
+    assert b"Content-Type: image/jpeg" in resp.content
+
+
+@pytest.mark.unit
 def test_docs_are_split_between_core_and_dev(client) -> None:
     """文档默认 core，dev 单独入口 / Docs split into core default and dev page."""
     docs = client.get("/docs")
@@ -288,6 +439,7 @@ def test_core_openapi_contains_required_business_endpoints(client) -> None:
         "/api/core/v1/analysis/result",
         "/api/core/v1/analysis/stop",
         "/api/core/v1/camera/status",
+        "/api/core/v1/camera/preview/stream",
     }
     assert required.issubset(paths)
     assert all(path.startswith("/api/core/v1/") for path in paths)

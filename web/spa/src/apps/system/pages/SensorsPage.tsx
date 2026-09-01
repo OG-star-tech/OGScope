@@ -26,7 +26,7 @@ function formatJson(data: unknown): string {
 }
 
 export function SensorsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [bus, setBus] = useState(1);
   const [addr, setAddr] = useState(12);
   const [runI2cdetect, setRunI2cdetect] = useState(true);
@@ -91,7 +91,11 @@ export function SensorsPage() {
         { method: "POST" },
       );
       setResult(data);
-      setMagCalHint("已开始方向校准，请缓慢旋转设备 5-15 秒。");
+      setMagCalHint(
+        locale === "zh"
+          ? "已开始方向校准，请缓慢旋转设备 5-15 秒。"
+          : "Heading calibration started. Rotate the device slowly for 5–15 seconds.",
+      );
       const status = await requestDevDebugJson<MagCalStatus>(
         `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
       );
@@ -102,7 +106,7 @@ export function SensorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [addr, bus]);
+  }, [addr, bus, locale]);
 
   const runMagCalCommit = useCallback(async () => {
     setLoading(true);
@@ -114,7 +118,7 @@ export function SensorsPage() {
         { method: "POST" },
       );
       setResult(data);
-      setMagCalHint("已保存并锁定方向校准。");
+      setMagCalHint(locale === "zh" ? "已保存并锁定方向校准。" : "Heading calibration saved and locked.");
       const status = await requestDevDebugJson<MagCalStatus>(
         `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
       );
@@ -125,9 +129,14 @@ export function SensorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [addr, bus]);
+  }, [addr, bus, locale]);
 
   const runMagCalReset = useCallback(async () => {
+    if (!window.confirm(
+      locale === "zh"
+        ? "重置已保存的方向校准并恢复自动模式？"
+        : "Reset the saved heading calibration and return to auto mode?",
+    )) return;
     setLoading(true);
     setError(null);
     try {
@@ -137,7 +146,7 @@ export function SensorsPage() {
         { method: "POST" },
       );
       setResult(data);
-      setMagCalHint("已重置到自动模式。");
+      setMagCalHint(locale === "zh" ? "已重置到自动模式。" : "Calibration reset to auto mode.");
       const status = await requestDevDebugJson<MagCalStatus>(
         `/api/debug/sensors/magnetometer/calibration/status?${qs.toString()}`,
       );
@@ -148,7 +157,7 @@ export function SensorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [addr, bus]);
+  }, [addr, bus, locale]);
 
   const runMagCalStatus = useCallback(async () => {
     setLoading(true);

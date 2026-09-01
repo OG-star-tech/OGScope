@@ -5,11 +5,16 @@
 """
 
 import logging
+import math
+import time
 from abc import ABC, abstractmethod
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 
+from ogscope.camera_optics import IMX327_16MM_F14_OPTICS
 from ogscope.domain.camera.driver import CameraCapabilities, LinuxpyV4L2Driver
 
 logger = logging.getLogger(__name__)
@@ -58,8 +63,15 @@ class IMX327MIPICamera(CameraInterface):
     """IMX327 MIPI 相机驱动 - 基于 Picamera2 / IMX327 MIPI camera driver - based on Picamera2"""
 
     SENSOR_MAX_WIDTH = 1920
-    SENSOR_MAX_HEIGHT = 1020
+    SENSOR_MAX_HEIGHT = 1080
     PREVIEW_BUFFER_COUNT = 2
+    AE_SUPERVISOR_INTERVAL_S = 1.0
+    AE_SUPERVISOR_STEP_EV = 0.5
+    AE_DARK_CONFIRM_FRAMES = 2
+    AE_BRIGHT_CONFIRM_FRAMES = 2
+    AUTO_EXPOSURE_MAX_US = 1_000_000
+    LUMINANCE_STATS_MAX_SAMPLES = 32_768
+    PRODUCT_TUNING_FILE = Path(__file__).with_name("tuning") / "imx327.json"
     MANUAL_CONTROL_RANGE_DEFAULTS = {
         "ExposureTime": {"min": 1000, "max": 100000, "default": 10000, "step": 1000},
         "AnalogueGain": {"min": 1.0, "max": 16.0, "default": 1.0, "step": 0.1},
@@ -76,8 +88,19 @@ class IMX327MIPICamera(CameraInterface):
         self.backend_name = "picamera2/libcamera"
         self.output_pixel_format = "RGB888"
         self._frame_duration_limits: tuple[int, int] | None = None
+        self._frame_duration_control = "not_applied"
+        self._frame_duration_control_error: str | None = None
         self._lores_available = False
         self._last_lores_stats: dict[str, Any] = {}
+        self._pending_capture_job = None
+        self.tuning_file = (
+            Path(str(config["tuning_file"])).expanduser()
+            if config.get("tuning_file")
+            else None
+        )
+        self._tuning_source = "system_default"
+        self._tuning_loaded = False
+        self._tuning_error: str | None = None
 
         # 相机参数 / Camera parameters
         requested_width = int(config.get("width", 640))
@@ -100,7 +123,16 @@ class IMX327MIPICamera(CameraInterface):
         self.white_balance_gain_r = config.get("white_balance_gain_r", 1.0)
         self.white_balance_gain_b = config.get("white_balance_gain_b", 1.0)
         self.night_mode = bool(config.get("night_mode", False))
-        self.auto_exposure_max_us = int(config.get("auto_exposure_max_us", 2_000_000))
+        self.auto_exposure_max_us = max(
+            10_000,
+            min(
+                self.AUTO_EXPOSURE_MAX_US,
+                int(config.get("auto_exposure_max_us", self.AUTO_EXPOSURE_MAX_US)),
+            ),
+        )
+        self.capture_timeout_sec = max(
+            0.5, float(config.get("capture_timeout_sec", 4.0))
+        )
         self.ae_flicker_mode = str(config.get("ae_flicker_mode", "off")).lower()
         self.noise_reduction_mode = self._normalize_noise_reduction_mode(
             config.get("noise_reduction_mode", config.get("noise_reduction", "fast"))
@@ -123,7 +155,22 @@ class IMX327MIPICamera(CameraInterface):
 
         # 电子极轴镜默认 AE 策略（约 16mm 广角、低帧率夜空）；仍由 libcamera ISP 闭环 / Polar-scope AE defaults (16mm, dark sky; ISP AE loop).
         self.ae_polar_preset = bool(config.get("ae_polar_preset", True))
-        self.ae_exposure_value = float(config.get("ae_exposure_value", 0.35))
+        self.ae_exposure_value = float(config.get("ae_exposure_value", 1.0))
+        self.ae_aggressive_enabled = bool(config.get("ae_aggressive_enabled", True))
+        # Start every AE session from neutral. Dark-scene supervision may then
+        # raise EV, while daylight never inherits a night-sky bias at startup.
+        # 每次 AE 会话都从中性补偿开始；暗场监督随后按需抬升 EV，白天启动时不会
+        # 继承夜空增益偏置。
+        self._ae_effective_exposure_value = 0.0
+        self._ae_last_adjust_at = 0.0
+        self._ae_scene_mode = "evaluating"
+        self._ae_dark_frames = 0
+        self._ae_bright_frames = 0
+        self._ae_control_backend = "unavailable"
+        self._ae_requested_exposure_mode = "long"
+        self._ae_requested_constraint_mode = "normal"
+        self._ae_applied_controls: list[str] = []
+        self._ae_control_error: str | None = None
 
         logger.info(
             f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps"
@@ -272,7 +319,7 @@ class IMX327MIPICamera(CameraInterface):
         if mode not in {"supersample", "native", "crop"}:
             mode = "native"
         if mode == "supersample":
-            # 先采满幅 1920×1020，再经 _resize_preserve_fov 缩到输出（保留整幅视场，非中心裁切）
+            # 先采满幅 1920×1080，再经 _resize_preserve_fov 缩到输出（保留整幅视场，非中心裁切）
             # Full sensor readout then letterbox resize to output (full FOV preserved, not center crop).
             capture_w = self.SENSOR_MAX_WIDTH
             capture_h = self.SENSOR_MAX_HEIGHT
@@ -378,19 +425,26 @@ class IMX327MIPICamera(CameraInterface):
     def _apply_frame_duration_controls(self) -> None:
         """优先应用 FrameDurationLimits，失败时回退 FrameRate / Prefer FrameDurationLimits, fallback to FrameRate."""
         if not self.camera:
+            self._frame_duration_control = "camera_unavailable"
             return
         limits = self._compute_frame_duration_limits()
         self._frame_duration_limits = limits
+        self._frame_duration_control_error = None
         if self._control_supported("FrameDurationLimits"):
             try:
                 self.camera.set_controls({"FrameDurationLimits": limits})
+                self._frame_duration_control = "frame_duration_limits"
                 return
             except Exception as e:
+                self._frame_duration_control_error = type(e).__name__
                 logger.debug("FrameDurationLimits 未生效，回退 FrameRate: %s", e)
         try:
             self.camera.set_controls({"FrameRate": float(self.fps)})
-        except Exception:
-            pass
+            self._frame_duration_control = "frame_rate_fallback"
+        except Exception as e:
+            self._frame_duration_control = "failed"
+            self._frame_duration_control_error = type(e).__name__
+            logger.debug("帧周期控制未生效 / Frame-duration control failed: %s", e)
 
     def _noise_reduction_control_value(self) -> Any:
         """将语义模式映射到 libcamera 降噪枚举/整数 / Map semantic NR mode to libcamera value."""
@@ -482,30 +536,199 @@ class IMX327MIPICamera(CameraInterface):
             buffer_count=self.PREVIEW_BUFFER_COUNT,
         )
 
-    def _collect_lores_stats(self, request: Any) -> None:
-        """从 lores 流提取轻量亮度统计 / Extract lightweight luminance stats from lores stream."""
-        if not self._lores_available:
+    @staticmethod
+    def _histogram_percentile(histogram: np.ndarray, percentile: float) -> int:
+        """从 8 位直方图读取最近秩百分位 / Read nearest-rank percentile from an 8-bit histogram."""
+        total = int(histogram.sum())
+        if total <= 0:
+            return 0
+        rank = max(1, int(math.ceil(total * percentile / 100.0)))
+        return int(np.searchsorted(np.cumsum(histogram), rank, side="left"))
+
+    def _luminance_stats(self, luminance: np.ndarray, *, source: str) -> dict[str, Any]:
+        """用有界采样直方图计算亮度统计 / Compute luminance stats with a bounded histogram sample."""
+        values = np.asarray(luminance)
+        if values.ndim >= 2 and values.size > self.LUMINANCE_STATS_MAX_SAMPLES:
+            stride = max(
+                1,
+                int(
+                    math.ceil(math.sqrt(values.size / self.LUMINANCE_STATS_MAX_SAMPLES))
+                ),
+            )
+            values = values[::stride, ::stride]
+        values = np.clip(values.reshape(-1), 0, 255).astype(np.uint8, copy=False)
+        histogram = np.bincount(values, minlength=256)
+        sample_count = int(histogram.sum())
+        if sample_count <= 0:
+            return {}
+        levels = np.arange(256, dtype=np.float64)
+        return {
+            "source": source,
+            "sample_count": sample_count,
+            "mean": float(np.dot(histogram, levels) / sample_count),
+            "min": int(np.flatnonzero(histogram)[0]),
+            "max": int(np.flatnonzero(histogram)[-1]),
+            "p50": float(self._histogram_percentile(histogram, 50.0)),
+            "p90": float(self._histogram_percentile(histogram, 90.0)),
+            "p99": float(self._histogram_percentile(histogram, 99.0)),
+            "p99_8": float(self._histogram_percentile(histogram, 99.8)),
+            "saturated_fraction": float(histogram[250:].sum() / sample_count),
+        }
+
+    def _collect_lores_stats(
+        self, request: Any, main_image: np.ndarray | None = None
+    ) -> None:
+        """优先从 lores 提取统计，失败时有界采样主流 / Prefer lores stats; bounded main-stream fallback."""
+        luminance: np.ndarray | None = None
+        source = "main_fallback"
+        if self._lores_available:
+            try:
+                lores = request.make_array("lores")
+                if lores is not None:
+                    if (
+                        len(getattr(lores, "shape", ())) == 2
+                        and lores.shape[0] >= self.lores_height
+                    ):
+                        luminance = lores[: self.lores_height, :]
+                    elif len(getattr(lores, "shape", ())) >= 3:
+                        luminance = lores[..., 0]
+                    else:
+                        luminance = lores
+                    source = "lores"
+            except Exception as e:
+                logger.debug(
+                    "读取 lores 统计失败，回退主流 / Lores stats failed; using main stream: %s",
+                    e,
+                )
+        if luminance is None and main_image is not None:
+            # RGB 主流用绿色通道作为低分配亮度近似；曝光监督不需要精确色度转换。
+            # Use green as a low-allocation RGB luminance proxy; AE supervision does not need chroma accuracy.
+            luminance = main_image[..., 1] if main_image.ndim >= 3 else main_image
+        if luminance is None:
             return
         try:
-            lores = request.make_array("lores")
-            if lores is None:
+            stats = self._luminance_stats(luminance, source=source)
+            if not stats:
                 return
-            if (
-                len(getattr(lores, "shape", ())) == 2
-                and lores.shape[0] >= self.lores_height
-            ):
-                y_plane = lores[: self.lores_height, :]
-            elif len(getattr(lores, "shape", ())) >= 3:
-                y_plane = lores[..., 0]
-            else:
-                y_plane = lores
-            self._last_lores_stats = {
-                "mean": float(np.mean(y_plane)),
-                "min": int(np.min(y_plane)),
-                "max": int(np.max(y_plane)),
-            }
+            self._last_lores_stats = stats
+            self._update_aggressive_auto_exposure(stats)
         except Exception as e:
-            logger.debug("读取 lores 统计失败 / Failed to read lores stats: %s", e)
+            logger.debug("亮度统计失败 / Failed to compute luminance stats: %s", e)
+
+    def _desired_aggressive_ae_ev(self, stats: dict[str, Any]) -> float:
+        """按暗部与高光占比选择 AE 补偿 / Select AE bias from shadows and highlight share."""
+        p50 = float(stats.get("p50") or 0.0)
+        saturated = float(stats.get("saturated_fraction") or 0.0)
+        base = max(-2.0, min(2.0, float(self.ae_exposure_value)))
+
+        # A tiny clipped lamp must not black out the rest of the scene. Allow up
+        # to 2% clipping and aggressively lift a dark median; broad daylight or
+        # widespread clipping falls back to neutral compensation.
+        # 少量过曝路灯不应压黑整幅画面；允许最多 2% 高光裁切并积极抬升暗部中位数，
+        # 白天或大面积过曝时则回落到中性补偿。
+        if p50 >= 180.0 or saturated >= 0.20:
+            return 0.0
+        if p50 <= 40.0 and saturated <= 0.02:
+            return max(base, 1.5)
+        if p50 <= 80.0 and saturated <= 0.05:
+            return max(base, 1.0)
+        if p50 <= 120.0 and saturated <= 0.08:
+            return max(0.5, min(base, 1.0))
+        return min(base, 0.5)
+
+    def _classify_ae_scene(self, stats: dict[str, Any]) -> str:
+        """用低成本亮度统计识别星空或明亮场景 / Classify starfield or bright scenes cheaply."""
+        p50 = float(stats.get("p50") or 0.0)
+        p99_8 = float(stats.get("p99_8") or stats.get("p99") or 0.0)
+        saturated = float(stats.get("saturated_fraction") or 0.0)
+        dark = p50 <= 80.0 and p99_8 <= 200.0 and saturated <= 0.02
+        bright = p50 >= 160.0 or saturated >= 0.08
+
+        self._ae_dark_frames = self._ae_dark_frames + 1 if dark else 0
+        self._ae_bright_frames = self._ae_bright_frames + 1 if bright else 0
+        if p50 >= 180.0 or saturated >= 0.20:
+            return "daylight"
+        if self._ae_bright_frames >= self.AE_BRIGHT_CONFIRM_FRAMES:
+            return "daylight"
+        if self._ae_dark_frames >= self.AE_DARK_CONFIRM_FRAMES:
+            return "starfield"
+        return self._ae_scene_mode
+
+    @staticmethod
+    def _load_ae_control_namespace() -> tuple[Any | None, str]:
+        """优先读取 libcamera 枚举，兼容旧 Picamera2 导出 / Prefer libcamera AE enums."""
+        try:
+            from libcamera import controls as control_namespace
+
+            return control_namespace, "libcamera.controls"
+        except ImportError:
+            try:
+                from picamera2 import controls as control_namespace
+
+                return control_namespace, "picamera2.controls"
+            except ImportError:
+                return None, "unavailable"
+
+    def _reset_autonomous_ae_state(self) -> None:
+        """新 AE 会话从无场景偏见状态开始 / Start a fresh AE session without stale scene bias."""
+        self._ae_effective_exposure_value = 0.0
+        self._ae_last_adjust_at = 0.0
+        self._ae_scene_mode = "evaluating"
+        self._ae_dark_frames = 0
+        self._ae_bright_frames = 0
+        self._ae_requested_exposure_mode = "long"
+        self._ae_requested_constraint_mode = "normal"
+        self._ae_applied_controls = []
+        self._ae_control_error = None
+
+    def _update_aggressive_auto_exposure(self, stats: dict[str, Any]) -> None:
+        """自主切换星空 AE 并慢速调整 EV / Autonomously select starfield AE and supervise EV."""
+        if (
+            not self.camera
+            or not self.auto_exposure
+            or not self.ae_polar_preset
+            or not self.ae_aggressive_enabled
+        ):
+            return
+        now = time.monotonic()
+        if now - self._ae_last_adjust_at < self.AE_SUPERVISOR_INTERVAL_S:
+            return
+        scene_mode = self._classify_ae_scene(stats)
+        if scene_mode != self._ae_scene_mode:
+            self._ae_scene_mode = scene_mode
+            self._apply_polar_auto_exposure_controls()
+        desired = self._desired_aggressive_ae_ev(stats)
+        current = float(self._ae_effective_exposure_value)
+        delta = desired - current
+        if abs(delta) < 0.1:
+            self._ae_last_adjust_at = now
+            return
+        if desired <= 0.0 and (
+            float(stats.get("p50") or 0.0) >= 180.0
+            or float(stats.get("saturated_fraction") or 0.0) >= 0.20
+        ):
+            # Broad clipping needs an immediate daylight escape; a slow EV ramp
+            # leaves the preview unusable for several frames.
+            # 大面积过曝时立即回到日间中性值；逐档回落会让预览连续多帧不可用。
+            next_ev = 0.0
+        else:
+            step = min(abs(delta), self.AE_SUPERVISOR_STEP_EV)
+            next_ev = current + (step if delta > 0 else -step)
+        controls = self._camera_controls()
+        try:
+            if "ExposureValue" in controls:
+                self.camera.set_controls({"ExposureValue": next_ev})
+            elif "Brightness" in controls:
+                self.camera.set_controls(
+                    {"Brightness": max(-1.0, min(1.0, next_ev * 0.2))}
+                )
+            else:
+                return
+        except Exception as exc:
+            logger.debug("动态 AE 补偿未生效 / Dynamic AE bias failed: %s", exc)
+            return
+        self._ae_effective_exposure_value = next_ev
+        self._ae_last_adjust_at = now
 
     def _camera_capabilities(self) -> dict[str, Any]:
         """汇总相机能力供 API/UI 降级 / Summarize camera capabilities for API/UI fallback."""
@@ -538,7 +761,7 @@ class IMX327MIPICamera(CameraInterface):
         }
 
     def _apply_polar_auto_exposure_controls(self) -> None:
-        """libcamera AE 预设：暗部优先、矩阵测光、偏长曝光、EV；失败项跳过 / AE preset; skip unsupported controls."""
+        """应用自主场景 AE：星空优先长曝光，明亮场景快速恢复 / Apply autonomous scene AE."""
         if not self.camera or not self.auto_exposure:
             return
         if not self.ae_polar_preset:
@@ -549,43 +772,71 @@ class IMX327MIPICamera(CameraInterface):
             except Exception as e:
                 logger.debug("AeEnable only: %s", e)
             return
-        try:
-            from picamera2 import controls as pcc
-        except ImportError:
-            return
-
         cc = getattr(self.camera, "camera_controls", None) or {}
         updates: dict[str, Any] = {"AeEnable": True}
-        if hasattr(pcc, "AeConstraintModeEnum"):
-            updates["AeConstraintMode"] = pcc.AeConstraintModeEnum.Shadows
-        if hasattr(pcc, "AeMeteringModeEnum"):
-            updates["AeMeteringMode"] = pcc.AeMeteringModeEnum.Matrix
-        if hasattr(pcc, "AeExposureModeEnum"):
-            updates["AeExposureMode"] = pcc.AeExposureModeEnum.Long
-        ev = float(self.ae_exposure_value)
-        if abs(ev) > 1e-6:
-            if "ExposureValue" in cc:
-                updates["ExposureValue"] = ev
-            elif "Brightness" in cc:
-                updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
+        pcc, backend = self._load_ae_control_namespace()
+        self._ae_control_backend = backend
+        starfield = self._ae_scene_mode == "starfield"
+        self._ae_requested_constraint_mode = "shadows" if starfield else "normal"
+        # Long is a shutter-priority curve, not a forced one-second exposure.
+        # It still shortens exposure in daylight while avoiding noisy gain-first
+        # behavior in the product's primary starfield use case.
+        # Long 是快门优先曲线而非强制一秒曝光；白天仍会主动缩短曝光，同时避免
+        # 产品核心星空场景退回高增益优先行为。
+        self._ae_requested_exposure_mode = "long"
+        if pcc is not None:
+            constraint_enum = getattr(pcc, "AeConstraintModeEnum", None)
+            metering_enum = getattr(pcc, "AeMeteringModeEnum", None)
+            exposure_enum = getattr(pcc, "AeExposureModeEnum", None)
+            if constraint_enum is not None and "AeConstraintMode" in cc:
+                updates["AeConstraintMode"] = getattr(
+                    constraint_enum,
+                    "Shadows" if starfield else "Normal",
+                )
+            if metering_enum is not None and "AeMeteringMode" in cc:
+                updates["AeMeteringMode"] = metering_enum.Matrix
+            if exposure_enum is not None and "AeExposureMode" in cc:
+                updates["AeExposureMode"] = exposure_enum.Long
+        ev = float(self._ae_effective_exposure_value)
+        # Explicitly write the neutral value too. Omitting zero can leave a
+        # previous dark-scene bias active after returning to daylight.
+        # 中性值也必须显式写入；省略零值会让此前的暗场补偿残留到白天。
+        if "ExposureValue" in cc:
+            updates["ExposureValue"] = ev
+        elif "Brightness" in cc:
+            updates["Brightness"] = max(-1.0, min(1.0, ev * 0.2))
 
         try:
             self._apply_frame_duration_controls()
             self._apply_ae_flicker_controls()
             self.camera.set_controls(updates)
+            self._ae_applied_controls = sorted(updates)
+            self._ae_control_error = None
             logger.info(
-                "已应用电子极轴镜 AE 预设 (Shadows/Matrix/Long, EV≈%.2f)",
+                "已应用自主 AE 场景=%s constraint=%s exposure=%s EV≈%.2f / "
+                "Applied autonomous AE scene=%s constraint=%s exposure=%s EV≈%.2f",
+                self._ae_scene_mode,
+                self._ae_requested_constraint_mode,
+                self._ae_requested_exposure_mode,
+                ev,
+                self._ae_scene_mode,
+                self._ae_requested_constraint_mode,
+                self._ae_requested_exposure_mode,
                 ev,
             )
         except Exception as e:
+            self._ae_control_error = type(e).__name__
             logger.warning("AE 预设批量设置失败，逐项重试: %s", e)
+            applied: list[str] = []
             for key, val in updates.items():
                 if key != "AeEnable" and key not in cc:
                     continue
                 try:
                     self.camera.set_controls({key: val})
+                    applied.append(key)
                 except Exception as err:
                     logger.debug("AE 控制 %s 未生效: %s", key, err)
+            self._ae_applied_controls = sorted(applied)
 
     def _white_balance_controls(self) -> dict[str, Any]:
         """生成白平衡控制；auto 必须真正打开 AWB / Build WB controls; auto must really enable AWB."""
@@ -632,12 +883,56 @@ class IMX327MIPICamera(CameraInterface):
             return
         self.camera.set_controls(self._white_balance_controls())
 
+    def _load_picamera_tuning(self, picamera_type: Any) -> dict[str, Any] | None:
+        """加载产品或显式覆盖 tuning，失败时允许系统默认回退 / Load product or override tuning with safe fallback."""
+        tuning_path = self.tuning_file or self.PRODUCT_TUNING_FILE
+        source_prefix = "override" if self.tuning_file else "product"
+        self._tuning_source = f"{source_prefix}:{tuning_path.name}"
+        loader = getattr(picamera_type, "load_tuning_file", None)
+        if not callable(loader):
+            self._tuning_source = "system_default"
+            self._tuning_error = "load_tuning_file_unavailable"
+            return None
+        try:
+            tuning = loader(tuning_path.name, dir=str(tuning_path.parent))
+            self._tuning_loaded = True
+            self._tuning_error = None
+            return tuning
+        except Exception as e:
+            # API 只报告错误类型，完整路径只进入本机日志，避免泄露部署目录。
+            # The API reports only the error type; the full local path stays in logs.
+            self._tuning_source = "system_default"
+            self._tuning_loaded = False
+            self._tuning_error = type(e).__name__
+            logger.warning(
+                "相机 tuning 加载失败，回退系统默认 / Camera tuning load failed; using system default (%s): %s",
+                tuning_path,
+                e,
+            )
+            return None
+
     def initialize(self) -> bool:
         """初始化 MIPI 相机 / Initialize MIPI camera"""
         try:
             from picamera2 import Picamera2
 
-            self.camera = Picamera2()
+            tuning = self._load_picamera_tuning(Picamera2)
+            if tuning is None:
+                self.camera = Picamera2()
+            else:
+                try:
+                    self.camera = Picamera2(tuning=tuning)
+                except TypeError as e:
+                    # 旧版 Picamera2 构造器可能不支持 tuning 参数，保持可启动并明确降级。
+                    # Older Picamera2 constructors may reject tuning; keep startup viable and report fallback.
+                    self._tuning_source = "system_default"
+                    self._tuning_loaded = False
+                    self._tuning_error = type(e).__name__
+                    logger.warning(
+                        "Picamera2 不接受产品 tuning，回退系统默认 / Picamera2 rejected product tuning; using default: %s",
+                        e,
+                    )
+                    self.camera = Picamera2()
 
             # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
             # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
@@ -647,17 +942,30 @@ class IMX327MIPICamera(CameraInterface):
 
             # 设置相机控制参数 / Set camera control parameters
             # 构建控制参数，兼容部分固件未提供 DigitalGain 的情况 / Build control parameters, compatible with some firmwares that do not provide DigitalGain
-            controls = {
-                "ExposureTime": self.exposure_us,
-                "AnalogueGain": self.analogue_gain,
-                "AeEnable": self.auto_exposure,
-            }
+            controls = {"AeEnable": self.auto_exposure}
+            if not self.auto_exposure:
+                # Manual exposure/gain must not be queued together with AE.
+                # Some IMX327/libcamera combinations keep those seed values
+                # latched, which can leave daylight fixed at 10 ms and white.
+                # 自动曝光启动时不能同时排队手动曝光/增益；部分 IMX327/libcamera
+                # 组合会锁住这些初值，导致白天固定在 10 ms 并整幅过曝。
+                controls.update(
+                    {
+                        "ExposureTime": self.exposure_us,
+                        "AnalogueGain": self.analogue_gain,
+                    }
+                )
             controls.update(self._white_balance_controls())
-            try:
-                self.camera.set_controls({**controls, "DigitalGain": self.digital_gain})
-            except Exception:
-                # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is not supported, it will degenerate to not setting this item.
+            if self.auto_exposure:
                 self.camera.set_controls(controls)
+            else:
+                try:
+                    self.camera.set_controls(
+                        {**controls, "DigitalGain": self.digital_gain}
+                    )
+                except Exception:
+                    # DigitalGain 不被支持时，退化为不设置该项 / When DigitalGain is unsupported, omit it.
+                    self.camera.set_controls(controls)
 
             if self.auto_exposure:
                 self._apply_polar_auto_exposure_controls()
@@ -689,11 +997,11 @@ class IMX327MIPICamera(CameraInterface):
             # 设置帧周期（优先 FrameDurationLimits） / Set frame period (prefer FrameDurationLimits).
             self._apply_frame_duration_controls()
 
-            # 重新配置后重放曝光控制，避免状态漂移到驱动默认值 / Replay exposure control after reconfiguration to avoid state drift to driver defaults
+            # 手动控制可在启动前排队；AE 必须在流启动后再次启用，确保 IMX327/libcamera
+            # 真正进入闭环而不是停留在初始化曝光。 / Manual controls may be queued
+            # before start; re-enable AE after streaming so the driver enters its loop.
             try:
-                if self.auto_exposure:
-                    self._apply_polar_auto_exposure_controls()
-                else:
+                if not self.auto_exposure:
                     controls = {
                         "AeEnable": False,
                         "ExposureTime": self.exposure_us,
@@ -713,6 +1021,9 @@ class IMX327MIPICamera(CameraInterface):
 
             self.camera.start()
             self.is_capturing = True
+            if self.auto_exposure:
+                self._reset_autonomous_ae_state()
+                self._apply_polar_auto_exposure_controls()
             logger.info("相机开始捕获")
             return True
         except Exception as e:
@@ -727,6 +1038,7 @@ class IMX327MIPICamera(CameraInterface):
         try:
             self.camera.stop()
             self.is_capturing = False
+            self._pending_capture_job = None
             logger.info("相机停止捕获")
             return True
         except Exception as e:
@@ -744,13 +1056,26 @@ class IMX327MIPICamera(CameraInterface):
             return None
 
         try:
-            # 同一请求读取图像与元数据，避免额外等待下一帧
-            # Read image and metadata from one request to avoid waiting for another frame.
-            request = self.camera.capture_request()
+            # 使用 Picamera2 异步任务并限制等待时间，避免 libcamera 卡住后永久占用抓帧线程。
+            # Use a bounded Picamera2 job so a stuck libcamera request cannot hold the grabber forever.
+            if self._pending_capture_job is None:
+                self._pending_capture_job = self.camera.capture_request(wait=False)
+            job = self._pending_capture_job
+            try:
+                request = self.camera.wait(job, timeout=self.capture_timeout_sec)
+            except FutureTimeoutError:
+                logger.error(
+                    "相机抓帧超时（%.2fs），等待生命周期管理器回收 / "
+                    "Camera capture timed out after %.2fs; lifecycle recovery required",
+                    self.capture_timeout_sec,
+                    self.capture_timeout_sec,
+                )
+                return None
+            self._pending_capture_job = None
             try:
                 image = request.make_array("main")
                 self._last_metadata = dict(request.get_metadata() or {})
-                self._collect_lores_stats(request)
+                self._collect_lores_stats(request, main_image=image)
             finally:
                 request.release()
 
@@ -802,6 +1127,7 @@ class IMX327MIPICamera(CameraInterface):
             return image
 
         except Exception as e:
+            self._pending_capture_job = None
             logger.error(f"捕获图像失败: {e}")
             return None
 
@@ -995,6 +1321,7 @@ class IMX327MIPICamera(CameraInterface):
         try:
             self.auto_exposure = enabled
             if enabled:
+                self._reset_autonomous_ae_state()
                 self._apply_polar_auto_exposure_controls()
             else:
                 self.camera.set_controls({"AeEnable": False})
@@ -1123,11 +1450,18 @@ class IMX327MIPICamera(CameraInterface):
             camera_properties = self.camera.camera_properties
             metadata = self._last_metadata or {}
             capabilities = self._camera_capabilities()
+            optics = IMX327_16MM_F14_OPTICS.describe_capture(
+                capture_width_px=self.capture_width,
+                capture_height_px=self.capture_height,
+                sampling_mode=self.sampling_mode,
+                rotation_deg=self.rotation,
+            )
             return {
                 "driver": self.driver_name,
                 "backend": self.backend_name,
                 "capabilities": capabilities,
                 "sensor": camera_properties.get("Model", "Unknown"),
+                "optics": optics,
                 "resolution": f"{self.width}x{self.height}",
                 "fps": self.fps,
                 "exposure_us": self.exposure_us,
@@ -1138,11 +1472,19 @@ class IMX327MIPICamera(CameraInterface):
                 "frame_duration_limits": list(
                     self._frame_duration_limits or self._compute_frame_duration_limits()
                 ),
+                "frame_duration_control": self._frame_duration_control,
+                "frame_duration_control_error": self._frame_duration_control_error,
                 "analogue_gain": self.analogue_gain,
+                "actual_analogue_gain": metadata.get(
+                    "AnalogueGain", self.analogue_gain
+                ),
                 "digital_gain": self.digital_gain,
                 "actual_digital_gain": metadata.get("DigitalGain"),
                 "auto_exposure": self.auto_exposure,
                 "auto_exposure_max_us": self.auto_exposure_max_us,
+                "tuning_source": self._tuning_source,
+                "tuning_loaded": self._tuning_loaded,
+                "tuning_error": self._tuning_error,
                 "ae_flicker_mode": self.ae_flicker_mode,
                 "noise_reduction_mode": self.noise_reduction_mode,
                 "noise_reduction": {"off": 0, "fast": 1, "high_quality": 2}.get(
@@ -1173,6 +1515,14 @@ class IMX327MIPICamera(CameraInterface):
                 "night_mode": self.night_mode,
                 "ae_polar_preset": self.ae_polar_preset,
                 "ae_exposure_value": self.ae_exposure_value,
+                "ae_effective_exposure_value": self._ae_effective_exposure_value,
+                "ae_aggressive_enabled": self.ae_aggressive_enabled,
+                "ae_scene_mode": self._ae_scene_mode,
+                "ae_control_backend": self._ae_control_backend,
+                "ae_requested_exposure_mode": self._ae_requested_exposure_mode,
+                "ae_requested_constraint_mode": self._ae_requested_constraint_mode,
+                "ae_applied_controls": self._ae_applied_controls,
+                "ae_control_error": self._ae_control_error,
                 "lores_enabled": self.lores_enabled,
                 "lores_available": self._lores_available,
                 "lores_width": self.lores_width,
@@ -1295,7 +1645,9 @@ class IMX327MIPICamera(CameraInterface):
         if not self.is_initialized:
             logger.error("相机未初始化")
             return False
-        self.auto_exposure_max_us = max(10_000, min(10_000_000, int(value)))
+        self.auto_exposure_max_us = max(
+            10_000, min(self.AUTO_EXPOSURE_MAX_US, int(value))
+        )
         self._apply_frame_duration_controls()
         return True
 

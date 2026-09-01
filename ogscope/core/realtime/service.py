@@ -5,13 +5,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
-from ogscope.algorithms.star_extract import StarExtractor, StarPoint
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.web.camera_shared import get_camera_manager
 
@@ -25,6 +27,8 @@ class RealtimeState:
     fullsolve_count: int = 0
     last_result: dict[str, Any] | None = None
     last_error: str = ""
+    session_id: str = ""
+    started_mono: float = 0.0
 
 
 class RealtimeSolveService:
@@ -32,7 +36,7 @@ class RealtimeSolveService:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.extractor = StarExtractor(max_stars=effective_solver_max_stars(settings))
+        self._max_stars = effective_solver_max_stars(settings)
         self.solver = PlateSolver(
             fov_deg=settings.solver_fov_deg,
             fov_max_error_deg=settings.solver_fov_max_error_deg,
@@ -40,7 +44,7 @@ class RealtimeSolveService:
         )
         self.state = RealtimeState()
         self._task: asyncio.Task[None] | None = None
-        self._previous_stars: list[StarPoint] | None = None
+        self._has_fullsolve = False
         self._hint_ra = settings.solver_hint_ra_deg
         self._hint_dec = settings.solver_hint_dec_deg
         self._fullsolve_interval = max(1, settings.solver_fullsolve_interval_frames)
@@ -61,11 +65,13 @@ class RealtimeSolveService:
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
         solve_context: Any | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
         if self.state.running:
             return {
                 "success": True,
+                "session_id": self.state.session_id,
                 "message": "实时解算已在运行 / Realtime solver already running",
             }
         if hint_ra_deg is not None:
@@ -76,13 +82,28 @@ class RealtimeSolveService:
         self._fov_max_error = fov_max_error
         self._solve_timeout_ms = solve_timeout_ms
         self._solve_context = solve_context
-        self.state = RealtimeState(running=True)
-        self._previous_stars = None
+        self.state = RealtimeState(
+            running=True,
+            session_id=str(session_id or ""),
+            started_mono=time.monotonic(),
+        )
+        self._has_fullsolve = False
         self._task = asyncio.create_task(self._loop())
-        return {"success": True, "message": "实时解算已启动 / Realtime solver started"}
+        self._log_event(
+            "session_started",
+            fov_estimate=fov_estimate,
+            fov_max_error=fov_max_error,
+            solve_timeout_ms=solve_timeout_ms,
+        )
+        return {
+            "success": True,
+            "session_id": self.state.session_id,
+            "message": "实时解算已启动 / Realtime solver started",
+        }
 
     async def stop(self) -> dict[str, Any]:
         """停止实时解算 / Stop realtime solving"""
+        was_running = self.state.running
         self.state.running = False
         if self._task and not self._task.done():
             self._task.cancel()
@@ -91,6 +112,14 @@ class RealtimeSolveService:
             except asyncio.CancelledError:
                 pass
         self._task = None
+        if was_running:
+            self._log_event(
+                "session_stopped",
+                frame_count=self.state.frame_count,
+                fullsolve_count=self.state.fullsolve_count,
+                last_status=str((self.state.last_result or {}).get("status") or ""),
+                last_error=self.state.last_error,
+            )
         return {"success": True, "message": "实时解算已停止 / Realtime solver stopped"}
 
     async def get_status(self) -> dict[str, Any]:
@@ -101,6 +130,7 @@ class RealtimeSolveService:
             "fullsolve_count": self.state.fullsolve_count,
             "last_result": self.state.last_result,
             "last_error": self.state.last_error,
+            "session_id": self.state.session_id,
         }
 
     async def _loop(self) -> None:
@@ -134,35 +164,70 @@ class RealtimeSolveService:
                     continue
                 last_frame_id = frame_id
                 last_started_mono = time.monotonic()
-                stars = self.extractor.extract(frame)
                 self.state.frame_count += 1
 
                 use_fullsolve = (
                     self.state.frame_count % self._fullsolve_interval == 0
-                    or self._previous_stars is None
+                    or not self._has_fullsolve
+                    or str((self.state.last_result or {}).get("status") or "")
+                    != "MATCH_FOUND"
                 )
                 if use_fullsolve:
+                    solve_started = time.monotonic()
                     solved = await asyncio.to_thread(
                         self._solve_frame_sync,
                         frame,
-                        stars,
                     )
                     self._apply_solve_result(solved)
                     self.state.fullsolve_count += 1
-                self._previous_stars = stars
+                    self._log_event(
+                        "fullsolve_finished",
+                        frame_count=self.state.frame_count,
+                        fullsolve_count=self.state.fullsolve_count,
+                        status=solved.status,
+                        detected_stars=solved.detected_stars,
+                        matches=solved.matches,
+                        t_solve_ms=solved.t_solve_ms,
+                        t_extract_ms=solved.t_extract_ms,
+                        t_preprocess_ms=solved.t_preprocess_ms,
+                        wall_ms=int((time.monotonic() - solve_started) * 1000),
+                    )
+                    # ``solve_from_bgr_frame`` is the authoritative production
+                    # image pipeline.  Keep only a sentinel here; StarExtractor
+                    # remains available for focus metrics and lightweight counts.
+                    # ``solve_from_bgr_frame`` 是生产解算权威图像管线；这里只保留哨兵。
+                    # StarExtractor 仍用于焦点指标和轻量星点计数。
+                    self._has_fullsolve = True
             except Exception as exc:  # noqa: BLE001
+                changed = str(exc) != self.state.last_error
                 self.state.last_error = str(exc)
+                if changed:
+                    self._log_event("loop_error", error=str(exc), level="warning")
                 await asyncio.sleep(0.1)
+
+    def _log_event(self, event: str, *, level: str = "info", **fields: Any) -> None:
+        """Emit one correlated solve lifecycle event / 输出一条可关联的解算生命周期事件。"""
+        started = self.state.started_mono
+        payload = {
+            "event": event,
+            "session_id": self.state.session_id,
+            "elapsed_ms": int((time.monotonic() - started) * 1000) if started else 0,
+            **fields,
+        }
+        log = logger.warning if level == "warning" else logger.info
+        log(
+            "analysis_event {}",
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
+        )
 
     def _solve_frame_sync(
         self,
         frame: Any,
-        stars: list[StarPoint],
     ) -> SolveResult:
         """同步解算单帧（线程池中调用）/ Sync solve for one frame."""
-        return self.solver.solve(
-            stars=stars,
-            frame_shape=frame.shape,
+        return self.solver.solve_from_bgr_frame(
+            frame_bgr=frame,
+            max_stars=self._max_stars,
             hint_ra_deg=self._hint_ra,
             hint_dec_deg=self._hint_dec,
             solve_source="realtime",
@@ -176,6 +241,9 @@ class RealtimeSolveService:
         row = solved.to_dict()
         attach_sensor_prediction(row, self._solve_context)
         self.state.last_result = row
+        # A later completed frame supersedes a transient capture/solve exception.
+        # 后续完成的帧应清除瞬时采集或解算异常，避免上层永久看到旧错误。
+        self.state.last_error = ""
         self._hint_ra = solved.ra_deg
         self._hint_dec = solved.dec_deg
 

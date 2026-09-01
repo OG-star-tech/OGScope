@@ -43,6 +43,7 @@ class CameraManager:
         self._read_lock = Lock()
         self._frame_lock = Lock()
         self._grabber_task: asyncio.Task | None = None
+        self._inflight_read_future: asyncio.Future | None = None
         self._idle_shutdown_task: asyncio.Task | None = None
         self._frame_id = 0
         self._capture_sequence = 0
@@ -62,15 +63,24 @@ class CameraManager:
         self._jpeg_encode_failures = 0
         self._target_fps = max(1, int(settings.shared_preview_fps))
         self._probe_timeout_sec = max(0.5, float(settings.camera_probe_timeout_sec))
+        self._capture_timeout_sec = max(0.5, float(settings.camera_capture_timeout_sec))
+        self._grabber_drain_timeout_sec = self._capture_timeout_sec + 1.0
+        # 停止预算必须覆盖仍在收敛的最长抓帧，否则一次正常的 1 秒 AE 首帧超时
+        # 会把 libcamera 留在不可回收状态。 / Stop must outlive an in-flight
+        # long-AE convergence frame or a recoverable startup becomes unrecoverable.
+        self._stop_timeout_sec = max(4.0, self._capture_timeout_sec + 2.0)
+        self._close_timeout_sec = 2.5
         self._stale_timeout_sec = max(
             0.5, float(settings.camera_frame_stale_timeout_sec)
         )
         self._idle_shutdown_sec = max(0.0, float(settings.camera_idle_shutdown_sec))
         self._max_grab_failures = max(1, int(settings.camera_grab_failures_offline))
         self._health_error: str | None = None
+        self._restart_required = False
         self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
         self._last_capture_success_mono = 0.0
+        self._has_successful_capture = False
         self._preview_consumers = 0
         self._analysis_consumers = 0
         self._recording_consumers = 0
@@ -109,9 +119,16 @@ class CameraManager:
             "auto_exposure": True,
             "ae_polar_preset": settings.camera_ae_polar_preset,
             "ae_exposure_value": settings.camera_ae_exposure_value,
-            "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 2_000_000
+            "ae_aggressive_enabled": settings.camera_ae_aggressive_enabled,
+            "tuning_file": (
+                str(settings.camera_tuning_file)
+                if getattr(settings, "camera_tuning_file", None)
+                else None
             ),
+            "auto_exposure_max_us": getattr(
+                settings, "camera_auto_exposure_max_us", 1_000_000
+            ),
+            "capture_timeout_sec": self._capture_timeout_sec,
             "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
             "noise_reduction_mode": getattr(
                 settings, "camera_noise_reduction_mode", "fast"
@@ -187,11 +204,14 @@ class CameraManager:
                 now = time.monotonic()
                 self._capture_sequence += 1
                 self._last_capture_success_mono = now
+                self._has_successful_capture = True
                 self._capture_timestamps.append(now)
             return frame
 
     def _camera_is_fresh(self) -> bool:
         """判断运行中的相机是否仍有新鲜帧 / Check whether a running camera is still fresh."""
+        if self._restart_required:
+            return False
         if self._camera is None or not getattr(self._camera, "is_capturing", False):
             return False
         if self._last_capture_success_mono <= 0:
@@ -216,18 +236,30 @@ class CameraManager:
     async def ensure_started(self, *, start_grabber: bool = False) -> None:
         """确保单相机进入采集并启动共享帧抓取 / Ensure capture and shared frame grabber."""
         self._cancel_idle_shutdown()
+        if self._restart_required:
+            raise RuntimeError(
+                self._health_error
+                or "相机需要重启服务后恢复 / Camera service restart required"
+            )
         if self._camera_is_fresh():
             if start_grabber:
                 async with self._control_lock:
                     await self._ensure_grabber_locked()
             return
         async with self._control_lock:
+            if self._restart_required:
+                raise RuntimeError(
+                    self._health_error
+                    or "相机需要重启服务后恢复 / Camera service restart required"
+                )
             if self._camera_is_fresh():
                 if start_grabber:
                     await self._ensure_grabber_locked()
                 return
             if self._camera is None:
                 self._health_error = None
+                self._restart_required = False
+                self._has_successful_capture = False
                 self._camera = await asyncio.to_thread(self._create_camera_sync)
                 if self._camera is None:
                     self._health_error = "相机初始化失败 / Camera init failed"
@@ -322,60 +354,98 @@ class CameraManager:
             )
             return
         try:
-            await self._stop_grabber_locked()
-            if self._camera is None:
+            if not await self._stop_grabber_locked():
                 return
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._safe_stop_capture_sync), timeout=4.0
+            if self._camera is None:
+                self._restart_required = False
+                return
+            _, stop_timed_out = await self._run_lifecycle_step_locked(
+                "stop", self._safe_stop_capture_sync, self._stop_timeout_sec
+            )
+            if stop_timed_out:
+                return
+            close_ok, close_timed_out = await self._run_lifecycle_step_locked(
+                "close", self._safe_close_camera_sync, self._close_timeout_sec
+            )
+            if close_timed_out or not close_ok:
+                self._mark_restart_required(
+                    "相机资源未能安全关闭，需要重启服务 / "
+                    "Camera resources did not close safely; service restart required"
                 )
-            except asyncio.TimeoutError:
-                self._logger.warning(
-                    "相机停止超时，继续执行退出流程 / Camera stop timed out, continue shutdown"
-                )
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._safe_close_camera_sync), timeout=2.5
-                )
-            except asyncio.TimeoutError:
-                self._logger.warning(
-                    "相机关闭超时，继续执行退出流程 / Camera close timed out, continue shutdown"
-                )
-            self._camera = None
-            self._last_capture_success_mono = 0.0
-            with self._frame_lock:
-                self._latest_raw = None
-                self._latest_jpeg = None
-                self._latest_ts = 0.0
-                self._latest_w = 0
-                self._latest_h = 0
+                return
+            self._clear_camera_state_locked(health_error=None)
         finally:
             if acquired:
                 self._control_lock.release()
 
-    def _safe_stop_capture_sync(self) -> None:
+    def _safe_stop_capture_sync(self) -> bool:
         camera = self._camera
         if camera is None:
-            return
+            return True
         if not getattr(camera, "is_capturing", False):
-            return
+            return True
         try:
-            camera.stop_capture()
+            return bool(camera.stop_capture())
         except Exception as e:
             self._logger.warning(
                 "停止相机捕获异常 / Failed to stop camera capture: %s", e
             )
+            return False
 
-    def _safe_close_camera_sync(self) -> None:
+    def _safe_close_camera_sync(self) -> bool:
         camera = self._camera
         if camera is None:
-            return
+            return True
         try:
             inner_camera = getattr(camera, "camera", None)
             if inner_camera is not None and hasattr(inner_camera, "close"):
                 inner_camera.close()
+            return True
         except Exception as e:
             self._logger.warning("关闭相机资源异常 / Failed to close camera: %s", e)
+            return False
+
+    def _mark_restart_required(self, reason: str) -> None:
+        """标记不可在进程内恢复的相机故障 / Mark a camera fault unsafe for in-process recovery."""
+        self._restart_required = True
+        self._health_error = reason
+        self._logger.critical("camera_restart_required reason=%s", reason)
+
+    def _clear_camera_state_locked(self, *, health_error: str | None) -> None:
+        """清除已确认释放的相机状态 / Clear camera state only after confirmed release."""
+        self._camera = None
+        self._restart_required = False
+        self._health_error = health_error
+        self._consecutive_grab_failures = 0
+        self._stream_started_at = 0.0
+        self._last_capture_success_mono = 0.0
+        self._has_successful_capture = False
+        with self._frame_lock:
+            self._latest_raw = None
+            self._latest_jpeg = None
+            self._latest_ts = 0.0
+            self._latest_w = 0
+            self._latest_h = 0
+
+    async def _run_lifecycle_step_locked(
+        self,
+        operation_name: str,
+        fn: Callable[[], bool],
+        timeout_sec: float,
+    ) -> tuple[bool, bool]:
+        """在读锁内限时执行生命周期步骤 / Run a bounded lifecycle step under the read lock."""
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self._call_with_read_lock, fn),
+                timeout=max(0.05, float(timeout_sec)),
+            )
+            return bool(result), False
+        except asyncio.TimeoutError:
+            self._mark_restart_required(
+                f"相机{operation_name}超时，需要重启服务 / "
+                f"Camera {operation_name} timed out; service restart required"
+            )
+            return False, True
 
     async def pause_grabber(self) -> None:
         """暂停共享抓帧任务（保留采集）/ Pause shared frame grabber only."""
@@ -405,16 +475,28 @@ class CameraManager:
         """受控重配置：同一临界区内停抓帧->改参->恢复 / Controlled reconfigure."""
         async with self._control_lock:
             t0 = time.time()
-            await self._stop_grabber_locked()
+            if not await self._stop_grabber_locked():
+                raise RuntimeError(
+                    self._health_error
+                    or "相机抓帧任务未能停止 / Camera grabber did not stop"
+                )
             try:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(self._call_with_read_lock, fn),
                     timeout=timeout_sec,
                 )
                 return result
+            except asyncio.TimeoutError:
+                self._mark_restart_required(
+                    f"相机重配置超时（{operation_name}），需要重启服务 / "
+                    f"Camera reconfiguration timed out ({operation_name}); service restart required"
+                )
+                raise
             finally:
-                if self._camera is not None and getattr(
-                    self._camera, "is_capturing", False
+                if (
+                    not self._restart_required
+                    and self._camera is not None
+                    and getattr(self._camera, "is_capturing", False)
                 ):
                     await self._ensure_grabber_locked()
                 self._logger.info(
@@ -438,39 +520,68 @@ class CameraManager:
         self._health_error = reason
         current = asyncio.current_task()
         if self._grabber_task and self._grabber_task is not current:
-            await self._stop_grabber_locked()
+            if not await self._stop_grabber_locked():
+                return
         elif self._grabber_task is current:
             self._grabber_task = None
-        await asyncio.to_thread(self._safe_stop_capture_sync)
-        await asyncio.to_thread(self._safe_close_camera_sync)
-        self._camera = None
-        self._consecutive_grab_failures = 0
-        self._stream_started_at = 0.0
-        with self._frame_lock:
-            self._latest_raw = None
-            self._latest_jpeg = None
-            self._latest_ts = 0.0
-            self._latest_w = 0
-            self._latest_h = 0
+        _, stop_timed_out = await self._run_lifecycle_step_locked(
+            "stop", self._safe_stop_capture_sync, self._stop_timeout_sec
+        )
+        if stop_timed_out:
+            return
+        close_ok, close_timed_out = await self._run_lifecycle_step_locked(
+            "close", self._safe_close_camera_sync, self._close_timeout_sec
+        )
+        if close_timed_out or not close_ok:
+            self._mark_restart_required(
+                "相机失效后资源未能安全关闭，需要重启服务 / "
+                "Camera invalidation could not release resources; service restart required"
+            )
+            return
+        self._clear_camera_state_locked(health_error=reason)
 
     async def _ensure_grabber_locked(self) -> None:
         if self._grabber_task and not self._grabber_task.done():
             return
         self._grabber_task = asyncio.create_task(self._grabber_loop())
 
-    async def _stop_grabber_locked(self) -> None:
+    async def _stop_grabber_locked(self) -> bool:
         if not self._grabber_task:
-            return
-        self._grabber_task.cancel()
+            return True
+        task = self._grabber_task
+        if task is asyncio.current_task():
+            self._grabber_task = None
+            return True
+        task.cancel()
         try:
-            await asyncio.wait_for(self._grabber_task, timeout=2.0)
+            await asyncio.wait_for(task, timeout=2.0)
         except asyncio.CancelledError:
             # 抓帧任务被取消属于正常停止流程，不应向上抛出
             # Task cancellation is expected during graceful stop.
             pass
         except Exception:
             pass
+        inflight = self._inflight_read_future
+        if inflight is not None and not inflight.done():
+            try:
+                # shield 防止 wait_for 取消仍在工作线程中收尾的读请求。
+                # shield keeps wait_for from cancelling the read that is draining in a worker thread.
+                await asyncio.wait_for(
+                    asyncio.shield(inflight), timeout=self._grabber_drain_timeout_sec
+                )
+            except asyncio.TimeoutError:
+                self._mark_restart_required(
+                    "相机抓帧线程未能在超时内退出，需要重启服务 / "
+                    "Camera read worker did not drain; service restart required"
+                )
+                self._grabber_task = None
+                return False
+            except Exception:
+                pass
+        if self._inflight_read_future is inflight:
+            self._inflight_read_future = None
         self._grabber_task = None
+        return True
 
     async def _grabber_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -479,7 +590,16 @@ class CameraManager:
                 interval = 1.0 / float(max(1, self._target_fps))
                 t0 = time.time()
                 try:
-                    frame = await asyncio.to_thread(self._read_frame_sync)
+                    read_future = loop.run_in_executor(None, self._read_frame_sync)
+                    self._inflight_read_future = read_future
+                    try:
+                        frame = await asyncio.shield(read_future)
+                    finally:
+                        if (
+                            read_future.done()
+                            and self._inflight_read_future is read_future
+                        ):
+                            self._inflight_read_future = None
                     if frame is not None:
                         self._consecutive_grab_failures = 0
                         encode_t0 = time.perf_counter()
@@ -544,6 +664,8 @@ class CameraManager:
     def attach_camera_instance(self, camera: Any) -> None:
         """注入现有相机实例（测试/兼容）/ Attach existing camera instance (tests/compat)."""
         self._camera = camera
+        self._restart_required = False
+        self._health_error = None
 
     async def status(self) -> dict[str, Any]:
         cam = self._camera
@@ -552,19 +674,24 @@ class CameraManager:
                 "connected": False,
                 "streaming": False,
                 "error": self._health_error or "相机未初始化 / Camera not initialized",
+                "restart_required": bool(self._restart_required),
                 "runtime_overrides": self._runtime_overrides,
             }
         initialized = bool(getattr(cam, "is_initialized", False))
         capturing = bool(getattr(cam, "is_capturing", False))
-        has_frames = self._frame_id > 0
+        # 空闲相机不会持续抓帧；一次成功探测即可证明流已建立，实际使用时 ensure_started 会再次探测。
+        # Idle cameras do not grab continuously; one successful probe proves stream setup,
+        # while ensure_started re-probes before the next real consumer uses it.
+        has_successful_capture = self._has_successful_capture
         within_grace = (
             self._stream_started_at > 0
             and (time.time() - self._stream_started_at) <= self._probe_timeout_sec
         )
         offline = (
-            bool(self._health_error)
+            self._restart_required
+            or bool(self._health_error)
             or self._consecutive_grab_failures >= self._max_grab_failures
-            or (capturing and not has_frames and not within_grace)
+            or (capturing and not has_successful_capture and not within_grace)
         )
         if offline:
             reason = self._health_error
@@ -577,12 +704,14 @@ class CameraManager:
                 "connected": False,
                 "streaming": False,
                 "error": reason,
+                "restart_required": bool(self._restart_required),
                 "runtime_overrides": self._runtime_overrides,
             }
         info = await asyncio.to_thread(cam.get_camera_info)
         return {
             "connected": initialized and capturing,
-            "streaming": capturing and (has_frames or within_grace),
+            "streaming": capturing and (has_successful_capture or within_grace),
+            "restart_required": False,
             "info": info,
             "runtime_overrides": self._runtime_overrides,
         }

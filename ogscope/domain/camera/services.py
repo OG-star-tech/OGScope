@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -12,6 +13,7 @@ from fastapi.responses import Response
 from starlette.requests import Request
 
 from ogscope.config import get_settings
+from ogscope.domain.camera.focus import focus_metric_analyzer
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 from ogscope.platform.adapters.debug_services import get_debug_services_module
 
@@ -85,6 +87,25 @@ class CameraDomainService:
             _PREVIEW_CLIENT_LAST_TS[client_host] = now
         return await self.get_preview(since_frame_id=since_frame_id)
 
+    async def get_focus_metrics(
+        self,
+        *,
+        target_x: float | None = None,
+        target_y: float | None = None,
+    ) -> dict[str, Any]:
+        """读取原始帧并测量星点焦点质量 / Measure star focus quality on a raw frame."""
+        from ogscope.web.camera_shared import get_camera_manager
+
+        frame, frame_id, timestamp = await get_camera_manager().get_raw_frame()
+        return await asyncio.to_thread(
+            focus_metric_analyzer.analyze,
+            frame,
+            frame_id=frame_id,
+            timestamp=timestamp,
+            target_x=target_x,
+            target_y=target_y,
+        )
+
     async def get_product_camera_status(
         self,
         *,
@@ -142,11 +163,22 @@ class StreamStateDomainService:
         from ogscope.web.camera_shared import get_camera_manager
 
         metrics = await get_camera_manager().stream_metrics()
+        limiter_metrics = await limiter.snapshot()
+        configured_stall_timeout_ms = int(settings.stream_mjpeg_client_stall_timeout_ms)
+        effective_stall_timeout_ms = (
+            max(
+                configured_stall_timeout_ms,
+                int(settings.stream_mjpeg_frame_fetch_timeout_ms) + 5000,
+            )
+            if configured_stall_timeout_ms > 0
+            else 0
+        )
         return {
             "max_clients": int(limiter.max_clients),
-            "active_clients": int(limiter.active_clients),
             "frame_fetch_timeout_ms": int(settings.stream_mjpeg_frame_fetch_timeout_ms),
+            "client_stall_timeout_ms": effective_stall_timeout_ms,
             "target_preview_fps": int(metrics["preview_target_fps"]),
+            **limiter_metrics,
             **metrics,
         }
 
@@ -239,6 +271,14 @@ class DebugCameraService:
         return await _debug_services_module().DebugCameraService.update_settings(
             settings
         )
+
+    @staticmethod
+    async def start_focus_session():
+        return await _debug_services_module().DebugCameraService.start_focus_session()
+
+    @staticmethod
+    async def stop_focus_session():
+        return await _debug_services_module().DebugCameraService.stop_focus_session()
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):

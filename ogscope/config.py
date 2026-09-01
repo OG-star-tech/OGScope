@@ -9,6 +9,8 @@ from typing import Optional
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ogscope.camera_optics import DEFAULT_EFFECTIVE_FOV_WIDTH_DEG
+
 
 class Settings(BaseSettings):
     """应用配置 / Application configuration"""
@@ -102,19 +104,33 @@ class Settings(BaseSettings):
     camera_gain: float = Field(default=1.0, description="增益")
     camera_ae_polar_preset: bool = Field(
         default=True,
-        description="自动曝光时启用电子极轴镜 AE 预设 (Shadows/Matrix/Long+EV) / AE polar-scope preset",
+        description=(
+            "启用 OGScope 自主星空场景 AE (Shadows/Matrix/Long+EV) / "
+            "Enable OGScope autonomous starfield AE"
+        ),
     )
     camera_ae_exposure_value: float = Field(
-        default=0.35,
+        default=1.0,
         ge=-2.0,
         le=2.0,
-        description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
+        description="星空 AE 曝光补偿(档) / Starfield AE exposure compensation in EV stops",
+    )
+    camera_ae_aggressive_enabled: bool = Field(
+        default=True,
+        description="根据暗部与高光占比动态提高极轴镜 AE / Dynamically bias polar AE toward dark detail",
+    )
+    camera_tuning_file: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Picamera2 tuning 覆盖路径；为空时使用随产品发布的 IMX327 tuning / "
+            "Picamera2 tuning override path; bundled IMX327 tuning is used by default"
+        ),
     )
     camera_auto_exposure_max_us: int = Field(
-        default=2_000_000,
+        default=1_000_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 us，暗场允许降帧 / Max auto-exposure frame duration in us",
+        description="自动曝光最长帧周期 1s，暗场允许降帧 / Max auto-exposure frame duration, capped at 1s",
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -229,7 +245,11 @@ class Settings(BaseSettings):
     solver_hint_ra_deg: float = Field(default=0.0, description="默认解算RA提示(度)")
     solver_hint_dec_deg: float = Field(default=90.0, description="默认解算Dec提示(度)")
     solver_fov_deg: float = Field(
-        default=11.0, description="视场角(度) / Default FOV estimate (deg)"
+        default=DEFAULT_EFFECTIVE_FOV_WIDTH_DEG,
+        description=(
+            "当前 IMX327 1280x720 + 16mm 镜头的有效水平视场(度) / "
+            "Effective horizontal FOV for the current IMX327 1280x720 + 16mm capture"
+        ),
     )
     solver_max_stars: int = Field(default=80, description="用于解算的最大星点数量")
     solver_fullsolve_interval_frames: int = Field(
@@ -338,9 +358,18 @@ class Settings(BaseSettings):
         ge=3000,
         le=120000,
         description=(
-            "MJPEG 循环单次取帧（含编码线程）最大等待毫秒；超时则结束流并释放名额，"
-            "避免异常断开时长时间占满并发 / Max wait per MJPEG frame fetch (incl. encode thread); "
-            "on timeout the stream ends to free slots after abnormal client disconnect"
+            "MJPEG 循环单次取帧（含编码线程）最大等待毫秒；超时表示相机取帧停滞 / "
+            "Max wait per MJPEG frame fetch (incl. encode thread); timeout means camera fetch stalled"
+        ),
+    )
+    stream_mjpeg_client_stall_timeout_ms: int = Field(
+        default=30000,
+        ge=0,
+        le=300000,
+        description=(
+            "MJPEG 下游发送无进展的最大毫秒数；至少比取帧超时多 5 秒，0=禁用 / "
+            "Max time without downstream MJPEG send progress; effectively at least 5s above "
+            "frame-fetch timeout; 0=disabled"
         ),
     )
 
@@ -374,6 +403,15 @@ class Settings(BaseSettings):
         ge=0.5,
         le=30.0,
         description="相机探测超时（秒）/ Camera probe timeout in seconds",
+    )
+    camera_capture_timeout_sec: float = Field(
+        default=8.0,
+        ge=0.5,
+        le=120.0,
+        description=(
+            "单次相机抓帧硬超时（秒）；1 秒 AE 首帧需要包含多帧收敛预算 / "
+            "Hard frame timeout; one-second AE startup needs a multi-frame convergence budget"
+        ),
     )
     camera_grab_failures_offline: int = Field(
         default=3,
@@ -523,6 +561,15 @@ class Settings(BaseSettings):
         }:
             return text
         return "auto"
+
+    @field_validator("camera_auto_exposure_max_us", mode="before")
+    @classmethod
+    def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
+        """兼容旧配置并限制暗场曝光为 1s / Keep legacy config bootable and cap AE at 1s."""
+        try:
+            return min(1_000_000, int(value))
+        except (TypeError, ValueError):
+            return value
 
     @field_validator("camera_ae_flicker_mode", mode="before")
     @classmethod

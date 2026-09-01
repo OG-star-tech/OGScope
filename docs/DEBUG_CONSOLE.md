@@ -13,6 +13,13 @@ OGScope 调试控制台是一个专为开发者设计的相机调试工具，提
 - 支持启动/停止预览
 - 实时状态显示：采集帧率、预览帧率、曝光、消费者数量、编码器与内存压力
 
+### ✨ 星点焦点校准
+- 一键进入焦点校准，自动持续测量多颗可用星点的 HFD 与 FWHM
+- 用“继续、接近最佳、向错误方向”等直观提示引导用户缓慢旋转镜头
+- 记录本次调焦的最佳 HFD 与变化趋势；数值越低通常越锐利
+- 可直接点击预览中的星点锁定目标，也可恢复自动多星统计
+- 自动排除饱和、信噪比不足或形状异常的星点，避免误导
+
 ### 📸 拍摄控制
 - **单张拍摄**: 拍摄高质量照片并自动保存
 - **视频录制**: 手动控制录制时长，支持MP4格式
@@ -20,7 +27,7 @@ OGScope 调试控制台是一个专为开发者设计的相机调试工具，提
 - **参数记录**: 每次拍摄自动生成参数记录文件
 
 ### ⚙️ 参数设置
-- **曝光时间**: 1ms - 100ms (微秒级调节)
+- **曝光时间**: 0.1ms–1s（微秒级调节，与自动曝光上限一致）
 - **模拟增益**: 1x - 16x (0.1x步进)
 - **数字增益**: 1x - 4x (0.1x步进)
 - **白平衡**: `auto` / `manual` / `night`，手动模式可设置红/蓝增益
@@ -83,23 +90,29 @@ python -m ogscope.web.app
    - 拖动滑块调整曝光和增益
    - 点击 "应用设置" 使参数生效
 
-3. **拍摄照片**
+3. **校准焦点（可选）**
+   - 点击预览区的“开始焦点校准”
+   - 工具会锁定当前实测曝光/增益并临时关闭降噪，完成或离开时恢复原设置
+   - 缓慢旋转镜头，观察 HFD 数值与趋势提示
+   - 让 HFD 尽可能接近本次最佳值；小星点未被自动选中时，直接点击画面中的星点强制局部测量
+
+4. **拍摄照片**
    - 切换到 "拍摄控制" 标签页
    - 点击 "拍摄照片" 按钮
    - 照片自动保存到 `~/dev_captures/` 目录
 
-4. **录制视频**
+5. **录制视频**
    - 点击 "开始录制" 按钮
    - 录制过程中显示计时器
    - 点击 "停止录制" 结束录制
 
-5. **管理预设**
+6. **管理预设**
    - 切换到 "预设管理" 标签页
    - 输入预设名称和描述
    - 点击 "保存预设" 保存当前设置
    - 点击预设卡片上的 "应用" 快速切换
 
-6. **查看文件**
+7. **查看文件**
    - 切换到 "文件管理" 标签页
    - 查看所有拍摄文件
    - 点击 "下载" 下载文件到本地
@@ -151,6 +164,7 @@ python -m ogscope.web.app
 - `POST /api/dev/debug/camera/start` - 启动相机
 - `POST /api/dev/debug/camera/stop` - 停止相机
 - `GET /api/dev/debug/camera/preview` - 获取预览图像
+- `GET /api/dev/debug/camera/focus/metrics` - 获取当前帧的星点焦点指标
 
 ### 拍摄功能
 - `POST /api/dev/debug/camera/capture` - 拍摄照片
@@ -224,7 +238,8 @@ python scripts/test_debug_console.py --test deps
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | 手动白平衡红/蓝增益 |
 | `camera_night_mode` | `false` | 启动时应用夜间白平衡标记 |
-| `camera_auto_exposure_max_us` | `2000000` | 自动曝光最长帧周期，暗场允许降低帧率 |
+| `camera_tuning_file` | 空 | 可选 Picamera2 tuning 覆盖路径；默认加载产品内置 IMX327 tuning |
+| `camera_auto_exposure_max_us` | `1000000` | 自动曝光最长帧周期，暗场允许降至约 1 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | 启用低分辨率辅助流统计 |

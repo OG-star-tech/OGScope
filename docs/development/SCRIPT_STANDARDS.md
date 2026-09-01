@@ -1,6 +1,6 @@
 # OGScope 脚本编写与调用规范
 
-中文 | English (inline)
+中文 | [English](SCRIPT_STANDARDS_EN.md)
 
 本规范用于统一 `scripts/` 与后续 `deploy/` 相关脚本的行为，降低双仓联动时的维护成本与误操作风险。
 
@@ -98,4 +98,3 @@
 - 涉及运行路径改动时，验证 `systemd` 与健康检查可用：
   - `systemctl status ogscope`
   - `curl -s http://127.0.0.1:8000/health`
-
