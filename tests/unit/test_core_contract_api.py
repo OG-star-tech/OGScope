@@ -71,6 +71,13 @@ def test_core_camera_ambient_hint_from_metadata() -> None:
                 "actual_exposure_us": 80_000,
                 "auto_exposure_max_us": 100_000,
                 "actual_digital_gain": 2.0,
+                "optics": {
+                    "effective_fov_deg": {
+                        "width": 13.01,
+                        "height": 7.34,
+                        "source": "product_calibrated",
+                    }
+                },
             },
         }
     )
@@ -78,6 +85,7 @@ def test_core_camera_ambient_hint_from_metadata() -> None:
     hint = normalized["ambient_hint"]
     assert hint["available"] is True
     assert hint["source"] == "camera_metadata"
+    assert normalized["info"]["optics"]["effective_fov_deg"]["width"] == 13.01
     assert 0.0 <= hint["dark_score"] <= 1.0
     assert hint["exposure_us"] == 80_000
 

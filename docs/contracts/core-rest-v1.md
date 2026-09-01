@@ -76,6 +76,8 @@
 - `GET /api/core/v1/camera/status`
   - 返回相机连接状态、流状态、runtime overrides 与可选 `ambient_hint`
   - `ambient_hint` 是环境亮度建议遥测，供上层设备做显示/交互策略参考；典型字段包括 `available`、`dark_score`（0.0 明亮到 1.0 昏暗）、`lux`、`exposure_us`、`digital_gain`
+  - `info.optics` 是可选的产品光学描述；`lens` 保存 16mm F1.4、标称 500 万像素、M12 与红外截止滤镜等名义参数，`full_sensor_fov_deg` 保存 1920×1080 全幅光学视场，`effective_fov_deg` 保存当前采集模式经过产品标定后的有效视场。上层解算与寻星应优先使用 `effective_fov_deg`，字段缺失时再回退本地默认值
+  - `info.ae_scene_mode` 与 `info.ae_requested_exposure_mode` 是自主 AE 诊断；`starfield` 表示 OGScope 已独立识别暗天空并选择快门优先的长曝光曲线，不依赖上位机工作模式
 - `POST /api/core/v1/camera/start`
   - 仅当相机启动命令成功且状态确认 `connected=true`、`streaming=true` 时返回 `success=true`
   - `applied` 包含 `action`、`hardware_plane_ok`、`ready`、`connected`、`streaming`；调用方应以 `ready` 判断是否可立即取帧

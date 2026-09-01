@@ -35,7 +35,133 @@ def test_product_tuning_long_curve_reaches_one_second() -> None:
     assert len(long_mode["shutter"]) == len(long_mode["gain"])
     first_max_shutter = long_mode["shutter"].index(1_000_000)
     assert long_mode["gain"][: first_max_shutter + 1] == [1.0] * (first_max_shutter + 1)
-    assert long_mode["gain"][-1] == 12.0
+    assert max(long_mode["gain"]) == 4.0
+    assert agc["constraint_modes"]["shadows"][0]["q_hi"] == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_autonomous_ae_selects_libcamera_long_shadows_for_starfield(
+    monkeypatch,
+) -> None:
+    """暗场确认后必须请求 Long+Shadows / Confirmed darkness must request Long+Shadows."""
+
+    class Constraint:
+        Normal = "constraint-normal"
+        Shadows = "constraint-shadows"
+
+    class Metering:
+        Matrix = "metering-matrix"
+
+    class Exposure:
+        Normal = "exposure-normal"
+        Long = "exposure-long"
+
+    class Namespace:
+        AeConstraintModeEnum = Constraint
+        AeMeteringModeEnum = Metering
+        AeExposureModeEnum = Exposure
+
+    class FakeCamera:
+        camera_controls = {
+            "AeConstraintMode": object(),
+            "AeMeteringMode": object(),
+            "AeExposureMode": object(),
+            "ExposureValue": object(),
+            "FrameDurationLimits": object(),
+        }
+
+        def __init__(self) -> None:
+            self.controls: list[dict[str, Any]] = []
+
+        def set_controls(self, controls: dict[str, Any]) -> None:
+            self.controls.append(controls)
+
+    camera = _camera(ae_exposure_value=1.0)
+    fake = FakeCamera()
+    camera.camera = fake
+    monkeypatch.setattr(
+        camera,
+        "_load_ae_control_namespace",
+        lambda: (Namespace, "test.libcamera.controls"),
+    )
+    dark = {
+        "p50": 8.0,
+        "p90": 10.0,
+        "p99": 12.0,
+        "p99_8": 13.0,
+        "saturated_fraction": 0.0,
+    }
+
+    camera._update_aggressive_auto_exposure(dark)
+    camera._ae_last_adjust_at = 0.0
+    camera._update_aggressive_auto_exposure(dark)
+
+    scene_update = next(item for item in fake.controls if "AeExposureMode" in item)
+    assert camera._ae_scene_mode == "starfield"
+    assert scene_update["AeExposureMode"] == "exposure-long"
+    assert scene_update["AeConstraintMode"] == "constraint-shadows"
+    assert camera._ae_control_backend == "test.libcamera.controls"
+
+
+@pytest.mark.unit
+def test_autonomous_ae_immediately_escapes_severe_brightness(monkeypatch) -> None:
+    """严重过曝必须立即退回日间曲线 / Severe clipping must immediately restore daylight AE."""
+
+    class Constraint:
+        Normal = "constraint-normal"
+        Shadows = "constraint-shadows"
+
+    class Metering:
+        Matrix = "metering-matrix"
+
+    class Exposure:
+        Normal = "exposure-normal"
+        Long = "exposure-long"
+
+    class Namespace:
+        AeConstraintModeEnum = Constraint
+        AeMeteringModeEnum = Metering
+        AeExposureModeEnum = Exposure
+
+    class FakeCamera:
+        camera_controls = {
+            "AeConstraintMode": object(),
+            "AeMeteringMode": object(),
+            "AeExposureMode": object(),
+            "ExposureValue": object(),
+            "FrameDurationLimits": object(),
+        }
+
+        def __init__(self) -> None:
+            self.controls: list[dict[str, Any]] = []
+
+        def set_controls(self, controls: dict[str, Any]) -> None:
+            self.controls.append(controls)
+
+    camera = _camera(ae_exposure_value=1.0)
+    fake = FakeCamera()
+    camera.camera = fake
+    camera._ae_scene_mode = "starfield"
+    camera._ae_effective_exposure_value = 1.5
+    monkeypatch.setattr(
+        camera, "_load_ae_control_namespace", lambda: (Namespace, "test")
+    )
+
+    camera._update_aggressive_auto_exposure(
+        {
+            "p50": 220.0,
+            "p90": 250.0,
+            "p99": 255.0,
+            "p99_8": 255.0,
+            "saturated_fraction": 0.25,
+        }
+    )
+
+    scene_update = next(item for item in fake.controls if "AeExposureMode" in item)
+    assert camera._ae_scene_mode == "daylight"
+    assert scene_update["AeExposureMode"] == "exposure-long"
+    assert scene_update["AeConstraintMode"] == "constraint-normal"
+    assert camera._ae_effective_exposure_value == pytest.approx(0.0)
 
 
 @pytest.mark.unit

@@ -9,6 +9,8 @@ from typing import Optional
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ogscope.camera_optics import DEFAULT_EFFECTIVE_FOV_WIDTH_DEG
+
 
 class Settings(BaseSettings):
     """应用配置 / Application configuration"""
@@ -102,13 +104,16 @@ class Settings(BaseSettings):
     camera_gain: float = Field(default=1.0, description="增益")
     camera_ae_polar_preset: bool = Field(
         default=True,
-        description="自动曝光时启用电子极轴镜 AE 预设 (Shadows/Matrix/Long+EV) / AE polar-scope preset",
+        description=(
+            "启用 OGScope 自主星空场景 AE (Shadows/Matrix/Long+EV) / "
+            "Enable OGScope autonomous starfield AE"
+        ),
     )
     camera_ae_exposure_value: float = Field(
         default=1.0,
         ge=-2.0,
         le=2.0,
-        description="AE 曝光补偿(档)，与 camera_ae_polar_preset 联用 / AE exposure comp EV stops",
+        description="星空 AE 曝光补偿(档) / Starfield AE exposure compensation in EV stops",
     )
     camera_ae_aggressive_enabled: bool = Field(
         default=True,
@@ -240,7 +245,11 @@ class Settings(BaseSettings):
     solver_hint_ra_deg: float = Field(default=0.0, description="默认解算RA提示(度)")
     solver_hint_dec_deg: float = Field(default=90.0, description="默认解算Dec提示(度)")
     solver_fov_deg: float = Field(
-        default=11.0, description="视场角(度) / Default FOV estimate (deg)"
+        default=DEFAULT_EFFECTIVE_FOV_WIDTH_DEG,
+        description=(
+            "当前 IMX327 1280x720 + 16mm 镜头的有效水平视场(度) / "
+            "Effective horizontal FOV for the current IMX327 1280x720 + 16mm capture"
+        ),
     )
     solver_max_stars: int = Field(default=80, description="用于解算的最大星点数量")
     solver_fullsolve_interval_frames: int = Field(
@@ -396,12 +405,12 @@ class Settings(BaseSettings):
         description="相机探测超时（秒）/ Camera probe timeout in seconds",
     )
     camera_capture_timeout_sec: float = Field(
-        default=4.0,
+        default=8.0,
         ge=0.5,
         le=120.0,
         description=(
-            "单次相机抓帧硬超时（秒）；应高于允许的最长曝光 / "
-            "Hard timeout for one camera frame; keep above the longest allowed exposure"
+            "单次相机抓帧硬超时（秒）；1 秒 AE 首帧需要包含多帧收敛预算 / "
+            "Hard frame timeout; one-second AE startup needs a multi-frame convergence budget"
         ),
     )
     camera_grab_failures_offline: int = Field(
