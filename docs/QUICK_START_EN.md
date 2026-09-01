@@ -1,158 +1,147 @@
 # OGScope Quick Start Guide
 
-This guide will help you quickly set up the OGScope development environment.
-
 English | [中文](QUICK_START.md)
 
-## 🎯 Goals
+Use this guide for a first installation and basic validation on a Raspberry Pi Zero 2W. See the [Development Guide](development/README_EN.md) for all installer options, WiFi, low-memory tuning, and routine updates.
 
-- ✅ Run OGScope on Raspberry Pi Zero 2W
-- ✅ Configure PyCharm Professional remote development
-- ✅ Access the system through web interface
+## 1. Prepare
 
-## 📋 Prerequisites
+### Hardware
 
-### Hardware Requirements
+- Raspberry Pi Zero 2W
+- IMX327 MIPI camera
+- 32 GB or larger MicroSD card
+- Stable 5 V / 2 A or better power supply
 
-- Raspberry Pi Zero 2W development board
-- IMX327 camera module
-- 2.4" SPI LCD display
-- MicroSD card (32GB+)
-- Power supply (5V/2A)
+### Software
 
-### Software Requirements
+- Raspberry Pi OS Lite 64-bit (Debian/apt based)
+- Python 3.10+
+- Git
+- Access to apt, PyPI, and GitHub during first installation
 
-- macOS/Windows/Linux development machine
-- PyCharm Professional 2025
-- Python 3.9+
-- Poetry package manager
+Use Raspberry Pi Imager to configure the hostname, SSH, public key, and initial user. Do not rely on historical default usernames or passwords.
 
-## 🚀 Installation Steps
-
-### Step 1: Prepare Raspberry Pi Zero 2W
-
-1. **Flash the OS**
-   ```bash
-   # Download Raspberry Pi OS image for Raspberry Pi Zero 2W
-   # Flash to microSD card using balenaEtcher
-   ```
-
-2. **Initial Setup**
-   ```bash
-   # Boot the board and connect via SSH
-   ssh pi@orangepi.local
-   
-   # Update system
-   sudo apt update && sudo apt upgrade -y
-   
-   # Install essential packages
-   sudo apt install -y python3.9 python3-pip python3-venv git
-   ```
-
-3. **Install Poetry**
-   ```bash
-   curl -sSL https://install.python-poetry.org | python3 -
-   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-   source ~/.bashrc
-   ```
-
-### Step 2: Clone and Setup Project
+## 2. Connect to the board
 
 ```bash
-# Clone the repository
+ssh <user>@raspberrypi.local
+# Use the router-assigned IP when mDNS is unavailable
+ssh <user>@<board-ip>
+```
+
+Public-key authentication is recommended:
+
+```bash
+ssh-copy-id <user>@<board-ip>
+ssh -o BatchMode=yes <user>@<board-ip> true
+```
+
+## 3. Clone and install
+
+```bash
 git clone https://github.com/OG-star-tech/OGScope.git
 cd OGScope
-
-# Install dependencies
-poetry install
-
-# Activate virtual environment
-poetry shell
+chmod +x scripts/bootstrap.sh
+./scripts/bootstrap.sh
 ```
 
-### Step 3: Configure PyCharm
+`bootstrap.sh` deploys the runtime tree to `/opt/ogscope` by default, then creates the project virtual environment, installs system dependencies, and registers `ogscope.service`.
 
-1. **Open Project**
-   - Launch PyCharm Professional
-   - Open the OGScope project directory
-
-2. **Configure File Sync**
-   - Go to `Tools` → `Deployment` → `Configuration`
-   - Add SFTP server for Raspberry Pi Zero 2W
-   - Configure automatic file synchronization
-
-3. **Setup Run Configurations**
-   - Create local run configuration for development
-   - Create remote run configuration for hardware testing
-
-### Step 4: Run the Application
+For mainland China mirrors:
 
 ```bash
-# Local development
-python -m ogscope.main
-
-# Remote testing (on Raspberry Pi)
-ssh orangepi
-cd /home/pi/OGScope
-poetry run python -m ogscope.main
+export OGSCOPE_MIRROR=cn
+./scripts/bootstrap.sh
 ```
 
-## 🌐 Access Web Interface
+For the minimal runtime:
 
-After starting the application, access:
-- Local: http://localhost:8000
-- Remote: http://orangepi.local:8000
+```bash
+OGSCOPE_BOOTSTRAP_MODE=min ./scripts/bootstrap.sh
+```
 
-## 🔧 Development Workflow
+When the source already resides in the target runtime directory, you can run:
 
-1. **Local Development**
-   - Write code in PyCharm
-   - Test basic functionality locally
-   - Use local run configuration
+```bash
+./scripts/install.sh
+```
 
-2. **File Synchronization**
-   - Files automatically sync to Raspberry Pi
-   - Manual sync when needed
+## 4. Verify
 
-3. **Hardware Testing**
-   - Switch to remote run configuration
-   - Test camera and hardware features
-   - Debug on actual hardware
+```bash
+sudo systemctl status ogscope --no-pager
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/api/core/v1/system/status
+```
 
-## 📚 Next Steps
+Open:
 
-- Read [Development Guide](development/README.md)
-- Follow the remote workflow in [Development Guide](development/README.md)
-- Explore [API Documentation](API_ARCHITECTURE.md)
+- Home: `http://<board-ip>:8000/`
+- Debug console: `http://<board-ip>:8000/debug`
+- API documentation: `http://<board-ip>:8000/docs`
 
-## 🆘 Troubleshooting
+Camera checks:
 
-### Common Issues
+```bash
+rpicam-hello --list-cameras 2>/dev/null || libcamera-hello --list-cameras
+curl -fsS http://127.0.0.1:8000/api/core/v1/camera/status
+```
 
-1. **Connection Problems**
-   ```bash
-   # Check network connectivity
-   ping orangepi.local
-   
-   # Verify SSH connection
-   ssh orangepi
-   ```
+`POST /api/core/v1/camera/start` succeeds only after the camera confirms both `connected=true` and `streaming=true`.
 
-2. **Permission Issues**
-   ```bash
-   # Fix camera permissions
-   sudo usermod -a -G video pi
-   sudo reboot
-   ```
+## 5. Routine updates
 
-3. **Dependency Issues**
-   ```bash
-   # Reinstall dependencies
-   poetry install --sync
-   ```
+```bash
+cd /opt/ogscope
+./scripts/board-update.sh
+```
 
-## 📞 Support
+To install development dependencies:
 
-- [GitHub Issues](https://github.com/OG-star-tech/OGScope/issues)
-- [Discussions](https://github.com/OG-star-tech/OGScope/discussions)
-- [Documentation](README.md)
+```bash
+OGSCOPE_INSTALL_DEV=1 ./scripts/board-update.sh
+```
+
+## 6. Local development
+
+```bash
+poetry install
+poetry run pytest -q
+
+cd web/spa
+npm ci
+npm run build
+```
+
+Changes involving the camera, GPIO, I2C, or systemd must be revalidated on real hardware. See the [Development Guide](development/README_EN.md) and `scripts/sync_dev_board.sh` for board synchronization.
+
+## 7. Troubleshooting
+
+### Service does not start
+
+```bash
+sudo journalctl -u ogscope -b --no-pager -n 200
+sudo systemctl cat ogscope
+```
+
+### Camera is unavailable
+
+```bash
+rpicam-hello --list-cameras 2>/dev/null || libcamera-hello --list-cameras
+sudo journalctl -u ogscope -b --no-pager | grep -i -E 'camera|libcamera|imx327'
+```
+
+Check the camera overlay, ribbon orientation, and `/boot/firmware/config.txt` before rebooting.
+
+### Network or hotspot problems
+
+Follow the [WiFi / NetworkManager Guide](development/wifi-nm_EN.md). Do not run multiple network initialization stacks at the same time.
+
+## 8. Next documents
+
+- [Documentation index](README_EN.md) | [中文](README.md)
+- [Development Guide](development/README_EN.md) | [中文](development/README.md)
+- [Core REST v1 contract](contracts/core-rest-v1_EN.md) | [中文](contracts/core-rest-v1.md)
+- [Debug console](DEBUG_CONSOLE_EN.md) | [中文](DEBUG_CONSOLE.md)
+- [Issue tracker](https://github.com/OG-star-tech/OGScope/issues)

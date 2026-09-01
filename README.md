@@ -24,7 +24,8 @@
 ### Phase 2 - 完整功能
 
 - ⏳ SPI 屏幕显示
-- ⏳ 自动板块求解
+- ✅ Tetra3 自动板块求解
+- ✅ 实时解算与调试控制台
 - ⏳ 移动 App 控制
 - ⏳ 校准数据管理
 
@@ -77,7 +78,7 @@ python -m ogscope.main
 
 ### Web 界面访问
 
-启动后访问: [http://raspberrypi.local:8000](http://raspberrypi.local:8000) 或 http://:8000
+启动后访问：[http://raspberrypi.local:8000](http://raspberrypi.local:8000) 或 `http://<设备IP>:8000`
 
 ## 文档
 

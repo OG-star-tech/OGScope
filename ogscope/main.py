@@ -53,6 +53,9 @@ async def main() -> int:
             port=settings.port,
             reload=settings.reload,
             log_level=settings.log_level.lower(),
+            # Product middleware logs mutations and failures; omit high-rate polling access lines.
+            # 产品中间件记录写操作与失败；关闭高频轮询的逐请求访问日志。
+            access_log=False,
         )
         server = uvicorn.Server(config)
         await server.serve()

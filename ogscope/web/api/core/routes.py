@@ -2,9 +2,13 @@
 Core v1 标准契约路由 / Core v1 standard contract routes.
 """
 
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from ogscope.core.application import core_contract_service
+from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import ensure_safe_basename
 from ogscope.web.api.models.schemas import (
     CoreAnalysisControlResponse,
@@ -19,6 +23,12 @@ from ogscope.web.api.models.schemas import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_MJPEG_LIMIT_DETAIL = (
+    "MJPEG stream limit reached; close other previews or tabs / "
+    "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
+)
 
 
 @router.post(
@@ -88,6 +98,33 @@ async def core_camera_status() -> CoreCameraStatusResponse:
     try:
         data = await core_contract_service.get_camera_status()
         return CoreCameraStatusResponse(**data)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/core/v1/camera/preview/stream")
+async def core_camera_preview_stream(
+    request: Request,
+    quality: int | None = Query(None, ge=10, le=100),
+) -> StreamingResponse:
+    """产品级 MJPEG 相机预览 / Product MJPEG camera preview."""
+    try:
+        from ogscope.config import get_settings
+
+        effective_quality = int(quality or get_settings().preview_jpeg_quality)
+        return await build_camera_mjpeg_stream(
+            request,
+            image_format="jpeg",
+            quality=effective_quality,
+            limit_detail=_MJPEG_LIMIT_DETAIL,
+            timeout_log_message=(
+                "Core MJPEG 单帧取流超时，结束响应以释放名额 / "
+                "Core MJPEG frame fetch timed out, closing stream"
+            ),
+            logger=logger,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

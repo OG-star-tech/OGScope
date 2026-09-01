@@ -120,6 +120,8 @@ async function fetchDebugCameraMjpegGate(): Promise<"ok" | "busy" | "fail"> {
 export default function AnalysisLabApp() {
   const { t, locale } = useI18n();
   const [view, setView] = useState<LabView>("lab_image");
+  const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
+  const [parameterDrawerOpen, setParameterDrawerOpen] = useState(false);
   const [uploads, setUploads] = useState<UploadFileRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [params, setParams] = useState<SolveParams>(defaultLabParams);
@@ -1094,11 +1096,61 @@ export default function AnalysisLabApp() {
 
 
   return (
-    <div className="flex min-h-full flex-col bg-surface text-on-surface">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-surface text-on-surface">
       <LabHeader view={view} setView={setView} />
 
+      {(view === "lab_image" || view === "lab_video") && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-outline-variant/15 bg-surface-container-low px-3 py-2 text-xs 2xl:hidden">
+          <button
+            type="button"
+            className="rounded border border-outline-variant/30 px-3 py-1.5 text-on-surface"
+            onClick={() => {
+              setParameterDrawerOpen(false);
+              setAssetDrawerOpen(true);
+            }}
+          >
+            {locale === "zh" ? "素材" : "Assets"}
+          </button>
+          <button
+            type="button"
+            className="rounded border border-outline-variant/30 px-3 py-1.5 text-on-surface"
+            onClick={() => {
+              setAssetDrawerOpen(false);
+              setParameterDrawerOpen(true);
+            }}
+          >
+            {locale === "zh" ? "解算参数" : "Solve parameters"}
+          </button>
+        </div>
+      )}
+
+      {(assetDrawerOpen || parameterDrawerOpen) && (
+        <button
+          type="button"
+          className="fixed inset-x-0 bottom-0 top-[88px] z-40 bg-black/60 2xl:hidden"
+          aria-label={locale === "zh" ? "关闭面板" : "Close panel"}
+          onClick={() => {
+            setAssetDrawerOpen(false);
+            setParameterDrawerOpen(false);
+          }}
+        />
+      )}
+
       <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 border-r border-outline-variant/15 bg-surface-container-lowest p-3 text-xs">
+        <aside
+          className={`fixed bottom-0 left-0 top-[88px] z-50 w-64 shrink-0 overflow-y-auto border-r border-outline-variant/15 bg-surface-container-lowest p-3 text-xs shadow-2xl transition-transform 2xl:static 2xl:translate-x-0 2xl:shadow-none ${
+            assetDrawerOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="mb-2 flex justify-end 2xl:hidden">
+            <button
+              type="button"
+              className="rounded border border-outline-variant/30 px-2 py-1"
+              onClick={() => setAssetDrawerOpen(false)}
+            >
+              {locale === "zh" ? "关闭" : "Close"}
+            </button>
+          </div>
           <div className="mb-3 font-semibold text-on-surface-variant">{t("sidebar.assets")}</div>
           <label className="mb-3 flex cursor-pointer items-center gap-2 rounded bg-primary-container/30 px-2 py-2 text-on-primary-container">
             <Upload className="h-4 w-4" />
@@ -2117,7 +2169,20 @@ export default function AnalysisLabApp() {
               )}
             </main>
 
-            <aside className="flex w-80 shrink-0 flex-col border-l border-outline-variant/15 bg-surface-container-low text-xs min-h-0">
+            <aside
+              className={`fixed bottom-0 right-0 top-[88px] z-50 flex min-h-0 w-80 shrink-0 flex-col border-l border-outline-variant/15 bg-surface-container-low text-xs shadow-2xl transition-transform 2xl:static 2xl:translate-x-0 2xl:shadow-none ${
+                parameterDrawerOpen ? "translate-x-0" : "translate-x-full"
+              }`}
+            >
+              <div className="flex shrink-0 justify-end border-b border-outline-variant/15 p-2 2xl:hidden">
+                <button
+                  type="button"
+                  className="rounded border border-outline-variant/30 px-2 py-1"
+                  onClick={() => setParameterDrawerOpen(false)}
+                >
+                  {locale === "zh" ? "关闭" : "Close"}
+                </button>
+              </div>
               {view !== "lab_video" && (
                 <div className="shrink-0 space-y-2 border-b border-outline-variant/20 p-4 pb-3">
                   <button

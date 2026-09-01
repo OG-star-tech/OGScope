@@ -23,11 +23,19 @@ This document defines the **minimal stable REST surface** for callers integratin
   - `fov_estimate`
   - `fov_max_error`
   - `solve_timeout_ms`
+  - `solve_context` (optional sensor context)
+    - `quality.time_fresh`: optional; when explicitly `false`, time is not used for sensor prediction
+    - `quality.camera_pose_calibrated`: optional; when explicitly `false`, mount angles are not used as camera-pose prediction
+    - Omitting both fields preserves legacy-client behavior
+    - When either field is `false`, OGScope returns `sensor_status=unavailable` for diagnostics without changing the plate solver's `MATCH_FOUND` result
 - Response:
   - `success: bool`
   - `session_id: str`
   - `state: "running" | "stopped"`
   - `message: str`
+
+A new `session_id` is generated whenever analysis starts from the stopped state;
+upstream consumers should ignore results from an older session.
 
 ### 2) Get Analysis Result
 
@@ -68,12 +76,20 @@ This document defines the **minimal stable REST surface** for callers integratin
 
 - `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
   - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
+  - Optional `info.optics` describes product optics. `lens` carries nominal 16mm F1.4, 5MP optical rating, M12, and IR-cut properties; `full_sensor_fov_deg` describes the 1920×1080 optical field, while `effective_fov_deg` is the product-calibrated field for the active capture mode. Upstream solving and sky search should prefer `effective_fov_deg`, with a local fallback for older servers.
+  - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently selected the shutter-first long-exposure curve and does not depend on an upstream work mode.
 - `POST /api/core/v1/camera/start`
+  - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`
+  - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames
 - `POST /api/core/v1/camera/stop`
+- `GET /api/core/v1/camera/preview/stream?quality=75`
+  - Product MJPEG preview using the shared preview consumer and concurrency limiter
+  - `quality` ranges from `10` to `100`; omission uses the server preview-quality setting
+  - Responses are non-cacheable; the endpoint returns `503` when the client limit is reached
 
-MJPEG stream, stream control status, and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) are **only** on developer paths (not duplicated under `/api/core/v1/`):
+Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) remain developer-only:
 
-- `GET /api/dev/debug/camera/stream?quality=75` — MJPEG (JPEG)
+- `GET /api/dev/debug/camera/stream?quality=75` — developer entry backed by the shared Core preview implementation
 - `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout, target preview FPS
 - `GET /api/dev/debug/camera/preview` — single-frame preview
 

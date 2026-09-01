@@ -17,6 +17,7 @@ def test_build_config_catalog_includes_new_preview_fields() -> None:
     assert "OGSCOPE_SHARED_PREVIEW_FPS" in keys
     assert "OGSCOPE_PREVIEW_JPEG_QUALITY" in keys
     assert "OGSCOPE_PREVIEW_ENCODER" in keys
+    assert "OGSCOPE_CAMERA_TUNING_FILE" in keys
     assert "OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US" in keys
     assert "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE" in keys
     assert "OGSCOPE_SIMULATION_MODE" in keys
@@ -38,3 +39,11 @@ def test_build_config_catalog_includes_new_preview_fields() -> None:
 def test_simulation_mode_tri_state(raw: str | None, expected: bool | None) -> None:
     settings = Settings(simulation_mode=raw)  # type: ignore[arg-type]
     assert settings.simulation_mode is expected
+
+
+@pytest.mark.unit
+def test_legacy_auto_exposure_ceiling_is_capped_at_one_second() -> None:
+    """旧环境值不阻止启动且会收敛到 1 秒 / Legacy values boot and clamp to 1s."""
+    settings = Settings(camera_auto_exposure_max_us=2_000_000)
+
+    assert settings.camera_auto_exposure_max_us == 1_000_000

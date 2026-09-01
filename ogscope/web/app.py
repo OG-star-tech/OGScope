@@ -3,6 +3,8 @@ FastAPI Web 应用
 """
 
 import asyncio
+import json
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -233,6 +235,26 @@ def _is_local_client(request: Request) -> bool:
     """判断是否本机来源 / Determine whether request comes from localhost."""
     client_host = request.client.host if request.client else ""
     return client_host in {"127.0.0.1", "::1", "localhost"}
+
+
+@app.middleware("http")
+async def _diagnostic_access_log(request: Request, call_next):
+    """Log mutations and failed requests without flooding on status polling / 记录写操作与失败，避免状态轮询刷屏。"""
+    started = time.monotonic()
+    response = await call_next(request)
+    if request.method not in {"GET", "HEAD", "OPTIONS"} or response.status_code >= 400:
+        payload = {
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        log = logger.warning if response.status_code >= 400 else logger.info
+        log(
+            "http_event {}",
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        )
+    return response
 
 
 @app.middleware("http")

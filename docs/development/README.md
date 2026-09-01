@@ -12,7 +12,7 @@
 - **B 板上运维**：[WiFi](wifi-nm.md) | [English](wifi-nm_EN.md)；[星库](plate-solve-data.md)；[稳定性](ogscope-service-hardening.md)；[BOM](../hardware/bom.md) | [English](../hardware/bom_EN.md)
 - **C API/契约/测试**：[API 架构（含 FastAPI 入口）](../API_ARCHITECTURE.md) | [English](../API_ARCHITECTURE_EN.md)；[系统架构](../architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md)；[Core 契约](../contracts/core-rest-v1.md) | [English](../contracts/core-rest-v1_EN.md)；[Dev 契约](../contracts/dev-rest-v1.md) | [English](../contracts/dev-rest-v1_EN.md)；[兼容矩阵](../contracts/core-compatibility-matrix.md)；[自检](ARCHITECTURE_QUICK_CHECKLIST.md) | [English](ARCHITECTURE_QUICK_CHECKLIST_EN.md)；[测试](testing-guide.md) | [English](testing-guide_EN.md)
 - **D 外部集成**：[Subordinate 模式](../contracts/subordinate-mode.md) | [English](../contracts/subordinate-mode_EN.md)；[Hardware Plane UDS v1](../contracts/hardware-plane-uds-v1.md) | [English](../contracts/hardware-plane-uds-v1_EN.md)
-- **E 工具与贡献**：[脚本规范](SCRIPT_STANDARDS.md)；[调试控制台](../DEBUG_CONSOLE.md) | [English](../DEBUG_CONSOLE_EN.md)；[贡献指南](../../CONTRIBUTING.md) | [English](../../CONTRIBUTING_EN.md)
+- **E 工具与贡献**：[脚本规范](SCRIPT_STANDARDS.md) | [English](SCRIPT_STANDARDS_EN.md)；[调试控制台](../DEBUG_CONSOLE.md) | [English](../DEBUG_CONSOLE_EN.md)；[贡献指南](../../CONTRIBUTING.md) | [English](../../CONTRIBUTING_EN.md)
 
 当前推荐流程为：**本地编辑代码 -> 上传到开发板 -> 使用 `systemd` 重启服务验证**。  
 该流程与实际硬件运行环境一致，适合涉及相机与系统库依赖的场景。

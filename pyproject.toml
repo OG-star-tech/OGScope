@@ -10,6 +10,7 @@ repository = "https://github.com/your-username/OGScope"
 documentation = "https://github.com/your-username/OGScope/docs"
 keywords = ["astronomy", "polar-alignment", "astrophotography", "raspberry-pi", "mipi-camera"]
 packages = [{include = "ogscope"}]
+include = ["ogscope/platform/hardware/tuning/*.json"]
 
 [tool.poetry.dependencies]
 python = "^3.10"

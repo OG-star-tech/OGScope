@@ -226,12 +226,14 @@ class SolveContextQuality(BaseModel):
 
     gps_valid: bool = False
     time_valid: bool = False
+    time_fresh: Optional[bool] = None
     heading_valid: bool = False
     mount_valid: bool = False
+    camera_pose_calibrated: Optional[bool] = None
 
 
 class SolveContextPayload(BaseModel):
-    """Optional sensor context from ZenitAPA / ZenitAPA 提供的可选传感器上下文。"""
+    """外部系统提供的可选传感器上下文 / Optional external sensor context."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -566,7 +568,13 @@ class CoreStreamStatusResponse(BaseModel):
     max_clients: int
     active_clients: int
     frame_fetch_timeout_ms: int
+    client_stall_timeout_ms: int = 0
     target_preview_fps: int
+    oldest_client_age_ms: int = 0
+    oldest_client_idle_ms: int = 0
+    released_clients_total: int = 0
+    stalled_clients_total: int = 0
+    release_reasons: dict[str, int] = Field(default_factory=dict)
     sensor_target_fps: float = 0.0
     preview_target_fps: int = 0
     actual_capture_fps: float = 0.0

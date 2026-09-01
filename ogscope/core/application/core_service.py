@@ -5,6 +5,7 @@ Core 标准契约应用服务 / Core standard contract application service.
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -190,6 +191,8 @@ class CoreContractService:
         solve_context: Any | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
+        was_running = self._session.running
+        next_session_id = self._session.session_id if was_running else uuid.uuid4().hex
         result = await realtime_solve_service.start(
             hint_ra_deg=hint_ra_deg,
             hint_dec_deg=hint_dec_deg,
@@ -197,10 +200,16 @@ class CoreContractService:
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
             solve_context=solve_context,
+            session_id=next_session_id,
         )
-        self._session.running = True
+        success = bool(result.get("success", True))
+        self._session.running = success
+        if success and not was_running:
+            # A unique id lets upstream consumers reject results from an older run.
+            # 唯一会话 ID 让上层能够拒绝旧一轮分析留下的结果。
+            self._session.session_id = str(result.get("session_id") or next_session_id)
         return {
-            "success": bool(result.get("success", True)),
+            "success": success,
             "session_id": self._session.session_id,
             "state": "running",
             "message": result.get("message", ""),
@@ -327,23 +336,37 @@ class CoreContractService:
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
         hardware_client = get_hardware_plane_client()
-        hp_result = await hardware_client.device_command("camera", "start")
+        # 冷启动可能超过硬件平面通用 RPC 预算；先完成真实相机启动，再同步平面状态。
+        # Cold start can exceed the generic plane RPC budget; start hardware first, then sync plane state.
         result = await camera_domain_service.start()
+        hp_result = await hardware_client.device_command("camera", "start")
+        status = await self.get_camera_status()
+        ready = bool(status.get("connected")) and bool(status.get("streaming"))
+        message = str(result.get("message", ""))
+        if not ready:
+            message = str(
+                status.get("error") or message or "camera did not become ready"
+            )
         return {
-            "success": bool(result.get("success", True)),
-            "message": result.get("message", ""),
-            "info": {},
+            "success": bool(result.get("success", True)) and ready,
+            "message": message,
+            "info": status.get("info", {}),
             "applied": {
                 "action": "start",
                 "hardware_plane_ok": bool(hp_result.get("success", False)),
+                "ready": ready,
+                "connected": bool(status.get("connected")),
+                "streaming": bool(status.get("streaming")),
             },
         }
 
     async def stop_camera(self) -> dict[str, Any]:
         """停止 Core 相机 / Stop core camera."""
         hardware_client = get_hardware_plane_client()
-        hp_result = await hardware_client.device_command("camera", "stop")
+        # 先让相机域完成有界清理，避免硬件平面短 RPC 预算提前取消释放流程。
+        # Let the camera domain finish bounded cleanup before the short plane RPC can cancel it.
         result = await camera_domain_service.stop()
+        hp_result = await hardware_client.device_command("camera", "stop")
         return {
             "success": bool(result.get("success", True)),
             "message": result.get("message", ""),
@@ -358,15 +381,25 @@ class CoreContractService:
         """按 Core 语义微调相机参数 / Tune camera params with core semantics."""
         applied: dict[str, Any] = {}
         auto_exposure = payload.get("auto_exposure")
-        if auto_exposure is not None:
+        exposure_us = payload.get("exposure_us")
+        restore_auto_after_exposure = bool(auto_exposure) and exposure_us is not None
+
+        if auto_exposure is not None and not restore_auto_after_exposure:
             await camera_domain_service.set_auto_exposure_mode(bool(auto_exposure))
             applied["auto_exposure"] = bool(auto_exposure)
 
-        if payload.get("exposure_us") is not None:
-            await camera_domain_service.update_settings(
-                {"exposure": payload["exposure_us"]}
-            )
-            applied["exposure_us"] = int(payload["exposure_us"])
+        if exposure_us is not None:
+            exposure_settings: dict[str, Any] = {"exposure": exposure_us}
+            if restore_auto_after_exposure:
+                # 先在手动模式写入可恢复基线，再重新开启 AE。
+                # Write the restorable manual baseline before re-enabling AE.
+                exposure_settings["autoExposure"] = False
+            await camera_domain_service.update_settings(exposure_settings)
+            applied["exposure_us"] = int(exposure_us)
+
+        if restore_auto_after_exposure:
+            await camera_domain_service.set_auto_exposure_mode(True)
+            applied["auto_exposure"] = True
 
         if payload.get("analogue_gain") is not None:
             settings: dict[str, Any] = {"gain": float(payload["analogue_gain"])}

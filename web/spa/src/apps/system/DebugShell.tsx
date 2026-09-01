@@ -1,15 +1,17 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Activity,
   Bolt,
   Camera,
   Cpu,
   LayoutDashboard,
+  Menu,
   Network,
   Settings,
   Sparkles,
   Touchpad,
   Wifi,
+  X,
 } from "lucide-react";
 import { useSystemInfo } from "@shared/context/SystemInfoContext";
 import { useI18n } from "@shared/i18n/I18nProvider";
@@ -36,6 +38,7 @@ export function DebugShell({
 }) {
   const { t, locale, setLocale } = useI18n();
   const { info } = useSystemInfo();
+  const [navOpen, setNavOpen] = useState(false);
 
   const cpu = info?.cpu_usage != null ? Number(info.cpu_usage).toFixed(1) : "—";
   const mem = info?.memory_usage != null ? Number(info.memory_usage).toFixed(1) : "—";
@@ -61,8 +64,31 @@ export function DebugShell({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-on-surface md:flex-row">
-      <aside className="glass-panel z-50 flex w-full shrink-0 flex-col border-b border-outline-variant/20 bg-surface-container-low/80 backdrop-blur-xl md:fixed md:left-0 md:top-0 md:h-full md:w-64 md:border-b-0 md:border-r md:border-white/5">
+      {navOpen ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          aria-label={locale === "zh" ? "关闭导航" : "Close navigation"}
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
+      <aside
+        id="system-console-navigation"
+        className={`glass-panel fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col overflow-y-auto border-r border-white/5 bg-surface-container-low/95 backdrop-blur-xl transition-transform lg:translate-x-0 ${
+          navOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         <div className="p-5">
+          <div className="mb-3 flex justify-end lg:hidden">
+            <button
+              type="button"
+              className="rounded p-1.5 text-on-surface-variant hover:bg-white/5 hover:text-on-surface"
+              aria-label={locale === "zh" ? "关闭导航" : "Close navigation"}
+              onClick={() => setNavOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
           <div className="mb-8 flex items-center gap-3">
             <div className="primary-gradient flex h-10 w-10 items-center justify-center rounded-lg shadow-lg">
               <Sparkles className="h-5 w-5 text-on-primary-container" />
@@ -75,12 +101,12 @@ export function DebugShell({
             </div>
           </div>
           <nav className="flex flex-col gap-0.5">
-            <button type="button" className={navClass(route === "overview")} onClick={() => onRouteChange("overview")}>
+            <button type="button" className={navClass(route === "overview")} onClick={() => { onRouteChange("overview"); setNavOpen(false); }}>
               <LayoutDashboard className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.overview")}</span>
             </button>
             {allowNetworkRoute && (
-              <button type="button" className={navClass(route === "network")} onClick={() => onRouteChange("network")}>
+              <button type="button" className={navClass(route === "network")} onClick={() => { onRouteChange("network"); setNavOpen(false); }}>
                 <Network className="h-4 w-4 shrink-0" />
                 <span>{t("sys.shell.nav.network")}</span>
               </button>
@@ -107,27 +133,27 @@ export function DebugShell({
               <Sparkles className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.analysis")}</span>
             </a>
-            <button type="button" className={navClass(route === "sensors")} onClick={() => onRouteChange("sensors")}>
+            <button type="button" className={navClass(route === "sensors")} onClick={() => { onRouteChange("sensors"); setNavOpen(false); }}>
               <Activity className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.sensors")}</span>
             </button>
-            <button type="button" className={navClass(route === "power")} onClick={() => onRouteChange("power")}>
+            <button type="button" className={navClass(route === "power")} onClick={() => { onRouteChange("power"); setNavOpen(false); }}>
               <Bolt className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.power")}</span>
             </button>
-            <button type="button" className={navClass(route === "hmi")} onClick={() => onRouteChange("hmi")}>
+            <button type="button" className={navClass(route === "hmi")} onClick={() => { onRouteChange("hmi"); setNavOpen(false); }}>
               <Touchpad className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.hmi")}</span>
             </button>
-            <button type="button" className={navClass(route === "config")} onClick={() => onRouteChange("config")}>
+            <button type="button" className={navClass(route === "config")} onClick={() => { onRouteChange("config"); setNavOpen(false); }}>
               <Settings className="h-4 w-4 shrink-0" />
               <span>{t("sys.shell.nav.config")}</span>
             </button>
           </nav>
         </div>
-        <div className="mt-auto hidden p-5 md:block">
+        <div className="mt-auto p-5">
           <div className="rounded-xl border border-white/5 bg-surface-container-low p-3">
-            <p className="truncate text-xs font-semibold text-on-surface">{t("sys.shell.workbench")}</p>
+            <p className="truncate text-xs font-semibold text-on-surface" title={t("sys.shell.workbench")}>{t("sys.shell.workbench")}</p>
             <p className="font-mono text-[10px] text-on-surface-variant">
               {t("sys.shell.node")}: OGSCOPE_PI_ZERO_2W
             </p>
@@ -135,14 +161,24 @@ export function DebugShell({
         </div>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:ml-64">
-        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center justify-between border-b border-white/5 bg-neutral-950/80 px-4 backdrop-blur-md md:px-8">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:ml-64">
+        <header className="sticky top-0 z-30 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/5 bg-neutral-950/80 px-4 py-2 backdrop-blur-md lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              className="rounded p-1.5 text-on-surface-variant hover:bg-white/5 hover:text-on-surface lg:hidden"
+              aria-controls="system-console-navigation"
+              aria-expanded={navOpen}
+              aria-label={locale === "zh" ? "打开导航" : "Open navigation"}
+              onClick={() => setNavOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </button>
             <span className="hidden truncate border-b-2 border-primary pb-0.5 font-mono text-xs uppercase tracking-wider text-primary sm:inline">
               {routeTitle[route]}
             </span>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-3 sm:gap-4">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-4">
             <div className="mr-2 flex gap-1 text-[10px]">
               <button
                 type="button"
@@ -180,7 +216,7 @@ export function DebugShell({
           </div>
         </header>
 
-        <main className="og-scrollbar min-h-0 flex-1 overflow-auto p-4 md:p-6">{children}</main>
+        <main className="og-scrollbar min-h-0 flex-1 overflow-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   );

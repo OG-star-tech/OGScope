@@ -13,6 +13,13 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - Start/stop preview
 - Live status: capture FPS, preview FPS, exposure, consumers, encoder, and memory pressure
 
+### Star focus calibration
+- Start a guided focusing session and continuously measure multi-star HFD and FWHM.
+- Follow plain-language guidance such as keep turning, near best, or wrong direction.
+- Track the best HFD and recent trend for the current session; lower is normally sharper.
+- Click a star in the preview to lock it, or return to automatic multi-star aggregation.
+- Saturated, low-SNR, and badly shaped candidates are excluded to avoid misleading scores.
+
 ### Capture
 - **Still capture**: high-quality photos with auto-save
 - **Video recording**: manual duration, MP4
@@ -20,7 +27,7 @@ The OGScope debug console is a developer-focused camera tool: live preview, capt
 - **Sidecar metadata**: `.txt` parameter file per capture
 
 ### Parameters
-- **Exposure**: 1ms–100ms (fine steps)
+- **Exposure**: 0.1ms–1s (fine steps, aligned with the auto-exposure ceiling)
 - **Analog gain**: 1x–16x (0.1x steps)
 - **Digital gain**: 1x–4x (0.1x steps)
 - **White balance**: `auto` / `manual` / `night`; manual mode exposes red/blue gains
@@ -68,10 +75,11 @@ Browser: `http://localhost:8000/debug`
 
 1. **Start preview** — click Start, wait for init, view stream.
 2. **Tune parameters** — Parameters tab, adjust sliders, Apply.
-3. **Capture still** — Capture tab, Capture photo; files under `~/dev_captures/`.
-4. **Record video** — Start recording, stop when done.
-5. **Presets** — Presets tab: name, description, Save; Apply from cards.
-6. **Files** — Files tab: list, download, details.
+3. **Calibrate focus (optional)** — start focus calibration, rotate the lens slowly, and minimize HFD. Click a preview star when you want to lock the target.
+4. **Capture still** — Capture tab, Capture photo; files under `~/dev_captures/`.
+5. **Record video** — Start recording, stop when done.
+6. **Presets** — Presets tab: name, description, Save; Apply from cards.
+7. **Files** — Files tab: list, download, details.
 
 ### Keyboard shortcuts
 
@@ -115,6 +123,7 @@ Browser: `http://localhost:8000/debug`
 - `POST /api/dev/debug/camera/start`
 - `POST /api/dev/debug/camera/stop`
 - `GET /api/dev/debug/camera/preview`
+- `GET /api/dev/debug/camera/focus/metrics`
 
 ### Capture
 - `POST /api/dev/debug/camera/capture`
@@ -179,7 +188,8 @@ These settings enter runtime through environment variables or config files. Name
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | Manual white-balance red/blue gains |
 | `camera_night_mode` | `false` | Apply night white-balance flag at startup |
-| `camera_auto_exposure_max_us` | `2000000` | Longest AE frame duration for dark fields |
+| `camera_tuning_file` | empty | Optional Picamera2 tuning override path; the bundled IMX327 tuning is used by default |
+| `camera_auto_exposure_max_us` | `1000000` | Longest AE frame duration; dark scenes may fall to about 1 fps |
 | `camera_ae_flicker_mode` | `off` | `off` / `50hz` / `60hz` |
 | `camera_noise_reduction_mode` | `fast` | `off` / `fast` / `high_quality` |
 | `camera_lores_enabled` | `true` | Enable the low-resolution helper stream |

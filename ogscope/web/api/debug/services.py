@@ -35,6 +35,9 @@ recording_fps_value: float = 15.0
 recording_media_filename: Optional[str] = None
 recording_codec_fourcc: str = "MJPG"
 recording_container: str = "AVI"
+# 焦点会话只锁定会影响星点轮廓的运行时参数，结束时恢复 / Focus session restores runtime imaging controls.
+focus_session_snapshot: Optional[dict[str, Any]] = None
+focus_session_state_lock: Optional[asyncio.Lock] = None
 
 _CAMERA_ENV_KEY_MAP = {
     "width": "OGSCOPE_CAMERA_WIDTH",
@@ -65,6 +68,14 @@ def _get_recording_state_lock() -> asyncio.Lock:
     if recording_state_lock is None:
         recording_state_lock = asyncio.Lock()
     return recording_state_lock
+
+
+def _get_focus_session_state_lock() -> asyncio.Lock:
+    """懒加载焦点会话锁 / Lazy-init focus-session lock."""
+    global focus_session_state_lock
+    if focus_session_state_lock is None:
+        focus_session_state_lock = asyncio.Lock()
+    return focus_session_state_lock
 
 
 def is_recording_active() -> bool:
@@ -326,6 +337,8 @@ class DebugCameraService:
         """停止调试相机 / Stop debugging camera"""
         camera = await asyncio.to_thread(get_camera_instance)
         _attach_manager_camera_if_needed(camera)
+        if focus_session_snapshot is not None:
+            await DebugCameraService.stop_focus_session()
         await get_camera_manager().stop()
         return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
 
@@ -915,7 +928,12 @@ class DebugCameraService:
         if not hasattr(camera, "set_auto_exposure"):
             raise Exception("当前相机不支持自动曝光切换")
 
-        if not camera.set_auto_exposure(bool(enabled)):
+        applied = await get_camera_manager().reconfigure_camera(
+            "set_auto_exposure",
+            lambda: camera.set_auto_exposure(bool(enabled)),
+            timeout_sec=10.0,
+        )
+        if not applied:
             raise Exception("设置自动曝光模式失败")
 
         get_camera_manager().update_runtime_overrides({"auto_exposure": bool(enabled)})
@@ -933,70 +951,77 @@ class DebugCameraService:
             raise Exception("相机未初始化")
 
         try:
-            # 优先处理自动曝光开关，避免自动 / Prioritize the automatic exposure switch to avoid automatic
-            auto_exposure = settings.get(
-                "autoExposure", getattr(camera, "auto_exposure", False)
-            )
-            if hasattr(camera, "set_auto_exposure"):
-                camera.set_auto_exposure(bool(auto_exposure))
+            # 整组设置在同一个相机事务中执行，避免与 capture_request 并发访问 libcamera。
+            # Apply the full settings batch in one camera transaction to avoid racing capture_request.
+            def _apply_settings_sync() -> bool:
+                auto_exposure = settings.get(
+                    "autoExposure", getattr(camera, "auto_exposure", False)
+                )
+                if hasattr(camera, "set_auto_exposure"):
+                    camera.set_auto_exposure(bool(auto_exposure))
 
-            # 更新基础相机参数 / Update basic camera parameters
-            if not auto_exposure and "exposure" in settings:
-                camera.set_exposure(settings["exposure"])
+                if not auto_exposure and "exposure" in settings:
+                    camera.set_exposure(settings["exposure"])
 
-            if not auto_exposure and "gain" in settings and "digitalGain" in settings:
-                camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
-            elif not auto_exposure and "gain" in settings:
-                camera.set_gain(settings["gain"])
+                if (
+                    not auto_exposure
+                    and "gain" in settings
+                    and "digitalGain" in settings
+                ):
+                    camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
+                elif not auto_exposure and "gain" in settings:
+                    camera.set_gain(settings["gain"])
 
-            # 更新图像增强参数 / Update image enhancement parameters
-            if any(
-                key in settings
-                for key in ["contrast", "brightness", "saturation", "sharpness"]
-            ):
-                contrast = settings.get("contrast", 1.0)
-                brightness = settings.get("brightness", 0.0)
-                saturation = settings.get("saturation", 1.0)
-                sharpness = settings.get("sharpness", 1.0)
-
-                if hasattr(camera, "set_image_enhancement"):
+                if any(
+                    key in settings
+                    for key in ["contrast", "brightness", "saturation", "sharpness"]
+                ) and hasattr(camera, "set_image_enhancement"):
                     camera.set_image_enhancement(
-                        contrast, brightness, saturation, sharpness
+                        settings.get("contrast", 1.0),
+                        settings.get("brightness", 0.0),
+                        settings.get("saturation", 1.0),
+                        settings.get("sharpness", 1.0),
                     )
 
-            # 更新降噪设置 / Update noise reduction settings
-            if "noiseReductionMode" in settings:
-                if hasattr(camera, "set_noise_reduction_mode"):
+                if "noiseReductionMode" in settings and hasattr(
+                    camera, "set_noise_reduction_mode"
+                ):
                     camera.set_noise_reduction_mode(settings["noiseReductionMode"])
-            if "noiseReduction" in settings and "noiseReductionMode" not in settings:
-                if hasattr(camera, "set_noise_reduction"):
+                elif "noiseReduction" in settings and hasattr(
+                    camera, "set_noise_reduction"
+                ):
                     camera.set_noise_reduction(settings["noiseReduction"])
 
-            # 更新 libcamera 高级控制 / Update advanced libcamera controls
-            if "aeFlickerMode" in settings:
-                if hasattr(camera, "set_ae_flicker_mode"):
+                if "aeFlickerMode" in settings and hasattr(
+                    camera, "set_ae_flicker_mode"
+                ):
                     camera.set_ae_flicker_mode(settings["aeFlickerMode"])
-            if "autoExposureMaxUs" in settings and settings["autoExposureMaxUs"]:
-                if hasattr(camera, "set_auto_exposure_max_us"):
+                if (
+                    "autoExposureMaxUs" in settings
+                    and settings["autoExposureMaxUs"]
+                    and hasattr(camera, "set_auto_exposure_max_us")
+                ):
                     camera.set_auto_exposure_max_us(settings["autoExposureMaxUs"])
 
-            # 更新白平衡设置 / Update white balance settings
-            if "whiteBalanceMode" in settings:
-                mode = settings["whiteBalanceMode"]
-                gain_r = settings.get("whiteBalanceGainR", 1.0)
-                gain_b = settings.get("whiteBalanceGainB", 1.0)
-
-                if hasattr(camera, "set_white_balance"):
-                    camera.set_white_balance(mode, gain_r, gain_b)
-
-            # 更新颜色模式设置 / Update color mode settings
-            if "colorMode" in settings:
-                if hasattr(camera, "set_color_mode"):
-                    await get_camera_manager().reconfigure_camera(
-                        "update_color_mode",
-                        lambda: camera.set_color_mode(settings["colorMode"]),
-                        timeout_sec=10.0,
+                if "whiteBalanceMode" in settings and hasattr(
+                    camera, "set_white_balance"
+                ):
+                    camera.set_white_balance(
+                        settings["whiteBalanceMode"],
+                        settings.get("whiteBalanceGainR", 1.0),
+                        settings.get("whiteBalanceGainB", 1.0),
                     )
+
+                if "colorMode" in settings and hasattr(camera, "set_color_mode"):
+                    camera.set_color_mode(settings["colorMode"])
+                return True
+
+            logging.getLogger(__name__).info(
+                "camera_settings_apply fields=%s", ",".join(sorted(settings))
+            )
+            await get_camera_manager().reconfigure_camera(
+                "update_settings", _apply_settings_sync, timeout_sec=10.0
+            )
 
             overrides: dict[str, Any] = {}
             if "exposure" in settings:
@@ -1039,6 +1064,104 @@ class DebugCameraService:
             }
         except Exception as e:
             raise Exception(f"更新设置失败: {str(e)}")
+
+    @staticmethod
+    async def start_focus_session() -> dict[str, Any]:
+        """锁定曝光/增益并关闭降噪，保存可恢复快照 / Lock imaging controls with a restorable snapshot."""
+        global focus_session_snapshot
+        async with _get_focus_session_state_lock():
+            if focus_session_snapshot is not None:
+                return {
+                    "success": True,
+                    "active": True,
+                    "already_active": True,
+                    "locked": focus_session_snapshot["locked"],
+                }
+
+            camera = get_camera_instance()
+            if not camera or not camera.is_initialized:
+                raise Exception("相机未初始化")
+            info = (
+                camera.get_camera_info() if hasattr(camera, "get_camera_info") else {}
+            )
+            snapshot_settings = {
+                "autoExposure": bool(getattr(camera, "auto_exposure", False)),
+                "exposure": int(getattr(camera, "exposure_us", 10_000)),
+                "gain": float(getattr(camera, "analogue_gain", 1.0)),
+                "digitalGain": float(getattr(camera, "digital_gain", 1.0)),
+                "noiseReductionMode": str(
+                    getattr(camera, "noise_reduction_mode", "fast")
+                ),
+            }
+            locked = {
+                "autoExposure": False,
+                "exposure": max(
+                    1,
+                    int(
+                        info.get("actual_exposure_us") or snapshot_settings["exposure"]
+                    ),
+                ),
+                "gain": max(
+                    0.1,
+                    float(
+                        info.get("actual_analogue_gain") or snapshot_settings["gain"]
+                    ),
+                ),
+                "digitalGain": max(
+                    0.1,
+                    float(
+                        info.get("actual_digital_gain")
+                        or snapshot_settings["digitalGain"]
+                    ),
+                ),
+                "noiseReductionMode": "off",
+            }
+            runtime_overrides = get_camera_manager().get_runtime_overrides()
+            await DebugCameraService.update_settings(locked)
+            focus_session_snapshot = {
+                "settings": snapshot_settings,
+                "runtime_overrides": runtime_overrides,
+                "locked": locked,
+            }
+            return {
+                "success": True,
+                "active": True,
+                "already_active": False,
+                "locked": locked,
+            }
+
+    @staticmethod
+    async def stop_focus_session() -> dict[str, Any]:
+        """恢复焦点会话前的相机参数 / Restore camera controls from before focus mode."""
+        global focus_session_snapshot
+        async with _get_focus_session_state_lock():
+            snapshot = focus_session_snapshot
+            if snapshot is None:
+                return {"success": True, "active": False, "restored": False}
+
+            camera = get_camera_instance()
+            restored = bool(camera and camera.is_initialized)
+            if restored:
+                restore_settings = snapshot["settings"]
+                if restore_settings["autoExposure"]:
+                    # 先恢复手动基线，再重新开启 AE；否则批量设置会按 AE 语义跳过曝光/增益。
+                    # Restore the manual baseline before re-enabling AE; AE batches skip exposure/gain.
+                    await DebugCameraService.update_settings(
+                        {**restore_settings, "autoExposure": False}
+                    )
+                    await DebugCameraService.update_settings({"autoExposure": True})
+                else:
+                    await DebugCameraService.update_settings(restore_settings)
+            manager = get_camera_manager()
+            manager.clear_runtime_overrides()
+            manager.update_runtime_overrides(snapshot["runtime_overrides"])
+            focus_session_snapshot = None
+            return {
+                "success": True,
+                "active": False,
+                "restored": restored,
+                "restored_settings": snapshot["settings"],
+            }
 
     @staticmethod
     async def reset_camera():

@@ -45,7 +45,7 @@ echo "== Sync OGScope code → ${REMOTE}:${DEV_PATH} (uploads/logs/data preserve
 
 rsync -avz --delete \
   -e "${RSYNC_SSH}" \
-  --exclude '.git/' \
+  --exclude '.git' \
   --exclude '.venv/' \
   --exclude 'node_modules/' \
   --exclude '__pycache__/' \

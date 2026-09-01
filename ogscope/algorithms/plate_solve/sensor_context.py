@@ -146,10 +146,28 @@ def predict_from_solve_context(
     if not ctx:
         return {"sensor_status": "unavailable"}
 
+    # A raw motor position is not an absolute camera pointing direction until
+    # the mechanical zero and boresight transform are calibrated.
+    # 未标定机械零位与光轴变换前，原始电机角度不是摄像头的绝对指向。
+    if quality.get("camera_pose_calibrated") is False:
+        return {
+            "sensor_status": "unavailable",
+            "sensor_reason": "camera_pose_uncalibrated",
+        }
+    if quality.get("time_fresh") is False:
+        return {
+            "sensor_status": "unavailable",
+            "sensor_reason": "observer_time_stale",
+        }
+
     gps_valid = bool(quality.get("gps_valid"))
     time_valid = bool(quality.get("time_valid"))
+    time_fresh_raw = quality.get("time_fresh")
+    time_fresh = time_valid if time_fresh_raw is None else bool(time_fresh_raw)
     mount_valid = bool(quality.get("mount_valid"))
     heading_valid = bool(quality.get("heading_valid"))
+    camera_pose_raw = quality.get("camera_pose_calibrated")
+    camera_pose_calibrated = True if camera_pose_raw is None else bool(camera_pose_raw)
     lat = _optional_float(observer.get("latitude_deg"))
     lon = _optional_float(observer.get("longitude_deg"))
     when = _parse_utc(observer.get("time_utc"))
@@ -160,17 +178,28 @@ def predict_from_solve_context(
     if (
         not gps_valid
         or not time_valid
+        or not time_fresh
+        or not camera_pose_calibrated
         or lat is None
         or lon is None
         or when is None
         or alt is None
         or az is None
     ):
-        return {"sensor_status": "unavailable"}
+        return {
+            "sensor_status": "unavailable",
+            "sensor_reason": "sensor_context_incomplete",
+        }
     if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and -90.0 <= alt <= 90.0):
-        return {"sensor_status": "unavailable"}
+        return {
+            "sensor_status": "unavailable",
+            "sensor_reason": "sensor_context_invalid",
+        }
     if not (mount_valid or heading_valid):
-        return {"sensor_status": "unavailable"}
+        return {
+            "sensor_status": "unavailable",
+            "sensor_reason": "orientation_unavailable",
+        }
     predicted_ra, predicted_dec = horizontal_to_equatorial(
         altitude_deg=alt,
         azimuth_deg=az,
