@@ -1285,6 +1285,19 @@ class AnalysisService:
     ) -> dict[str, Any]:
         """相机或视频文件单帧解算 / Single-frame solve from camera or video file."""
         if body.source == "camera":
+            # Product/Core alignment owns the live camera solver while active; developer
+            # polling must yield instead of adding capture and CPU latency. /
+            # 产品级 Core 对准运行时独占实时解算；开发者轮询必须让路，避免增加抓帧和 CPU 延迟。
+            from ogscope.core.realtime import realtime_solve_service
+
+            if realtime_solve_service.state.running:
+                return {
+                    "success": True,
+                    "input_name": body.input_name or "",
+                    "gate_status": "SKIPPED_BUSY",
+                    "gate_reason": "core realtime analysis is active",
+                    "next_allowed_in_ms": 0,
+                }
             try:
                 from ogscope.web.api.debug.services import is_recording_active
 
