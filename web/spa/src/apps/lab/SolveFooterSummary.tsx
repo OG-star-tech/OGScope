@@ -1,4 +1,5 @@
 import {
+  formatArcminArcsecFromArcsec,
   formatAngleDeg,
   formatProbLine,
   parseSolveResult,
@@ -79,7 +80,7 @@ export function SolveFooterSummary({
           <div>
             <div className="text-on-surface-variant">{t("lab.metric.rmse")}</div>
             <div className="font-semibold tabular-nums text-on-surface">
-              {s.rmseArcsec.toFixed(2)}″
+              {formatArcminArcsecFromArcsec(s.rmseArcsec)}
             </div>
           </div>
         )}
