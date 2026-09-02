@@ -54,6 +54,12 @@ export function formatAngleDeg(v: number | null): string {
   return `${v.toFixed(4)}°`;
 }
 
+/** 同时显示角分与角秒，避免调试时误读单位 / Show arcminutes and arcseconds together for unambiguous debugging. */
+export function formatArcminArcsecFromArcsec(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${(value / 60).toFixed(2)}′ / ${value.toFixed(1)}″`;
+}
+
 /**
  * Tetra3 `Prob`：假阳性概率（越低越可信）/ Tetra3 Prob = false-positive probability (lower is better).
  *
