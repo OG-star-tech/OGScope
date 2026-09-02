@@ -804,15 +804,15 @@ class AnalysisService:
         return {"input_name": body.input_name, "results": results}
 
     def import_from_debug_capture(self, filename: str) -> dict[str, Any]:
-        """从 ~/dev_captures 复制到分析素材池并标记来源 / Copy debug capture into pool."""
-        src = Path.home() / "dev_captures" / Path(filename).name
+        """从统一调试拍摄目录复制到素材池 / Copy configured debug capture into pool."""
+        src = DEV_CAPTURES_DIR / ensure_safe_basename(filename.strip())
         if not src.is_file():
             raise FileNotFoundError(
                 "调试采集文件不存在 / Debug capture file not found in dev_captures"
             )
         dst = self.upload_root / src.name
         shutil.copy2(src, dst)
-        side_txt = Path.home() / "dev_captures" / f"{src.stem}.txt"
+        side_txt = DEV_CAPTURES_DIR / f"{src.stem}.txt"
         if side_txt.is_file():
             shutil.copy2(side_txt, self.upload_root / side_txt.name)
         self._lab.set_file_source(dst.name, "debug_console")

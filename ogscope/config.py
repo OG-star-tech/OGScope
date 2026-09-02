@@ -220,6 +220,13 @@ class Settings(BaseSettings):
     # 文件路径配置 / File path configuration
     data_dir: Path = Field(default=Path("./data"), description="数据目录")
     upload_dir: Path = Field(default=Path("./uploads"), description="上传目录")
+    dev_captures_dir: Optional[Path] = Field(
+        default=None,
+        description=(
+            "开发者相机拍摄持久化目录；None 时使用 data/dev_captures / "
+            "Persistent developer-camera capture directory; defaults to data/dev_captures"
+        ),
+    )
     analysis_dir: Path = Field(
         default=Path("./data/analysis"), description="分析任务目录"
     )
@@ -613,9 +620,13 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        if self.dev_captures_dir is None:
+            object.__setattr__(self, "dev_captures_dir", self.data_dir / "dev_captures")
         # 创建必要的目录 / Create necessary directories
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        assert self.dev_captures_dir is not None
+        self.dev_captures_dir.mkdir(parents=True, exist_ok=True)
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.plate_solve_dir.mkdir(parents=True, exist_ok=True)
 
