@@ -151,6 +151,7 @@ Thumbs.db
 # ====================
 # 用户上传的图像
 uploads/
+data/dev_captures/
 captured_images/
 *.fits
 *.fit
@@ -205,4 +206,3 @@ TODO.md
 NOTES.md
 .obsidian/
 PiFinder-release
-

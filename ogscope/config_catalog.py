@@ -137,6 +137,7 @@ _CATALOG_SECTIONS: tuple[
             "database_url",
             "data_dir",
             "upload_dir",
+            "dev_captures_dir",
             "analysis_dir",
             "plate_solve_dir",
             "solver_tetra_database_path",

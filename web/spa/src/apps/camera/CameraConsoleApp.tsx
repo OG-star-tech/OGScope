@@ -229,6 +229,12 @@ type DebugFileItem = {
   type: "image" | "video";
 };
 
+type DebugStorageInfo = {
+  path: string;
+  persistence: "persistent" | "temporary";
+  is_persistent: boolean;
+};
+
 type DebugFileInfo = {
   filename: string;
   size: number;
@@ -510,6 +516,7 @@ export function CameraConsoleApp() {
   const [presets, setPresets] = useState<CameraPreset[]>([]);
   const [presetBusy, setPresetBusy] = useState(false);
   const [files, setFiles] = useState<DebugFileItem[]>([]);
+  const [fileStorage, setFileStorage] = useState<DebugStorageInfo | null>(null);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileInfo, setFileInfo] = useState<DebugFileInfo | null>(null);
   const [fileInfoBusy, setFileInfoBusy] = useState(false);
@@ -1033,14 +1040,25 @@ export function CameraConsoleApp() {
   const loadFiles = async () => {
     setFileBusy(true);
     try {
-      const data = await requestJson<{ files?: DebugFileItem[] }>("/api/debug/files", { cache: "no-store" });
+      const data = await requestJson<{ files?: DebugFileItem[]; storage?: DebugStorageInfo }>("/api/debug/files", { cache: "no-store" });
       setFiles(data.files ?? []);
+      setFileStorage(data.storage ?? null);
       setFilePage(1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setFileBusy(false);
     }
+  };
+
+  const exportAllFiles = () => {
+    const anchor = document.createElement("a");
+    anchor.href = `${debugApi("/files")}/export`;
+    anchor.download = "";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setNotice(t("cam.notice.exportAll"));
   };
 
   const closeFileInfo = () => {
@@ -2094,9 +2112,18 @@ export function CameraConsoleApp() {
 
           <section className="rounded-xl border border-outline-variant/20 bg-surface-container p-4 text-xs">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider">{t("cam.files.title")}</h2>
-            <div className="mb-2">
+            {fileStorage && (
+              <div className={`mb-3 rounded border px-2 py-1.5 ${fileStorage.is_persistent === false ? "border-amber-400/40 bg-amber-400/10 text-amber-200" : "border-primary/30 bg-primary/5 text-on-surface-variant"}`}>
+                <div>{fileStorage.is_persistent === false ? t("cam.files.storageTemporary") : t("cam.files.storagePersistent")}</div>
+                <div className="mt-1 break-all font-mono text-[10px] opacity-80">{fileStorage.path}</div>
+              </div>
+            )}
+            <div className="mb-2 flex flex-wrap gap-2">
               <button type="button" disabled={fileBusy} onClick={() => void loadFiles()} className="rounded border border-outline-variant/40 px-2 py-1 disabled:opacity-50">
                 {t("cam.files.refresh")}
+              </button>
+              <button type="button" disabled={fileBusy || files.length === 0} onClick={exportAllFiles} className="rounded border border-outline-variant/40 px-2 py-1 disabled:opacity-50">
+                <Download className="mr-1 inline h-3.5 w-3.5" />{t("cam.files.exportAll")}
               </button>
             </div>
             {fileInfoBusy && <div className="mb-2 text-on-surface-variant">{t("cam.files.loadingInfo")}</div>}
