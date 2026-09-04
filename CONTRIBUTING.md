@@ -33,11 +33,11 @@
    cd OGScope
    ```
 
-2. **基于 staging 创建功能分支 / Branch from staging**
+2. **基于 develop 创建功能分支 / Branch from develop**
    ```bash
    git fetch origin
-   git checkout staging
-   git pull origin staging
+   git checkout develop
+   git pull origin develop
    git checkout -b feature/your-feature-name
    ```
 
@@ -125,16 +125,16 @@
 
 | 分支 | 用途 |
 |------|------|
-| `main` | 稳定发布线；仅通过 PR 从 `staging` 晋级 |
-| `staging` | **长期测试集成分支**；日常开发、板端联调与社区测试基准 |
-| `feature/*` | 功能/重构；从 `staging` 拉出，PR 合回后删除 |
-| `fix/*` | 小修复；合入 `staging` 验证，紧急时可 hotfix 合 `main` |
+| `main` | 稳定发布线；仅通过 PR 从 `develop` 晋级 |
+| `develop` | **长期测试集成分支**；日常开发、板端联调与社区测试基准 |
+| `feature/*` | 功能/重构；从 `develop` 拉出，PR 合回后删除 |
+| `fix/*` | 小修复；合入 `develop` 验证，紧急修复也必须先回合 `develop` |
 
-流程：`feature/*` / `fix/*` → PR → `staging` → 测试通过后 PR → `main`。
+流程：`feature/*` / `fix/*` → PR → `develop` → 测试通过后 PR → `main`。
 
-**禁止直接向 `main` 或 `staging` 提交或推送**（本地 pre-commit 会拦截；remote 需配置 GitHub Rulesets 或 Branch protection，见 [.github/scripts/apply-branch-protection.sh](.github/scripts/apply-branch-protection.sh)）。
+**禁止直接向 `main` 或 `develop` 提交或推送**（本地 pre-commit 会拦截；远端通过 GitHub Rulesets 强制执行，见 [.github/scripts/apply-branch-protection.sh](.github/scripts/apply-branch-protection.sh)）。
 
-**已废弃**：不再使用 `develop`、`dev`、`dev-latest` 集成分支。
+**已废弃**：不再使用 `staging`、`dev`、`dev-latest` 集成分支。
 
 ## 开发流程
 
@@ -142,7 +142,7 @@
 2. **开发**: 在本地开发和测试
 3. **提交 PR**: 创建 Pull Request
 4. **代码审查**: 等待维护者审查
-5. **合并**: 审查通过后合并到 `staging`，测试通过后再通过 PR 晋级 `main`
+5. **合并**: 审查通过后合并到 `develop`，测试通过后再通过 PR 晋级 `main`
 
 ## 代码审查标准
 

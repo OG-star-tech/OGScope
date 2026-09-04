@@ -1,5 +1,5 @@
-# 分支策略守卫：main 只能由 staging PR 晋级
-# Branch guard: main can only be promoted from staging PRs
+# 分支策略守卫：main 只能由 develop PR 晋级
+# Branch guard: main can only be promoted from develop PRs
 #
 # 说明 / Note: push 守卫是兜底；真正阻断直接更新依赖 GitHub Rulesets。
 # Push guard is a fallback; GitHub Rulesets are what block direct updates.
@@ -13,7 +13,7 @@ on:
     branches: [main]
 
 jobs:
-  require-staging-source:
+  require-develop-source:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -22,12 +22,12 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if [[ "${HEAD_REF}" == "staging" ]]; then
-            echo "Allowed: staging -> main"
+          if [[ "${HEAD_REF}" == "develop" ]]; then
+            echo "Allowed: develop -> main"
             exit 0
           fi
-          echo "::error::main 只能从 staging 分支通过 PR 晋级，当前来源：${HEAD_REF}"
-          echo "::error::PRs to main must come from staging. Current source: ${HEAD_REF}"
+          echo "::error::main 只能从 develop 分支通过 PR 晋级，当前来源：${HEAD_REF}"
+          echo "::error::PRs to main must come from develop. Current source: ${HEAD_REF}"
           exit 1
 
   block-direct-push-to-main:
@@ -48,6 +48,6 @@ jobs:
             echo "Allowed merge to main."
             exit 0
           fi
-          echo "::error::禁止直接向 main 推送。请先合入 staging，再通过 PR 合入 main。"
-          echo "::error::Direct push to main is not allowed. Merge to staging first, then open a PR to main."
+          echo "::error::禁止直接向 main 推送。请先合入 develop，再通过 PR 合入 main。"
+          echo "::error::Direct push to main is not allowed. Merge to develop first, then open a PR to main."
           exit 1
