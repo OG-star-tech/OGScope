@@ -8,7 +8,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -75,12 +75,12 @@ class RealtimeSolveService:
             )
             midpoint_ts = completed_ts - exposure_us / 2_000_000.0
             completed_iso = (
-                datetime.fromtimestamp(completed_ts, UTC)
+                datetime.fromtimestamp(completed_ts, timezone.utc)
                 .isoformat()
                 .replace("+00:00", "Z")
             )
             midpoint_iso = (
-                datetime.fromtimestamp(midpoint_ts, UTC)
+                datetime.fromtimestamp(midpoint_ts, timezone.utc)
                 .isoformat()
                 .replace("+00:00", "Z")
             )
