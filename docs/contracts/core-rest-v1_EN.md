@@ -45,9 +45,13 @@ upstream consumers should ignore results from an older session.
   - `session_id: str`
   - `state: "running" | "completed" | "stopped"`
   - `result: object | null`
+    - `observation_time_utc`: optional exposure-midpoint UTC for the current frame; astronomical coordinate conversion should prefer it
+    - `capture_completed_at_utc`, `capture_exposure_us`: optional capture diagnostics
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
+
+While Core realtime analysis is active, developer single-frame camera solves return `SKIPPED_BUSY` so debug polling cannot contend with product alignment for camera and CPU resources. File solving is unaffected.
 
 ### 3) Stop Analysis
 

@@ -5,7 +5,10 @@
 import asyncio
 import json
 import logging
+import os
+import tempfile
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -17,6 +20,7 @@ from ogscope.domain.shared.filesystem import (
     DEV_CAPTURES_DIR,
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
+    dev_captures_storage_info,
     ensure_safe_basename,
 )
 from ogscope.web.camera_shared import get_camera_manager
@@ -60,6 +64,31 @@ _CAMERA_ENV_KEY_MAP = {
 # 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
 # Serialize ensure/start; offload blocking camera calls from asyncio event loop.
 _camera_ensure_lock = asyncio.Lock()
+
+
+def _build_debug_capture_archive() -> tuple[Path, str]:
+    """在持久化卷上构建导出包 / Build export archive on the capture volume."""
+    archive_name = f"ogscope_debug_captures_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".ogscope-debug-captures-",
+        suffix=".zip",
+        dir=str(DEBUG_CAPTURES_DIR.parent),
+    )
+    os.close(fd)
+    archive_path = Path(temporary_name)
+    try:
+        with zipfile.ZipFile(
+            archive_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as archive:
+            for source_path in sorted(
+                DEBUG_CAPTURES_DIR.iterdir(), key=lambda item: item.name
+            ):
+                if source_path.is_file() and not source_path.is_symlink():
+                    archive.write(source_path, arcname=source_path.name)
+        return archive_path, archive_name
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
 
 
 def _get_recording_state_lock() -> asyncio.Lock:
@@ -1687,10 +1716,18 @@ class DebugFileService:
             # 按修改时间排序（最新的在前） / Sort by modification time (newest first)
             files.sort(key=lambda x: x["modified"], reverse=True)
 
-            return {"files": files}
+            return {
+                "files": files,
+                "storage": dev_captures_storage_info(DEBUG_CAPTURES_DIR),
+            }
 
         except Exception as e:
             raise Exception(f"获取文件列表失败: {str(e)}")
+
+    @staticmethod
+    async def create_export_archive() -> tuple[Path, str]:
+        """创建调试拍摄导出包 / Create a debug-capture export archive."""
+        return await asyncio.to_thread(_build_debug_capture_archive)
 
     @staticmethod
     async def get_file_info(filename: str):

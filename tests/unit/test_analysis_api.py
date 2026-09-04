@@ -84,6 +84,30 @@ def test_analysis_upload_and_single_image_solve(
 
 
 @pytest.mark.unit
+def test_analysis_import_uses_configured_debug_capture_directory(
+    client, temp_analysis_dir, monkeypatch, tmp_path: Path
+):
+    """分析导入与调试台共用同一采集目录 / Analysis import shares capture storage."""
+    from ogscope.web.api.analysis import services as analysis_services
+
+    debug_root = tmp_path / "configured-debug-captures"
+    debug_root.mkdir()
+    (debug_root / "field.jpg").write_bytes(b"field-image")
+    (debug_root / "field.txt").write_text('{"exposure_us": 500000}', encoding="utf-8")
+    monkeypatch.setattr(analysis_services, "DEV_CAPTURES_DIR", debug_root)
+
+    response = client.post(
+        "/api/dev/analysis/uploads/import_from_debug",
+        json={"filename": "field.jpg"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filename"] == "field.jpg"
+    assert (temp_analysis_dir / "uploads" / "field.jpg").read_bytes() == b"field-image"
+    assert (temp_analysis_dir / "uploads" / "field.txt").is_file()
+
+
+@pytest.mark.unit
 def test_analysis_solve_image_overlay_ext(
     client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
 ):
@@ -557,6 +581,25 @@ def test_analysis_camera_solve_skipped_when_recording_active(
     data = resp.json()
     assert data.get("gate_status") == "SKIPPED_BUSY"
     assert "recording" in str(data.get("gate_reason", ""))
+
+
+@pytest.mark.unit
+def test_analysis_camera_solve_yields_to_core_realtime(
+    client, temp_analysis_dir, mock_plate_solve, monkeypatch
+):
+    """正式 Core 解算运行时开发者相机解算让路 / Developer solve yields to Core realtime."""
+    from ogscope.core.realtime import realtime_solve_service
+
+    monkeypatch.setattr(realtime_solve_service.state, "running", True)
+    resp = client.post(
+        "/api/dev/analysis/solve/frame",
+        json={"source": "camera"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["gate_status"] == "SKIPPED_BUSY"
+    assert "core realtime" in data["gate_reason"]
 
 
 @pytest.mark.unit

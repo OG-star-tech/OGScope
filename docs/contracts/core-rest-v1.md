@@ -44,9 +44,13 @@
   - `session_id: str`
   - `state: "running" | "completed" | "stopped"`
   - `result: object | null`
+    - `observation_time_utc`：可选，当前图像曝光中点 UTC；天文坐标换算应优先使用该时刻
+    - `capture_completed_at_utc`、`capture_exposure_us`：可选抓帧诊断字段
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
+
+Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，避免调试轮询与产品对准争抢相机和 CPU；文件解算不受影响。
 
 ### 3) Stop Analysis
 

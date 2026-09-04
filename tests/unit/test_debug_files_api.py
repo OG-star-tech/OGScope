@@ -2,7 +2,9 @@
 调试文件 API 的最小回归测试。
 """
 
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -11,7 +13,10 @@ import pytest
 def test_debug_files_empty(client, temp_debug_dir):
     response = client.get("/api/dev/debug/files")
     assert response.status_code == 200
-    assert response.json() == {"files": []}
+    payload = response.json()
+    assert payload["files"] == []
+    assert payload["storage"]["path"] == str(temp_debug_dir)
+    assert payload["storage"]["is_persistent"] is False
 
 
 @pytest.mark.unit
@@ -55,3 +60,22 @@ def test_debug_files_delete_removes_image_and_info(client, temp_debug_dir):
     assert "message_key" in delete_resp.json()
     assert not image_path.exists()
     assert not info_path.exists()
+
+
+@pytest.mark.unit
+def test_debug_files_export_includes_media_sidecar_and_presets(client, temp_debug_dir):
+    (temp_debug_dir / "IMG_20260101_000002.jpg").write_bytes(b"image")
+    (temp_debug_dir / "IMG_20260101_000002.txt").write_text("{}", encoding="utf-8")
+    (temp_debug_dir / "presets.json").write_text("{}", encoding="utf-8")
+
+    response = client.get("/api/dev/debug/files/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.namelist() == [
+            "IMG_20260101_000002.jpg",
+            "IMG_20260101_000002.txt",
+            "presets.json",
+        ]
+    assert list(temp_debug_dir.parent.glob(".ogscope-debug-captures-*.zip")) == []
