@@ -75,8 +75,8 @@ def test_settings_accepts_explicit_debug_capture_directory(tmp_path: Path) -> No
 
 @pytest.mark.unit
 def test_storage_info_distinguishes_persistent_and_temporary(tmp_path: Path) -> None:
-    persistent = dev_captures_storage_info(tmp_path / "captures")
-    temporary = dev_captures_storage_info(Path("/tmp/dev_captures"))
+    persistent = dev_captures_storage_info(Path.cwd() / "data" / "dev_captures")
+    temporary = dev_captures_storage_info(tmp_path / "captures")
 
     assert persistent["is_persistent"] is True
     assert persistent["persistence"] == "persistent"

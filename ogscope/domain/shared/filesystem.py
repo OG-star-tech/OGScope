@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path, PurePath
 
@@ -51,7 +52,11 @@ def ensure_safe_basename(filename: str) -> str:
 def dev_captures_storage_info(path: Path = DEV_CAPTURES_DIR) -> dict[str, object]:
     """返回调试拍摄目录的持久化语义 / Describe capture storage persistence."""
     resolved = path.expanduser().resolve()
-    volatile_roots = (Path("/tmp").resolve(), Path("/run").resolve())
+    volatile_roots = {
+        Path("/tmp").resolve(),
+        Path("/run").resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    }
     is_temporary = any(
         resolved == root or root in resolved.parents for root in volatile_roots
     )
