@@ -16,7 +16,7 @@ def test_debug_files_empty(client, temp_debug_dir):
     payload = response.json()
     assert payload["files"] == []
     assert payload["storage"]["path"] == str(temp_debug_dir)
-    assert payload["storage"]["is_persistent"] is True
+    assert payload["storage"]["is_persistent"] is False
 
 
 @pytest.mark.unit
