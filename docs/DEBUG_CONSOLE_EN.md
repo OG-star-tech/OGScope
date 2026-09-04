@@ -76,10 +76,10 @@ Browser: `http://localhost:8000/debug`
 1. **Start preview** — click Start, wait for init, view stream.
 2. **Tune parameters** — Parameters tab, adjust sliders, Apply.
 3. **Calibrate focus (optional)** — start focus calibration, rotate the lens slowly, and minimize HFD. Click a preview star when you want to lock the target.
-4. **Capture still** — Capture tab, Capture photo; files under `~/dev_captures/`.
+4. **Capture still** — Capture tab, Capture photo; files persist under `./data/dev_captures/` by default. Set `OGSCOPE_DEV_CAPTURES_DIR` to override it. Paths under `/tmp` or `/run` are marked as temporary in the UI and are cleared by a reboot.
 5. **Record video** — Start recording, stop when done.
 6. **Presets** — Presets tab: name, description, Save; Apply from cards.
-7. **Files** — Files tab: list, download, details.
+7. **Files** — Files tab: list, download, export all media and sidecars as a ZIP, or inspect details.
 
 ### Keyboard shortcuts
 
@@ -92,13 +92,17 @@ Browser: `http://localhost:8000/debug`
 ## File layout
 
 ```
-~/dev_captures/
+./data/dev_captures/
 ├── IMG_20241201_143022.jpg
 ├── IMG_20241201_143022.txt
 ├── VID_20241201_143045.mp4
 ├── VID_20241201_143045.txt
 └── presets.json
 ```
+
+When persistent capture storage is first used, OGScope copies existing files from
+legacy `/tmp/dev_captures/` and `~/dev_captures/` directories without overwriting
+newer persistent files. Legacy source files remain in place.
 
 ### Sidecar format (example)
 

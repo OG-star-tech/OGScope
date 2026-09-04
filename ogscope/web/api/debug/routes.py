@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from ogscope.config import get_settings
 from ogscope.core.application import core_contract_service
@@ -424,6 +425,21 @@ async def get_capture_files():
     """获取拍摄文件列表 / Get shooting file list"""
     try:
         return await DebugFileService.get_files()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/files/export")
+async def export_capture_files():
+    """导出全部拍摄文件及参数侧车 / Export all captures and sidecars."""
+    try:
+        archive_path, archive_name = await DebugFileService.create_export_archive()
+        return FileResponse(
+            path=str(archive_path),
+            filename=archive_name,
+            media_type="application/zip",
+            background=BackgroundTask(archive_path.unlink, missing_ok=True),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

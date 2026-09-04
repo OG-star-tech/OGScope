@@ -84,6 +84,30 @@ def test_analysis_upload_and_single_image_solve(
 
 
 @pytest.mark.unit
+def test_analysis_import_uses_configured_debug_capture_directory(
+    client, temp_analysis_dir, monkeypatch, tmp_path: Path
+):
+    """分析导入与调试台共用同一采集目录 / Analysis import shares capture storage."""
+    from ogscope.web.api.analysis import services as analysis_services
+
+    debug_root = tmp_path / "configured-debug-captures"
+    debug_root.mkdir()
+    (debug_root / "field.jpg").write_bytes(b"field-image")
+    (debug_root / "field.txt").write_text('{"exposure_us": 500000}', encoding="utf-8")
+    monkeypatch.setattr(analysis_services, "DEV_CAPTURES_DIR", debug_root)
+
+    response = client.post(
+        "/api/dev/analysis/uploads/import_from_debug",
+        json={"filename": "field.jpg"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filename"] == "field.jpg"
+    assert (temp_analysis_dir / "uploads" / "field.jpg").read_bytes() == b"field-image"
+    assert (temp_analysis_dir / "uploads" / "field.txt").is_file()
+
+
+@pytest.mark.unit
 def test_analysis_solve_image_overlay_ext(
     client, temp_analysis_dir, mock_plate_solve, tmp_path: Path
 ):

@@ -21,6 +21,7 @@ def test_build_config_catalog_includes_new_preview_fields() -> None:
     assert "OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US" in keys
     assert "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE" in keys
     assert "OGSCOPE_SIMULATION_MODE" in keys
+    assert "OGSCOPE_DEV_CAPTURES_DIR" in keys
 
 
 @pytest.mark.unit

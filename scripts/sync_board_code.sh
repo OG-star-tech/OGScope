@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 同步 OGScope 源码到开发板并执行 board-update（保留 uploads/logs/data）
-# Sync OGScope source to dev board and run board-update (keeps uploads/logs/data)
+# 同步 OGScope 源码到开发板并执行 board-update（保留 uploads/logs/data 及调试拍摄）
+# Sync OGScope source and run board-update (keeps uploads/logs/data and debug captures)
 #
 # 用法 / Usage:
 #   export OGSCOPE_DEV_HOST=192.168.31.231
@@ -41,7 +41,7 @@ do
   fi
 done
 
-echo "== Sync OGScope code → ${REMOTE}:${DEV_PATH} (uploads/logs/data preserved) =="
+echo "== Sync OGScope code → ${REMOTE}:${DEV_PATH} (uploads/logs/data and debug captures preserved) =="
 
 rsync -avz --delete \
   -e "${RSYNC_SSH}" \
