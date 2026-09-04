@@ -11,9 +11,9 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: debug-statements
-      # 禁止在 main 上直接 commit / Block direct commits on main
+      # 禁止在长期受保护分支上直接提交 / Block direct commits on protected branches
       - id: no-commit-to-branch
-        args: [--branch, main]
+        args: [--branch, main, --branch, develop]
 
   - repo: https://github.com/psf/black
     rev: 24.1.1
@@ -33,4 +33,3 @@ repos:
       - id: mypy
         additional_dependencies: [types-all]
         args: [--ignore-missing-imports]
-
