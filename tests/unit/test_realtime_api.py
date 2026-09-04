@@ -4,7 +4,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pytest
@@ -31,7 +31,7 @@ def test_capture_time_payload_uses_exposure_midpoint() -> None:
     """解算时刻取曝光中点而非解算完成时刻 / Use exposure midpoint, not solve completion."""
     from ogscope.core.realtime.service import RealtimeSolveService
 
-    completed = datetime(2026, 9, 1, 15, 0, 1, tzinfo=UTC).timestamp()
+    completed = datetime(2026, 9, 1, 15, 0, 1, tzinfo=timezone.utc).timestamp()
     payload = RealtimeSolveService._capture_time_payload(
         completed,
         {"actual_exposure_us": 1_000_000},
