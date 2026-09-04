@@ -17,6 +17,9 @@ import numpy as np
 from PIL import Image
 
 from ogscope.algorithms.plate_solve.centroid_quality import filter_centroids_yx
+from ogscope.algorithms.plate_solve.scene_quality import (
+    analyze_structural_contamination,
+)
 from ogscope.algorithms.star_extract import StarPoint
 from ogscope.config import Settings, get_settings
 
@@ -27,6 +30,18 @@ _STATUS_NAMES: dict[int, str] = {
     4: "CANCELLED",
     5: "TOO_FEW",
 }
+
+
+def _tetra_status_name(out: dict[str, Any]) -> str:
+    """读取 Tetra3 状态名称 / Read a Tetra3 status name."""
+    status = out.get("status")
+    if status is None:
+        return "UNKNOWN"
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        return str(status)
+    return _STATUS_NAMES.get(code, str(status))
 
 
 def _json_safe(obj: Any) -> Any:
@@ -506,10 +521,13 @@ class PlateSolver:
 
         centroid_kw = params.to_get_centroids_kwargs()
         t0 = time.perf_counter()
+        # 多取一组候选供失败后的保守回退使用；常规解算仍只接收 max_stars。
+        # Keep a bounded reserve pool for fallback; the normal solve still gets max_stars.
+        reserve_limit = min(200, max(max_stars, max_stars * 2))
         try:
             centroids = get_centroids_from_image(
                 pil_image,
-                max_returned=max_stars,
+                max_returned=reserve_limit,
                 **centroid_kw,
             )
         except (OSError, ValueError, RuntimeError) as exc:
@@ -534,31 +552,45 @@ class PlateSolver:
         t_extract_ms = (time.perf_counter() - t0) * 1000.0
 
         detected_raw = int(len(centroids))
-        cyx = np.asarray(centroids, dtype=np.float64)
-        if detected_raw >= 4:
-            cyx_f, cq = filter_centroids_yx(cyx, (height, width), level)
-        else:
-            cyx_f, cq = cyx, {
-                "level": level,
+        cyx_pool = np.asarray(centroids, dtype=np.float64)
+        cyx_normal = cyx_pool[:max_stars]
+        detected = int(cyx_normal.shape[0])
+        cq: dict[str, Any] = {
+            "level": level,
+            "strategy": "normal_first",
+            "normal_status": None,
+            "fallback_attempted": False,
+            "fallback_status": None,
+            "flags": [],
+            "hints": [],
+            "metrics": {
+                "input_count": detected_raw,
+                "output_count": detected,
+                "normal_candidate_count": detected,
+                "reserve_candidate_count": max(0, detected_raw - detected),
+                "removed_dense": 0,
+                "removed_line": 0,
+                "dense_candidates": 0,
+                "line_candidates": 0,
+                "evidence_candidates": 0,
+                "requested_rejected": 0,
+                "filter_limited": False,
+            },
+            "rejected_centroids_yx": [],
+            "scene": {
+                "analyzed": False,
+                "has_structural_evidence": False,
                 "flags": [],
-                "hints": [],
-                "metrics": {
-                    "input_count": detected_raw,
-                    "output_count": detected_raw,
-                    "removed_dense": 0,
-                    "removed_line": 0,
-                },
-            }
-        detected = int(cyx_f.shape[0])
+                "metrics": {},
+            },
+        }
         if detected < 4:
             overlay = (
-                _make_solve_overlay({}, cyx_f, None, (h0, w0), (height, width))
-                if len(cyx_f) > 0
+                _make_solve_overlay({}, cyx_normal, None, (h0, w0), (height, width))
+                if len(cyx_normal) > 0
                 else None
             )
-            raw_ex: dict[str, Any] = {"reason": "need_at_least_4_stars"}
-            if detected_raw >= 4 and detected < 4:
-                raw_ex["reason"] = "too_few_after_centroid_filter"
+            cq["normal_status"] = "TOO_FEW"
             return SolveResult(
                 ra_deg=0.0,
                 dec_deg=0.0,
@@ -575,15 +607,15 @@ class PlateSolver:
                 t_extract_ms=t_extract_ms,
                 t_preprocess_ms=t_preprocess_ms,
                 large_scale_bg_subtract=large_scale_bg_subtract,
-                raw=raw_ex,
+                raw={"reason": "need_at_least_4_stars"},
                 solve_overlay=overlay,
                 centroid_quality=cq,
             )
 
         try:
             t3 = self._tetra()
-            out = t3.solve_from_centroids(
-                cyx_f,
+            normal_out = t3.solve_from_centroids(
+                cyx_normal,
                 (height, width),
                 fov_estimate=fov_est,
                 fov_max_error=fov_err,
@@ -611,13 +643,110 @@ class PlateSolver:
                 centroid_quality=cq,
             )
 
-        out["T_extract"] = t_extract_ms
-        out["T_preprocess"] = t_preprocess_ms
+        normal_out["T_extract"] = t_extract_ms
+        normal_out["T_preprocess"] = t_preprocess_ms
+        normal_status = _tetra_status_name(normal_out)
+        cq["normal_status"] = normal_status
+
+        # 成功结果绝不被遮挡分类推翻；场景分析也因此不进入常规成功路径。
+        # Never overturn a valid solve; scene analysis stays out of the success path.
+        if normal_status == "MATCH_FOUND":
+            return _tetra_dict_to_result(
+                normal_out,
+                detected,
+                solve_source,
+                centroids_yx=cyx_normal,
+                frame_shape_original=(h0, w0),
+                solve_shape=(height, width),
+                large_scale_bg_subtract=large_scale_bg_subtract,
+                centroid_quality=cq,
+            )
+
+        t0_scene = time.perf_counter()
+        scene = analyze_structural_contamination(img)
+        scene_ms = (time.perf_counter() - t0_scene) * 1000.0
+        cq["scene"] = {
+            "analyzed": True,
+            **scene.to_dict(),
+        }
+        cq["scene"]["metrics"]["analysis_ms"] = round(scene_ms, 3)
+
+        # 星点密集不构成回退依据；没有独立结构证据时直接保留常规失败结果。
+        # Dense stars do not justify fallback; independent structural evidence is required.
+        if not scene.has_structural_evidence:
+            return _tetra_dict_to_result(
+                normal_out,
+                detected,
+                solve_source,
+                centroids_yx=cyx_normal,
+                frame_shape_original=(h0, w0),
+                solve_shape=(height, width),
+                large_scale_bg_subtract=large_scale_bg_subtract,
+                centroid_quality=cq,
+            )
+
+        cyx_filtered, fallback_quality = filter_centroids_yx(
+            cyx_pool,
+            (height, width),
+            level,
+            evidence_mask=scene.evidence_mask,
+            max_rejected_fraction=0.35,
+        )
+        cyx_fallback = cyx_filtered[:max_stars]
+        fallback_detected = int(cyx_fallback.shape[0])
+        cq.update(
+            {
+                "strategy": "normal_then_structural_fallback",
+                "fallback_attempted": False,
+                "flags": fallback_quality["flags"],
+                "hints": fallback_quality["hints"],
+                "rejected_centroids_yx": fallback_quality["rejected_centroids_yx"],
+            }
+        )
+        cq["metrics"].update(fallback_quality["metrics"])
+        cq["metrics"]["normal_candidate_count"] = detected
+        cq["metrics"]["fallback_candidate_count"] = fallback_detected
+        cq["metrics"]["reserve_candidate_count"] = max(0, detected_raw - detected)
+
+        changed = not np.array_equal(cyx_fallback, cyx_normal)
+        if fallback_detected < 4:
+            cq["fallback_status"] = "TOO_FEW"
+        elif not changed:
+            cq["fallback_status"] = "SKIPPED_UNCHANGED"
+        else:
+            cq["fallback_attempted"] = True
+            try:
+                fallback_out = t3.solve_from_centroids(
+                    cyx_fallback,
+                    (height, width),
+                    fov_estimate=fov_est,
+                    fov_max_error=fov_err,
+                    solve_timeout=timeout,
+                    return_matches=True,
+                )
+            except OSError as exc:
+                cq["fallback_status"] = "DATABASE_ERROR"
+                normal_out["fallback_error"] = str(exc)
+            else:
+                fallback_out["T_extract"] = t_extract_ms
+                fallback_out["T_preprocess"] = t_preprocess_ms + scene_ms
+                cq["fallback_status"] = _tetra_status_name(fallback_out)
+                return _tetra_dict_to_result(
+                    fallback_out,
+                    fallback_detected,
+                    solve_source,
+                    centroids_yx=cyx_fallback,
+                    frame_shape_original=(h0, w0),
+                    solve_shape=(height, width),
+                    large_scale_bg_subtract=large_scale_bg_subtract,
+                    centroid_quality=cq,
+                )
+
         return _tetra_dict_to_result(
-            out,
+            normal_out,
             detected,
             solve_source,
-            centroids_yx=cyx_f,
+            centroids_yx=cyx_normal,
             frame_shape_original=(h0, w0),
             solve_shape=(height, width),
             large_scale_bg_subtract=large_scale_bg_subtract,
