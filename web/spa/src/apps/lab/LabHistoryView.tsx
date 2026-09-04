@@ -4,6 +4,7 @@ import { History } from "lucide-react";
 import { experimentAssetUrl, exportExperiments } from "@dev-api/analysis";
 import { useI18n } from "@shared/i18n/I18nProvider";
 import { formatDateTime } from "@shared/utils/format";
+import { formatArcminArcsecFromArcsec } from "@shared/utils/solveDisplay";
 
 export function LabHistoryView({
   historyQ,
@@ -120,7 +121,9 @@ export function LabHistoryView({
                   <div className="mt-1 text-on-surface-variant">
                     {t("history.preset")}: {String(row.preset_label)} · {t("history.metrics")}:{" "}
                     matches={String(metrics?.matches ?? "—")} rmse=
-                    {String(metrics?.rmse_arcsec ?? "—")}
+                    {formatArcminArcsecFromArcsec(
+                      typeof metrics?.rmse_arcsec === "number" ? metrics.rmse_arcsec : null,
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-1">

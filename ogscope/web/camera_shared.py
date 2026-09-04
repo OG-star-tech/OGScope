@@ -601,6 +601,10 @@ class CameraManager:
                         ):
                             self._inflight_read_future = None
                     if frame is not None:
+                        # Timestamp the completed sensor read before JPEG work so cached raw
+                        # frames retain capture time rather than encoder completion time. /
+                        # 在 JPEG 编码前记录传感器读帧完成时刻，避免缓存 raw 帧误用编码完成时间。
+                        capture_completed_ts = time.time()
                         self._consecutive_grab_failures = 0
                         encode_t0 = time.perf_counter()
                         encoded = await loop.run_in_executor(
@@ -620,7 +624,7 @@ class CameraManager:
                             # By default do not retain raw to avoid dual large buffers; set env to keep.
                             self._latest_raw = frame if self._keep_raw_cache else None
                             self._latest_jpeg = jpeg
-                            self._latest_ts = time.time()
+                            self._latest_ts = capture_completed_ts
                             self._latest_w = w
                             self._latest_h = h
                             self._last_jpeg_encoder = encoded.encoder

@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -56,6 +57,40 @@ class RealtimeSolveService:
             float(settings.star_analysis_min_interval_ms) / 1000.0,
             1.0 / max(0.01, float(settings.star_analysis_target_fps)),
         )
+
+    @staticmethod
+    def _capture_time_payload(
+        capture_completed_ts: float,
+        camera_info: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build exposure-midpoint UTC telemetry / 构造曝光中点 UTC 遥测。"""
+        try:
+            completed_ts = float(capture_completed_ts)
+            if completed_ts <= 0:
+                return {}
+            info = camera_info if isinstance(camera_info, dict) else {}
+            exposure_us = max(
+                0,
+                int(info.get("actual_exposure_us", info.get("exposure_us", 0)) or 0),
+            )
+            midpoint_ts = completed_ts - exposure_us / 2_000_000.0
+            completed_iso = (
+                datetime.fromtimestamp(completed_ts, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            midpoint_iso = (
+                datetime.fromtimestamp(midpoint_ts, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+        except (OSError, OverflowError, TypeError, ValueError):
+            return {}
+        return {
+            "observation_time_utc": midpoint_iso,
+            "capture_completed_at_utc": completed_iso,
+            "capture_exposure_us": exposure_us,
+        }
 
     async def start(
         self,
@@ -152,7 +187,7 @@ class RealtimeSolveService:
                 # 必须与共享预览走同一套读锁 + 线程卸载，禁止在事件循环线程里直接 capture_array
                 # Must share the same read lock as shared preview; never call capture_array on the event-loop thread.
                 try:
-                    frame, frame_id, _ts = await manager.get_raw_frame()
+                    frame, frame_id, frame_ts = await manager.get_raw_frame()
                 except RuntimeError:
                     await asyncio.sleep(0.1)
                     continue
@@ -165,6 +200,13 @@ class RealtimeSolveService:
                 last_frame_id = frame_id
                 last_started_mono = time.monotonic()
                 self.state.frame_count += 1
+                try:
+                    camera_info = cam.get_camera_info()
+                except (
+                    Exception
+                ):  # noqa: BLE001 - timing remains optional / 时间遥测可降级
+                    camera_info = {}
+                capture_time = self._capture_time_payload(frame_ts, camera_info)
 
                 use_fullsolve = (
                     self.state.frame_count % self._fullsolve_interval == 0
@@ -178,7 +220,7 @@ class RealtimeSolveService:
                         self._solve_frame_sync,
                         frame,
                     )
-                    self._apply_solve_result(solved)
+                    self._apply_solve_result(solved, capture_time=capture_time)
                     self.state.fullsolve_count += 1
                     self._log_event(
                         "fullsolve_finished",
@@ -191,6 +233,8 @@ class RealtimeSolveService:
                         t_extract_ms=solved.t_extract_ms,
                         t_preprocess_ms=solved.t_preprocess_ms,
                         wall_ms=int((time.monotonic() - solve_started) * 1000),
+                        rmse_arcsec=solved.rmse_arcsec,
+                        observation_time_utc=capture_time.get("observation_time_utc"),
                     )
                     # ``solve_from_bgr_frame`` is the authoritative production
                     # image pipeline.  Keep only a sentinel here; StarExtractor
@@ -236,9 +280,18 @@ class RealtimeSolveService:
             solve_timeout_ms=self._solve_timeout_ms,
         )
 
-    def _apply_solve_result(self, solved: SolveResult) -> None:
+    def _apply_solve_result(
+        self,
+        solved: SolveResult,
+        *,
+        capture_time: dict[str, Any] | None = None,
+    ) -> None:
         """写入解算结果 / Persist solve result"""
         row = solved.to_dict()
+        if capture_time:
+            # Optional additive Core fields keep old consumers compatible. /
+            # 可选增量字段保持旧版 Core 消费方兼容。
+            row.update(capture_time)
         attach_sensor_prediction(row, self._solve_context)
         self.state.last_result = row
         # A later completed frame supersedes a transient capture/solve exception.
