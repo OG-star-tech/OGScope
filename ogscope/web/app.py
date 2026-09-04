@@ -26,6 +26,7 @@ from starlette.exceptions import WebSocketException as StarletteWebSocketExcepti
 
 from ogscope.__version__ import __version__
 from ogscope.config import get_settings
+from ogscope.domain.shared.filesystem import migrate_legacy_dev_captures
 from ogscope.platform.hardware_plane.runtime import (
     describe_hardware_plane_profile,
     get_hardware_plane_client,
@@ -42,6 +43,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # 启动时执行 / Execute at startup
     logger.info("初始化 Web 应用...")
     settings = get_settings()
+    capture_migration = migrate_legacy_dev_captures()
+    if capture_migration["migrated"]:
+        logger.info(
+            "已迁移历史调试拍摄文件 / Migrated legacy debug captures: {}",
+            len(capture_migration["migrated"]),
+        )
+    if capture_migration["errors"]:
+        logger.warning(
+            "历史调试拍摄迁移部分失败 / Some legacy debug captures failed to migrate: {}",
+            capture_migration["errors"],
+        )
     hp_profile = describe_hardware_plane_profile(settings)
     logger.info(
         "硬件角色={} 传感器来源={} 本地传感器={} HMI={} UI={} 远端UDS={}",

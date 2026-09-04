@@ -345,6 +345,10 @@ class DebugFileService:
         return await _debug_services_module().DebugFileService.get_files()
 
     @staticmethod
+    async def create_export_archive():
+        return await _debug_services_module().DebugFileService.create_export_archive()
+
+    @staticmethod
     async def get_file_info(filename: str):
         return await _debug_services_module().DebugFileService.get_file_info(filename)
 
