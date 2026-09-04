@@ -47,11 +47,16 @@ upstream consumers should ignore results from an older session.
   - `result: object | null`
     - `observation_time_utc`: optional exposure-midpoint UTC for the current frame; astronomical coordinate conversion should prefer it
     - `capture_completed_at_utc`, `capture_exposure_us`: optional capture diagnostics
+    - `centroid_quality`: optional extraction and obstruction-fallback diagnostics; `strategy`, `normal_status`, `fallback_attempted`, and `fallback_status` describe the path actually used
+      - `scene` is analyzed only after a normal solve failure; `has_structural_evidence` requires a large bright region or long structural edges, and star density alone is never obstruction evidence
+      - `metrics.filter_limited=true` means filtering reached its conservative cap and retained the remaining candidates; callers must not turn this developer diagnostic into a user error
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
 
 While Core realtime analysis is active, developer single-frame camera solves return `SKIPPED_BUSY` so debug polling cannot contend with product alignment for camera and CPU resources. File solving is unaffected.
+
+A normal `MATCH_FOUND` result is authoritative and is never overturned by scene classification. Only after a normal failure with independent structural evidence does OGScope remove dense or collinear candidates that overlap that evidence and retry once. At most 35% of the reserve candidate pool is removed.
 
 ### 3) Stop Analysis
 

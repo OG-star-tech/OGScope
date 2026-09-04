@@ -9,8 +9,8 @@ from ogscope.algorithms.plate_solve.centroid_quality import filter_centroids_yx
 
 
 @pytest.mark.unit
-def test_filter_dense_cluster_removes_points_level5() -> None:
-    """高等级应剔除局部密集格 / High level removes dense grid cell."""
+def test_dense_cluster_without_image_evidence_is_not_removed() -> None:
+    """密度本身不能判定遮挡 / Density alone must not classify obstruction."""
     h, w = 200, 200
     pts = []
     # 密集 10 点于同一格 / Ten points in one cell
@@ -21,6 +21,28 @@ def test_filter_dense_cluster_removes_points_level5() -> None:
         pts.append([120.0 + (i % 5) * 8.0, 140.0 + (i // 5) * 9.0])
     cyx = np.asarray(pts, dtype=np.float64)
     out, q = filter_centroids_yx(cyx, (h, w), 5)
+    assert q["metrics"]["dense_candidates"] > 0
+    assert q["metrics"]["removed_dense"] == 0
+    assert np.array_equal(out, cyx)
+
+
+@pytest.mark.unit
+def test_dense_cluster_with_image_evidence_is_removed() -> None:
+    """局部密度与结构证据重合时才剔除 / Reject density only with structural evidence."""
+    h, w = 200, 200
+    cyx = np.asarray(
+        [[25.0, 25.0 + i * 0.3] for i in range(10)]
+        + [[120.0 + (i % 5) * 8.0, 140.0 + (i // 5) * 9.0] for i in range(20)],
+        dtype=np.float64,
+    )
+    evidence = np.zeros((h, w), dtype=bool)
+    evidence[15:40, 15:45] = True
+    out, q = filter_centroids_yx(
+        cyx,
+        (h, w),
+        5,
+        evidence_mask=evidence,
+    )
     assert q["metrics"]["removed_dense"] > 0
     assert out.shape[0] < cyx.shape[0]
 
@@ -35,7 +57,8 @@ def test_filter_collinear_removes_line_level5() -> None:
     for i in range(15):
         pts.append([150.0, x0 + (x1 - x0) * i / 14.0])
     cyx = np.asarray(pts, dtype=np.float64)
-    out, q = filter_centroids_yx(cyx, (h, w), 5)
+    evidence = np.ones((h, w), dtype=bool)
+    out, q = filter_centroids_yx(cyx, (h, w), 5, evidence_mask=evidence)
     assert q["metrics"]["removed_line"] > 0 or "LINE_CLUSTER_REJECTED" in q["flags"]
 
 
@@ -46,8 +69,27 @@ def test_level1_milder_than_level5_dense() -> None:
     pts = [[20.0 + i * 0.2, 20.0] for i in range(8)]
     pts += [[100.0 + i * 15.0, 100.0] for i in range(10)]
     cyx = np.asarray(pts, dtype=np.float64)
-    _, q1 = filter_centroids_yx(cyx, (h, w), 1)
-    _, q5 = filter_centroids_yx(cyx, (h, w), 5)
+    evidence = np.ones((h, w), dtype=bool)
+    _, q1 = filter_centroids_yx(cyx, (h, w), 1, evidence_mask=evidence)
+    _, q5 = filter_centroids_yx(cyx, (h, w), 5, evidence_mask=evidence)
     r1 = int(q1["metrics"]["removed_dense"]) + int(q1["metrics"]["removed_line"])
     r5 = int(q5["metrics"]["removed_dense"]) + int(q5["metrics"]["removed_line"])
     assert r5 >= r1
+
+
+@pytest.mark.unit
+def test_filter_caps_rejection_and_keeps_at_least_four() -> None:
+    """过滤达到上限时保守放行 / Filtering fails open at its rejection cap."""
+    h, w = 120, 200
+    cyx = np.asarray([[60.0, 10.0 + i * 4.0] for i in range(20)])
+    evidence = np.ones((h, w), dtype=bool)
+    out, q = filter_centroids_yx(
+        cyx,
+        (h, w),
+        5,
+        evidence_mask=evidence,
+        max_rejected_fraction=0.25,
+    )
+    assert out.shape[0] == 15
+    assert q["metrics"]["filter_limited"] is True
+    assert "CENTROID_FILTER_LIMITED" in q["flags"]
