@@ -157,6 +157,7 @@ export default function AnalysisLabApp() {
     pattern: true,
     all: true,
     rejected: true,
+    evidenceRegions: true,
   });
   const [debugFiles, setDebugFiles] = useState<DebugFileRow[]>([]);
   const [debugPick, setDebugPick] = useState<string | null>(null);
@@ -209,6 +210,7 @@ export default function AnalysisLabApp() {
   /** MJPEG <img> onError 重连次数（防死循环）/ Reconnect attempts after img error */
   const cameraMjpegImgRetryRef = useRef(0);
   const cameraSolveTimeoutRef = useRef<number | null>(null);
+  const cameraHoldTimeoutRef = useRef<number | null>(null);
   /** 视频连续解算：setTimeout 链式调度（与后端门禁对齐）/ Chained timeouts for gate alignment */
   const fileSolveTimeoutRef = useRef<number | null>(null);
   const cameraSolveInFlightRef = useRef(false);
@@ -217,28 +219,6 @@ export default function AnalysisLabApp() {
   const cameraSolveRunningRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
 
-  /** 从当前预览 img 截一帧为 JPEG blob URL（用于冻结与星点同帧）/ Snapshot current preview frame for freeze */
-  const captureCameraFrameAsBlobUrl = useCallback(async (): Promise<string | null> => {
-    const el = cameraPreviewImgRef.current;
-    if (!el || el.naturalWidth < 2) return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = el.naturalWidth;
-    canvas.height = el.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    try {
-      ctx.drawImage(el, 0, 0);
-    } catch {
-      return null;
-    }
-    return await new Promise((resolve) => {
-      canvas.toBlob(
-        (b) => resolve(b ? URL.createObjectURL(b) : null),
-        "image/jpeg",
-        0.92,
-      );
-    });
-  }, []);
   const [sysOverview, setSysOverview] = useState<import("@shared/api").SystemInfo | null>(null);
   const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
 
@@ -655,20 +635,44 @@ export default function AnalysisLabApp() {
       const outResult = (out as { result?: Record<string, unknown> }).result;
       const solveStatus =
         typeof outResult?.status === "string" ? String(outResult.status) : "";
-      if (autoHoldEnabled && solveStatus === "MATCH_FOUND") {
+      const structuralEvidence = Boolean(
+        (outResult?.centroid_quality as
+          | { scene?: { has_structural_evidence?: boolean } }
+          | undefined)?.scene?.has_structural_evidence,
+      );
+      const solveFrame =
+        outResult?.solve_frame && typeof outResult.solve_frame === "object"
+          ? (outResult.solve_frame as Record<string, unknown>)
+          : null;
+      const solveFrameUrl =
+        solveFrame?.available === true && typeof solveFrame.url === "string"
+          ? solveFrame.url
+          : null;
+      if (solveFrameUrl && (solveStatus === "MATCH_FOUND" || structuralEvidence)) {
         setIsFrozen(true);
         setFrozenFrameId(
           (out as { frame_id?: number }).frame_id != null
             ? String((out as { frame_id?: number }).frame_id)
             : null,
         );
-        const snap = await captureCameraFrameAsBlobUrl();
-        setFrozenImageUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return snap;
-        });
-        stopCameraSolveLoop();
-      } else if (fromLoop) {
+        setFrozenImageUrl(solveFrameUrl);
+        if (cameraHoldTimeoutRef.current != null) {
+          window.clearTimeout(cameraHoldTimeoutRef.current);
+          cameraHoldTimeoutRef.current = null;
+        }
+        if (autoHoldEnabled) {
+          stopCameraSolveLoop();
+        } else {
+          // 短暂停留便于核对；解算调度继续 / Brief visual hold while solve scheduling continues.
+          cameraHoldTimeoutRef.current = window.setTimeout(() => {
+            cameraHoldTimeoutRef.current = null;
+            setIsFrozen(false);
+            setFrozenImageUrl(null);
+            setCameraStreamNonce(Date.now());
+          }, 2800);
+        }
+      }
+      if (fromLoop && (!autoHoldEnabled || solveStatus !== "MATCH_FOUND")) {
         clearCameraSolveSchedule();
         const wait = Math.max(50, Number(nextAllowed ?? effInt ?? starAnalysisIntervalMs));
         cameraSolveTimeoutRef.current = window.setTimeout(() => {
@@ -930,12 +934,13 @@ export default function AnalysisLabApp() {
   };
 
   const resumeLivePreview = () => {
+    if (cameraHoldTimeoutRef.current != null) {
+      window.clearTimeout(cameraHoldTimeoutRef.current);
+      cameraHoldTimeoutRef.current = null;
+    }
     setIsFrozen(false);
     setFrozenFrameId(null);
-    setFrozenImageUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
+    setFrozenImageUrl(null);
     setCameraStreamNonce(Date.now());
   };
 
@@ -1671,7 +1676,7 @@ export default function AnalysisLabApp() {
                     {t("lab.layers")}
                   </span>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {(["matched", "pattern", "all", "rejected"] as const).map((k) => (
+                    {(["matched", "pattern", "all", "rejected", "evidenceRegions"] as const).map((k) => (
                       <label key={k} className="flex cursor-pointer items-center gap-1">
                         <input
                           type="checkbox"
@@ -1688,7 +1693,9 @@ export default function AnalysisLabApp() {
                               ? t("lab.layer.pattern")
                               : k === "all"
                                 ? t("lab.layer.all")
-                                : t("lab.layer.rejected")}
+                                : k === "rejected"
+                                  ? t("lab.layer.rejected")
+                                  : t("lab.layer.evidenceRegions")}
                         </span>
                       </label>
                     ))}

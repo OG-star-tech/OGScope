@@ -104,6 +104,14 @@ def test_failed_normal_solve_retries_after_structural_filter(
     assert result.centroid_quality["normal_status"] == "NO_MATCH"
     assert result.centroid_quality["fallback_status"] == "MATCH_FOUND"
     assert result.centroid_quality["metrics"]["requested_rejected"] > 0
+    assert result.solve_overlay is not None
+    regions = result.solve_overlay["scene_evidence_regions"]
+    assert 1 <= len(regions) <= 12
+    assert all(
+        0.0 <= point["x"] <= image.shape[1] and 0.0 <= point["y"] <= image.shape[0]
+        for region in regions
+        for point in region["points"]
+    )
 
 
 @pytest.mark.unit

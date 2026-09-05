@@ -23,6 +23,7 @@ class SceneQualityAnalysis:
     evidence_mask: np.ndarray
     flags: list[str]
     metrics: dict[str, Any]
+    regions: list[dict[str, Any]]
 
     @property
     def has_structural_evidence(self) -> bool:
@@ -35,6 +36,7 @@ class SceneQualityAnalysis:
             "has_structural_evidence": self.has_structural_evidence,
             "flags": list(self.flags),
             "metrics": dict(self.metrics),
+            "regions": list(self.regions),
         }
 
 
@@ -59,6 +61,7 @@ def analyze_structural_contamination(
         return SceneQualityAnalysis(
             evidence_mask=empty,
             flags=[],
+            regions=[],
             metrics={
                 "analysis_width": w,
                 "analysis_height": h,
@@ -88,6 +91,7 @@ def analyze_structural_contamination(
         bright_seed, connectivity=8
     )
     bright_mask = np.zeros((sh, sw), dtype=np.uint8)
+    bright_regions: list[tuple[int, int, int, int, int]] = []
     min_bright_area = max(18, int(round(sh * sw * 0.00045)))
     for label in range(1, component_count):
         area = int(stats[label, cv2.CC_STAT_AREA])
@@ -95,6 +99,15 @@ def analyze_structural_contamination(
         box_h = int(stats[label, cv2.CC_STAT_HEIGHT])
         if area >= min_bright_area and max(box_w, box_h) >= 6:
             bright_mask[labels == label] = 1
+            bright_regions.append(
+                (
+                    int(stats[label, cv2.CC_STAT_LEFT]),
+                    int(stats[label, cv2.CC_STAT_TOP]),
+                    box_w,
+                    box_h,
+                    area,
+                )
+            )
     if np.any(bright_mask):
         bright_mask = cv2.dilate(
             bright_mask,
@@ -123,6 +136,7 @@ def analyze_structural_contamination(
     line_mask = np.zeros((sh, sw), dtype=np.uint8)
     long_line_count = 0
     max_line_length = 0.0
+    line_regions: list[tuple[int, int, int, int, float]] = []
     if lines is not None:
         line_width = max(5, int(round(min_side * 0.035)))
         for raw_line in lines[:, 0, :]:
@@ -133,6 +147,7 @@ def analyze_structural_contamination(
                 max_line_length,
                 float(np.hypot(x2 - x1, y2 - y1)),
             )
+            line_regions.append((x1, y1, x2, y2, float(np.hypot(x2 - x1, y2 - y1))))
 
     linear_fraction = float(np.mean(line_mask > 0))
     strong_linear_evidence = max_line_length >= min_side * 0.40 or (
@@ -143,6 +158,7 @@ def analyze_structural_contamination(
         # Dense random stars can form short Hough coincidences; discard weak line evidence.
         line_mask[:] = 0
         linear_fraction = 0.0
+        line_regions = []
 
     evidence_small = np.maximum(bright_mask, line_mask)
     evidence_mask = cv2.resize(
@@ -159,9 +175,39 @@ def analyze_structural_contamination(
     if strong_linear_evidence:
         flags.append("LONG_STRUCTURAL_EDGES")
 
+    # 只导出少量几何证据，不导出位图；坐标仍在分析小图上，解算层统一缩放回原图。
+    # Export bounded geometry rather than a bitmap; the solve layer scales it to source pixels.
+    regions: list[dict[str, Any]] = []
+    for x, y, box_w, box_h, _area in sorted(
+        bright_regions, key=lambda item: item[4], reverse=True
+    )[:6]:
+        regions.append(
+            {
+                "kind": "large_bright_region",
+                "geometry": "polygon",
+                "points": [
+                    [float(x), float(y)],
+                    [float(x + box_w), float(y)],
+                    [float(x + box_w), float(y + box_h)],
+                    [float(x), float(y + box_h)],
+                ],
+            }
+        )
+    for x1, y1, x2, y2, _length in sorted(
+        line_regions, key=lambda item: item[4], reverse=True
+    )[:6]:
+        regions.append(
+            {
+                "kind": "long_structural_edge",
+                "geometry": "polyline",
+                "points": [[float(x1), float(y1)], [float(x2), float(y2)]],
+            }
+        )
+
     return SceneQualityAnalysis(
         evidence_mask=evidence_mask,
         flags=flags,
+        regions=regions,
         metrics={
             "analysis_width": sw,
             "analysis_height": sh,

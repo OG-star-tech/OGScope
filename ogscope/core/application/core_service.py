@@ -233,6 +233,15 @@ class CoreContractService:
             "fullsolve_count": int(status.get("fullsolve_count", 0)),
         }
 
+    def get_analysis_frame_snapshot(self, *, session_id: str, frame_id: int) -> Any:
+        """读取与指定结果匹配的 JPEG / Read the JPEG matching one solve result."""
+        snapshot = realtime_solve_service.get_solve_frame_snapshot()
+        if snapshot is None:
+            raise LookupError("solve frame snapshot unavailable")
+        if snapshot.session_id != session_id or snapshot.frame_id != int(frame_id):
+            raise ValueError("solve frame snapshot no longer matches this result")
+        return snapshot
+
     async def stop_analysis(self) -> dict[str, Any]:
         """结束实时分析 / Stop realtime analysis."""
         result = await realtime_solve_service.stop()
