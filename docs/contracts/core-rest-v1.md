@@ -49,6 +49,8 @@
     - `centroid_quality`：可选提星与遮挡回退诊断；`strategy`、`normal_status`、`fallback_attempted`、`fallback_status` 描述实际采用的路径
       - `scene` 仅在常规解算失败后分析；`has_structural_evidence` 只表示发现大亮区或长结构边缘，星点密度本身不构成遮挡证据
       - `metrics.filter_limited=true` 表示过滤达到保守上限，剩余候选已放行；调用方不得把该开发诊断转换为用户错误
+    - `solve_overlay.scene_evidence_regions`：可选、有界的干扰证据几何；黄色区域/线段只解释过滤依据，不能单独否定解算结果
+    - `solve_frame`：可选精确解算帧元数据；`available=true` 时包含 `session_id`、`frame_id`、尺寸、JPEG 字节数、编码器与耗时
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
@@ -56,6 +58,14 @@
 Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，避免调试轮询与产品对准争抢相机和 CPU；文件解算不受影响。
 
 常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
+
+### 2.1) Get Exact Solve Frame
+
+- `GET /api/core/v1/analysis/frame?session_id=...&frame_id=...`
+- 仅保留最新一张压缩 JPEG，不保留 raw 帧或历史队列；新结果会覆盖或清除旧图
+- 成功解算以及带结构证据的失败会尝试编码；编码失败不改变星图解算状态
+- `session_id` 或 `frame_id` 与当前结果不匹配时返回 `409`，当前没有快照时返回 `404`
+- 响应使用 `private, no-store`；调用方应使用当前 `result.solve_frame` 中的双键读取，避免错配
 
 ### 3) Stop Analysis
 

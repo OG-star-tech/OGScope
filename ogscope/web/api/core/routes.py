@@ -5,7 +5,7 @@ Core v1 标准契约路由 / Core v1 standard contract routes.
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from ogscope.core.application import core_contract_service
 from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
@@ -64,6 +64,36 @@ async def core_get_analysis_result() -> CoreAnalysisResultResponse:
         return CoreAnalysisResultResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/core/v1/analysis/frame")
+async def core_get_analysis_frame(
+    session_id: str = Query(..., min_length=1, max_length=128),
+    frame_id: int = Query(..., ge=0),
+) -> Response:
+    """读取与解算结果严格对应的 JPEG / Read the JPEG matching a solve result."""
+    try:
+        snapshot = core_contract_service.get_analysis_frame_snapshot(
+            session_id=session_id,
+            frame_id=frame_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=snapshot.content,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "X-Analysis-Session-Id": snapshot.session_id,
+            "X-Solve-Frame-Id": str(snapshot.frame_id),
+            "X-Frame-Width": str(snapshot.width),
+            "X-Frame-Height": str(snapshot.height),
+            "X-JPEG-Encoder": snapshot.encoder,
+        },
+    )
 
 
 @router.post(

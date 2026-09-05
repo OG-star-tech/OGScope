@@ -816,6 +816,60 @@ def _make_solve_overlay(
     }
 
 
+def _scaled_scene_evidence_regions(
+    centroid_quality: dict[str, Any] | None,
+    frame_shape_original: tuple[int, int],
+) -> list[dict[str, Any]]:
+    """将有界场景证据缩放到原图像素 / Scale bounded scene evidence to source pixels."""
+    if not isinstance(centroid_quality, dict):
+        return []
+    scene = centroid_quality.get("scene")
+    if not isinstance(scene, dict) or not scene.get("has_structural_evidence"):
+        return []
+    metrics = scene.get("metrics")
+    regions = scene.get("regions")
+    if not isinstance(metrics, dict) or not isinstance(regions, list):
+        return []
+    try:
+        analysis_w = float(metrics.get("analysis_width") or 0)
+        analysis_h = float(metrics.get("analysis_height") or 0)
+    except (TypeError, ValueError):
+        return []
+    if analysis_w <= 0 or analysis_h <= 0:
+        return []
+
+    h0, w0 = int(frame_shape_original[0]), int(frame_shape_original[1])
+    sx = w0 / analysis_w
+    sy = h0 / analysis_h
+    scaled: list[dict[str, Any]] = []
+    for raw_region in regions[:12]:
+        if not isinstance(raw_region, dict):
+            continue
+        raw_points = raw_region.get("points")
+        if not isinstance(raw_points, list):
+            continue
+        points: list[dict[str, float]] = []
+        for raw_point in raw_points[:32]:
+            if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
+                continue
+            try:
+                x = float(raw_point[0]) * sx
+                y = float(raw_point[1]) * sy
+            except (TypeError, ValueError):
+                continue
+            points.append({"x": x, "y": y})
+        if len(points) < 2:
+            continue
+        scaled.append(
+            {
+                "kind": str(raw_region.get("kind") or "structural_evidence"),
+                "geometry": str(raw_region.get("geometry") or "polyline"),
+                "points": points,
+            }
+        )
+    return scaled
+
+
 def _tetra_dict_to_result(
     out: dict[str, Any],
     detected_stars: int,
@@ -858,6 +912,12 @@ def _tetra_dict_to_result(
         overlay = _make_solve_overlay(
             out, centroids_yx, rejected_yx, frame_shape_original, solve_shape
         )
+        regions = _scaled_scene_evidence_regions(
+            centroid_quality,
+            frame_shape_original,
+        )
+        if overlay is not None and regions:
+            overlay["scene_evidence_regions"] = regions
 
     return SolveResult(
         ra_deg=ra_f,

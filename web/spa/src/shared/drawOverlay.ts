@@ -5,6 +5,13 @@ export type LayerToggles = {
   pattern: boolean;
   all: boolean;
   rejected: boolean;
+  evidenceRegions?: boolean;
+};
+
+export type SceneEvidenceRegion = {
+  kind?: string;
+  geometry?: "polygon" | "polyline" | string;
+  points?: Array<{ x: number; y: number }>;
 };
 
 export type SolveOverlay = {
@@ -12,6 +19,7 @@ export type SolveOverlay = {
   stars_rejected_centroids?: Array<{ x: number; y: number }>;
   stars_pattern?: Array<{ x: number; y: number }>;
   stars_matched?: Array<{ x: number; y: number; mag?: number }>;
+  scene_evidence_regions?: SceneEvidenceRegion[];
   overlay_ext?: {
     labels_topn?: Array<{
       x: number;
@@ -40,6 +48,29 @@ function drawOverlayCore(
 ): void {
   if (!overlay) return;
   ctx.clearRect(0, 0, w, h);
+
+  if ((layers.evidenceRegions ?? true) && Array.isArray(overlay.scene_evidence_regions)) {
+    for (const region of overlay.scene_evidence_regions) {
+      const points = Array.isArray(region.points)
+        ? region.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+        : [];
+      if (points.length < 2) continue;
+      ctx.save();
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.9)";
+      ctx.fillStyle = "rgba(251, 191, 36, 0.12)";
+      ctx.lineWidth = region.geometry === "polyline" ? 5 : 2;
+      ctx.setLineDash(region.geometry === "polyline" ? [10, 6] : [7, 5]);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
+      if (region.geometry === "polygon" && points.length >= 3) {
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 
   if (layers.all && Array.isArray(overlay.stars_all_centroids)) {
     ctx.fillStyle = "rgba(156, 163, 175, 0.85)";

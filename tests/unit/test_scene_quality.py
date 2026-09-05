@@ -44,6 +44,9 @@ def test_branch_like_edges_are_detected() -> None:
     assert result.has_structural_evidence is True
     assert "LONG_STRUCTURAL_EDGES" in result.flags
     assert result.metrics["max_line_length_px"] > 70
+    assert 1 <= len(result.regions) <= 12
+    assert any(region["kind"] == "long_structural_edge" for region in result.regions)
+    assert all(len(region["points"]) <= 32 for region in result.regions)
 
 
 @pytest.mark.unit
@@ -54,3 +57,4 @@ def test_large_bright_source_is_detected_but_isolated_stars_are_not() -> None:
     result = analyze_structural_contamination(image)
     assert "LARGE_BRIGHT_REGION" in result.flags
     assert result.metrics["bright_fraction"] > 0.01
+    assert any(region["geometry"] == "polygon" for region in result.regions)
