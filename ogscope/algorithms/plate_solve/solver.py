@@ -690,6 +690,7 @@ class PlateSolver:
             (height, width),
             level,
             evidence_mask=scene.evidence_mask,
+            evidence_region_labels=scene.evidence_region_labels,
             max_rejected_fraction=0.35,
         )
         cyx_fallback = cyx_filtered[:max_stars]

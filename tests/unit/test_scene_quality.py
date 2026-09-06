@@ -35,6 +35,20 @@ def test_rich_star_field_is_not_structural_obstruction() -> None:
 
 
 @pytest.mark.unit
+def test_smooth_sky_gradient_is_not_dark_structure() -> None:
+    """平滑天光渐变不能被当作暗树 / A smooth sky gradient is not a dark tree."""
+    gradient = np.linspace(28, 92, 640, dtype=np.uint8)
+    gray = np.repeat(gradient[np.newaxis, :], 360, axis=0)
+    image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    result = analyze_structural_contamination(image)
+
+    assert "DARK_EXTENDED_STRUCTURE" not in result.flags
+    assert result.metrics["dark_component_count"] == 0
+    assert result.metrics["dark_fraction"] == 0.0
+
+
+@pytest.mark.unit
 def test_branch_like_edges_are_detected() -> None:
     """跨画面的树枝结构应提供证据 / Long branch-like edges provide evidence."""
     image = _rich_star_field()
@@ -58,3 +72,49 @@ def test_large_bright_source_is_detected_but_isolated_stars_are_not() -> None:
     assert "LARGE_BRIGHT_REGION" in result.flags
     assert result.metrics["bright_fraction"] > 0.01
     assert any(region["geometry"] == "polygon" for region in result.regions)
+
+
+@pytest.mark.unit
+def test_mixed_bright_and_dark_trees_include_low_contrast_structure() -> None:
+    """亮暗树同框时保留低对比暗结构 / Retain low-contrast dark structure beside bright trees."""
+    image = np.full((360, 640, 3), 100, dtype=np.uint8)
+    rng = np.random.default_rng(12)
+    for y, x, value in zip(
+        rng.integers(8, 352, 220),
+        rng.integers(8, 632, 220),
+        rng.integers(135, 256, 220),
+        strict=True,
+    ):
+        cv2.circle(image, (int(x), int(y)), 1, (int(value),) * 3, -1)
+
+    cv2.line(image, (0, 345), (230, 70), (225, 225, 225), 9)
+    dark = (78, 78, 78)
+    paths = [
+        [(639, 350), (585, 300), (560, 245), (515, 205), (500, 150)],
+        [(590, 305), (615, 245), (600, 205), (630, 160)],
+        [(550, 250), (525, 220), (535, 175), (510, 140)],
+    ]
+    for points in paths:
+        cv2.polylines(
+            image,
+            [np.asarray(points, dtype=np.int32)],
+            False,
+            dark,
+            4,
+            lineType=cv2.LINE_AA,
+        )
+    for center, radius in [((560, 180), 25), ((600, 195), 22), ((515, 155), 24)]:
+        cv2.circle(image, center, radius, dark, -1, lineType=cv2.LINE_AA)
+
+    result = analyze_structural_contamination(image)
+
+    assert "DARK_EXTENDED_STRUCTURE" in result.flags
+    assert result.metrics["dark_component_count"] >= 1
+    assert result.metrics["dark_fraction"] > 0.01
+    assert any(region["kind"] == "dark_structural_region" for region in result.regions)
+    assert result.evidence_region_labels.shape == (
+        result.metrics["analysis_height"],
+        result.metrics["analysis_width"],
+    )
+    dark_roi = result.evidence_mask[80:360, 400:640]
+    assert float(np.mean(dark_roi)) > 0.02
