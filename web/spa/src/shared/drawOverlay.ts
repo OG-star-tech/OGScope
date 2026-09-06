@@ -55,11 +55,19 @@ function drawOverlayCore(
         ? region.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
         : [];
       if (points.length < 2) continue;
+      // 暗结构使用冷色，避免与亮区/强边缘证据混淆。/ Use a cool color for dark structures.
+      const isDarkStructure = region.kind === "dark_structural_region";
       ctx.save();
-      ctx.strokeStyle = "rgba(251, 191, 36, 0.9)";
-      ctx.fillStyle = "rgba(251, 191, 36, 0.12)";
+      ctx.strokeStyle = isDarkStructure
+        ? "rgba(56, 189, 248, 0.92)"
+        : "rgba(251, 191, 36, 0.9)";
+      ctx.fillStyle = isDarkStructure
+        ? "rgba(56, 189, 248, 0.12)"
+        : "rgba(251, 191, 36, 0.12)";
       ctx.lineWidth = region.geometry === "polyline" ? 5 : 2;
-      ctx.setLineDash(region.geometry === "polyline" ? [10, 6] : [7, 5]);
+      ctx.setLineDash(
+        region.geometry === "polyline" ? [10, 6] : isDarkStructure ? [4, 4] : [7, 5],
+      );
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);

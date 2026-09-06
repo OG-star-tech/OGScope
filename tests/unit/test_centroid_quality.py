@@ -93,3 +93,35 @@ def test_filter_caps_rejection_and_keeps_at_least_four() -> None:
     assert out.shape[0] == 15
     assert q["metrics"]["filter_limited"] is True
     assert "CENTROID_FILTER_LIMITED" in q["flags"]
+
+
+@pytest.mark.unit
+def test_limited_filter_balances_bright_and_dark_evidence_regions() -> None:
+    """达到上限时亮区不能独占额度 / Bright evidence cannot monopolize a limited cap."""
+    h, w = 200, 200
+    bright_cluster = [[25.0 + i * 0.2, 25.0] for i in range(10)]
+    dark_cluster = [[165.0 + i * 0.2, 165.0] for i in range(10)]
+    cyx = np.asarray(bright_cluster + dark_cluster, dtype=np.float64)
+    evidence = np.zeros((h, w), dtype=bool)
+    evidence[15:45, 15:45] = True
+    evidence[155:190, 155:190] = True
+    labels = np.zeros((h, w), dtype=np.uint16)
+    labels[15:45, 15:45] = 1
+    labels[155:190, 155:190] = 2
+
+    out, quality = filter_centroids_yx(
+        cyx,
+        (h, w),
+        5,
+        evidence_mask=evidence,
+        evidence_region_labels=labels,
+        max_rejected_fraction=0.20,
+    )
+
+    rejected = np.asarray(quality["rejected_centroids_yx"], dtype=np.float64)
+    assert out.shape[0] == 16
+    assert np.any(rejected[:, 0] < 50.0)
+    assert np.any(rejected[:, 0] > 150.0)
+    assert quality["metrics"]["evidence_regions_considered"] == 2
+    assert quality["metrics"]["evidence_regions_rejected"] == 2
+    assert quality["metrics"]["rejection_balanced"] is True
