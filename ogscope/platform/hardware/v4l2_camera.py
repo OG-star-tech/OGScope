@@ -224,11 +224,14 @@ class V4L2RawCamera:
             }
             return True
 
-        targets = (
+        configured_targets = (
             (self.sensor_entity, self.sensor_pad),
             (self.receiver_entity, self.receiver_sink_pad),
             (self.receiver_entity, self.receiver_source_pad),
         )
+        # 有些 Unicam 拓扑只暴露传感器 subdev；负 pad 让部署配置跳过不存在的接收器 pad。
+        # Some Unicam graphs expose only the sensor subdev; negative pads skip absent receiver pads.
+        targets = tuple((entity, pad) for entity, pad in configured_targets if pad >= 0)
         for entity, pad in targets:
             target = (
                 f'"{entity}":{pad}[fmt:{self.media_bus_format}/'

@@ -271,6 +271,38 @@ def test_media_pipeline_uses_configured_entities(monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_media_pipeline_skips_absent_receiver_pads(monkeypatch) -> None:
+    camera = V4L2RawCamera(
+        {
+            "v4l2_media_device": "/dev/media2",
+            "v4l2_sensor_entity": "imx327 10-001a",
+            "v4l2_receiver_entity": "unicam-image",
+            "v4l2_sensor_pad": 0,
+            "v4l2_receiver_sink_pad": -1,
+            "v4l2_receiver_source_pad": -1,
+        }
+    )
+    commands: list[list[str]] = []
+
+    def _run(command: list[str], **_kwargs) -> subprocess.CompletedProcess:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    assert camera._configure_media_pipeline() is True
+    assert commands == [
+        [
+            "media-ctl",
+            "-d",
+            "/dev/media2",
+            "--set-v4l2",
+            '"imx327 10-001a":0[fmt:SRGGB10_1X10/1920x1080]',
+        ]
+    ]
+
+
+@pytest.mark.unit
 def test_media_pipeline_failure_is_not_silently_ignored(monkeypatch) -> None:
     camera = V4L2RawCamera({})
     monkeypatch.setattr(

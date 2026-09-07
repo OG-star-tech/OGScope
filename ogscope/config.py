@@ -139,15 +139,21 @@ class Settings(BaseSettings):
     )
     camera_v4l2_receiver_sink_pad: int = Field(
         default=0,
-        ge=0,
+        ge=-1,
         le=32,
-        description="CSI 接收器 sink pad 编号 / CSI receiver sink-pad index",
+        description=(
+            "CSI 接收器 sink pad 编号，-1 跳过 / "
+            "CSI receiver sink-pad index; -1 skips it"
+        ),
     )
     camera_v4l2_receiver_source_pad: int = Field(
         default=1,
-        ge=0,
+        ge=-1,
         le=32,
-        description="CSI 接收器 source pad 编号 / CSI receiver source-pad index",
+        description=(
+            "CSI 接收器 source pad 编号，-1 跳过 / "
+            "CSI receiver source-pad index; -1 skips it"
+        ),
     )
     camera_v4l2_media_bus_format: str = Field(
         default="SRGGB10_1X10",
