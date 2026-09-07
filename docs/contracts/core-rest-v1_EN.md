@@ -86,6 +86,8 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
 - `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
   - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
   - Optional `info.optics` describes product optics. `lens` carries nominal 16mm F1.4, 5MP optical rating, M12, and IR-cut properties; `full_sensor_fov_deg` describes the 1920×1080 optical field, while `effective_fov_deg` is the product-calibrated field for the active capture mode. Upstream solving and sky search should prefer `effective_fov_deg`, with a local fallback for older servers.
+  - Optional `info.driver` / `info.backend` and `info.capabilities` describe backend capabilities. V4L2 RAW uses OGScope software AE while preserving the same RGB888, frame-identity, and solve contracts. Failed hardware-control readback may leave `info.actual_exposure_us` / `info.actual_analogue_gain` as `null`.
+  - Upstream business logic must not branch on driver names; it consumes Core v1 readiness, `info.optics.effective_fov_deg`, optional capability/ambient telemetry, and existing analysis results.
   - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently selected the shutter-first long-exposure curve and does not depend on an upstream work mode.
 - `POST /api/core/v1/camera/start`
   - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`

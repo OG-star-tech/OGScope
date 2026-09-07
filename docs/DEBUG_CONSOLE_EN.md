@@ -153,6 +153,11 @@ Camera status also exposes diagnostic fields:
 | `camera_driver` / `camera_backend` | Camera driver and backend names |
 | `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format` | Low-resolution helper stream state |
 
+With `OGSCOPE_CAMERA_TYPE=v4l2`, status also exposes software-AE, RAW signal-level,
+media-graph, negotiated-format, and hardware-readback diagnostics. Digital gain,
+temporal noise reduction, and the lores branch are explicitly unsupported on this
+backend. See [V4L2 RAW camera and night-sky software AE](development/v4l2-auto-exposure.md).
+
 ### Presets
 - `GET /api/dev/debug/camera/presets`
 - `POST /api/dev/debug/camera/presets`
@@ -218,15 +223,15 @@ journalctl -u ogscope.service -f
 ## Raspberry Pi deployment notes
 
 - Uses system Picamera2 / libcamera.
-- Under venv, inject system paths in the service unit, e.g.  
-  `PYTHONPATH=/usr/lib/python3/dist-packages:/usr/local/lib/python3.13/dist-packages`  
+- Under venv, inject system paths in the service unit, e.g.
+  `PYTHONPATH=/usr/lib/python3/dist-packages:/usr/local/lib/python3.13/dist-packages`
   `LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu`
 
 ## Support
 
-1. This troubleshooting section  
-2. Run test scripts  
-3. Application logs  
+1. This troubleshooting section
+2. Run test scripts
+3. Application logs
 4. Open an Issue on the repository
 
 ---

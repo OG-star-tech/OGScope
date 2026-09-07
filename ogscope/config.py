@@ -89,7 +89,13 @@ class Settings(BaseSettings):
     log_file: Optional[Path] = Field(default=None, description="日志文件路径")
 
     # 相机配置 / Camera configuration
-    camera_type: str = Field(default="imx327_mipi", description="相机类型: usb/csi/spi")
+    camera_type: str = Field(
+        default="imx327_mipi",
+        description=(
+            "相机后端：imx327_mipi（Picamera2/libcamera）或 v4l2 / "
+            "Camera backend: imx327_mipi or v4l2"
+        ),
+    )
     camera_width: int = Field(
         default=1280, description="图像宽度 / Default capture width"
     )
@@ -102,6 +108,144 @@ class Settings(BaseSettings):
     )
     camera_exposure: int = Field(default=10000, description="曝光时间(us)")
     camera_gain: float = Field(default=1.0, description="增益")
+    camera_device: str = Field(
+        default="/dev/video0", description="V4L2 视频设备 / V4L2 video device"
+    )
+    camera_v4l2_sensor_subdev: str = Field(
+        default="/dev/v4l-subdev1",
+        description="V4L2 传感器控制子设备 / V4L2 sensor control subdevice",
+    )
+    camera_v4l2_media_device: str = Field(
+        default="/dev/media0",
+        description="V4L2 Media Controller 设备 / V4L2 media-controller device",
+    )
+    camera_v4l2_configure_media_pipeline: bool = Field(
+        default=True,
+        description="启动时配置媒体链路 / Configure the media pipeline on startup",
+    )
+    camera_v4l2_sensor_entity: str = Field(
+        default="imx327 10-001a",
+        description="Media Controller 传感器实体 / Media-controller sensor entity",
+    )
+    camera_v4l2_receiver_entity: str = Field(
+        default="unicam",
+        description="Media Controller CSI 接收实体 / Media-controller CSI receiver entity",
+    )
+    camera_v4l2_sensor_pad: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description="传感器源 pad 编号 / Sensor source-pad index",
+    )
+    camera_v4l2_receiver_sink_pad: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description="CSI 接收器 sink pad 编号 / CSI receiver sink-pad index",
+    )
+    camera_v4l2_receiver_source_pad: int = Field(
+        default=1,
+        ge=0,
+        le=32,
+        description="CSI 接收器 source pad 编号 / CSI receiver source-pad index",
+    )
+    camera_v4l2_media_bus_format: str = Field(
+        default="SRGGB10_1X10",
+        description="传感器媒体总线格式 / Sensor media-bus format",
+    )
+    camera_v4l2_pixel_format: str = Field(
+        default="RG10", description="V4L2 RAW 像素格式 / V4L2 RAW pixel format"
+    )
+    camera_v4l2_bit_depth: int = Field(
+        default=10, ge=8, le=16, description="V4L2 RAW 位深 / V4L2 RAW bit depth"
+    )
+    camera_v4l2_black_level: int = Field(
+        default=-1,
+        ge=-1,
+        le=65534,
+        description="RAW 黑电平；-1 自动读取 / RAW black level; -1 auto-detects",
+    )
+    camera_v4l2_white_level: int = Field(
+        default=0,
+        ge=0,
+        le=65535,
+        description="RAW 白电平；0 自动推导 / RAW white level; 0 auto-detects",
+    )
+    camera_v4l2_bayer_pattern: str = Field(
+        default="RGGB", description="V4L2 Bayer 排列 / V4L2 Bayer pattern"
+    )
+    camera_v4l2_active_width: int = Field(
+        default=1920, ge=160, description="传感器有效宽度 / Sensor active width"
+    )
+    camera_v4l2_active_height: int = Field(
+        default=1080, ge=120, description="传感器有效高度 / Sensor active height"
+    )
+    camera_v4l2_line_duration_us: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="行周期覆盖值；0 自动推导 / Line-duration override; 0 derives it",
+    )
+    camera_v4l2_gain_db_per_step: float = Field(
+        default=0.3,
+        gt=0.0,
+        description="模拟增益每步 dB / Analogue-gain dB per control step",
+    )
+    camera_v4l2_auto_gain_max: float = Field(
+        default=16.0,
+        ge=1.0,
+        le=64.0,
+        description="软件 AE 最大模拟增益 / Software-AE maximum analogue gain",
+    )
+    camera_v4l2_ae_target_background: float = Field(
+        default=0.035,
+        ge=0.005,
+        le=0.25,
+        description="夜空背景目标亮度 / Night-sky background target",
+    )
+    camera_v4l2_ae_target_highlight: float = Field(
+        default=0.45,
+        ge=0.05,
+        le=0.95,
+        description="星点高分位目标亮度 / Star-highlight percentile target",
+    )
+    camera_v4l2_ae_highlight_percentile: float = Field(
+        default=99.8,
+        ge=95.0,
+        le=99.99,
+        description="软件 AE 星点分位 / Software-AE star percentile",
+    )
+    camera_v4l2_ae_trace_enabled: bool = Field(
+        default=False,
+        description="写入有界 AE 诊断轨迹 / Write bounded AE diagnostic traces",
+    )
+    camera_v4l2_ae_trace_dir: Optional[Path] = Field(
+        default=None,
+        description="AE 诊断目录；为空时使用数据目录 / AE trace directory; data-dir default",
+    )
+    camera_v4l2_ae_trace_max_events: int = Field(
+        default=2000,
+        ge=1,
+        le=100_000,
+        description="每次 AE 轨迹最大事件数 / Maximum events per AE trace",
+    )
+    camera_v4l2_ae_trace_raw_sample_interval: int = Field(
+        default=10,
+        ge=1,
+        le=10_000,
+        description="每 N 帧保存降采样 RAW / Save sampled RAW every N frames",
+    )
+    camera_v4l2_ae_trace_max_raw_samples: int = Field(
+        default=100,
+        ge=0,
+        le=10_000,
+        description="每次轨迹最大 RAW 样本数 / Maximum RAW samples per trace",
+    )
+    camera_v4l2_ae_trace_raw_max_side: int = Field(
+        default=320,
+        ge=16,
+        le=2048,
+        description="诊断 RAW 样本最长边 / Diagnostic RAW sample maximum side",
+    )
     camera_ae_polar_preset: bool = Field(
         default=True,
         description=(
@@ -568,6 +712,22 @@ class Settings(BaseSettings):
         }:
             return text
         return "auto"
+
+    @field_validator("camera_type", mode="before")
+    @classmethod
+    def _parse_camera_type(cls, value: object) -> str:
+        """规范化可选相机后端并兼容旧别名 / Normalize backends and legacy aliases."""
+        text = str(value or "imx327_mipi").strip().lower()
+        if text in {"v4l2", "v4l2_raw", "linuxpy_v4l2", "v4l2_linuxpy"}:
+            return "v4l2"
+        return text
+
+    @field_validator("camera_v4l2_bayer_pattern", mode="before")
+    @classmethod
+    def _parse_camera_v4l2_bayer_pattern(cls, value: object) -> str:
+        """校验 Bayer 排列 / Validate the Bayer pattern."""
+        text = str(value or "RGGB").strip().upper()
+        return text if text in {"RGGB", "BGGR", "GRBG", "GBRG"} else "RGGB"
 
     @field_validator("camera_auto_exposure_max_us", mode="before")
     @classmethod
