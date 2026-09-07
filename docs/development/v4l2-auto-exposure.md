@@ -38,6 +38,22 @@ OGSCOPE_CAMERA_V4L2_ACTIVE_WIDTH=1920
 OGSCOPE_CAMERA_V4L2_ACTIVE_HEIGHT=1080
 ```
 
+若 `media-ctl -p` 显示 CSI 接收端只是视频节点、没有可配置的 subdev source pad，
+可将相应 pad 设为 `-1` 跳过。已在 Raspberry Pi Unicam 的 sink-only 拓扑验证过的
+覆盖配置为：
+
+```bash
+OGSCOPE_CAMERA_V4L2_SENSOR_SUBDEV=/dev/v4l-subdev0
+OGSCOPE_CAMERA_V4L2_MEDIA_DEVICE=/dev/media2
+OGSCOPE_CAMERA_V4L2_RECEIVER_ENTITY=unicam-image
+OGSCOPE_CAMERA_V4L2_RECEIVER_SINK_PAD=-1
+OGSCOPE_CAMERA_V4L2_RECEIVER_SOURCE_PAD=-1
+```
+
+When the CSI receiver is represented only by a video node and has no configurable
+subdevice pads, set the absent receiver pads to `-1`. OGScope will configure the
+sensor pad and let the video-node `S_FMT` call select the capture format.
+
 The device nodes, media entities, bus code, FourCC, bit depth, and Bayer order are
 board-discovered values rather than portable defaults. Initialization fails when
 the requested media graph, RAW format/size, or required exposure controls cannot
@@ -203,3 +219,24 @@ FWHM, solve rate, preview latency, and CPU against the Picamera2/libcamera basel
 before promoting V4L2 to a product profile. This change does not modify the BSP;
 the target OS must independently provide the kernel/media graph, permissions,
 `v4l-utils`, OpenCV V4L2 support, and writable persistent data paths.
+
+### 2026-09-07 Raspberry Pi 实机探针 / Board probe
+
+在 Raspberry Pi CM0、Debian 13、Linux 6.18.34 上完成了不改永久配置的临时验证：
+
+- `/dev/media2` 为 Unicam，`/dev/video0` 为 RAW capture，传感器控件位于
+  `/dev/v4l-subdev0`；`unicam-image` 只有 sink pad，因此接收器两个 pad 均配置为 `-1`。
+- `RG10`、1920×1080 协商成功；OpenCV 返回一维 byte buffer，适配器正确重排为
+  1920×1080 `uint16`，实测 RAW 为右对齐 10-bit。
+- 从 `pixel_rate=148500000`、`horizontal_blanking=2020` 推导出的行周期为
+  `26.532µs`；曝光与模拟增益写入后回读通过。
+- 12 帧软件 AE 从约 10ms 降到产品最短约 1ms，并在现场强明场进入
+  `limited_bright`；Picamera2 以相同约 1ms 曝光也接近全白。约 27µs 手动曝光无饱和，
+  说明该结果是夜空 AE 最短曝光边界，不是 RAW packing 故障。
+- Core v1 状态、100µs 手动调参、1280×720 MJPEG、两轮 stop/start，以及实时分析
+  start/result/stop 均通过。无星明场返回 `TOO_FEW`，属于预期业务结果。
+- 测试结束后原 Picamera2 服务恢复为 healthy、connected、streaming；未执行电机运动。
+
+This probe validates the application/driver boundary on one board only. It does
+not close the required dark-frame, night-sky, solve-rate, long-run, or motor-system
+acceptance gates.
