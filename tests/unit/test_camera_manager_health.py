@@ -61,6 +61,15 @@ class _SlowStopCamera(_FrameCamera):
         return True
 
 
+class _FailedStopCamera(_FrameCamera):
+    """模拟驱动报告无法释放 / Simulate a driver reporting release failure."""
+
+    is_capturing = True
+
+    def stop_capture(self) -> bool:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_ensure_started_fails_when_no_frames() -> None:
     manager = CameraManager()
@@ -203,6 +212,19 @@ async def test_stop_timeout_keeps_camera_handle_and_blocks_reacquire() -> None:
     await manager.stop()
     assert manager.get_camera_instance() is None
     assert camera.camera.closed is True
+
+
+@pytest.mark.asyncio
+async def test_stop_failure_keeps_camera_handle_and_requires_restart() -> None:
+    """显式停止失败不得被后续 close 掩盖 / A stop failure must not be hidden by close."""
+    manager = CameraManager()
+    camera = _FailedStopCamera()
+    manager.attach_camera_instance(camera)
+
+    await manager.stop()
+
+    assert manager.get_camera_instance() is camera
+    assert manager._restart_required is True
 
 
 @pytest.mark.asyncio

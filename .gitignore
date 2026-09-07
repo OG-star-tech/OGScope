@@ -152,6 +152,7 @@ Thumbs.db
 # 用户上传的图像
 uploads/
 data/dev_captures/
+data/camera-ae-traces/
 captured_images/
 *.fits
 *.fit

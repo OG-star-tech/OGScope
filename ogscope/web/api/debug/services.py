@@ -986,8 +986,11 @@ class DebugCameraService:
                 auto_exposure = settings.get(
                     "autoExposure", getattr(camera, "auto_exposure", False)
                 )
-                if hasattr(camera, "set_auto_exposure"):
-                    camera.set_auto_exposure(bool(auto_exposure))
+                if "autoExposure" in settings:
+                    if not hasattr(camera, "set_auto_exposure"):
+                        raise Exception("当前相机驱动不支持自动曝光")
+                    if not camera.set_auto_exposure(bool(auto_exposure)):
+                        raise Exception("设置自动曝光模式失败")
 
                 if not auto_exposure and "exposure" in settings:
                     camera.set_exposure(settings["exposure"])

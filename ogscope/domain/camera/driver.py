@@ -1,4 +1,4 @@
-"""相机驱动抽象与未来 Linuxpy 入口 / Camera driver abstractions and future Linuxpy hook."""
+"""相机驱动抽象 / Camera driver abstractions."""
 
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ class CameraCapabilities:
     lores_height: int = 0
     lores_format: str = ""
     awb_modes: tuple[str, ...] = ("auto", "manual", "night")
+    auto_exposure: bool = False
+    software_auto_exposure: bool = False
+    manual_exposure: bool = True
     ae_flicker: bool = False
     noise_reduction_modes: tuple[str, ...] = ("off", "fast", "high_quality")
     manual_digital_gain: bool = False
@@ -51,19 +54,3 @@ class CameraDriver(Protocol):
     def get_video_frame(self) -> Any: ...
 
     def get_camera_info(self) -> dict[str, Any]: ...
-
-
-class LinuxpyV4L2Driver:
-    """Linuxpy/V4L2 预留骨架；本轮不作为树莓派 CSI 默认路径 / Reserved linuxpy/V4L2 stub."""
-
-    is_initialized = False
-    is_capturing = False
-
-    def __init__(self, config: dict[str, Any]):
-        self.config = config
-
-    def initialize(self) -> bool:
-        """真实 linuxpy 适配将在自定义 Linux 系统中实现 / Real linuxpy adapter is implemented later."""
-        raise NotImplementedError(
-            "linuxpy driver is reserved but not implemented / linuxpy 驱动已预留但未实现"
-        )
