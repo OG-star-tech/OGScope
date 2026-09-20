@@ -271,6 +271,17 @@ class V4L2RawCamera:
             1, int(config.get("v4l2_temporal_nr_max_frames", 50))
         )
         self._nr_accumulator: np.ndarray | None = None
+        # 累积器是否持有有效历史。曝光/增益一变要丢弃历史，但不能把数组
+        # 本身丢掉：AE 收敛期间每帧都可能触发一次，反复重新分配整幅
+        # float32 会让 RSS 一路涨上去（实测开着 AE 抓 40 帧涨了 38MB）。
+        # 置为无效即可，下一帧原地覆盖。
+        # Whether the accumulator holds valid history. An exposure/gain
+        # change must discard the history but must NOT drop the array:
+        # during AE convergence that can fire every frame, and
+        # reallocating a full-frame float32 each time walks RSS upward
+        # (measured: +38MB over 40 frames with AE enabled). Marking it
+        # invalid lets the next frame overwrite it in place.
+        self._nr_accumulator_valid = False
         # 整幅 float32 的复用暂存：时域降噪先用完、_debayer 再用，两者
         # 生命周期不重叠，所以共用一块即可（各自单独分配会白白多占 3.7MB）
         # / One reused full-frame float32 scratch: temporal NR finishes
@@ -653,11 +664,12 @@ class V4L2RawCamera:
         self._frame_duration_us = max(
             self.exposure_us, int(round(frame_lines * self._line_duration_us))
         )
-        # 曝光/增益真的变了，累积的是不同亮度的帧，直接清空时域降噪累积器，
-        # 避免下一帧被拖回旧亮度 / Exposure/gain actually changed, so the
-        # accumulator holds frames at a different brightness - clear it so
-        # the next frame isn't blended back toward the old brightness level.
-        self._nr_accumulator = None
+        # 曝光/增益真的变了，累积的是不同亮度的帧，作废历史避免下一帧被
+        # 拖回旧亮度；保留数组本身，下一帧原地覆盖 / Exposure/gain actually
+        # changed, so the accumulated history is at a different brightness -
+        # invalidate it so the next frame isn't blended back toward the old
+        # level, but keep the array itself for in-place reuse.
+        self._nr_accumulator_valid = False
         return True
 
     def _create_capture(self) -> Any | None:
@@ -789,7 +801,7 @@ class V4L2RawCamera:
         # 每次开始抓帧都是新的一段序列，之前累积的帧可能是很久以前的场景
         # / Each capture start is a fresh sequence - a stale accumulator from
         # a previous run could hold a since-changed scene.
-        self._nr_accumulator = None
+        self._nr_accumulator_valid = False
         return True
 
     def stop_capture(self) -> bool:
@@ -1088,8 +1100,12 @@ class V4L2RawCamera:
             return raw
         accumulator = self._nr_accumulator
         if accumulator is None or accumulator.shape != raw.shape:
-            self._nr_accumulator = raw.astype(np.float32)
-            return self._nr_accumulator
+            accumulator = np.empty(raw.shape, dtype=np.float32)
+            self._nr_accumulator = accumulator
+        if not self._nr_accumulator_valid:
+            np.copyto(accumulator, raw, casting="unsafe")
+            self._nr_accumulator_valid = True
+            return accumulator
         # 就地更新，复用一块 scratch：acc += alpha * (raw - acc)。写成
         # `alpha * raw + (1-alpha) * acc` 每帧会产生三个整幅 float32 临时量。
         # In-place update against one reused scratch: acc += alpha*(raw-acc).
