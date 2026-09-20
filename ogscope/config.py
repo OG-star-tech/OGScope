@@ -425,6 +425,40 @@ class Settings(BaseSettings):
         default=2.5,
         description="σ 阈值倍数；略高可减少假星 / Sigma multiplier for thresholding",
     )
+    solver_centroid_sigma_v4l2: float = Field(
+        default=2.1,
+        description=(
+            "V4L2 RAW 后端专用 σ 阈值：gamma 校正后画面对比度仍明显低于 "
+            "picamera2/libcamera ISP 输出（尝试过再叠加 CLAHE 局部对比度增强，"
+            "但在实测中只是放大暗部噪声、没有真正提升星点可探测性，已撤销 - "
+            "见 docs/development/v4l2-zero2w-board-validation.md）。单独降低"
+            "这条后端的阈值，而不是让画面在视觉上冒充 ISP 输出，才能大致复现 "
+            "picamera2 在其默认 solver_centroid_sigma=2.5 下的检出数量级。"
+            "但这个值不是精确常数：在真实 Zero2W 上重复拍摄，能对齐 picamera2 "
+            "检出数的 σ 在不同轮次间落在约 1.9-2.2 之间（同一室内白天场景，"
+            "曝光/噪声实现每次略有不同），2.1 取的是这个区间的中点，偏保守 "
+            "（宁可少检出也不要让候选点数暴涨到 picamera2 的 3-4 倍，那样的一"
+            "轮实测出现过）。在真实夜空验证前不要把这个数当作精确标定值 / "
+            "Sigma threshold specific to the V4L2 RAW backend: even after "
+            "gamma correction, contrast still trails picamera2/libcamera's "
+            "ISP output measurably (a CLAHE local-contrast stage was tried "
+            "on top but just amplified dark-region noise without improving "
+            "real star detectability, and was reverted - see "
+            "docs/development/v4l2-zero2w-board-validation.md). A "
+            "separately-lowered threshold for this backend, not reshaping "
+            "the image, is what roughly reproduces picamera2's own "
+            "detection order-of-magnitude at its default "
+            "solver_centroid_sigma=2.5 - but this isn't a precise constant: "
+            "across repeated captures on real Zero2W hardware, the sigma "
+            "that matches picamera2's count varied between ~1.9 and ~2.2 "
+            "run to run (same indoor daylight scene, exposure/noise differ "
+            "slightly each capture). 2.1 is the midpoint, chosen "
+            "conservatively (better to under-detect than let the candidate "
+            "count balloon to 3-4x picamera2's, which happened in one "
+            "observed round). Do not treat this as a precisely calibrated "
+            "value until validated against real night sky"
+        ),
+    )
     solver_centroid_max_area: int = Field(
         default=400,
         description="连通域最大像素面积；过小会丢掉亮星光晕 / Max spot area in pixels",

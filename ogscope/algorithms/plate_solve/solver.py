@@ -114,9 +114,26 @@ class CentroidExtractionParams:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> CentroidExtractionParams:
-        """从应用配置构造 / Build from application settings."""
+        """从应用配置构造 / Build from application settings.
+
+        V4L2 RAW 后端即使做了 gamma 校正，对比度仍明显低于 picamera2/libcamera
+        的 ISP 输出，同一 sigma 下检出的星点数会显著偏少；单独给它一条更低的
+        阈值（见 solver_centroid_sigma_v4l2 的说明）才能复现 picamera2 在自己
+        默认阈值下的检出数/形状统计，而不是让画面在视觉上冒充 ISP 输出。
+        Even with gamma correction, the V4L2 RAW backend's contrast still
+        trails picamera2/libcamera's ISP output, so the same sigma detects
+        far fewer stars there; only a separately-tuned, lower threshold (see
+        solver_centroid_sigma_v4l2's docstring) reproduces picamera2's own
+        detection count/shape statistics at its default, rather than
+        reshaping the image to imitate ISP output.
+        """
+        sigma = (
+            settings.solver_centroid_sigma_v4l2
+            if settings.camera_type == "v4l2"
+            else settings.solver_centroid_sigma
+        )
         return cls(
-            sigma=settings.solver_centroid_sigma,
+            sigma=sigma,
             max_area=settings.solver_centroid_max_area,
             min_area=settings.solver_centroid_min_area,
             filtsize=settings.solver_centroid_filtsize,

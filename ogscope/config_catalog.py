@@ -185,6 +185,7 @@ _CATALOG_SECTIONS: tuple[
             "solver_max_stars",
             "solver_fullsolve_interval_frames",
             "solver_centroid_sigma",
+            "solver_centroid_sigma_v4l2",
             "solver_centroid_max_area",
             "solver_centroid_min_area",
             "solver_centroid_filtsize",
