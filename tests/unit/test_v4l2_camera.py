@@ -608,3 +608,134 @@ def test_v4l2_capabilities_truthfully_report_software_ae() -> None:
     assert info["capabilities"]["software_auto_exposure"] is True
     assert info["capabilities"]["manual_digital_gain"] is False
     assert info["auto_exposure_engine"] == "software_night_sky"
+
+
+@pytest.mark.unit
+def test_temporal_nr_first_frame_is_passthrough() -> None:
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.5})
+    raw = np.full((4, 4), 1000, dtype=np.uint16)
+
+    output = camera._apply_temporal_nr(raw)
+
+    assert np.array_equal(output, raw)
+
+
+@pytest.mark.unit
+def test_temporal_nr_blends_consecutive_raw_frames_with_configured_alpha() -> None:
+    # temporal_nr_seconds=0 pins the fixed alpha, isolating the blend maths
+    # from the frame-duration-aware adaptation.
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.5, "v4l2_temporal_nr_seconds": 0.0}
+    )
+    raw_a = np.full((4, 4), 1000, dtype=np.uint16)
+    raw_b = np.full((4, 4), 2000, dtype=np.uint16)
+
+    camera._apply_temporal_nr(raw_a)
+    output = camera._apply_temporal_nr(raw_b)
+
+    assert np.all(output == 1500)  # 0.5 * 2000 + 0.5 * 1000
+
+
+@pytest.mark.unit
+def test_temporal_nr_keeps_sub_integer_precision_in_raw_domain() -> None:
+    """Averaging happens in the linear RAW domain, so the accumulator must
+    keep fractional values rather than rounding back to integer RAW codes -
+    that sub-integer precision is what the oversampled gamma LUT preserves."""
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.5, "v4l2_temporal_nr_seconds": 0.0}
+    )
+    camera._apply_temporal_nr(np.full((4, 4), 1000, dtype=np.uint16))
+
+    output = camera._apply_temporal_nr(np.full((4, 4), 1001, dtype=np.uint16))
+
+    assert np.allclose(output, 1000.5)
+
+
+@pytest.mark.unit
+def test_temporal_nr_alpha_averages_more_frames_at_short_exposures() -> None:
+    """Short exposures deliver many frames per second, so the EMA should
+    average far more of them (smaller alpha) than the fixed bound - the
+    wall-clock cost is negligible there, unlike at long exposures."""
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0})
+
+    camera._frame_duration_us = 10_000  # 10ms frames -> 200 in 2s, capped at 50
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(1.0 / 50)
+
+    camera._frame_duration_us = 200_000  # 200ms frames -> 10 frames in 2s
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.1)
+
+
+@pytest.mark.unit
+def test_temporal_nr_alpha_never_exceeds_configured_bound_at_long_exposures() -> None:
+    """At long exposures averaging more frames is real latency, so it must
+    clamp back to the configured alpha rather than stretching convergence."""
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0})
+
+    camera._frame_duration_us = 3_000_000  # 3s frames -> 0.67 frames in 2s
+
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_temporal_nr_seconds_zero_falls_back_to_fixed_alpha() -> None:
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 0.0})
+    camera._frame_duration_us = 10_000
+
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_temporal_nr_disabled_at_alpha_one_is_pure_passthrough() -> None:
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 1.0})
+    raw_a = np.full((4, 4), 1000, dtype=np.uint16)
+    raw_b = np.full((4, 4), 2000, dtype=np.uint16)
+
+    camera._apply_temporal_nr(raw_a)
+    output = camera._apply_temporal_nr(raw_b)
+
+    assert np.array_equal(output, raw_b)
+
+
+@pytest.mark.unit
+def test_exposure_change_resets_temporal_nr_accumulator(monkeypatch) -> None:
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+    monkeypatch.setattr(camera, "_set_control", lambda _name, _value: True)
+    camera._nr_accumulator = np.full((120, 160), 42.0, dtype=np.float32)
+
+    assert camera._apply_exposure_gain(30_000, 2.0) is True
+
+    assert camera._nr_accumulator is None
+
+
+@pytest.mark.unit
+def test_start_capture_resets_temporal_nr_accumulator() -> None:
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+    camera._capture = _FakeCapture(np.full((120, 160), 500, dtype=np.uint16))
+    camera._nr_accumulator = np.zeros((120, 160), dtype=np.float32)
+
+    assert camera.start_capture() is True
+
+    assert camera._nr_accumulator is None
+
+
+@pytest.mark.unit
+def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
+    monkeypatch,
+) -> None:
+    """No sensor black_level control (confirmed via v4l2-ctl --list-ctrls on
+    real hardware) must not silently fall back to 0 - that means zero
+    black-level correction is ever applied. Falls back to a value measured
+    with the lens covered on real hardware instead."""
+    camera = V4L2RawCamera({"v4l2_bit_depth": 12})
+    monkeypatch.setattr(camera, "_read_control", lambda _name: None)
+
+    camera._resolve_signal_levels()
+
+    assert camera.black_level != 0
+    from ogscope.platform.hardware.v4l2_camera import (
+        FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE,
+    )
+
+    expected = round(FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE * 4095)
+    assert camera.black_level == expected
+    assert camera._signal_level_sources["black_level"] == "fallback_measured_dark_frame"
