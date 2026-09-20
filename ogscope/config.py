@@ -277,10 +277,18 @@ class Settings(BaseSettings):
         ),
     )
     camera_auto_exposure_max_us: int = Field(
-        default=1_000_000,
+        default=3_000_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 1s，暗场允许降帧 / Max auto-exposure frame duration, capped at 1s",
+        description=(
+            "自动曝光最长帧周期 3s，暗场允许降帧 / Max auto-exposure frame "
+            "duration, capped at 3s (raised from 1s 2026-09-20 after "
+            "validating 1-3s manual exposure on real Zero2W hardware via "
+            "the V4L2 backend - see "
+            "docs/development/v4l2-zero2w-board-validation.md; the "
+            "picamera2 backend keeps its own independent 1s ceiling, "
+            "camera.py's AUTO_EXPOSURE_MAX_US, unaffected by this)"
+        ),
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -738,9 +746,9 @@ class Settings(BaseSettings):
     @field_validator("camera_auto_exposure_max_us", mode="before")
     @classmethod
     def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
-        """兼容旧配置并限制暗场曝光为 1s / Keep legacy config bootable and cap AE at 1s."""
+        """兼容旧配置并限制暗场曝光为 3s / Keep legacy config bootable and cap AE at 3s."""
         try:
-            return min(1_000_000, int(value))
+            return min(3_000_000, int(value))
         except (TypeError, ValueError):
             return value
 

@@ -506,11 +506,15 @@ def test_vblank_expands_dynamic_exposure_range(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_v4l2_auto_exposure_ceiling_is_capped_at_one_second() -> None:
-    camera = _ready_camera(auto_exposure_max_us=2_000_000)
+def test_v4l2_auto_exposure_ceiling_is_capped_at_three_seconds() -> None:
+    """2026-09-20 从 1 秒放宽到 3 秒 - 在真实 Zero2W 上验证 1s-3s 手动曝光后的
+    产品决策，见 docs/development/v4l2-zero2w-board-validation.md / Raised
+    from 1s to 3s on 2026-09-20 after validating 1s-3s manual exposure on a
+    real Zero2W - see docs/development/v4l2-zero2w-board-validation.md."""
+    camera = _ready_camera(auto_exposure_max_us=5_000_000)
 
-    assert camera.auto_exposure_max_us == 1_000_000
-    assert camera._ae.limits.max_exposure_us == 1_000_000
+    assert camera.auto_exposure_max_us == 3_000_000
+    assert camera._ae.limits.max_exposure_us == 3_000_000
 
 
 @pytest.mark.unit
@@ -521,9 +525,9 @@ def test_software_ae_gain_limit_respects_hardware_control_range() -> None:
     camera._ae = camera._create_auto_exposure()
 
     assert camera._ae.limits.max_gain == pytest.approx(1.995, abs=0.001)
-    assert camera.set_auto_exposure_max_us(3_000_000) is True
-    assert camera.auto_exposure_max_us == 1_000_000
-    assert camera._ae.limits.max_exposure_us == 1_000_000
+    assert camera.set_auto_exposure_max_us(5_000_000) is True
+    assert camera.auto_exposure_max_us == 3_000_000
+    assert camera._ae.limits.max_exposure_us == 3_000_000
 
 
 @pytest.mark.unit

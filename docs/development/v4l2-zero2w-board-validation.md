@@ -261,12 +261,18 @@ motors disabled against it, until:
    here.
 4. City-glow, cloud, and moon/light-pollution scenarios per the handoff's own
    listed test matrix.
-5. Manual long-exposure control (up to 3s, see [`exposure`](#validation-results)/
-   [`long_capture`](#validation-results) above) and the AE engine's own 1s
-   policy ceiling are both now validated as designed. Not open, included
-   here for completeness: nothing about the *product* AE ceiling needs
-   revisiting - 1s is a deliberate, documented decision, not a limitation
-   found during this validation.
+5. **Superseded 2026-09-20**: manual long-exposure control up to 3s (see
+   [`exposure`](#validation-results)/[`long_capture`](#validation-results)
+   above) validated cleanly enough that the product decision itself changed
+   - the automatic engine's policy ceiling was raised from 1s to 3s
+   (`AUTO_EXPOSURE_MAX_CEILING_US` in `v4l2_camera.py`,
+   `Settings.camera_auto_exposure_max_us` in `config.py`). The picamera2
+   backend's own independent ceiling (`camera.py`'s `AUTO_EXPOSURE_MAX_US`)
+   is intentionally untouched - it has its own separate clamp and this
+   round only validated the V4L2 path. Still genuinely open: whether the AE
+   loop's convergence *behavior* holds up all the way out to 3s under real
+   dark-sky signal (item 2 above) - only the control-plane ceiling changed
+   here, not a re-validation of AE quality at the new ceiling.
 
 ## Correction to the original handoff document
 

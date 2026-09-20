@@ -168,7 +168,7 @@ class CameraManager:
                 else None
             ),
             "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 1_000_000
+                settings, "camera_auto_exposure_max_us", 3_000_000
             ),
             "capture_timeout_sec": self._capture_timeout_sec,
             "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
