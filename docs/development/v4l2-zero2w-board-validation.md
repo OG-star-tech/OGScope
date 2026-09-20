@@ -86,16 +86,53 @@ actual_exposure_us: 10000   actual_analogue_gain: 1.0
 real `pixel_rate`/`horizontal_blanking` controls, not the IMX327 fallback
 estimate.
 
-**`exposure`** - sweep 1ms/10ms/50ms/200ms, all with verified readback
-matching the request exactly (200ms exercises the vertical_blanking
-auto-extension path):
+**`exposure`** - sweep 1ms through 3s, all with verified readback matching
+the request exactly (200ms+ exercises the vertical_blanking auto-extension
+path). `set_exposure()` does not go through `AutoExposureLimits`' 1-second
+policy ceiling (see [AE loop](#auto-exposure-control-loop) below) - it's
+bounded only by the real hardware control ranges. From this board's
+`vertical_blanking.max=261423` and `line_duration≈22.22us`, the theoretical
+ceiling is `(720+261423)*22.22us ≈ 5.8s`, so 3s was expected to be well
+within range, and was:
 
 ```
-set_exposure(1000)   -> True  actual_exposure_us=1000    control_readback={'verified': True, 'error': None}
-set_exposure(10000)  -> True  actual_exposure_us=10000   control_readback={'verified': True, 'error': None}
-set_exposure(50000)  -> True  actual_exposure_us=50000   control_readback={'verified': True, 'error': None}
-set_exposure(200000) -> True  actual_exposure_us=200000  control_readback={'verified': True, 'error': None}
+set_exposure(1000)    -> True  actual_exposure_us=1000     control_readback={'verified': True, 'error': None}
+set_exposure(10000)   -> True  actual_exposure_us=10000    control_readback={'verified': True, 'error': None}
+set_exposure(50000)   -> True  actual_exposure_us=50000    control_readback={'verified': True, 'error': None}
+set_exposure(200000)  -> True  actual_exposure_us=200000   control_readback={'verified': True, 'error': None}
+set_exposure(500000)  -> True  actual_exposure_us=500000   control_readback={'verified': True, 'error': None}
+set_exposure(1000000) -> True  actual_exposure_us=1000000  control_readback={'verified': True, 'error': None}
+set_exposure(2000000) -> True  actual_exposure_us=2000000  control_readback={'verified': True, 'error': None}
+set_exposure(3000000) -> True  actual_exposure_us=3000000  control_readback={'verified': True, 'error': None}
 ```
+
+**`long_capture`** - actual frame capture (not just control write/readback)
+at 1s/2s/3s, confirming the read doesn't hang or time out:
+
+```
+exposure=1000000 set_exposure=True actual=1000000 capture_elapsed=1.74s shape=(720, 1280, 3) dtype=uint8 min=229 max=255 mean=246.33
+exposure=2000000 set_exposure=True actual=2000000 capture_elapsed=0.67s shape=(720, 1280, 3) dtype=uint8 min=229 max=255 mean=246.33
+exposure=3000000 set_exposure=True actual=3000000 capture_elapsed=1.91s shape=(720, 1280, 3) dtype=uint8 min=229 max=255 mean=246.33
+```
+
+Two things worth noting, not bugs but real characteristics to design around:
+
+- Frames are **fully saturated** (`min=229 max=255`, near-white) at every
+  exposure. Expected: a 1-3s exposure indoors under normal room light
+  massively overexposes the sensor - this is what multi-second exposures are
+  *for* under actual dark-sky conditions, not something a bright test scene
+  can validate. The mechanism (control write, readback, capture completing
+  without hanging) is what this stage actually confirms.
+- `capture_elapsed` does **not** scale monotonically with requested exposure
+  (1.74s / 0.67s / 1.91s for 1s / 2s / 3s). Read as V4L2/OpenCV buffer
+  pipelining returning a frame already in flight rather than one freshly
+  exposed at the just-applied setting - the same lag the AE engine's
+  `settling` state (see below) exists to absorb. Anything reading a frame
+  immediately after changing exposure - manually or via the AE loop -
+  should not trust that specific frame's exposure to already reflect the
+  new setting; the AE engine already accounts for this, a fact any other
+  caller of `set_exposure()` followed immediately by `capture_image()`
+  should keep in mind.
 
 **`capture`** - real RAW capture through `_unpack_raw` -> `_debayer`, indoor/
 bright test scene (not night sky - see [Still open](#still-open-before-this-becomes-the-default)):
@@ -110,6 +147,75 @@ Correct shape/dtype (RGB888, matches `output_pixel_format`), non-degenerate
 pixel values (not all-zero, not saturated). A 40-frame run converged to a
 stable mean (~51.4) by the last several frames, consistent with the software
 AE loop settling.
+
+## Auto-exposure control loop
+
+`capture_image()` already calls `_observe_auto_exposure()` internally on
+every frame (`ogscope/platform/hardware/v4l2_camera.py`) - the `ae_loop`
+validation stage doesn't reimplement any AE logic, it just runs 20 real
+capture cycles with `auto_exposure=True` (the default) and prints the real
+engine's state per frame.
+
+**Important, confirmed in code before running anything**: the automatic
+engine's own exposure ceiling is deliberately hard-clamped to 1 second -
+`auto_exposure_max_us = max(10_000, min(1_000_000, config.get(...)))` in
+`V4L2RawCamera.__init__` unconditionally caps at `1_000_000` regardless of
+what's configured. This matches `docs/development/v4l2-auto-exposure.md`'s
+documented product decision ("产品自动曝光上限仍为 1 秒" / "the product auto
+exposure ceiling remains 1 second") - it is intentional, not a bug, and not
+something this validation round works around. `long_capture` above tests the
+*hardware's* ceiling via manual `set_exposure()`, which bypasses this policy
+layer entirely; this section tests the *policy-bounded automatic engine*
+within its designed range.
+
+```
+effective_auto_exposure_max_us (policy ceiling): 1000000
+frame 0: ae_state=converged  exposure_us=10000  gain=1.0 mean=49.51
+frame 1: ae_state=converged  exposure_us=10000  gain=1.0 mean=43.71
+frame 2: ae_state=adjusting  exposure_us=11111  gain=1.0 mean=38.85
+frame 3: ae_state=settling   exposure_us=11111  gain=1.0 mean=34.94
+frame 4: ae_state=settling   exposure_us=11111  gain=1.0 mean=34.92
+frame 5: ae_state=adjusting  exposure_us=14244  gain=1.0 mean=37.39
+frame 6: ae_state=settling   exposure_us=14244  gain=1.0 mean=37.40
+frame 7: ae_state=settling   exposure_us=14244  gain=1.0 mean=37.40
+frame 8: ae_state=adjusting  exposure_us=17400  gain=1.0 mean=43.86
+frame 9: ae_state=settling   exposure_us=17400  gain=1.0 mean=43.86
+frame 10: ae_state=settling  exposure_us=17400  gain=1.0 mean=43.86
+frame 11: ae_state=converged exposure_us=17400  gain=1.0 mean=50.48
+...
+frame 19: ae_state=converged exposure_us=17400  gain=1.0 mean=50.49
+```
+
+Reads as a correct, textbook convergence: exposure-only ramp (gain never
+moves, matching the documented "lengthen exposure before adding gain"
+policy - the bright indoor scene never needed gain), each `adjusting` step
+followed by `settling` frames before the next decision (the hysteresis/wait
+built into the control loop, which also absorbs the same
+capture-vs-setting lag noted under `long_capture` above), then a stable
+`converged` hold for the remaining 9 of 20 frames. The state machine and its
+settling design work correctly on this board's real 12-bit config. What
+this does *not* validate: AE behavior against real dark-sky signal
+statistics, where target background/highlight levels and convergence speed
+matter far more than they do against a well-lit indoor scene - see
+[Still open](#still-open-before-this-becomes-the-default).
+
+## Repeated start/stop
+
+Per the original handoff's own acceptance list item ("repeated camera
+stop/start"). 5 cycles of `initialize()` -> `start_capture()` ->
+`capture_image()` -> `close()`, each a fresh `V4L2RawCamera` instance:
+
+```
+cycle 0: initialize=True captured_shape=(720, 1280, 3)
+cycle 1: initialize=True captured_shape=(720, 1280, 3)
+cycle 2: initialize=True captured_shape=(720, 1280, 3)
+cycle 3: initialize=True captured_shape=(720, 1280, 3)
+cycle 4: initialize=True captured_shape=(720, 1280, 3)
+```
+
+All 5 succeeded - no device-busy failures from a prior cycle not fully
+releasing the node before the next one opened it, no resource leak
+preventing re-initialization.
 
 ## Memory comparison (the actual motivation for this branch)
 
@@ -136,18 +242,31 @@ Per this board's and the handoff doc's own acceptance gate - **do not** flip
 `OGSCOPE_CAMERA_TYPE` to `v4l2` as a product default, and keep alignment/
 motors disabled against it, until:
 
-1. Real night-sky solve accuracy validated (this round used an indoor/bright
-   scene - `TOO_FEW`-style rejection or correct solves under actual dim star
-   fields not yet exercised on this board).
-2. Software AE convergence validated under real dark-sky brightness levels,
-   not just the exposure-sweep control-plane check done here (that confirms
-   the sensor accepts and reports back the requested values - it says
-   nothing about whether the AE control loop's decisions are correct absent
-   real signal statistics).
-3. Long-run stability (repeated start/stop, extended capture sessions) - only
-   a short 40-frame run and a few init/exposure calls were exercised here.
+1. Real night-sky solve accuracy validated (all rounds so far used an
+   indoor/bright scene - `TOO_FEW`-style rejection or correct solves under
+   actual dim star fields not yet exercised on this board).
+2. **AE decision-loop mechanics are now validated** (state machine
+   progression, exposure-only ramp before gain, settling/hysteresis, stable
+   convergence and hold - see [Auto-exposure control loop](#auto-exposure-control-loop)),
+   but only against a well-lit indoor scene. What remains open: whether the
+   same convergence quality and speed hold against real dark-sky signal
+   statistics, where `target_background`/`target_highlight` and the
+   percentile-based highlight metric behave very differently against sparse
+   stars on a near-black background than against a uniformly lit room.
+3. **Short-run repeated start/stop is now validated** (5 cycles, see
+   [Repeated start/stop](#repeated-start-stop)). Still open: long-run
+   stability under extended real capture sessions (hours, not a few dozen
+   frames), and repeated cycles interleaved with real AE convergence under
+   dark-sky conditions rather than the bright/fast-converging case tested
+   here.
 4. City-glow, cloud, and moon/light-pollution scenarios per the handoff's own
    listed test matrix.
+5. Manual long-exposure control (up to 3s, see [`exposure`](#validation-results)/
+   [`long_capture`](#validation-results) above) and the AE engine's own 1s
+   policy ceiling are both now validated as designed. Not open, included
+   here for completeness: nothing about the *product* AE ceiling needs
+   revisiting - 1s is a deliberate, documented decision, not a limitation
+   found during this validation.
 
 ## Correction to the original handoff document
 

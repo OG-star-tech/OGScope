@@ -24,6 +24,7 @@ Usage (on-device, service stopped first so /dev/video0 is free):
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 # Run from the repo root or with the package already on PYTHONPATH; this is
@@ -124,13 +125,35 @@ def stage_capture(num_frames: int = 3) -> None:
 
 
 def stage_exposure() -> None:
-    print("=== exposure sweep ===")
+    """手动曝光扫描，直到 3 秒 / Manual exposure sweep, up to 3 seconds.
+
+    set_exposure() 不经过 AutoExposureLimits 的 1 秒策略上限（那只限制自动
+    引擎自身的决策 - 见 _create_auto_exposure），只受真实硬件控件范围约束：
+    vertical_blanking.max=261423 行、line_duration≈22.22us，理论曝光上限
+    ≈ (720+261423)*22.22us ≈ 5.8s。3 秒应在此范围内，用于直接验证硬件/驱动
+    是否真支持，而非仅验证策略层配置。/ set_exposure() does not go through
+    AutoExposureLimits' 1-second policy ceiling (that only bounds the
+    automatic engine's own decisions - see _create_auto_exposure); it's
+    bounded only by the real hardware control ranges. Theoretical ceiling
+    from this board's vertical_blanking.max/line_duration is ~5.8s, so 3s
+    should be well within hardware capability - this tests that directly.
+    """
+    print("=== exposure sweep (manual, up to 3s) ===")
     cam = stage_init()
     if cam is None:
         print("FAIL: init failed, cannot test exposure")
         return
     try:
-        for exposure_us in (1_000, 10_000, 50_000, 200_000):
+        for exposure_us in (
+            1_000,
+            10_000,
+            50_000,
+            200_000,
+            500_000,
+            1_000_000,
+            2_000_000,
+            3_000_000,
+        ):
             ok = cam.set_exposure(exposure_us)
             info = cam.get_camera_info()
             print(
@@ -140,6 +163,110 @@ def stage_exposure() -> None:
             )
     finally:
         cam.close()
+
+
+def stage_long_capture() -> None:
+    """在长曝光（1s/2s/3s）下实际抓一帧，确认读取不挂起且数据合理 /
+    Actually capture a frame at long exposure (1s/2s/3s), confirming the
+    read doesn't hang and the data looks sane."""
+    print("=== long-exposure capture (1s/2s/3s) ===")
+    cam = stage_init()
+    if cam is None:
+        print("FAIL: init failed, cannot capture")
+        return
+    try:
+        started = cam.start_capture()
+        print(f"start_capture() -> {started}")
+        if not started:
+            return
+        for exposure_us in (1_000_000, 2_000_000, 3_000_000):
+            set_ok = cam.set_exposure(exposure_us)
+            info = cam.get_camera_info()
+            t0 = time.monotonic()
+            frame = cam.capture_image()
+            elapsed = time.monotonic() - t0
+            if frame is None:
+                print(
+                    f"exposure={exposure_us} set_exposure={set_ok} -> "
+                    f"capture FAILED (None) after {elapsed:.2f}s"
+                )
+                continue
+            arr = np.asarray(frame)
+            print(
+                f"exposure={exposure_us} set_exposure={set_ok} "
+                f"actual={info.get('actual_exposure_us')} "
+                f"capture_elapsed={elapsed:.2f}s shape={arr.shape} "
+                f"dtype={arr.dtype} min={arr.min()} max={arr.max()} "
+                f"mean={arr.mean():.2f}"
+            )
+    finally:
+        cam.close()
+
+
+def stage_ae_loop(num_frames: int = 20) -> None:
+    """驱动真实软件自动曝光引擎若干帧，观察其状态与决策收敛过程 /
+    Drive the real software auto-exposure engine over several frames,
+    observing its state and decision convergence.
+
+    capture_image() 已经在内部调用 _observe_auto_exposure()（见
+    v4l2_camera.py），本函数只是逐帧打印其状态，而不是重新实现 AE 逻辑。
+    自动引擎的曝光上限被 AutoExposureLimits 策略性地钳制在 1 秒
+    （auto_exposure_max_us = max(10_000, min(1_000_000, ...))) - 这是有意
+    的产品决策，不是本次验证要绕过的限制；本函数只观察引擎在其设计范围内的
+    真实收敛行为。/ capture_image() already calls _observe_auto_exposure()
+    internally (see v4l2_camera.py) - this just prints its state per frame,
+    it does not reimplement the AE logic. The automatic engine's exposure
+    ceiling is deliberately clamped to 1s by AutoExposureLimits
+    (auto_exposure_max_us = max(10_000, min(1_000_000, ...))) - an
+    intentional product decision, not something this validation should work
+    around; this only observes the engine's real convergence behavior inside
+    that designed range.
+    """
+    print("=== auto-exposure loop (real engine, default auto_exposure=True) ===")
+    cam = stage_init()
+    if cam is None:
+        print("FAIL: init failed, cannot run AE loop")
+        return
+    print(f"  effective_auto_exposure_max_us (policy ceiling): "
+          f"{cam.get_camera_info().get('effective_auto_exposure_max_us')}")
+    try:
+        started = cam.start_capture()
+        print(f"start_capture() -> {started}")
+        if not started:
+            return
+        for i in range(num_frames):
+            frame = cam.capture_image()
+            info = cam.get_camera_info()
+            if frame is None:
+                print(f"frame {i}: capture FAILED")
+                continue
+            arr = np.asarray(frame)
+            print(
+                f"frame {i}: ae_state={info.get('ae_state')} "
+                f"exposure_us={info.get('actual_exposure_us')} "
+                f"gain={info.get('actual_analogue_gain')} "
+                f"mean={arr.mean():.2f}"
+            )
+    finally:
+        cam.close()
+
+
+def stage_restart_cycles(cycles: int = 5) -> None:
+    """重复初始化/关闭，确认媒体管线与控件在多次开关后仍稳定 /
+    Repeated init/close cycles, confirming the media pipeline and controls
+    stay stable across repeated start/stop (per the handoff's own
+    acceptance list)."""
+    print(f"=== repeated start/stop ({cycles} cycles) ===")
+    for i in range(cycles):
+        cam = V4L2RawCamera(dict(CONFIG))
+        ok = cam.initialize()
+        captured = None
+        if ok:
+            if cam.start_capture():
+                frame = cam.capture_image()
+                captured = None if frame is None else np.asarray(frame).shape
+        cam.close()
+        print(f"cycle {i}: initialize={ok} captured_shape={captured}")
 
 
 def stage_memory(num_frames: int = 40) -> None:
@@ -183,6 +310,9 @@ STAGES = {
     "capture": stage_capture,
     "exposure": stage_exposure,
     "memory": stage_memory,
+    "long_capture": stage_long_capture,
+    "ae_loop": stage_ae_loop,
+    "restart_cycles": stage_restart_cycles,
 }
 
 
