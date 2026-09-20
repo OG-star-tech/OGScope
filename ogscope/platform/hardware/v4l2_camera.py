@@ -271,10 +271,13 @@ class V4L2RawCamera:
             1, int(config.get("v4l2_temporal_nr_max_frames", 50))
         )
         self._nr_accumulator: np.ndarray | None = None
-        # gamma 查表下标的复用缓冲 / Reused buffers for gamma LUT indices.
-        self._lut_index_scratch: np.ndarray | None = None
+        # 整幅 float32 的复用暂存：时域降噪先用完、_debayer 再用，两者
+        # 生命周期不重叠，所以共用一块即可（各自单独分配会白白多占 3.7MB）
+        # / One reused full-frame float32 scratch: temporal NR finishes
+        # with it before _debayer needs one, so their lifetimes never
+        # overlap and separate buffers would just waste 3.7MB.
+        self._frame_scratch: np.ndarray | None = None
         self._lut_index_buffer: np.ndarray | None = None
-        self._nr_scratch: np.ndarray | None = None
         # 色调查找表及其参数键 / Tone LUT and the parameter key it was built for.
         self._tone_lut_cache: np.ndarray | None = None
         self._tone_lut_key: tuple | None = None
@@ -878,10 +881,10 @@ class V4L2RawCamera:
         # frame - this path exists to save memory, and a few 3.7MB
         # per-frame temporaries push peak RSS up.
         raw_f = np.asarray(raw, dtype=np.float32)
-        scratch = self._lut_index_scratch
+        scratch = self._frame_scratch
         if scratch is None or scratch.shape != raw_f.shape:
             scratch = np.empty(raw_f.shape, dtype=np.float32)
-            self._lut_index_scratch = scratch
+            self._frame_scratch = scratch
         indices = self._lut_index_buffer
         if indices is None or indices.shape != raw_f.shape:
             indices = np.empty(raw_f.shape, dtype=np.uint16)
@@ -1092,10 +1095,10 @@ class V4L2RawCamera:
         # In-place update against one reused scratch: acc += alpha*(raw-acc).
         # Writing it as `alpha*raw + (1-alpha)*acc` allocates three
         # full-frame float32 temporaries per frame.
-        scratch = self._nr_scratch
+        scratch = self._frame_scratch
         if scratch is None or scratch.shape != raw.shape:
             scratch = np.empty(raw.shape, dtype=np.float32)
-            self._nr_scratch = scratch
+            self._frame_scratch = scratch
         np.copyto(scratch, raw, casting="unsafe")
         np.subtract(scratch, accumulator, out=scratch)
         np.multiply(scratch, self._effective_temporal_nr_alpha(), out=scratch)
