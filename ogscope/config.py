@@ -180,6 +180,69 @@ class Settings(BaseSettings):
     camera_v4l2_bayer_pattern: str = Field(
         default="RGGB", description="V4L2 Bayer 排列 / V4L2 Bayer pattern"
     )
+    camera_v4l2_gamma: float = Field(
+        default=2.2,
+        ge=1.0,
+        le=4.0,
+        description=(
+            "RAW 路径去马赛克后的 gamma 校正，用于匹配 picamera2/libcamera "
+            "ISP 色调曲线的对比度，使同一 solver_centroid_sigma 阈值在两条"
+            "后端上可复用 / Gamma correction applied after RAW demosaic, "
+            "matching picamera2/libcamera's ISP tone-curve contrast so the "
+            "same solver_centroid_sigma threshold works on both backends"
+        ),
+    )
+    camera_v4l2_temporal_nr_alpha: float = Field(
+        default=0.2,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "时域指数滑动平均降噪系数，1.0 关闭 / 不做累积：用真实静态场景连拍 "
+            "10 帧、逐像素算跨帧标准差测出，V4L2（仅 gamma）的噪声是 "
+            "picamera2 的 6.5 倍（3.55 对 0.55），因为这条路径完全没有降噪，"
+            "picamera2 的 ISP 默认有。产品场景是静态/跟踪的星空，用时域累积而"
+            "不是空间滤波，能在不牺牲空间分辨率的前提下压噪声。值越小压得越"
+            "狠但响应越慢（收敛约需 1/alpha 帧）；曝光或增益一变就会清空累积"
+            "器，不会把不同亮度的帧混在一起 / Temporal EMA noise-reduction "
+            "coefficient; 1.0 disables it (no accumulation). Measured on real "
+            "static-scene hardware (10-frame capture, per-pixel temporal std): "
+            "V4L2 (gamma only) has 6.5x picamera2's noise (3.55 vs 0.55) "
+            "because this path applies no noise reduction at all, while "
+            "picamera2's ISP does by default. The product's real scenes are "
+            "static/tracked astrophotography, so temporal accumulation (not "
+            "spatial filtering) reduces noise without sacrificing spatial "
+            "resolution. Lower = stronger reduction but slower response "
+            "(~1/alpha frames to converge); any exposure or gain change "
+            "clears the accumulator so frames of different brightness are "
+            "never blended together"
+        ),
+    )
+    camera_v4l2_temporal_nr_seconds: float = Field(
+        default=2.0,
+        ge=0.0,
+        le=30.0,
+        description=(
+            "时域降噪的时间常数（秒），0 表示退回固定 alpha：短曝光下每秒有"
+            "很多帧，多平均几十帧几乎不花墙钟时间，可以换到远强于固定 alpha "
+            "的降噪；长曝光下每帧几秒，平均更多帧就是实打实的延迟，于是夹回 "
+            "camera_v4l2_temporal_nr_alpha 这个上限 / Temporal-NR time "
+            "constant in seconds; 0 falls back to the fixed alpha. Short "
+            "exposures deliver many frames per second, so averaging tens of "
+            "them costs almost no wall-clock time and buys far more denoise "
+            "than a fixed alpha; long exposures cost seconds per frame, so "
+            "averaging more is real latency and it clamps back to the "
+            "camera_v4l2_temporal_nr_alpha bound"
+        ),
+    )
+    camera_v4l2_temporal_nr_max_frames: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description=(
+            "时域降噪最多平均多少帧（短曝光下的上限）/ Maximum frames the "
+            "temporal NR will average (the ceiling that short exposures hit)"
+        ),
+    )
     camera_v4l2_active_width: int = Field(
         default=1920, ge=160, description="传感器有效宽度 / Sensor active width"
     )

@@ -130,6 +130,12 @@ class CameraManager:
             "v4l2_black_level": settings.camera_v4l2_black_level,
             "v4l2_white_level": settings.camera_v4l2_white_level,
             "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
+            "v4l2_gamma": settings.camera_v4l2_gamma,
+            "v4l2_temporal_nr_alpha": settings.camera_v4l2_temporal_nr_alpha,
+            "v4l2_temporal_nr_seconds": settings.camera_v4l2_temporal_nr_seconds,
+            "v4l2_temporal_nr_max_frames": (
+                settings.camera_v4l2_temporal_nr_max_frames
+            ),
             "v4l2_active_width": settings.camera_v4l2_active_width,
             "v4l2_active_height": settings.camera_v4l2_active_height,
             "v4l2_line_duration_us": settings.camera_v4l2_line_duration_us,
