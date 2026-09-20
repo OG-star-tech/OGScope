@@ -25,6 +25,20 @@ from ogscope.domain.camera.driver import CameraCapabilities
 
 logger = logging.getLogger(__name__)
 
+# 软件自动曝光引擎允许的最长曝光时间上限（策略性，不是硬件限制 - 真实硬件
+# 上限由 vertical_blanking 等控件动态推导，见 _resolve_line_duration）。
+# 2026-09-20 在真实 Zero2W (192.168.0.41) 上验证 1s-3s 手动曝光（控件写入/
+# 回读与实际抓帧均正常）后，产品决策从 1s 放宽到 3s - 见
+# docs/development/v4l2-zero2w-board-validation.md。/
+# Ceiling on how long the software auto-exposure engine may drive exposure
+# (a policy limit, not a hardware one - the real hardware ceiling is derived
+# dynamically from vertical_blanking and friends, see
+# _resolve_line_duration). Raised from 1s to 3s as a product decision on
+# 2026-09-20 after validating manual 1s-3s exposure (control write/readback
+# and real capture, both clean) on a real Zero2W (192.168.0.41) - see
+# docs/development/v4l2-zero2w-board-validation.md.
+AUTO_EXPOSURE_MAX_CEILING_US = 3_000_000
+
 
 @dataclass(slots=True, frozen=True)
 class V4L2ControlRange:
@@ -122,7 +136,11 @@ class V4L2RawCamera:
         self.digital_gain = 1.0
         self.auto_exposure = bool(config.get("auto_exposure", True))
         self.auto_exposure_max_us = max(
-            10_000, min(1_000_000, int(config.get("auto_exposure_max_us", 1_000_000)))
+            10_000,
+            min(
+                AUTO_EXPOSURE_MAX_CEILING_US,
+                int(config.get("auto_exposure_max_us", AUTO_EXPOSURE_MAX_CEILING_US)),
+            ),
         )
         self._hardware_max_exposure_us = self.auto_exposure_max_us
         self.gain_db_per_step = float(config.get("v4l2_gain_db_per_step", 0.3))
@@ -838,7 +856,9 @@ class V4L2RawCamera:
 
     def set_auto_exposure_max_us(self, value: int) -> bool:
         """更新软件 AE 最长曝光 / Update maximum software-AE exposure."""
-        self.auto_exposure_max_us = max(10_000, min(1_000_000, int(value)))
+        self.auto_exposure_max_us = max(
+            10_000, min(AUTO_EXPOSURE_MAX_CEILING_US, int(value))
+        )
         enabled = self.auto_exposure
         self._ae = self._create_auto_exposure()
         self._ae.set_enabled(enabled)
