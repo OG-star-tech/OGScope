@@ -697,25 +697,36 @@ def test_temporal_nr_disabled_at_alpha_one_is_pure_passthrough() -> None:
 
 
 @pytest.mark.unit
-def test_exposure_change_resets_temporal_nr_accumulator(monkeypatch) -> None:
+def test_exposure_change_discards_temporal_nr_history(monkeypatch) -> None:
+    """An exposure change must discard the accumulated history (frames at a
+    different brightness), but must NOT free the buffer - reallocating a
+    full-frame float32 on every AE adjustment walks RSS upward."""
     camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
     monkeypatch.setattr(camera, "_set_control", lambda _name, _value: True)
-    camera._nr_accumulator = np.full((120, 160), 42.0, dtype=np.float32)
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    buffer_before = camera._nr_accumulator
 
     assert camera._apply_exposure_gain(30_000, 2.0) is True
 
-    assert camera._nr_accumulator is None
+    assert camera._nr_accumulator_valid is False
+    assert camera._nr_accumulator is buffer_before  # buffer kept for reuse
+
+    # The next frame starts fresh rather than blending toward the old value.
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
 
 
 @pytest.mark.unit
-def test_start_capture_resets_temporal_nr_accumulator() -> None:
+def test_start_capture_discards_temporal_nr_history() -> None:
     camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
     camera._capture = _FakeCapture(np.full((120, 160), 500, dtype=np.uint16))
-    camera._nr_accumulator = np.zeros((120, 160), dtype=np.float32)
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
 
     assert camera.start_capture() is True
 
-    assert camera._nr_accumulator is None
+    assert camera._nr_accumulator_valid is False
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
 
 
 @pytest.mark.unit
