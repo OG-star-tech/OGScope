@@ -273,6 +273,18 @@ motors disabled against it, until:
    loop's convergence *behavior* holds up all the way out to 3s under real
    dark-sky signal (item 2 above) - only the control-plane ceiling changed
    here, not a re-validation of AE quality at the new ceiling.
+6. **2026-09-20, applied to rpi-cm0 too**: the deployed
+   `OGSCOPE_CAMERA_V4L2_*` config uses this board's exact topology -
+   `SRGGB12_1X12`/`RG12`, sink-only Unicam, `/dev/v4l-subdev1` sensor - for
+   **both** rpi-zero2w and rpi-cm0, on the basis that both machines use the
+   same BCM2710A1 SoC, the same Unicam CSI receiver, and the same IMX327
+   sensor, so the same media topology is expected to hold. This has only
+   been confirmed by directly running `media-ctl`/`v4l2-ctl` on a physical
+   rpi-zero2w (192.168.0.41) - not independently re-run on a physical
+   rpi-cm0 board. If a real cm0 unit's discovery ever turns up a difference
+   (as this board's own discovery did against the doc's older CM0-validated
+   example above), the config needs updating for both machines, not just
+   cm0.
 
 ## Correction to the original handoff document
 
