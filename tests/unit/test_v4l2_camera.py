@@ -739,3 +739,68 @@ def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
     expected = round(FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE * 4095)
     assert camera.black_level == expected
     assert camera._signal_level_sources["black_level"] == "fallback_measured_dark_frame"
+
+
+@pytest.mark.unit
+def test_tone_lut_matches_float_reference_for_night_white_balance() -> None:
+    """The LUT path replaces a float32 pipeline, so it must reproduce the
+    same values - WB gains, contrast and brightness are pointwise, so
+    folding them into a LUT is exact up to rounding."""
+    camera = V4L2RawCamera(
+        {
+            "v4l2_active_width": 160,
+            "v4l2_active_height": 120,
+            "width": 160,
+            "height": 120,
+            "rotation": 0,
+            "white_balance_mode": "night",
+        }
+    )
+    image = (
+        np.arange(120 * 160 * 3, dtype=np.int64).reshape(120, 160, 3) % 256
+    ).astype(np.uint8)
+
+    output = camera._apply_postprocessing(image)
+
+    gains = np.asarray((1.1, 1.0, 0.9), dtype=np.float32)
+    expected = np.clip(np.rint(image.astype(np.float32) * gains), 0, 255).astype(
+        np.uint8
+    )
+    assert np.array_equal(output, expected)
+
+
+@pytest.mark.unit
+def test_tone_lut_rebuilds_when_white_balance_changes() -> None:
+    camera = V4L2RawCamera({"white_balance_mode": "night"})
+    first = camera._tone_lut().copy()
+
+    camera.white_balance_mode = "manual"
+    camera.white_balance_gain_r = 2.0
+    camera.white_balance_gain_b = 0.5
+    second = camera._tone_lut()
+
+    assert not np.array_equal(first, second)
+
+
+@pytest.mark.unit
+def test_saturation_still_applies_via_float_path() -> None:
+    """Saturation is cross-channel so it cannot fold into the LUT; it must
+    still take effect rather than being silently dropped."""
+    camera = V4L2RawCamera(
+        {
+            "v4l2_active_width": 160,
+            "v4l2_active_height": 120,
+            "width": 160,
+            "height": 120,
+            "rotation": 0,
+            "white_balance_mode": "auto",
+            "saturation": 0.0,  # fully desaturated -> all channels equal
+        }
+    )
+    image = np.zeros((120, 160, 3), dtype=np.uint8)
+    image[..., 0] = 200
+    image[..., 2] = 50
+
+    output = camera._apply_postprocessing(image)
+
+    assert output[0, 0, 0] == output[0, 0, 1] == output[0, 0, 2]

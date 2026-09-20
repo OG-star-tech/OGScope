@@ -275,6 +275,9 @@ class V4L2RawCamera:
         self._lut_index_scratch: np.ndarray | None = None
         self._lut_index_buffer: np.ndarray | None = None
         self._nr_scratch: np.ndarray | None = None
+        # 色调查找表及其参数键 / Tone LUT and the parameter key it was built for.
+        self._tone_lut_cache: np.ndarray | None = None
+        self._tone_lut_key: tuple | None = None
 
         self.is_initialized = False
         self.is_capturing = False
@@ -954,24 +957,68 @@ class V4L2RawCamera:
             raw,
         )
 
+    def _white_balance_gains(self) -> tuple[float, float, float]:
+        """当前白平衡增益 / Current white-balance gains."""
+        if self.white_balance_mode == "night":
+            return (1.1, 1.0, 0.9)
+        if self.white_balance_mode == "manual":
+            return (self.white_balance_gain_r, 1.0, self.white_balance_gain_b)
+        return (1.0, 1.0, 1.0)
+
+    def _tone_lut(self) -> np.ndarray:
+        """白平衡+对比度+亮度折叠成的 256x3 查找表（按参数缓存）/ The
+        white-balance + contrast + brightness chain folded into one 256x3
+        LUT, cached against the parameters that define it."""
+        key = (
+            self._white_balance_gains(),
+            self.contrast,
+            self.brightness,
+        )
+        if self._tone_lut_key != key or self._tone_lut_cache is None:
+            gains, contrast, brightness = key
+            levels = np.arange(256, dtype=np.float32)
+            offset = 127.5 * (1.0 - contrast) + brightness * 127.5
+            table = np.empty((1, 256, 3), dtype=np.uint8)
+            for channel, gain in enumerate(gains):
+                values = levels * gain * contrast + offset
+                table[0, :, channel] = np.clip(np.rint(values), 0, 255).astype(np.uint8)
+            self._tone_lut_cache = table
+            self._tone_lut_key = key
+        return self._tone_lut_cache
+
     def _apply_postprocessing(self, image: np.ndarray) -> np.ndarray:
         """应用轻量 RAW 后处理和几何变换 / Apply lightweight RAW post-processing and geometry."""
         import cv2
 
-        rgb = image.astype(np.float32)
-        if self.white_balance_mode == "night":
-            gains = (1.1, 1.0, 0.9)
-        elif self.white_balance_mode == "manual":
-            gains = (self.white_balance_gain_r, 1.0, self.white_balance_gain_b)
+        # 白平衡增益、对比度、亮度全都是逐像素逐通道的点运算，输入又是 uint8，
+        # 所以可以整条折叠成一张 256x3 的查找表，一次 cv2.LUT 搞定 —— 完全不
+        # 需要把整幅图转成 float32。原来的写法每帧要产生多个 11MB 的 float32
+        # 临时量（astype、减、乘、加、clip 各一份），这条路径本来就是为省内存
+        # 存在的。只有饱和度是跨通道运算（要先求通道均值），没法并进查找表，
+        # 所以仅在它非默认值时才回退到 float 路径。
+        # White-balance gains, contrast and brightness are all pointwise
+        # per-channel operations on a uint8 input, so the whole chain folds
+        # into one 256x3 lookup table applied by a single cv2.LUT - no
+        # full-frame float32 conversion at all. The previous form allocated
+        # several 11MB float32 temporaries per frame (astype, subtract,
+        # multiply, add, clip), and this path exists to save memory.
+        # Saturation is the one cross-channel op (it needs the per-pixel
+        # channel mean), so it can't fold into the LUT and only it falls
+        # back to the float path.
+        if abs(self.saturation - 1.0) <= 1e-3:
+            rgb8: np.ndarray = cv2.LUT(image, self._tone_lut())
         else:
-            gains = (1.0, 1.0, 1.0)
-        rgb *= np.asarray(gains, dtype=np.float32)
-        rgb = (rgb - 127.5) * self.contrast + 127.5 + self.brightness * 127.5
-
-        if abs(self.saturation - 1.0) > 1e-3:
+            rgb = image.astype(np.float32)
+            gains = self._white_balance_gains()
+            rgb *= np.asarray(gains, dtype=np.float32)
+            np.multiply(rgb, self.contrast, out=rgb)
+            np.add(rgb, 127.5 * (1.0 - self.contrast) + self.brightness * 127.5, out=rgb)
             gray = np.mean(rgb, axis=2, keepdims=True)
-            rgb = gray + (rgb - gray) * self.saturation
-        rgb8: np.ndarray = np.clip(rgb, 0, 255).astype(np.uint8)
+            np.subtract(rgb, gray, out=rgb)
+            np.multiply(rgb, self.saturation, out=rgb)
+            np.add(rgb, gray, out=rgb)
+            np.clip(rgb, 0, 255, out=rgb)
+            rgb8 = rgb.astype(np.uint8)
 
         if abs(self.sharpness - 1.0) > 1e-3:
             blurred = cv2.GaussianBlur(rgb8, (0, 0), sigmaX=1.0)
