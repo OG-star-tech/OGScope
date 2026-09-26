@@ -666,14 +666,20 @@ def test_temporal_nr_alpha_averages_more_frames_at_short_exposures() -> None:
 
 
 @pytest.mark.unit
-def test_temporal_nr_alpha_never_exceeds_configured_bound_at_long_exposures() -> None:
-    """At long exposures averaging more frames is real latency, so it must
-    clamp back to the configured alpha rather than stretching convergence."""
+def test_temporal_nr_alpha_converges_to_no_averaging_at_long_exposures() -> None:
+    """A single long exposure already carries its own integration time, so
+    forcing extra frames on top of it multiplies the real temporal window
+    (and any motion during it) far past what the reported exposure implies.
+    Forcing a 5-frame floor at a 3s exposure produced a real 15s blended
+    window - invisible on a perfectly still scene, but a source of star
+    trailing whenever the mount hasn't fully settled. Long exposures must
+    converge to alpha=1 (no extra averaging), not clamp back up to the
+    configured alpha."""
     camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0})
 
-    camera._frame_duration_us = 3_000_000  # 3s frames -> 0.67 frames in 2s
+    camera._frame_duration_us = 3_000_000  # 3s frames -> 0.67 frames in 2s budget
 
-    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.2)
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(1.0)
 
 
 @pytest.mark.unit

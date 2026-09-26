@@ -1124,21 +1124,38 @@ class V4L2RawCamera:
     def _effective_temporal_nr_alpha(self) -> float:
         """按帧时长换算实际 EMA 系数 / Frame-duration-aware EMA coefficient.
 
-        平均帧数 = temporal_nr_seconds / 帧时长，夹在 [1/temporal_nr_alpha,
-        temporal_nr_max_frames] 之间：短曝光多平均（墙钟代价可忽略），长曝光
-        不会比 temporal_nr_alpha 更激进（避免把收敛时间拖成几十秒）。
+        平均帧数 = temporal_nr_seconds / 帧时长，夹在 [1, temporal_nr_max_frames]
+        之间：短曝光多平均（墙钟代价可忽略），长曝光则自然收敛到很少的帧数。
+
+        这里曾经还夹着一个下界 1/temporal_nr_alpha（=5 帧）：单帧曝光已经逼近
+        上限（如 2s）时，仍强制至少平均 5 帧，真实时域积分窗口被拖到 5 倍单帧
+        曝光（10s+）。场景完全静止时看不出来，但曝光期间只要有一点残留机械
+        振动/未完全静止，就会被拉成远超单帧曝光时长的星轨——这正是"最大自动
+        曝光下出现拖线，看起来像几十秒堆栈"的根因。取消这个下界，长曝光按同样
+        的时间预算自然收敛到 1 帧（不再额外平均），不再制造超出单帧曝光的
+        隐藏积分窗口。
         Frames averaged = temporal_nr_seconds / frame duration, clamped to
-        [1/temporal_nr_alpha, temporal_nr_max_frames]: short exposures
-        average more (negligible wall-clock cost), long exposures never go
-        beyond the temporal_nr_alpha bound (which would stretch convergence
-        into tens of seconds).
+        [1, temporal_nr_max_frames]: short exposures average more (negligible
+        wall-clock cost); long exposures now naturally converge to very few
+        frames.
+
+        This used to also have a floor of 1/temporal_nr_alpha (=5 frames):
+        once a single exposure was already near the ceiling (e.g. 2s), it
+        still forced averaging at least 5 frames, stretching the real
+        temporal integration window to 5x one frame's exposure (10s+).
+        Invisible on a perfectly still scene, but any residual mechanical
+        settling during that window smears into star trails far longer than
+        the single-frame exposure - this was the root cause of "trailing at
+        maximum auto exposure, looking like a multi-ten-second stack".
+        Removing the floor lets long exposures converge to 1 frame (no extra
+        averaging) from the same time budget, instead of manufacturing a
+        hidden integration window beyond the single frame's own exposure.
         """
-        floor_frames = 1.0 / self.temporal_nr_alpha
         frame_duration_us = self._frame_duration_us or self.exposure_us
         if self.temporal_nr_seconds <= 0.0 or frame_duration_us <= 0:
             return self.temporal_nr_alpha
         frames = (self.temporal_nr_seconds * 1_000_000.0) / float(frame_duration_us)
-        frames = max(floor_frames, min(float(self.temporal_nr_max_frames), frames))
+        frames = max(1.0, min(float(self.temporal_nr_max_frames), frames))
         return 1.0 / frames
 
     def capture_image(self) -> np.ndarray | None:
