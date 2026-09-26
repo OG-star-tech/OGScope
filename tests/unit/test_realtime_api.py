@@ -43,6 +43,46 @@ def test_capture_time_payload_uses_exposure_midpoint() -> None:
 
 
 @pytest.mark.unit
+def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> None:
+    """启动必须跳过启动前缓存里的旧帧 / Starting a session must skip the frame already cached from before it.
+
+    The camera keeps capturing between sessions (for the live preview), so
+    whatever frame is cached when start() is called may have been taken
+    during/before mount settling. The loop must not treat that already-
+    cached frame as this session's fresh first frame - it needs to wait for
+    a strictly newer frame_id.
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+
+    class _FakeManager:
+        async def get_raw_frame(self):
+            return np.zeros((4, 4, 3), dtype=np.uint8), 7, 0.0
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    captured: dict[str, int] = {}
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        captured["initial_frame_id"] = initial_frame_id
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        # start() only schedules _loop as a task; yield once so it runs.
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert captured["initial_frame_id"] == 7
+
+
+@pytest.mark.unit
 def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve):
     """测试实时解算启停接口 / Test realtime solver start and stop endpoints."""
     from ogscope.web.api.debug import routes as debug_routes

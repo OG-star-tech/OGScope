@@ -149,7 +149,27 @@ class RealtimeSolveService:
             # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
             self._snapshot = None
         self._has_fullsolve = False
-        self._task = asyncio.create_task(self._loop())
+        # 相机在会话之间通常持续采集（供预览使用），缓存里"最新"的那一帧可能是
+        # 移动/未稳定期间拍到的，比如刚结束的 GOTO 收尾阶段。_loop 原来把
+        # last_frame_id 初始化成 -1，会把这张缓存里已有的旧帧当成本次会话的
+        # 全新首帧、立即拿去做 fullsolve——这正是"稳定时间之后仍然解算到带
+        # 拖线的帧"的根因。这里先取一次当前帧号作为基线，循环里必须等到真正
+        # 采集时间晚于此刻的新帧号，才会把它当作本次会话的首帧。
+        # The camera usually keeps capturing between sessions (for the live
+        # preview), so the "latest" cached frame can be one taken during/
+        # right after a move, before settling finished. _loop used to seed
+        # last_frame_id with -1, so that already-cached stale frame got
+        # accepted as this session's brand-new first frame and solved
+        # immediately - this was the root cause of "still solving a trailed
+        # frame after the settle wait". Grab the current frame id as a
+        # baseline here so the loop only accepts a frame captured after this
+        # point as its first frame.
+        baseline_frame_id = -1
+        try:
+            _frame, baseline_frame_id, _ts = await get_camera_manager().get_raw_frame()
+        except Exception:  # noqa: BLE001 - baseline is best-effort
+            baseline_frame_id = -1
+        self._task = asyncio.create_task(self._loop(baseline_frame_id))
         self._log_event(
             "session_started",
             fov_estimate=fov_estimate,
@@ -194,10 +214,10 @@ class RealtimeSolveService:
             "session_id": self.state.session_id,
         }
 
-    async def _loop(self) -> None:
+    async def _loop(self, initial_frame_id: int = -1) -> None:
         """后台循环 / Background loop"""
         last_started_mono = 0.0
-        last_frame_id = -1
+        last_frame_id = initial_frame_id
         while self.state.running:
             try:
                 remaining = self._analysis_interval_sec - (
