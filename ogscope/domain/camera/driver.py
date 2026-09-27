@@ -54,3 +54,17 @@ class CameraDriver(Protocol):
     def get_video_frame(self) -> Any: ...
 
     def get_camera_info(self) -> dict[str, Any]: ...
+
+    def begin_fresh_capture_epoch(self) -> None:
+        """新分析会话起点：清除任何跨帧历史状态 / Mark the start of a fresh
+        analysis session so any cross-frame history (e.g. temporal noise
+        reduction) is discarded before the next captured frame.
+
+        预览通常在会话之间持续采集，一个新 frame_id 不代表帧内容不带旧历史
+        （例如时域降噪的 EMA 累积器）。驱动若没有这类状态可以留空实现。
+        Preview capture usually keeps running between sessions, so a newer
+        frame_id alone doesn't guarantee the frame's content carries no old
+        history (e.g. a temporal-NR EMA accumulator). Drivers with no such
+        state can leave this a no-op.
+        """
+        ...

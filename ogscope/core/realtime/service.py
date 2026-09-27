@@ -169,6 +169,18 @@ class RealtimeSolveService:
             _frame, baseline_frame_id, _ts = await get_camera_manager().get_raw_frame()
         except Exception:  # noqa: BLE001 - baseline is best-effort
             baseline_frame_id = -1
+        # A newer frame_id is not the same guarantee as a newer optical scene:
+        # the V4L2 backend's temporal-NR EMA accumulator used to reset only on
+        # an exposure/gain change or a physical camera (re)start, so a frame
+        # captured after this point could still be blended with raw frames
+        # from before the mount settled. Tell the driver this is a fresh
+        # analysis-session epoch so it discards that history too - drivers
+        # with no such state (or test doubles) simply don't implement the
+        # hook.
+        camera = get_camera_manager().get_camera_instance()
+        begin_epoch = getattr(camera, "begin_fresh_capture_epoch", None)
+        if callable(begin_epoch):
+            begin_epoch()
         self._task = asyncio.create_task(self._loop(baseline_frame_id))
         self._log_event(
             "session_started",
