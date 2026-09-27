@@ -736,6 +736,35 @@ def test_start_capture_discards_temporal_nr_history() -> None:
 
 
 @pytest.mark.unit
+def test_fresh_capture_epoch_discards_history_without_reallocating() -> None:
+    """Regression for the "still solving a trailed frame" follow-up: preview
+    keeps capturing through a mount move (continuous frames at the pre-move
+    scene get blended into the EMA), and a fresh frame_id after analysis/start
+    is not the same guarantee as a frame free of that old history. Simulates
+    continuous preview -> mount movement/old frames -> analysis start
+    (begin_fresh_capture_epoch) -> first frame containing no previous EMA
+    history, and confirms the accumulator buffer itself is kept (RSS fix)."""
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+
+    # Continuous preview through a mount move: several frames at the
+    # pre-settle scene get blended into the EMA accumulator.
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    buffer_before = camera._nr_accumulator
+
+    # analysis/start begins.
+    camera.begin_fresh_capture_epoch()
+
+    assert camera._nr_accumulator_valid is False
+    assert camera._nr_accumulator is buffer_before  # buffer kept for reuse
+
+    # The first frame of the new session starts fresh, not blended toward
+    # the pre-move scene.
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
+
+
+@pytest.mark.unit
 def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
     monkeypatch,
 ) -> None:

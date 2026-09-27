@@ -61,6 +61,9 @@ def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> N
         async def get_raw_frame(self):
             return np.zeros((4, 4, 3), dtype=np.uint8), 7, 0.0
 
+        def get_camera_instance(self):
+            return None
+
     monkeypatch.setattr(
         realtime_service_module, "get_camera_manager", lambda: _FakeManager()
     )
@@ -80,6 +83,59 @@ def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> N
     asyncio.run(_run())
 
     assert captured["initial_frame_id"] == 7
+
+
+@pytest.mark.unit
+def test_start_resets_camera_temporal_history_for_the_new_epoch(
+    monkeypatch,
+) -> None:
+    """启动必须让驱动清除跨帧历史 / Starting a session must tell the driver to
+    discard cross-frame history (e.g. temporal-NR EMA), not just wait for a
+    newer frame_id.
+
+    A newer frame_id alone doesn't guarantee the frame's content carries no
+    old history: the camera keeps capturing through a mount move, and the
+    V4L2 backend's EMA accumulator used to reset only on an exposure/gain
+    change or a physical camera (re)start. start() must call the driver's
+    begin_fresh_capture_epoch hook so the first frame of a new session is
+    never blended with frames from before the mount settled.
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+    epoch_calls = 0
+
+    class _FakeCameraWithEpochHook:
+        def begin_fresh_capture_epoch(self) -> None:
+            nonlocal epoch_calls
+            epoch_calls += 1
+
+    camera = _FakeCameraWithEpochHook()
+
+    class _FakeManager:
+        async def get_raw_frame(self):
+            return np.zeros((4, 4, 3), dtype=np.uint8), 7, 0.0
+
+        def get_camera_instance(self):
+            return camera
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        return None
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert epoch_calls == 1
 
 
 @pytest.mark.unit

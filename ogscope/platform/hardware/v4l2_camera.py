@@ -804,6 +804,25 @@ class V4L2RawCamera:
         self._nr_accumulator_valid = False
         return True
 
+    def begin_fresh_capture_epoch(self) -> None:
+        """新分析会话起点：只失效累积器，不释放数组 / New analysis-session
+        epoch: invalidate the accumulator only, keep the allocated arrays.
+
+        预览通常在会话之间持续采集；此前累积器只在曝光/增益变化
+        （_apply_exposure_gain）或物理相机启动（start_capture）时清空，一次
+        新分析会话开始时可能仍在消费旧的 EMA 历史，即使它拿到的 frame_id 已
+        经比会话开始时新。让 analysis/start 主动调用这个钩子，保证下一帧不
+        带任何旧历史；不重新分配数组，保留此前修复的 RSS 收益。
+        Preview capture usually keeps running between sessions; the
+        accumulator used to be cleared only on an exposure/gain change
+        (_apply_exposure_gain) or a physical camera start (start_capture), so
+        a fresh analysis session could still consume old EMA history even
+        once its frame_id was newer than the session start. Have
+        analysis/start call this so the next frame carries none - the arrays
+        themselves are kept, preserving the earlier RSS fix.
+        """
+        self._nr_accumulator_valid = False
+
     def stop_capture(self) -> bool:
         """停止抓帧并释放节点以解除阻塞读取 / Stop capture and release the node to unblock reads."""
         self.is_capturing = False
