@@ -33,11 +33,6 @@ from ogscope.web.api.models.schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_MJPEG_LIMIT_DETAIL = (
-    "MJPEG stream limit reached; close other previews or tabs / "
-    "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
-)
-
 # ==================== 相机控制 ==================== / ==================== Camera Control ====================
 
 
@@ -96,7 +91,6 @@ async def _streaming_response_debug_camera_mjpeg(
         request,
         image_format=image_format,
         quality=quality,
-        limit_detail=_MJPEG_LIMIT_DETAIL,
         timeout_log_message="MJPEG 单帧取流超时，结束响应以释放名额 / MJPEG frame fetch timed out, closing stream",
         logger=logger,
     )

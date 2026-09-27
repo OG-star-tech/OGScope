@@ -8,16 +8,21 @@ import asyncio
 import time
 from collections import Counter
 from dataclasses import dataclass
+from typing import Callable
 
 from ogscope.config import get_settings
+
+EVICTED_FOR_NEW_CONNECTION = "evicted_for_new_connection"
 
 
 @dataclass
 class _MjpegSessionState:
-    """保存单个流会话的活跃时间 / Track timing for one stream session."""
+    """保存单个流会话的活跃时间与淘汰回调 / Track timing and the eviction
+    callback for one stream session."""
 
     acquired_mono: float
     last_progress_mono: float
+    on_evict: Callable[[], None] | None = None
 
 
 class MjpegStreamLease:
@@ -34,6 +39,13 @@ class MjpegStreamLease:
     async def idle_seconds(self) -> float | None:
         """返回距最近发送进展的秒数 / Return seconds since the latest send progress."""
         return await self._limiter._idle_seconds(self._session_id)
+
+    async def set_evict_callback(self, callback: Callable[[], None]) -> None:
+        """注册被强制淘汰时触发的回调（同步、非阻塞）/ Register a callback
+        fired if this lease is forcibly evicted to make room for a new
+        connection (sync, non-blocking - schedule any real cleanup work as
+        its own task)."""
+        await self._limiter._set_evict_callback(self._session_id, callback)
 
     async def release(self, reason: str = "released") -> bool:
         """幂等释放租约并记录原因 / Idempotently release the lease and record its reason."""
@@ -58,16 +70,43 @@ class MjpegStreamLimiter:
     def active_clients(self) -> int:
         return len(self._sessions)
 
-    async def try_acquire(self) -> MjpegStreamLease | None:
-        """若未超限则返回会话租约 / Return a session lease when under the limit."""
+    async def try_acquire(self) -> MjpegStreamLease:
+        """返回会话租约；已满时淘汰最久未发送进展的一路，为新连接让位 /
+        Return a session lease; when full, evict whichever session has gone
+        longest without send progress to make room for the new one.
+
+        名额上限存在是为了控制并发缓冲区占用的内存，不是为了拒绝新的预览
+        请求；到了上限时，与其向新连接返回 503，不如淘汰看起来最"旧"（最
+        久未成功推进）的那一路，直接把名额让给新连接——这也顺带比原来的
+        停滞看门狗更快地清掉一个实际已经死掉、只是还没到停滞超时的连接。
+        The slot cap exists to bound concurrent buffer memory, not to
+        reject new preview requests; when full, evicting whichever session
+        looks "oldest" (longest since it last actually made progress) and
+        handing the slot straight to the new connection is more useful than
+        a 503 - and it also clears out a connection that's effectively
+        already dead faster than waiting for the separate stall watchdog to
+        time it out.
+        """
+        evict_callback: Callable[[], None] | None = None
         async with self._lock:
             if self._max > 0 and len(self._sessions) >= self._max:
-                return None
+                stalest_id = min(
+                    self._sessions,
+                    key=lambda sid: self._sessions[sid].last_progress_mono,
+                )
+                evict_callback = self._sessions.pop(stalest_id).on_evict
+                self._release_reasons[EVICTED_FOR_NEW_CONNECTION] += 1
             session_id = self._next_session_id
             self._next_session_id += 1
             now = time.monotonic()
             self._sessions[session_id] = _MjpegSessionState(now, now)
-            return MjpegStreamLease(self, session_id)
+            lease = MjpegStreamLease(self, session_id)
+        # Fire the evicted session's own cleanup outside the lock - it may
+        # eventually call back into this limiter (e.g. release()), which
+        # would deadlock on a non-reentrant lock still held here.
+        if evict_callback is not None:
+            evict_callback()
+        return lease
 
     async def snapshot(self) -> dict[str, object]:
         """生成无敏感标识的会话指标 / Build session metrics without client identifiers."""
@@ -91,6 +130,9 @@ class MjpegStreamLimiter:
                 "stalled_clients_total": self._release_reasons.get(
                     "client_stall_timeout", 0
                 ),
+                "evicted_clients_total": self._release_reasons.get(
+                    EVICTED_FOR_NEW_CONNECTION, 0
+                ),
                 "release_reasons": dict(self._release_reasons),
             }
 
@@ -101,6 +143,14 @@ class MjpegStreamLimiter:
                 return False
             state.last_progress_mono = time.monotonic()
             return True
+
+    async def _set_evict_callback(
+        self, session_id: int, callback: Callable[[], None]
+    ) -> None:
+        async with self._lock:
+            state = self._sessions.get(session_id)
+            if state is not None:
+                state.on_evict = callback
 
     async def _idle_seconds(self, session_id: int) -> float | None:
         async with self._lock:
