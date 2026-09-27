@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fastapi import HTTPException
 
 from ogscope.domain.camera import streaming as streaming_mod
 from ogscope.domain.camera.stream_limiter import MjpegStreamLimiter
@@ -44,26 +43,69 @@ class _FakeManager:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_build_camera_mjpeg_stream_rejects_when_limit_reached(
+async def test_build_camera_mjpeg_stream_evicts_the_old_session_when_limit_reached(
     monkeypatch,
 ) -> None:
+    """名额已满时新连接直接顶替旧连接 / A new connection displaces the old
+    one outright when the slot cap is already full - the old session's
+    generator must actually stop and release its camera consumer, not just
+    lose its bookkeeping slot."""
     limiter = MjpegStreamLimiter(1)
-    held_lease = await limiter.try_acquire()
-    assert held_lease is not None
     monkeypatch.setattr(streaming_mod, "get_mjpeg_stream_limiter", lambda: limiter)
+    monkeypatch.setattr(streaming_mod, "get_settings", lambda: _FakeSettings())
 
-    req = _FakeRequest([False])
-    with pytest.raises(HTTPException) as exc:
-        await streaming_mod.build_camera_mjpeg_stream(
-            req,
-            image_format="jpeg",
-            quality=75,
-            limit_detail="limit",
-            timeout_log_message="timeout",
-            logger=streaming_mod.logging.getLogger(__name__),
-        )
-    assert exc.value.status_code == 503
-    await held_lease.release()
+    first_manager = _FakeManager()
+    monkeypatch.setattr(streaming_mod, "get_camera_manager", lambda: first_manager)
+
+    async def _fake_get_stream_frame_bytes(
+        fmt: str, quality: int, *, since_frame_id: int
+    ):
+        _ = fmt, quality, since_frame_id
+        return 200, b"abc", 1
+
+    monkeypatch.setattr(
+        streaming_mod.camera_domain_service,
+        "get_stream_frame_bytes",
+        _fake_get_stream_frame_bytes,
+    )
+
+    first_resp = await streaming_mod.build_camera_mjpeg_stream(
+        _FakeRequest([False]),
+        image_format="jpeg",
+        quality=75,
+        timeout_log_message="timeout",
+        logger=streaming_mod.logging.getLogger(__name__),
+    )
+    first_body = first_resp.body_iterator
+    await anext(first_body)  # let the generator acquire its camera consumer
+    assert first_manager.acquired is True
+    assert limiter.active_clients == 1
+
+    second_manager = _FakeManager()
+    monkeypatch.setattr(streaming_mod, "get_camera_manager", lambda: second_manager)
+
+    second_resp = await streaming_mod.build_camera_mjpeg_stream(
+        _FakeRequest([False]),
+        image_format="jpeg",
+        quality=75,
+        timeout_log_message="timeout",
+        logger=streaming_mod.logging.getLogger(__name__),
+    )
+
+    assert limiter.active_clients == 1  # the new one, not two
+
+    # The eviction schedules the old session's close as its own task.
+    for _ in range(20):
+        if first_manager.released:
+            break
+        await asyncio.sleep(0.01)
+    assert first_manager.released is True
+
+    snapshot = await limiter.snapshot()
+    assert snapshot["evicted_clients_total"] == 1
+
+    await first_body.aclose()
+    await second_resp.body_iterator.aclose()
 
 
 @pytest.mark.unit
@@ -92,7 +134,6 @@ async def test_build_camera_mjpeg_stream_yields_frame_and_releases(monkeypatch) 
         _FakeRequest([False, True]),
         image_format="jpeg",
         quality=75,
-        limit_detail="limit",
         timeout_log_message="timeout",
         logger=streaming_mod.logging.getLogger(__name__),
     )
