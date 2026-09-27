@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -282,6 +283,19 @@ class V4L2RawCamera:
         # (measured: +38MB over 40 frames with AE enabled). Marking it
         # invalid lets the next frame overwrite it in place.
         self._nr_accumulator_valid = False
+        # 重置之后，仍要拒绝把帧当作新种子，直到经过至少一次完整曝光时长
+        # 为止：否则第一帧可能是曝光起始时间早于重置点的旧帧（本身就带
+        # 拖线），被当成"全新种子"后，之后真正干净的帧还要跟这帧混合几帧
+        # 才收敛，肉眼看到的就是新旧画面之间的渐变/叠影。0 表示当前没有
+        # 处于这个等待窗口。
+        # / After a reset, frames must still not be trusted as the new seed
+        # until at least one full exposure duration has elapsed: otherwise
+        # the very first frame can be one whose exposure started before the
+        # reset point (itself already trailed), and once accepted as the
+        # "fresh seed", genuinely clean frames keep blending against it for
+        # several more frames before converging - visible as a fade/ghost
+        # between the old and new scene. 0 means no such window is active.
+        self._nr_fresh_epoch_deadline_mono = 0.0
         # 整幅 float32 的复用暂存：时域降噪先用完、_debayer 再用，两者
         # 生命周期不重叠，所以共用一块即可（各自单独分配会白白多占 3.7MB）
         # / One reused full-frame float32 scratch: temporal NR finishes
@@ -805,23 +819,35 @@ class V4L2RawCamera:
         return True
 
     def begin_fresh_capture_epoch(self) -> None:
-        """新分析会话起点：只失效累积器，不释放数组 / New analysis-session
-        epoch: invalidate the accumulator only, keep the allocated arrays.
+        """新分析会话/移动结算起点：失效累积器并等过一次完整曝光 / New
+        analysis-session or settle epoch: invalidate the accumulator and
+        wait out one full exposure before trusting a frame as the new seed.
 
-        预览通常在会话之间持续采集；此前累积器只在曝光/增益变化
-        （_apply_exposure_gain）或物理相机启动（start_capture）时清空，一次
-        新分析会话开始时可能仍在消费旧的 EMA 历史，即使它拿到的 frame_id 已
-        经比会话开始时新。让 analysis/start 主动调用这个钩子，保证下一帧不
-        带任何旧历史；不重新分配数组，保留此前修复的 RSS 收益。
-        Preview capture usually keeps running between sessions; the
-        accumulator used to be cleared only on an exposure/gain change
-        (_apply_exposure_gain) or a physical camera start (start_capture), so
-        a fresh analysis session could still consume old EMA history even
-        once its frame_id was newer than the session start. Have
-        analysis/start call this so the next frame carries none - the arrays
-        themselves are kept, preserving the earlier RSS fix.
+        预览通常持续采集；仅仅失效累积器不够——调用这个方法的时刻，传感器
+        可能已经在曝光一帧，其曝光起始时间早于调用点（甚至早于底座真正停
+        稳），这一帧本身可能已经带有拖线。如果直接把它当成"全新种子"，之
+        后真正干净的帧还要跟它混合几帧才收敛，肉眼看到的就是新旧画面之间
+        的渐变/叠影。所以在至少一次完整曝光时长内，持续用当前帧原地覆盖
+        （不建立种子、不参与混合），只有曝光起始时间确定晚于调用点的帧才
+        会被接受为新种子；不重新分配数组，保留此前修复的 RSS 收益。
+        Preview capture usually keeps running. Just invalidating the
+        accumulator is not enough: at the moment this is called, the sensor
+        may already be mid-exposure on a frame whose exposure started
+        before this call (even before the mount actually stopped), so that
+        frame can itself already be trailed. Accepting it outright as the
+        "fresh seed" means genuinely clean frames keep blending against it
+        for several more frames before converging - visible as a fade/ghost
+        between the old and new scene. So for at least one full exposure
+        duration, every frame keeps overwriting the accumulator in place
+        (no seed established, no blending) - only a frame whose exposure is
+        guaranteed to have started after this call becomes the new seed.
+        Arrays are not reallocated, preserving the earlier RSS fix.
         """
         self._nr_accumulator_valid = False
+        frame_duration_s = max(
+            1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
+        )
+        self._nr_fresh_epoch_deadline_mono = time.monotonic() + frame_duration_s
 
     def stop_capture(self) -> bool:
         """停止抓帧并释放节点以解除阻塞读取 / Stop capture and release the node to unblock reads."""
@@ -1110,10 +1136,18 @@ class V4L2RawCamera:
            a bonus rather than a cost.
 
         场景静止/跟踪时有效；曝光/增益一变，`_apply_exposure_gain` 会清空
-        累积器，下一帧直接作为新起点，不会把不同亮度的帧混在一起。
+        累积器，下一帧直接作为新起点，不会把不同亮度的帧混在一起。累积器
+        失效期间（见 begin_fresh_capture_epoch）不会立即把下一帧定为新种
+        子——要等过一次完整曝光时长，确保这一帧的曝光起始时间确定晚于失
+        效点，否则种子本身可能已经带着旧场景的拖线。
         Effective for static/tracked scenes; any exposure/gain change clears
         the accumulator via `_apply_exposure_gain`, so the next frame starts
         fresh instead of blending frames at different brightness levels.
+        While the accumulator is invalid (see begin_fresh_capture_epoch),
+        the very next frame is not immediately trusted as the new seed -
+        one full exposure duration must elapse first, so the eventual seed
+        is guaranteed to have started exposing after the invalidation point,
+        rather than itself already carrying the old scene's trail.
         """
         if self.temporal_nr_alpha >= 1.0:
             return raw
@@ -1123,7 +1157,8 @@ class V4L2RawCamera:
             self._nr_accumulator = accumulator
         if not self._nr_accumulator_valid:
             np.copyto(accumulator, raw, casting="unsafe")
-            self._nr_accumulator_valid = True
+            if time.monotonic() >= self._nr_fresh_epoch_deadline_mono:
+                self._nr_accumulator_valid = True
             return accumulator
         # 就地更新，复用一块 scratch：acc += alpha * (raw - acc)。写成
         # `alpha * raw + (1-alpha) * acc` 每帧会产生三个整幅 float32 临时量。

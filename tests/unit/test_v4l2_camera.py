@@ -765,6 +765,49 @@ def test_fresh_capture_epoch_discards_history_without_reallocating() -> None:
 
 
 @pytest.mark.unit
+def test_fresh_capture_epoch_rejects_a_seed_still_mid_exposure_at_reset(
+    monkeypatch,
+) -> None:
+    """Regression for "still see a fade between the old and new scene after
+    a move": a frame delivered before one full exposure duration has
+    elapsed since begin_fresh_capture_epoch() may itself have started
+    exposing before the reset (even before the mount stopped), so it can
+    already be trailed. It must not be trusted as the persisted seed - the
+    accumulator must stay invalid and keep being overwritten (not blended)
+    until a frame is guaranteed to have started exposing after the reset."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5, exposure_us=10_000)  # 10ms
+
+    camera.begin_fresh_capture_epoch()
+
+    # A frame delivered immediately (0ms later) may have started exposing
+    # before the reset - must not become the trusted seed yet.
+    output = camera._apply_temporal_nr(np.full((120, 160), 111, dtype=np.uint16))
+    assert np.all(output == 111)
+    assert camera._nr_accumulator_valid is False
+
+    # Still within the one-exposure window (5ms of 10ms elapsed) - same story.
+    clock["t"] = 0.005
+    output = camera._apply_temporal_nr(np.full((120, 160), 222, dtype=np.uint16))
+    assert np.all(output == 222)
+    assert camera._nr_accumulator_valid is False
+
+    # A full exposure duration has now elapsed - this frame is guaranteed to
+    # have started exposing after the reset, so it becomes the trusted seed.
+    clock["t"] = 0.010
+    output = camera._apply_temporal_nr(np.full((120, 160), 333, dtype=np.uint16))
+    assert np.all(output == 333)
+    assert camera._nr_accumulator_valid is True
+
+    # From here on, genuinely new frames blend against the real seed as usual.
+    blended = camera._apply_temporal_nr(np.full((120, 160), 999, dtype=np.uint16))
+    assert np.all(blended > 333) and np.all(blended < 999)
+
+
+@pytest.mark.unit
 def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
     monkeypatch,
 ) -> None:
