@@ -386,6 +386,18 @@ class CoreContractService:
             },
         }
 
+    async def reset_camera_temporal_history(self) -> dict[str, Any]:
+        """通知相机丢弃跨帧降噪历史（移动结算后调用）/ Tell the camera to
+        discard cross-frame temporal history (call this after a move
+        settles)."""
+        result = await camera_domain_service.reset_temporal_history()
+        return {
+            "success": bool(result.get("success", True)),
+            "message": "",
+            "info": {},
+            "applied": {"temporal_history_reset": bool(result.get("applied", False))},
+        }
+
     async def tune_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         """按 Core 语义微调相机参数 / Tune camera params with core semantics."""
         applied: dict[str, Any] = {}
