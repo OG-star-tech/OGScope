@@ -43,26 +43,36 @@ def test_capture_time_payload_uses_exposure_midpoint() -> None:
 
 
 @pytest.mark.unit
-def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> None:
-    """启动必须跳过启动前缓存里的旧帧 / Starting a session must skip the frame already cached from before it.
+def test_start_seeds_loop_baseline_when_still_within_a_fresh_epoch(
+    monkeypatch,
+) -> None:
+    """刚结算过移动时必须跳过缓存里的旧帧 / Right after a real settle, starting
+    a session must skip the frame already cached from before it.
 
     The camera keeps capturing between sessions (for the live preview), so
     whatever frame is cached when start() is called may have been taken
-    during/before mount settling. The loop must not treat that already-
-    cached frame as this session's fresh first frame - it needs to wait for
-    a strictly newer frame_id.
+    during/before mount settling. While the driver reports we're still
+    inside that risk window (a real settle happened recently), the loop
+    must not treat the already-cached frame as this session's fresh first
+    frame - it needs to wait for a strictly newer frame_id.
     """
     from ogscope.core.realtime import service as realtime_service_module
     from ogscope.core.realtime.service import RealtimeSolveService
 
     service = RealtimeSolveService()
 
+    class _FakeCameraStillFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return True
+
+    camera = _FakeCameraStillFresh()
+
     class _FakeManager:
         def get_current_capture_sequence(self) -> int:
             return 7
 
         def get_camera_instance(self):
-            return None
+            return camera
 
     monkeypatch.setattr(
         realtime_service_module, "get_camera_manager", lambda: _FakeManager()
@@ -86,36 +96,39 @@ def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> N
 
 
 @pytest.mark.unit
-def test_start_resets_camera_temporal_history_for_the_new_epoch(
+def test_start_skips_the_fresh_frame_wait_for_a_retry_at_an_unchanged_pose(
     monkeypatch,
 ) -> None:
-    """启动必须让驱动清除跨帧历史 / Starting a session must tell the driver to
-    discard cross-frame history (e.g. temporal-NR EMA), not just wait for a
-    newer frame_id.
+    """同姿态重试不应该再等一帧全新的 / A retry at an unchanged pose must not
+    wait for another brand-new frame.
 
-    A newer frame_id alone doesn't guarantee the frame's content carries no
-    old history: the camera keeps capturing through a mount move, and the
-    V4L2 backend's EMA accumulator used to reset only on an exposure/gain
-    change or a physical camera (re)start. start() must call the driver's
-    begin_fresh_capture_epoch hook so the first frame of a new session is
-    never blended with frames from before the mount settled.
+    Regression for "repeated retries at the same pose were barely
+    capturing a frame at all": every _single_solve() attempt restarts the
+    OGScope analysis session, and previously start() always demanded a
+    frame newer than whatever was already cached - even when no real
+    settle had happened since the last attempt, forcing every retry to pay
+    a full exposure's wait. Once the driver reports we're past its fresh
+    window (no real settle recently), start() must accept the current
+    session id and start_gate immediately (baseline -1), never touching
+    get_current_capture_sequence() at all.
     """
     from ogscope.core.realtime import service as realtime_service_module
     from ogscope.core.realtime.service import RealtimeSolveService
 
     service = RealtimeSolveService()
-    epoch_calls = 0
 
-    class _FakeCameraWithEpochHook:
-        def begin_fresh_capture_epoch(self) -> None:
-            nonlocal epoch_calls
-            epoch_calls += 1
+    class _FakeCameraNotFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return False
 
-    camera = _FakeCameraWithEpochHook()
+    camera = _FakeCameraNotFresh()
 
     class _FakeManager:
         def get_current_capture_sequence(self) -> int:
-            return 7
+            raise AssertionError(
+                "start() must not need the capture sequence when the "
+                "driver reports the cached frame is already safe"
+            )
 
         def get_camera_instance(self):
             return camera
@@ -124,8 +137,10 @@ def test_start_resets_camera_temporal_history_for_the_new_epoch(
         realtime_service_module, "get_camera_manager", lambda: _FakeManager()
     )
 
+    captured: dict[str, int] = {}
+
     async def _fake_loop(self, initial_frame_id: int = -1) -> None:
-        return None
+        captured["initial_frame_id"] = initial_frame_id
 
     monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
 
@@ -135,7 +150,7 @@ def test_start_resets_camera_temporal_history_for_the_new_epoch(
 
     asyncio.run(_run())
 
-    assert epoch_calls == 1
+    assert captured["initial_frame_id"] == -1
 
 
 @pytest.mark.unit
@@ -158,12 +173,18 @@ def test_start_never_calls_the_slow_synchronous_frame_grab(monkeypatch) -> None:
 
     service = RealtimeSolveService()
 
+    class _FakeCameraStillFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return True
+
+    camera = _FakeCameraStillFresh()
+
     class _FakeManager:
         def get_current_capture_sequence(self) -> int:
             return 3
 
         def get_camera_instance(self):
-            return None
+            return camera
 
         async def get_raw_frame(self):
             raise AssertionError(

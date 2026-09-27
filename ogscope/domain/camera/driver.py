@@ -68,3 +68,17 @@ class CameraDriver(Protocol):
         state can leave this a no-op.
         """
         ...
+
+    def is_within_fresh_capture_epoch(self) -> bool:
+        """当前缓存帧是否仍可能不安全 / Whether the currently cached frame
+        might still not be safe to reuse without waiting for a newer one.
+
+        没有这类状态的驱动应返回 False（永远安全，直接复用当前缓存），而
+        不是默认当作"仍不安全"去强迫调用方多等一帧——那样每次重试都要多付
+        一次完整曝光的等待成本，恰恰是这个方法存在的意义。
+        Drivers with no such state should return False (always safe, reuse
+        the current cache) rather than defaulting to "still unsafe" and
+        forcing the caller to wait for one more frame - that extra wait on
+        every retry is exactly what this method exists to avoid.
+        """
+        return False

@@ -808,6 +808,33 @@ def test_fresh_capture_epoch_rejects_a_seed_still_mid_exposure_at_reset(
 
 
 @pytest.mark.unit
+def test_is_within_fresh_capture_epoch_reports_the_same_window(monkeypatch) -> None:
+    """is_within_fresh_capture_epoch 与失效窗口保持一致 / Must track the same
+    window _apply_temporal_nr uses to decide whether to trust a seed.
+
+    A caller retrying at an unchanged pose (no real settle since the last
+    attempt) checks this before deciding whether to wait for a brand-new
+    frame - it must report False once the window has actually passed, or
+    every retry keeps paying a full exposure's wait for nothing."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(exposure_us=10_000)  # 10ms
+
+    assert camera.is_within_fresh_capture_epoch() is False  # never reset yet
+
+    camera.begin_fresh_capture_epoch()
+    assert camera.is_within_fresh_capture_epoch() is True
+
+    clock["t"] = 0.005
+    assert camera.is_within_fresh_capture_epoch() is True  # still mid-exposure
+
+    clock["t"] = 0.010
+    assert camera.is_within_fresh_capture_epoch() is False  # exposure has elapsed
+
+
+@pytest.mark.unit
 def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
     monkeypatch,
 ) -> None:
