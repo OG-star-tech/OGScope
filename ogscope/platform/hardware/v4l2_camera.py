@@ -849,6 +849,24 @@ class V4L2RawCamera:
         )
         self._nr_fresh_epoch_deadline_mono = time.monotonic() + frame_duration_s
 
+    def is_within_fresh_capture_epoch(self) -> bool:
+        """当前是否仍处于"下一帧可能不安全"的窗口内 / Whether we're still
+        inside the window where the next frame might not be safe yet.
+
+        窗口过后，当前缓存的那一帧本身已经能保证是在上次 settle 之后才开
+        始曝光的——调用方（比如一次同姿态内的重试）不需要再等一帧全新的，
+        直接用当前缓存的即可，这样重试才不会一直付一次完整曝光的等待成
+        本。仅在真正刚发生过 begin_fresh_capture_epoch 之后的短暂窗口内才
+        返回 True。
+        Once this window has passed, the currently cached frame is already
+        guaranteed to have started exposing after the last settle - a
+        caller retrying at an unchanged pose doesn't need to wait for
+        another brand-new one, it can just use what's cached right now.
+        Only returns True for the brief window right after
+        begin_fresh_capture_epoch was actually called.
+        """
+        return time.monotonic() < self._nr_fresh_epoch_deadline_mono
+
     def stop_capture(self) -> bool:
         """停止抓帧并释放节点以解除阻塞读取 / Stop capture and release the node to unblock reads."""
         self.is_capturing = False

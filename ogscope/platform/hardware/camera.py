@@ -1059,6 +1059,11 @@ class IMX327MIPICamera(CameraInterface):
         """
         return None
 
+    def is_within_fresh_capture_epoch(self) -> bool:
+        """本驱动无该状态，永远安全直接复用当前缓存帧 / This driver has no
+        such state - always safe to reuse the currently cached frame."""
+        return False
+
     def capture_image(self) -> Optional[np.ndarray]:
         """捕获单张图像 / Capture a single image"""
         if not self.is_initialized:

@@ -150,43 +150,55 @@ class RealtimeSolveService:
             self._snapshot = None
         self._has_fullsolve = False
         # 相机在会话之间通常持续采集（供预览使用），缓存里"最新"的那一帧可能是
-        # 移动/未稳定期间拍到的，比如刚结束的 GOTO 收尾阶段。_loop 原来把
-        # last_frame_id 初始化成 -1，会把这张缓存里已有的旧帧当成本次会话的
-        # 全新首帧、立即拿去做 fullsolve——这正是"稳定时间之后仍然解算到带
-        # 拖线的帧"的根因。这里先取一次当前帧号作为基线，循环里必须等到真正
-        # 采集时间晚于此刻的新帧号，才会把它当作本次会话的首帧。
+        # 移动/未稳定期间拍到的，比如刚结束的 GOTO 收尾阶段——但这只在底座
+        # 真的刚移动过、驱动仍处于"新鲜窗口"内才是风险；同一姿态内的重试
+        # （调用方没有再触发过移动结算）没有这个风险，当前缓存的那一帧本来
+        # 就是安全的。is_within_fresh_capture_epoch() 由调用方在真正的移动
+        # 结算时显式触发（见 begin_fresh_capture_epoch / Core
+        # camera/reset-temporal-history），不是每次 start() 都会置位——如果
+        # 这里也无条件调用 begin_fresh_capture_epoch，会让这个窗口在连续重
+        # 试时永远续期，等于每次重试都要多付一次完整曝光的等待成本，恰恰是
+        # 之前"同一姿态反复重试却几乎抓不到一帧"的根因。驱动没有这类状态
+        # （或测试替身）时默认永远安全，直接用当前缓存的那一帧。
         # The camera usually keeps capturing between sessions (for the live
         # preview), so the "latest" cached frame can be one taken during/
-        # right after a move, before settling finished. _loop used to seed
-        # last_frame_id with -1, so that already-cached stale frame got
-        # accepted as this session's brand-new first frame and solved
-        # immediately - this was the root cause of "still solving a trailed
-        # frame after the settle wait".
-        # get_raw_frame() must NOT be used here: without a resident raw
-        # cache (the default) it synchronously grabs a whole frame, which
-        # can mean waiting out whatever exposure the background grabber is
-        # currently holding and then grabbing another - measured to stretch
-        # this call past 8-10 seconds on real hardware, past the caller's
-        # own HTTP read timeout, so every start() attempt timed out and
-        # retried before any session ever lived long enough to solve a
-        # frame. get_current_capture_sequence() reads the same counter
+        # right after a move, before settling finished - but that's only a
+        # risk if the mount actually just moved and the driver is still
+        # inside its "fresh window". A retry at an unchanged pose (no new
+        # settle happened) has no such risk; the currently cached frame is
+        # already safe. is_within_fresh_capture_epoch() is set explicitly by
+        # the caller on a real settle (see begin_fresh_capture_epoch / the
+        # Core camera/reset-temporal-history endpoint), not by every
+        # start() call - calling begin_fresh_capture_epoch
+        # unconditionally here would keep re-extending that window on every
+        # retry, forcing every single retry to pay a full exposure's wait
+        # again, which was exactly why repeated retries at the same pose
+        # were barely capturing a frame at all. Drivers with no such state
+        # (or test doubles) default to always-safe, using whatever is
+        # cached right now.
+        # get_raw_frame() must NOT be used for the baseline: without a
+        # resident raw cache (the default) it synchronously grabs a whole
+        # frame, which can mean waiting out whatever exposure the
+        # background grabber is currently holding and then grabbing
+        # another - measured to stretch this call past 8-10 seconds on real
+        # hardware. get_current_capture_sequence() reads the same counter
         # without touching the camera at all.
-        try:
-            baseline_frame_id = get_camera_manager().get_current_capture_sequence()
-        except Exception:  # noqa: BLE001 - baseline is best-effort
-            baseline_frame_id = -1
-        # A newer frame_id is not the same guarantee as a newer optical scene:
-        # the V4L2 backend's temporal-NR EMA accumulator used to reset only on
-        # an exposure/gain change or a physical camera (re)start, so a frame
-        # captured after this point could still be blended with raw frames
-        # from before the mount settled. Tell the driver this is a fresh
-        # analysis-session epoch so it discards that history too - drivers
-        # with no such state (or test doubles) simply don't implement the
-        # hook.
         camera = get_camera_manager().get_camera_instance()
-        begin_epoch = getattr(camera, "begin_fresh_capture_epoch", None)
-        if callable(begin_epoch):
-            begin_epoch()
+        still_within_fresh_epoch = getattr(
+            camera, "is_within_fresh_capture_epoch", None
+        )
+        needs_fresh_frame = False
+        if callable(still_within_fresh_epoch):
+            try:
+                needs_fresh_frame = bool(still_within_fresh_epoch())
+            except Exception:  # noqa: BLE001 - best-effort, default to fast path
+                needs_fresh_frame = False
+        baseline_frame_id = -1
+        if needs_fresh_frame:
+            try:
+                baseline_frame_id = get_camera_manager().get_current_capture_sequence()
+            except Exception:  # noqa: BLE001 - baseline is best-effort
+                baseline_frame_id = -1
         self._task = asyncio.create_task(self._loop(baseline_frame_id))
         self._log_event(
             "session_started",
