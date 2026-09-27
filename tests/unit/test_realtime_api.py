@@ -58,8 +58,8 @@ def test_start_seeds_loop_baseline_from_currently_cached_frame(monkeypatch) -> N
     service = RealtimeSolveService()
 
     class _FakeManager:
-        async def get_raw_frame(self):
-            return np.zeros((4, 4, 3), dtype=np.uint8), 7, 0.0
+        def get_current_capture_sequence(self) -> int:
+            return 7
 
         def get_camera_instance(self):
             return None
@@ -114,8 +114,8 @@ def test_start_resets_camera_temporal_history_for_the_new_epoch(
     camera = _FakeCameraWithEpochHook()
 
     class _FakeManager:
-        async def get_raw_frame(self):
-            return np.zeros((4, 4, 3), dtype=np.uint8), 7, 0.0
+        def get_current_capture_sequence(self) -> int:
+            return 7
 
         def get_camera_instance(self):
             return camera
@@ -136,6 +136,59 @@ def test_start_resets_camera_temporal_history_for_the_new_epoch(
     asyncio.run(_run())
 
     assert epoch_calls == 1
+
+
+@pytest.mark.unit
+def test_start_never_calls_the_slow_synchronous_frame_grab(monkeypatch) -> None:
+    """回归：start() 建立基线绝不能触发同步抓帧 / Regression: establishing
+    the baseline in start() must never fall through to a synchronous
+    camera capture.
+
+    Without a resident raw cache (the default), get_raw_frame() blocks on a
+    real capture - which can mean waiting out whatever exposure the
+    background grabber is currently holding and then grabbing another.
+    Measured on real hardware, that stretched a single analysis/start call
+    past 8-10 seconds, well past the caller's own HTTP read timeout, so
+    every attempt timed out and was retried before any session ever lived
+    long enough to solve a single frame. start() must get its baseline
+    without going anywhere near get_raw_frame().
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+
+    class _FakeManager:
+        def get_current_capture_sequence(self) -> int:
+            return 3
+
+        def get_camera_instance(self):
+            return None
+
+        async def get_raw_frame(self):
+            raise AssertionError(
+                "start() must not call get_raw_frame() - it can block on a "
+                "real capture for as long as the current exposure"
+            )
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    captured: dict[str, int] = {}
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        captured["initial_frame_id"] = initial_frame_id
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert captured["initial_frame_id"] == 3
 
 
 @pytest.mark.unit

@@ -161,12 +161,18 @@ class RealtimeSolveService:
         # last_frame_id with -1, so that already-cached stale frame got
         # accepted as this session's brand-new first frame and solved
         # immediately - this was the root cause of "still solving a trailed
-        # frame after the settle wait". Grab the current frame id as a
-        # baseline here so the loop only accepts a frame captured after this
-        # point as its first frame.
-        baseline_frame_id = -1
+        # frame after the settle wait".
+        # get_raw_frame() must NOT be used here: without a resident raw
+        # cache (the default) it synchronously grabs a whole frame, which
+        # can mean waiting out whatever exposure the background grabber is
+        # currently holding and then grabbing another - measured to stretch
+        # this call past 8-10 seconds on real hardware, past the caller's
+        # own HTTP read timeout, so every start() attempt timed out and
+        # retried before any session ever lived long enough to solve a
+        # frame. get_current_capture_sequence() reads the same counter
+        # without touching the camera at all.
         try:
-            _frame, baseline_frame_id, _ts = await get_camera_manager().get_raw_frame()
+            baseline_frame_id = get_camera_manager().get_current_capture_sequence()
         except Exception:  # noqa: BLE001 - baseline is best-effort
             baseline_frame_id = -1
         # A newer frame_id is not the same guarantee as a newer optical scene:
