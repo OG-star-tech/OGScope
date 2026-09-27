@@ -38,6 +38,28 @@ class CameraDomainService:
     async def stop(self) -> dict[str, Any]:
         return await DebugCameraService.stop_camera()
 
+    async def reset_temporal_history(self) -> dict[str, Any]:
+        """通知驱动丢弃跨帧降噪历史 / Tell the driver to discard cross-frame
+        temporal history.
+
+        调用方（如 ZenitAPA）知道底座刚移动完并已稳定，但相机驱动本身不
+        知道；不调用的话，V4L2 后端的时域降噪累积器会继续把移动前后的画面
+        混在一起，无论解算帧还是预览画面都会出现"叠影"式的拖线/重影。驱动
+        没有这类状态（如 Picamera2）时钩子是空实现，`applied` 会是 False。
+        The caller (e.g. ZenitAPA) knows the mount just moved and settled,
+        but the camera driver itself doesn't; without this call the V4L2
+        backend's temporal-NR accumulator keeps blending frames from before
+        and after the move, showing a double-exposure-like ghost/smear in
+        both solve frames and the live preview. Drivers with no such state
+        (e.g. Picamera2) no-op the hook, so `applied` comes back False.
+        """
+        camera = DebugCameraService.get_camera_instance()
+        hook = getattr(camera, "begin_fresh_capture_epoch", None)
+        applied = callable(hook)
+        if applied:
+            hook()
+        return {"success": True, "applied": applied}
+
     async def set_auto_exposure_mode(self, enabled: bool):
         return await DebugCameraService.set_auto_exposure_mode(enabled)
 
