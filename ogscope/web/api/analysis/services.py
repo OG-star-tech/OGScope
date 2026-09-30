@@ -257,7 +257,8 @@ class AnalysisService:
                     quality=self._solve_snapshot_quality,
                     source_format="RGB888",
                 )
-        except Exception:  # noqa: BLE001 - 调试快照不能影响解算 / Snapshot must not affect solving
+        # 调试快照失败不能影响解算 / Snapshot failures must not affect solving.
+        except Exception:  # noqa: BLE001
             encoded = None
         if encoded is None:
             with self._solve_snapshot_lock:
