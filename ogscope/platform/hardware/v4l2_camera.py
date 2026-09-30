@@ -818,7 +818,7 @@ class V4L2RawCamera:
         self._nr_accumulator_valid = False
         return True
 
-    def begin_fresh_capture_epoch(self) -> None:
+    def begin_fresh_capture_epoch(self) -> bool:
         """新分析会话/移动结算起点：失效累积器并等过一次完整曝光 / New
         analysis-session or settle epoch: invalidate the accumulator and
         wait out one full exposure before trusting a frame as the new seed.
@@ -848,6 +848,7 @@ class V4L2RawCamera:
             1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
         )
         self._nr_fresh_epoch_deadline_mono = time.monotonic() + frame_duration_s
+        return True
 
     def is_within_fresh_capture_epoch(self) -> bool:
         """当前是否仍处于"下一帧可能不安全"的窗口内 / Whether we're still
@@ -960,9 +961,16 @@ class V4L2RawCamera:
         if scratch is None or scratch.shape != raw_f.shape:
             scratch = np.empty(raw_f.shape, dtype=np.float32)
             self._frame_scratch = scratch
+        # 13–16 位 RAW 的过采样 LUT 下标超过 uint16，按表长选择索引位宽。 /
+        # Oversampled LUT indices exceed uint16 for 13–16-bit RAW; size the index buffer accordingly.
+        index_dtype = np.uint16 if len(lut) <= 1 << 16 else np.uint32
         indices = self._lut_index_buffer
-        if indices is None or indices.shape != raw_f.shape:
-            indices = np.empty(raw_f.shape, dtype=np.uint16)
+        if (
+            indices is None
+            or indices.shape != raw_f.shape
+            or indices.dtype != index_dtype
+        ):
+            indices = np.empty(raw_f.shape, dtype=index_dtype)
             self._lut_index_buffer = indices
         np.multiply(raw_f, GAMMA_LUT_OVERSAMPLE, out=scratch)
         np.rint(scratch, out=scratch)
@@ -1090,7 +1098,9 @@ class V4L2RawCamera:
             gains = self._white_balance_gains()
             rgb *= np.asarray(gains, dtype=np.float32)
             np.multiply(rgb, self.contrast, out=rgb)
-            np.add(rgb, 127.5 * (1.0 - self.contrast) + self.brightness * 127.5, out=rgb)
+            np.add(
+                rgb, 127.5 * (1.0 - self.contrast) + self.brightness * 127.5, out=rgb
+            )
             gray = np.mean(rgb, axis=2, keepdims=True)
             np.subtract(rgb, gray, out=rgb)
             np.multiply(rgb, self.saturation, out=rgb)
