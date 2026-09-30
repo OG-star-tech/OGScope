@@ -10,7 +10,6 @@ import time
 from collections.abc import Coroutine
 from typing import Any
 
-from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.requests import Request
@@ -109,11 +108,20 @@ class _MjpegStreamSession:
             watchdog.cancel()
 
         # 先释放并发租约，再等待相机停止 / Release the slot before awaiting camera shutdown.
+        # released 只表示这次调用是否真正把租约从限流器里摘掉——被淘汰的
+        # 会话在收到这个回调之前名额就已经被摘掉了，released 会是 False，
+        # 但这仍然是一次真实的关闭，日志不应该因此漏记。
+        # released only reflects whether THIS call actually removed the
+        # lease's bookkeeping - an evicted session already had its slot
+        # popped before this callback runs, so released comes back False,
+        # but it's still a real close and should still be logged.
         released = await self._lease.release(reason)
-        if released:
-            self._logger.info(
-                "mjpeg_session_released reason=%s path=%s", reason, self._path
-            )
+        self._logger.info(
+            "mjpeg_session_released reason=%s path=%s slot_released=%s",
+            reason,
+            self._path,
+            released,
+        )
 
         if self._preview_acquired:
             self._preview_acquired = False
@@ -145,22 +153,19 @@ async def build_camera_mjpeg_stream(
     *,
     image_format: str,
     quality: int,
-    limit_detail: str,
     timeout_log_message: str,
     logger: logging.Logger,
 ) -> StreamingResponse:
-    """构建 MJPEG 流响应 / Build MJPEG stream response."""
+    """构建 MJPEG 流响应 / Build MJPEG stream response.
+
+    名额已满时 try_acquire() 会淘汰最旧的一路而不是拒绝本次请求，所以这
+    里不会再有"超限"的失败分支。
+    When the slot cap is already full, try_acquire() evicts the oldest
+    session rather than rejecting this request, so there is no longer an
+    "over limit" failure branch here.
+    """
     limiter = get_mjpeg_stream_limiter()
     lease = await limiter.try_acquire()
-    if lease is None:
-        path = str(getattr(getattr(request, "url", None), "path", "") or "")
-        logger.warning(
-            "mjpeg_try_acquire_rejected active=%s max=%s path=%s",
-            limiter.active_clients,
-            limiter.max_clients,
-            path,
-        )
-        raise HTTPException(status_code=503, detail=limit_detail)
 
     boundary = "frame"
     settings = get_settings()
@@ -184,6 +189,14 @@ async def build_camera_mjpeg_stream(
         stall_timeout_s=stall_timeout_s,
         logger=logger,
         path=path,
+    )
+    # If a later connection evicts this lease to free its slot, actually
+    # tear this session down (stop the generator, release the camera
+    # consumer) instead of leaving it running with a slot it no longer
+    # holds - scheduled as its own task since the callback itself must
+    # stay sync/non-blocking (see set_evict_callback).
+    await lease.set_evict_callback(
+        lambda: asyncio.create_task(session.close("evicted_for_new_connection"))
     )
     session.start_watchdog()
 

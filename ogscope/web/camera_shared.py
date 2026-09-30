@@ -130,6 +130,12 @@ class CameraManager:
             "v4l2_black_level": settings.camera_v4l2_black_level,
             "v4l2_white_level": settings.camera_v4l2_white_level,
             "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
+            "v4l2_gamma": settings.camera_v4l2_gamma,
+            "v4l2_temporal_nr_alpha": settings.camera_v4l2_temporal_nr_alpha,
+            "v4l2_temporal_nr_seconds": settings.camera_v4l2_temporal_nr_seconds,
+            "v4l2_temporal_nr_max_frames": (
+                settings.camera_v4l2_temporal_nr_max_frames
+            ),
             "v4l2_active_width": settings.camera_v4l2_active_width,
             "v4l2_active_height": settings.camera_v4l2_active_height,
             "v4l2_line_duration_us": settings.camera_v4l2_line_duration_us,
@@ -168,7 +174,7 @@ class CameraManager:
                 else None
             ),
             "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 1_000_000
+                settings, "camera_auto_exposure_max_us", 3_000_000
             ),
             "capture_timeout_sec": self._capture_timeout_sec,
             "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
@@ -820,6 +826,30 @@ class CameraManager:
         finally:
             self._analysis_consumers = max(0, self._analysis_consumers - 1)
             self._schedule_idle_shutdown()
+
+    def get_current_capture_sequence(self) -> int:
+        """当前抓帧序号，只读、绝不触发新抓帧 / Current capture sequence,
+        read-only, never triggers a new capture.
+
+        用于分析会话启动时建立新鲜度基线：get_raw_frame() 在没有常驻 raw
+        缓存时（默认）会同步抓一整帧，可能要等到硬件抓帧循环当前正持有的
+        那次曝光完成之后再抓一次全新的——曝光越长这个等待就越长，实测能
+        把 analysis/start 拖到 8-10 秒以上，超过调用方的读超时，导致反复
+        "启动失败又重试"，会话永远撑不到真正解算一帧。后台抓帧循环本来就
+        在持续推进这个序号，只读它本身完全不需要等待任何硬件操作。
+        Used to establish a freshness baseline when an analysis session
+        starts. get_raw_frame() synchronously grabs a whole frame when
+        there is no resident raw cache (the default) - it can end up
+        waiting for whatever exposure the background grabber loop is
+        currently holding, then grabbing another fresh one after that;
+        longer exposures make this wait longer, and it was measured to
+        stretch analysis/start past 8-10 seconds, past the caller's own
+        read timeout, causing repeated start-failed-then-retry cycles that
+        never let a session live long enough to actually solve a frame.
+        The background grabber loop is already advancing this number on
+        its own, so reading it needs no hardware operation at all.
+        """
+        return self._capture_sequence
 
     async def get_cached_frame_snapshot(self) -> SharedFrame | None:
         """读取当前缓存帧快照（不触发 ensure）/ Read cached snapshot without ensure."""

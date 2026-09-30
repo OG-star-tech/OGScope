@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -24,6 +25,52 @@ from ogscope.domain.camera.auto_exposure import (
 from ogscope.domain.camera.driver import CameraCapabilities
 
 logger = logging.getLogger(__name__)
+
+# 软件自动曝光引擎允许的最长曝光时间上限（策略性，不是硬件限制 - 真实硬件
+# 上限由 vertical_blanking 等控件动态推导，见 _resolve_line_duration）。
+# 2026-09-20 在真实 Zero2W (192.168.0.41) 上验证 1s-3s 手动曝光（控件写入/
+# 回读与实际抓帧均正常）后，产品决策从 1s 放宽到 3s - 见
+# docs/development/v4l2-zero2w-board-validation.md。/
+# Ceiling on how long the software auto-exposure engine may drive exposure
+# (a policy limit, not a hardware one - the real hardware ceiling is derived
+# dynamically from vertical_blanking and friends, see
+# _resolve_line_duration). Raised from 1s to 3s as a product decision on
+# 2026-09-20 after validating manual 1s-3s exposure (control write/readback
+# and real capture, both clean) on a real Zero2W (192.168.0.41) - see
+# docs/development/v4l2-zero2w-board-validation.md.
+AUTO_EXPOSURE_MAX_CEILING_US = 3_000_000
+
+# 这颗传感器（v4l2-ctl --list-ctrls）根本没有暴露任何黑电平控件，
+# _resolve_signal_levels() 的自动探测必然失败，退回的旧默认值是 0 —— 意味着
+# 完全没有黑电平校正，gamma 曲线从原始编码 0 开始放大，而不是从传感器真实的
+# 暗场地板开始。用遮住镜头（零入射光）在真实 Zero2W 上实测：10ms-3s 曝光下
+# 均值稳定在 240.5-244.1（12 位满量程 4095），暗电流增长速率仅约
+# 1.2 counts/sec（可忽略，不需要按曝光时间动态调整）。这里把退回默认值从
+# 0 改成这个实测值按位深换算的比例，而不是继续用明显错误的 0 —— 见
+# docs/development/v4l2-zero2w-board-validation.md 的暗场标定记录。
+# This sensor (per `v4l2-ctl --list-ctrls`) exposes no black-level control at
+# all, so _resolve_signal_levels()'s auto-detect always fails and used to
+# fall back to 0 - meaning zero black-level correction was ever applied, and
+# the gamma curve amplified the raw signal from code 0 instead of the
+# sensor's real dark floor. Measured on real Zero2W hardware with the lens
+# covered (zero incident light): mean raw value held steady at 240.5-244.1
+# (of a 4095 12-bit full range) across 10ms-3s exposure, with a negligible
+# ~1.2 counts/sec dark-current rate (no need for exposure-dependent
+# scaling). This replaces the old, provably-wrong 0 fallback with that
+# measured value, scaled proportionally by bit depth - see
+# docs/development/v4l2-zero2w-board-validation.md for the calibration.
+FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE = 240.5 / 4095.0
+
+# gamma 查找表的过采样倍数：时域降噪在线性 RAW 域完成，平均后的 RAW 带亚整数
+# 精度，查表前四舍五入回整数会把这部分精度量化掉。16 倍过采样把量化步长压到
+# 1/16 个 RAW 编码值，远低于实测的最小输出噪声（10ms 曝光约 0.17 个编码值），
+# 代价只有 12 位下 64KB 的表。
+# Oversampling factor for the gamma LUT: temporal NR runs in the linear RAW
+# domain, so averaged RAW values carry sub-integer precision that rounding to
+# integers before the lookup would quantize away. 16x puts the quantization
+# step at 1/16 of a RAW code, well under the smallest measured output noise
+# (~0.17 codes at 10ms), for a 64KB table at 12-bit.
+GAMMA_LUT_OVERSAMPLE = 16
 
 
 @dataclass(slots=True, frozen=True)
@@ -122,7 +169,11 @@ class V4L2RawCamera:
         self.digital_gain = 1.0
         self.auto_exposure = bool(config.get("auto_exposure", True))
         self.auto_exposure_max_us = max(
-            10_000, min(1_000_000, int(config.get("auto_exposure_max_us", 1_000_000)))
+            10_000,
+            min(
+                AUTO_EXPOSURE_MAX_CEILING_US,
+                int(config.get("auto_exposure_max_us", AUTO_EXPOSURE_MAX_CEILING_US)),
+            ),
         )
         self._hardware_max_exposure_us = self.auto_exposure_max_us
         self.gain_db_per_step = float(config.get("v4l2_gain_db_per_step", 0.3))
@@ -139,6 +190,122 @@ class V4L2RawCamera:
         self.brightness = float(config.get("brightness", 0.0))
         self.saturation = float(config.get("saturation", 1.0))
         self.sharpness = float(config.get("sharpness", 1.0))
+        # RAW 路径没有 ISP 色调曲线；线性拉伸后的画面对比度明显低于
+        # picamera2/libcamera 的输出，同一 sigma 阈值下提星命中率也明显更低
+        # （实测：同场景、相同曝光下 picamera2 检出 7 颗，V4L2 仅 1 颗，见
+        # docs/development/v4l2-zero2w-board-validation.md）。这里补一条与
+        # ISP 大致等效的 gamma 校正，让下游提星阈值在两条后端上可复用。
+        # The RAW path has no ISP tone curve; the linear stretch produces
+        # markedly lower contrast than picamera2/libcamera's output, and
+        # measurably fewer centroid detections at the same sigma threshold
+        # (same scene, same exposure: picamera2 found 7, V4L2 found 1 - see
+        # docs/development/v4l2-zero2w-board-validation.md). This adds a
+        # gamma correction roughly matching the ISP's tone curve so the
+        # downstream centroid threshold is reusable across both backends.
+        self.gamma = max(1.0, float(config.get("v4l2_gamma", 2.2)))
+        # 建在 initialize() 里、_resolve_signal_levels() 之后（需要真实黑/白
+        # 电平）/ Built in initialize(), after _resolve_signal_levels() (needs
+        # the resolved black/white levels).
+        self._gamma_lut: np.ndarray | None = None
+        # 曾在此处加过一级 CLAHE 局部对比度增强，已撤销：在真实 Zero2W 上实测
+        # （不同 clip_limit 1.0-3.0），即便很保守的设置也会把 patch_noise_std
+        # 从 gamma-only 的 0.58 推到 1.2+（picamera2 是 0.68），提星命中数始终
+        # 是 0-1（picamera2 同场景 6-7 颗），说明 CLAHE 只是在放大暗/平坦区域
+        # 的传感器噪声、没有真正提升星点可探测性。等效对比度需求应该靠给
+        # V4L2 后端单独调 solver_centroid_sigma 解决，而不是让画面在视觉上
+        # 冒充 picamera2 的输出。见
+        # docs/development/v4l2-zero2w-board-validation.md 的复测记录。
+        # A CLAHE local-contrast stage was added here and reverted: measured
+        # on real Zero2W hardware across clip_limit 1.0-3.0, even
+        # conservative settings pushed patch_noise_std from gamma-only's 0.58
+        # up to 1.2+ (picamera2's own is 0.68), while centroid counts stayed
+        # at 0-1 (picamera2 finds 6-7 on the same scene) - CLAHE was just
+        # amplifying sensor noise in dark/flat regions, not improving real
+        # star detectability. Matching detection sensitivity should be solved
+        # with a V4L2-specific solver_centroid_sigma, not by cosmetically
+        # reshaping the image to imitate picamera2's output. See
+        # docs/development/v4l2-zero2w-board-validation.md for the retest.
+        #
+        # 真正的根因随后在真实硬件上用时域方法测出来了：对着完全静止的场景连拍
+        # 10 帧，逐像素算跨帧标准差（场景没变，帧间差异就是纯噪声），picamera2
+        # 是 0.55，V4L2（仅 gamma）是 3.55 —— 差 6.5 倍，SNR 差了近 10 倍。根因是
+        # V4L2 这条路径完全没有降噪（noise_reduction_mode 硬编码 "off"，见下），
+        # 而 picamera2 的 ISP 默认做真实降噪。这解释了之前对比度不够的很大一部分
+        # 原因：gamma/CLAHE 都只是在给同一份带噪声的信号重新分布亮度，没有真正去
+        # 噪声。这里加一级时域指数滑动平均（EMA）：产品场景是静态/跟踪的星空，帧
+        # 间场景基本不变，时域累积能在不损失空间分辨率的前提下把随机噪声降下去
+        # （空间滤波比如高斯/双边会牺牲真实细节）。曝光/增益一变就清空累积器，
+        # 避免在 AE 调整/收敛过程中把不同亮度的帧混在一起。
+        # The real root cause was found afterward via a proper hardware
+        # methodology: 10 frames of a completely static scene, per-pixel
+        # temporal std (scene didn't change, so any frame-to-frame variation
+        # IS noise) - picamera2: 0.55, V4L2 (gamma only): 3.55, a 6.5x gap,
+        # ~10x worse SNR. Root cause: this path applies zero noise reduction
+        # (noise_reduction_mode hardcoded "off", see below) while picamera2's
+        # ISP applies real denoising by default. This explains much of the
+        # earlier contrast shortfall - gamma/CLAHE were both just redistributing
+        # brightness on the same noisy signal, never actually removing noise.
+        # Adds a temporal exponential-moving-average (EMA) stage: the product's
+        # real scenes are static/tracked astrophotography, so temporal
+        # accumulation reduces random noise without sacrificing spatial
+        # resolution (unlike spatial filtering, e.g. Gaussian/bilateral, which
+        # trades away real detail). Resets on any exposure/gain change to avoid
+        # blending frames of different brightness during AE adjustment/settling.
+        self.temporal_nr_alpha = max(
+            0.01, min(1.0, float(config.get("v4l2_temporal_nr_alpha", 0.2)))
+        )
+        # EMA 的时间常数按"秒"而不是按"帧"来定：短曝光下每秒能拿到很多帧，
+        # 多平均几十帧的墙钟代价可以忽略，所以可以用小得多的 alpha 换大得多
+        # 的降噪；长曝光下每帧就要好几秒，平均更多帧的代价是实打实的延迟，
+        # 所以退回 temporal_nr_alpha 这个上限（= 最少平均帧数 1/alpha）。
+        # The EMA time constant is defined in SECONDS rather than frames:
+        # at short exposures many frames arrive per second, so averaging
+        # tens of them costs negligible wall-clock time and buys a much
+        # smaller alpha (much stronger denoise); at long exposures each
+        # frame costs seconds, so averaging more of them is real latency and
+        # it falls back to the temporal_nr_alpha bound (= a floor of 1/alpha
+        # averaged frames).
+        self.temporal_nr_seconds = max(
+            0.0, float(config.get("v4l2_temporal_nr_seconds", 2.0))
+        )
+        self.temporal_nr_max_frames = max(
+            1, int(config.get("v4l2_temporal_nr_max_frames", 50))
+        )
+        self._nr_accumulator: np.ndarray | None = None
+        # 累积器是否持有有效历史。曝光/增益一变要丢弃历史，但不能把数组
+        # 本身丢掉：AE 收敛期间每帧都可能触发一次，反复重新分配整幅
+        # float32 会让 RSS 一路涨上去（实测开着 AE 抓 40 帧涨了 38MB）。
+        # 置为无效即可，下一帧原地覆盖。
+        # Whether the accumulator holds valid history. An exposure/gain
+        # change must discard the history but must NOT drop the array:
+        # during AE convergence that can fire every frame, and
+        # reallocating a full-frame float32 each time walks RSS upward
+        # (measured: +38MB over 40 frames with AE enabled). Marking it
+        # invalid lets the next frame overwrite it in place.
+        self._nr_accumulator_valid = False
+        # 重置之后，仍要拒绝把帧当作新种子，直到经过至少一次完整曝光时长
+        # 为止：否则第一帧可能是曝光起始时间早于重置点的旧帧（本身就带
+        # 拖线），被当成"全新种子"后，之后真正干净的帧还要跟这帧混合几帧
+        # 才收敛，肉眼看到的就是新旧画面之间的渐变/叠影。0 表示当前没有
+        # 处于这个等待窗口。
+        # / After a reset, frames must still not be trusted as the new seed
+        # until at least one full exposure duration has elapsed: otherwise
+        # the very first frame can be one whose exposure started before the
+        # reset point (itself already trailed), and once accepted as the
+        # "fresh seed", genuinely clean frames keep blending against it for
+        # several more frames before converging - visible as a fade/ghost
+        # between the old and new scene. 0 means no such window is active.
+        self._nr_fresh_epoch_deadline_mono = 0.0
+        # 整幅 float32 的复用暂存：时域降噪先用完、_debayer 再用，两者
+        # 生命周期不重叠，所以共用一块即可（各自单独分配会白白多占 3.7MB）
+        # / One reused full-frame float32 scratch: temporal NR finishes
+        # with it before _debayer needs one, so their lifetimes never
+        # overlap and separate buffers would just waste 3.7MB.
+        self._frame_scratch: np.ndarray | None = None
+        self._lut_index_buffer: np.ndarray | None = None
+        # 色调查找表及其参数键 / Tone LUT and the parameter key it was built for.
+        self._tone_lut_cache: np.ndarray | None = None
+        self._tone_lut_key: tuple | None = None
 
         self.is_initialized = False
         self.is_capturing = False
@@ -398,10 +565,12 @@ class V4L2RawCamera:
             black_source = "config"
         else:
             detected_black = self._read_control("black_level")
-            black = detected_black if detected_black is not None else 0
-            black_source = (
-                "sensor_control" if detected_black is not None else "fallback"
-            )
+            if detected_black is not None:
+                black = detected_black
+                black_source = "sensor_control"
+            else:
+                black = round(FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE * max_code)
+                black_source = "fallback_measured_dark_frame"
 
         if self._white_level_override > 0:
             white = self._white_level_override
@@ -509,6 +678,12 @@ class V4L2RawCamera:
         self._frame_duration_us = max(
             self.exposure_us, int(round(frame_lines * self._line_duration_us))
         )
+        # 曝光/增益真的变了，累积的是不同亮度的帧，作废历史避免下一帧被
+        # 拖回旧亮度；保留数组本身，下一帧原地覆盖 / Exposure/gain actually
+        # changed, so the accumulated history is at a different brightness -
+        # invalidate it so the next frame isn't blended back toward the old
+        # level, but keep the array itself for in-place reuse.
+        self._nr_accumulator_valid = False
         return True
 
     def _create_capture(self) -> Any | None:
@@ -585,6 +760,7 @@ class V4L2RawCamera:
                 return False
             self._resolve_line_duration()
             self._resolve_signal_levels()
+            self._gamma_lut = self._build_gamma_lut()
             enabled = self.auto_exposure
             self._ae = self._create_auto_exposure()
             self._ae.set_enabled(enabled)
@@ -636,7 +812,61 @@ class V4L2RawCamera:
         if self._capture is None:
             return False
         self.is_capturing = True
+        # 每次开始抓帧都是新的一段序列，之前累积的帧可能是很久以前的场景
+        # / Each capture start is a fresh sequence - a stale accumulator from
+        # a previous run could hold a since-changed scene.
+        self._nr_accumulator_valid = False
         return True
+
+    def begin_fresh_capture_epoch(self) -> bool:
+        """新分析会话/移动结算起点：失效累积器并等过一次完整曝光 / New
+        analysis-session or settle epoch: invalidate the accumulator and
+        wait out one full exposure before trusting a frame as the new seed.
+
+        预览通常持续采集；仅仅失效累积器不够——调用这个方法的时刻，传感器
+        可能已经在曝光一帧，其曝光起始时间早于调用点（甚至早于底座真正停
+        稳），这一帧本身可能已经带有拖线。如果直接把它当成"全新种子"，之
+        后真正干净的帧还要跟它混合几帧才收敛，肉眼看到的就是新旧画面之间
+        的渐变/叠影。所以在至少一次完整曝光时长内，持续用当前帧原地覆盖
+        （不建立种子、不参与混合），只有曝光起始时间确定晚于调用点的帧才
+        会被接受为新种子；不重新分配数组，保留此前修复的 RSS 收益。
+        Preview capture usually keeps running. Just invalidating the
+        accumulator is not enough: at the moment this is called, the sensor
+        may already be mid-exposure on a frame whose exposure started
+        before this call (even before the mount actually stopped), so that
+        frame can itself already be trailed. Accepting it outright as the
+        "fresh seed" means genuinely clean frames keep blending against it
+        for several more frames before converging - visible as a fade/ghost
+        between the old and new scene. So for at least one full exposure
+        duration, every frame keeps overwriting the accumulator in place
+        (no seed established, no blending) - only a frame whose exposure is
+        guaranteed to have started after this call becomes the new seed.
+        Arrays are not reallocated, preserving the earlier RSS fix.
+        """
+        self._nr_accumulator_valid = False
+        frame_duration_s = max(
+            1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
+        )
+        self._nr_fresh_epoch_deadline_mono = time.monotonic() + frame_duration_s
+        return True
+
+    def is_within_fresh_capture_epoch(self) -> bool:
+        """当前是否仍处于"下一帧可能不安全"的窗口内 / Whether we're still
+        inside the window where the next frame might not be safe yet.
+
+        窗口过后，当前缓存的那一帧本身已经能保证是在上次 settle 之后才开
+        始曝光的——调用方（比如一次同姿态内的重试）不需要再等一帧全新的，
+        直接用当前缓存的即可，这样重试才不会一直付一次完整曝光的等待成
+        本。仅在真正刚发生过 begin_fresh_capture_epoch 之后的短暂窗口内才
+        返回 True。
+        Once this window has passed, the currently cached frame is already
+        guaranteed to have started exposing after the last settle - a
+        caller retrying at an unchanged pose doesn't need to wait for
+        another brand-new one, it can just use what's cached right now.
+        Only returns True for the brief window right after
+        begin_fresh_capture_epoch was actually called.
+        """
+        return time.monotonic() < self._nr_fresh_epoch_deadline_mono
 
     def stop_capture(self) -> bool:
         """停止抓帧并释放节点以解除阻塞读取 / Stop capture and release the node to unblock reads."""
@@ -680,14 +910,73 @@ class V4L2RawCamera:
             f"unsupported RAW frame shape={raw.shape} dtype={raw.dtype} / 不支持的 RAW 帧"
         )
 
+    def _build_gamma_lut(self) -> np.ndarray:
+        """构建 RAW 编码值 -> 8 位 gamma 校正输出的查找表 / Build a RAW-code ->
+        8-bit gamma-corrected-output lookup table.
+
+        必须在 float32 线性域里对每个 RAW 编码值做 gamma，再量化成 8 位一次；
+        如果先线性拉伸到 8 位再查表，暗部（比如星点）在拉伸阶段就已经被压进
+        寥寥几个 8 位编码，gamma 再怎么展开也找不回损失的精度。
+        Gamma must be applied per RAW code in float32 linear space, quantizing
+        to 8-bit only once at the end; linearly stretching to 8-bit first and
+        then applying gamma via a 256-entry LUT crushes dim detail (e.g. faint
+        stars) into a handful of 8-bit codes before gamma ever sees it, and no
+        amount of gamma afterward can recover precision already lost there.
+
+        以 GAMMA_LUT_OVERSAMPLE 倍过采样建表：时域降噪现在在线性 RAW 域做
+        （见 _apply_temporal_nr），多帧平均后的 RAW 值带有亚整数精度——实测
+        10ms 曝光下输出噪声只有约 0.17 个 RAW 编码值，如果查表前先四舍五入回
+        整数，这部分精度会被量化掉，短曝光的降噪效果就白做了。
+        The table is oversampled by GAMMA_LUT_OVERSAMPLE: temporal NR now runs
+        in the linear RAW domain (see _apply_temporal_nr), so the averaged RAW
+        values carry sub-integer precision - measured output noise at 10ms is
+        only ~0.17 RAW codes, which rounding to integers before the lookup
+        would quantize away, throwing out the short-exposure NR gain.
+        """
+        max_code = (1 << max(1, self.bit_depth)) - 1
+        steps = max_code * GAMMA_LUT_OVERSAMPLE + 1
+        codes = np.arange(steps, dtype=np.float32) / GAMMA_LUT_OVERSAMPLE
+        span = max(1, self.white_level - self.black_level)
+        linear = np.clip((codes - self.black_level) / span, 0.0, 1.0)
+        gamma_corrected = np.power(linear, 1.0 / self.gamma) * 255.0
+        return np.clip(np.round(gamma_corrected), 0, 255).astype(np.uint8)
+
     def _debayer(self, raw: np.ndarray) -> np.ndarray:
-        """把右对齐 Bayer RAW 转为 RGB888 / Convert right-aligned Bayer RAW to RGB888."""
+        """把右对齐 Bayer RAW 转为 RGB888，并做 gamma 校正 / Convert right-aligned
+        Bayer RAW to RGB888, gamma-corrected to match ISP-path contrast."""
         import cv2
 
-        span = max(1, self.white_level - self.black_level)
-        raw8 = np.clip(
-            (raw.astype(np.float32) - self.black_level) * (255.0 / span), 0, 255
-        ).astype(np.uint8)
+        lut = self._gamma_lut
+        if lut is None:
+            lut = self._build_gamma_lut()
+            self._gamma_lut = lut
+        # 复用预分配缓冲做查表下标，避免每帧新建整幅 float32/int32 临时数组
+        # ——这条路径存在的意义就是省内存，每帧分配几个 3.7MB 的临时量会把
+        # 峰值 RSS 推上去 / Reuse preallocated buffers for the LUT indices
+        # instead of allocating full-frame float32/int32 temporaries every
+        # frame - this path exists to save memory, and a few 3.7MB
+        # per-frame temporaries push peak RSS up.
+        raw_f = np.asarray(raw, dtype=np.float32)
+        scratch = self._frame_scratch
+        if scratch is None or scratch.shape != raw_f.shape:
+            scratch = np.empty(raw_f.shape, dtype=np.float32)
+            self._frame_scratch = scratch
+        # 13–16 位 RAW 的过采样 LUT 下标超过 uint16，按表长选择索引位宽。 /
+        # Oversampled LUT indices exceed uint16 for 13–16-bit RAW; size the index buffer accordingly.
+        index_dtype = np.uint16 if len(lut) <= 1 << 16 else np.uint32
+        indices = self._lut_index_buffer
+        if (
+            indices is None
+            or indices.shape != raw_f.shape
+            or indices.dtype != index_dtype
+        ):
+            indices = np.empty(raw_f.shape, dtype=index_dtype)
+            self._lut_index_buffer = indices
+        np.multiply(raw_f, GAMMA_LUT_OVERSAMPLE, out=scratch)
+        np.rint(scratch, out=scratch)
+        np.clip(scratch, 0, len(lut) - 1, out=scratch)
+        np.copyto(indices, scratch, casting="unsafe")
+        raw8 = lut[indices]
         codes = {
             "RGGB": cv2.COLOR_BayerRG2RGB,
             "BGGR": cv2.COLOR_BayerBG2RGB,
@@ -754,24 +1043,70 @@ class V4L2RawCamera:
             raw,
         )
 
+    def _white_balance_gains(self) -> tuple[float, float, float]:
+        """当前白平衡增益 / Current white-balance gains."""
+        if self.white_balance_mode == "night":
+            return (1.1, 1.0, 0.9)
+        if self.white_balance_mode == "manual":
+            return (self.white_balance_gain_r, 1.0, self.white_balance_gain_b)
+        return (1.0, 1.0, 1.0)
+
+    def _tone_lut(self) -> np.ndarray:
+        """白平衡+对比度+亮度折叠成的 256x3 查找表（按参数缓存）/ The
+        white-balance + contrast + brightness chain folded into one 256x3
+        LUT, cached against the parameters that define it."""
+        key = (
+            self._white_balance_gains(),
+            self.contrast,
+            self.brightness,
+        )
+        if self._tone_lut_key != key or self._tone_lut_cache is None:
+            gains, contrast, brightness = key
+            levels = np.arange(256, dtype=np.float32)
+            offset = 127.5 * (1.0 - contrast) + brightness * 127.5
+            table = np.empty((1, 256, 3), dtype=np.uint8)
+            for channel, gain in enumerate(gains):
+                values = levels * gain * contrast + offset
+                table[0, :, channel] = np.clip(np.rint(values), 0, 255).astype(np.uint8)
+            self._tone_lut_cache = table
+            self._tone_lut_key = key
+        return self._tone_lut_cache
+
     def _apply_postprocessing(self, image: np.ndarray) -> np.ndarray:
         """应用轻量 RAW 后处理和几何变换 / Apply lightweight RAW post-processing and geometry."""
         import cv2
 
-        rgb = image.astype(np.float32)
-        if self.white_balance_mode == "night":
-            gains = (1.1, 1.0, 0.9)
-        elif self.white_balance_mode == "manual":
-            gains = (self.white_balance_gain_r, 1.0, self.white_balance_gain_b)
+        # 白平衡增益、对比度、亮度全都是逐像素逐通道的点运算，输入又是 uint8，
+        # 所以可以整条折叠成一张 256x3 的查找表，一次 cv2.LUT 搞定 —— 完全不
+        # 需要把整幅图转成 float32。原来的写法每帧要产生多个 11MB 的 float32
+        # 临时量（astype、减、乘、加、clip 各一份），这条路径本来就是为省内存
+        # 存在的。只有饱和度是跨通道运算（要先求通道均值），没法并进查找表，
+        # 所以仅在它非默认值时才回退到 float 路径。
+        # White-balance gains, contrast and brightness are all pointwise
+        # per-channel operations on a uint8 input, so the whole chain folds
+        # into one 256x3 lookup table applied by a single cv2.LUT - no
+        # full-frame float32 conversion at all. The previous form allocated
+        # several 11MB float32 temporaries per frame (astype, subtract,
+        # multiply, add, clip), and this path exists to save memory.
+        # Saturation is the one cross-channel op (it needs the per-pixel
+        # channel mean), so it can't fold into the LUT and only it falls
+        # back to the float path.
+        if abs(self.saturation - 1.0) <= 1e-3:
+            rgb8: np.ndarray = cv2.LUT(image, self._tone_lut())
         else:
-            gains = (1.0, 1.0, 1.0)
-        rgb *= np.asarray(gains, dtype=np.float32)
-        rgb = (rgb - 127.5) * self.contrast + 127.5 + self.brightness * 127.5
-
-        if abs(self.saturation - 1.0) > 1e-3:
+            rgb = image.astype(np.float32)
+            gains = self._white_balance_gains()
+            rgb *= np.asarray(gains, dtype=np.float32)
+            np.multiply(rgb, self.contrast, out=rgb)
+            np.add(
+                rgb, 127.5 * (1.0 - self.contrast) + self.brightness * 127.5, out=rgb
+            )
             gray = np.mean(rgb, axis=2, keepdims=True)
-            rgb = gray + (rgb - gray) * self.saturation
-        rgb8: np.ndarray = np.clip(rgb, 0, 255).astype(np.uint8)
+            np.subtract(rgb, gray, out=rgb)
+            np.multiply(rgb, self.saturation, out=rgb)
+            np.add(rgb, gray, out=rgb)
+            np.clip(rgb, 0, 255, out=rgb)
+            rgb8 = rgb.astype(np.uint8)
 
         if abs(self.sharpness - 1.0) > 1e-3:
             blurred = cv2.GaussianBlur(rgb8, (0, 0), sigmaX=1.0)
@@ -807,6 +1142,104 @@ class V4L2RawCamera:
             rgb8 = cv2.flip(rgb8, 0)
         return np.ascontiguousarray(rgb8)
 
+    def _apply_temporal_nr(self, raw: np.ndarray) -> np.ndarray:
+        """在线性 RAW 域做时域指数滑动平均降噪 / Temporal exponential-moving-
+        average denoise, in the linear RAW domain.
+
+        必须在 gamma 之前、线性域里做，原因有三：
+        1. 线性域的平均才是无偏的；在 gamma 编码后的值上平均会有系统偏差。
+        2. gamma 曲线在暗部斜率最陡（实测 10ms 曝光下约 1.3，接近黑电平时
+           可达数十倍），先降噪再过曲线，等于在噪声被放大之前就把它压掉。
+        3. 累积器从 H*W*3 的 float32（约 11MB）变成 H*W 的 float32（约
+           3.7MB），省下约 7MB —— 这条路径存在的意义就是省内存，所以这不是
+           代价而是额外收益。
+        Must run before gamma, in linear space, for three reasons:
+        1. Averaging is only unbiased in linear space; averaging
+           gamma-encoded values introduces a systematic bias.
+        2. The gamma curve is steepest in the shadows (measured ~1.3x at
+           10ms, tens of times near black), so denoising first means killing
+           the noise before the curve amplifies it.
+        3. The accumulator shrinks from H*W*3 float32 (~11MB) to H*W float32
+           (~3.7MB), saving ~7MB - this path exists to save memory, so that's
+           a bonus rather than a cost.
+
+        场景静止/跟踪时有效；曝光/增益一变，`_apply_exposure_gain` 会清空
+        累积器，下一帧直接作为新起点，不会把不同亮度的帧混在一起。累积器
+        失效期间（见 begin_fresh_capture_epoch）不会立即把下一帧定为新种
+        子——要等过一次完整曝光时长，确保这一帧的曝光起始时间确定晚于失
+        效点，否则种子本身可能已经带着旧场景的拖线。
+        Effective for static/tracked scenes; any exposure/gain change clears
+        the accumulator via `_apply_exposure_gain`, so the next frame starts
+        fresh instead of blending frames at different brightness levels.
+        While the accumulator is invalid (see begin_fresh_capture_epoch),
+        the very next frame is not immediately trusted as the new seed -
+        one full exposure duration must elapse first, so the eventual seed
+        is guaranteed to have started exposing after the invalidation point,
+        rather than itself already carrying the old scene's trail.
+        """
+        if self.temporal_nr_alpha >= 1.0:
+            return raw
+        accumulator = self._nr_accumulator
+        if accumulator is None or accumulator.shape != raw.shape:
+            accumulator = np.empty(raw.shape, dtype=np.float32)
+            self._nr_accumulator = accumulator
+        if not self._nr_accumulator_valid:
+            np.copyto(accumulator, raw, casting="unsafe")
+            if time.monotonic() >= self._nr_fresh_epoch_deadline_mono:
+                self._nr_accumulator_valid = True
+            return accumulator
+        # 就地更新，复用一块 scratch：acc += alpha * (raw - acc)。写成
+        # `alpha * raw + (1-alpha) * acc` 每帧会产生三个整幅 float32 临时量。
+        # In-place update against one reused scratch: acc += alpha*(raw-acc).
+        # Writing it as `alpha*raw + (1-alpha)*acc` allocates three
+        # full-frame float32 temporaries per frame.
+        scratch = self._frame_scratch
+        if scratch is None or scratch.shape != raw.shape:
+            scratch = np.empty(raw.shape, dtype=np.float32)
+            self._frame_scratch = scratch
+        np.copyto(scratch, raw, casting="unsafe")
+        np.subtract(scratch, accumulator, out=scratch)
+        np.multiply(scratch, self._effective_temporal_nr_alpha(), out=scratch)
+        np.add(accumulator, scratch, out=accumulator)
+        return accumulator
+
+    def _effective_temporal_nr_alpha(self) -> float:
+        """按帧时长换算实际 EMA 系数 / Frame-duration-aware EMA coefficient.
+
+        平均帧数 = temporal_nr_seconds / 帧时长，夹在 [1, temporal_nr_max_frames]
+        之间：短曝光多平均（墙钟代价可忽略），长曝光则自然收敛到很少的帧数。
+
+        这里曾经还夹着一个下界 1/temporal_nr_alpha（=5 帧）：单帧曝光已经逼近
+        上限（如 2s）时，仍强制至少平均 5 帧，真实时域积分窗口被拖到 5 倍单帧
+        曝光（10s+）。场景完全静止时看不出来，但曝光期间只要有一点残留机械
+        振动/未完全静止，就会被拉成远超单帧曝光时长的星轨——这正是"最大自动
+        曝光下出现拖线，看起来像几十秒堆栈"的根因。取消这个下界，长曝光按同样
+        的时间预算自然收敛到 1 帧（不再额外平均），不再制造超出单帧曝光的
+        隐藏积分窗口。
+        Frames averaged = temporal_nr_seconds / frame duration, clamped to
+        [1, temporal_nr_max_frames]: short exposures average more (negligible
+        wall-clock cost); long exposures now naturally converge to very few
+        frames.
+
+        This used to also have a floor of 1/temporal_nr_alpha (=5 frames):
+        once a single exposure was already near the ceiling (e.g. 2s), it
+        still forced averaging at least 5 frames, stretching the real
+        temporal integration window to 5x one frame's exposure (10s+).
+        Invisible on a perfectly still scene, but any residual mechanical
+        settling during that window smears into star trails far longer than
+        the single-frame exposure - this was the root cause of "trailing at
+        maximum auto exposure, looking like a multi-ten-second stack".
+        Removing the floor lets long exposures converge to 1 frame (no extra
+        averaging) from the same time budget, instead of manufacturing a
+        hidden integration window beyond the single frame's own exposure.
+        """
+        frame_duration_us = self._frame_duration_us or self.exposure_us
+        if self.temporal_nr_seconds <= 0.0 or frame_duration_us <= 0:
+            return self.temporal_nr_alpha
+        frames = (self.temporal_nr_seconds * 1_000_000.0) / float(frame_duration_us)
+        frames = max(1.0, min(float(self.temporal_nr_max_frames), frames))
+        return 1.0 / frames
+
     def capture_image(self) -> np.ndarray | None:
         """抓取一帧并推进软件 AE / Capture one frame and advance software AE."""
         if not self.is_initialized or not self.is_capturing or self._capture is None:
@@ -819,8 +1252,12 @@ class V4L2RawCamera:
             if not self.is_capturing:
                 return None
             raw = self._unpack_raw(frame)
+            # AE 仍然观察未降噪的原始帧，保持已验证的 AE 行为不变 / AE still
+            # observes the un-denoised raw frame, keeping the already-validated
+            # AE behaviour unchanged.
             self._observe_auto_exposure(raw)
-            return self._apply_postprocessing(self._debayer(raw))
+            denoised = self._apply_temporal_nr(raw)
+            return self._apply_postprocessing(self._debayer(denoised))
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
@@ -838,7 +1275,9 @@ class V4L2RawCamera:
 
     def set_auto_exposure_max_us(self, value: int) -> bool:
         """更新软件 AE 最长曝光 / Update maximum software-AE exposure."""
-        self.auto_exposure_max_us = max(10_000, min(1_000_000, int(value)))
+        self.auto_exposure_max_us = max(
+            10_000, min(AUTO_EXPOSURE_MAX_CEILING_US, int(value))
+        )
         enabled = self.auto_exposure
         self._ae = self._create_auto_exposure()
         self._ae.set_enabled(enabled)

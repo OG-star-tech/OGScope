@@ -120,8 +120,10 @@ limits each update to one stop, and exposes an explicit convergence state.
   未配置时的 8µs 只是 IMX327 回退值，状态会标记 `line_duration_source=fallback`。
 - 长曝光先提高 `vertical_blanking`，再写 `exposure`。曝光最大值会随 vblank
   动态变化，因此不能缓存启动时的 `exposure.max`。
-- 产品自动曝光上限仍为 1 秒；即使旧配置或硬件范围更大，也不会放宽当前分析和
-  交互的时间预算。手动范围仍按硬件控件报告。
+- 产品自动曝光上限为 3 秒（2026-09-20 从 1 秒放宽 - 在真实 Zero2W
+  (192.168.0.41) 上验证 1s-3s 手动曝光的控件写入/回读与实际抓帧均正常后的
+  产品决策，见 docs/development/v4l2-zero2w-board-validation.md）；即使旧
+  配置或硬件范围更大，也不会放宽超过这一上限。手动范围仍按硬件控件报告。
 - 模拟增益按 dB 步进换算，默认 `0.3 dB/step`，板端必须用实际传感器验证。
 - 每次写入曝光和模拟增益后批量回读控件。只有回读成功时才填写
   `actual_exposure_us` / `actual_analogue_gain`；否则这两个字段为 `null`，
@@ -130,6 +132,12 @@ limits each update to one stop, and exposes an explicit convergence state.
 - Line time is derived from `pixel_rate` and `horizontal_blanking` when available.
 - Long exposure raises `vertical_blanking` before writing `exposure`; the stale
   pre-vblank exposure maximum must not clamp the request.
+- The product auto-exposure ceiling is 3 seconds (raised from 1s on
+  2026-09-20 after validating 1s-3s manual exposure - control write/readback
+  and real capture, both clean - on a real Zero2W at 192.168.0.41; see
+  docs/development/v4l2-zero2w-board-validation.md). Legacy config or a
+  larger hardware range never loosens this. Manual range is still reported
+  straight from the hardware controls.
 - Analogue gain is converted in dB steps and requires board calibration.
 - Requested values, estimated applied values, and verified control readback are
   reported separately. Failed readback never masquerades as actual telemetry.
