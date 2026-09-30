@@ -96,7 +96,11 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
 - `GET /api/core/v1/camera/preview/stream?quality=75`
   - Product MJPEG preview using the shared preview consumer and concurrency limiter
   - `quality` ranges from `10` to `100`; omission uses the server preview-quality setting
-  - Responses are non-cacheable; the endpoint returns `503` when the client limit is reached
+  - Responses are non-cacheable; at the client limit, the stream with the oldest send progress is evicted to make room for the new connection
+- `POST /api/core/v1/camera/reset-temporal-history`
+  - No request body. The upstream caller explicitly invokes this after a mount move has settled to discard cross-frame denoising history; OGScope does not infer mount motion
+  - Uses the camera-control response shape. `applied.temporal_history_reset` reports whether the driver implements the reset hook; drivers without cross-frame history, such as Picamera2, return `false`
+  - This is an integration hook for avoiding pre-move history on V4L2. Until the upstream caller invokes it, end-to-end reset after movement is not in effect
 
 Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) remain developer-only:
 

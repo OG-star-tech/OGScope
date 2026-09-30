@@ -656,7 +656,9 @@ def test_temporal_nr_alpha_averages_more_frames_at_short_exposures() -> None:
     """Short exposures deliver many frames per second, so the EMA should
     average far more of them (smaller alpha) than the fixed bound - the
     wall-clock cost is negligible there, unlike at long exposures."""
-    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0})
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0}
+    )
 
     camera._frame_duration_us = 10_000  # 10ms frames -> 200 in 2s, capped at 50
     assert camera._effective_temporal_nr_alpha() == pytest.approx(1.0 / 50)
@@ -675,7 +677,9 @@ def test_temporal_nr_alpha_converges_to_no_averaging_at_long_exposures() -> None
     trailing whenever the mount hasn't fully settled. Long exposures must
     converge to alpha=1 (no extra averaging), not clamp back up to the
     configured alpha."""
-    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0})
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0}
+    )
 
     camera._frame_duration_us = 3_000_000  # 3s frames -> 0.67 frames in 2s budget
 
@@ -684,7 +688,9 @@ def test_temporal_nr_alpha_converges_to_no_averaging_at_long_exposures() -> None
 
 @pytest.mark.unit
 def test_temporal_nr_seconds_zero_falls_back_to_fixed_alpha() -> None:
-    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 0.0})
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 0.0}
+    )
     camera._frame_duration_us = 10_000
 
     assert camera._effective_temporal_nr_alpha() == pytest.approx(0.2)
@@ -855,6 +861,24 @@ def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
     expected = round(FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE * 4095)
     assert camera.black_level == expected
     assert camera._signal_level_sources["black_level"] == "fallback_measured_dark_frame"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("bit_depth", "index_dtype"), [(10, np.uint16), (16, np.uint32)]
+)
+def test_gamma_lut_index_preserves_full_supported_raw_range(
+    bit_depth: int,
+    index_dtype: type,
+) -> None:
+    """过采样索引不可在高位深溢出 / Oversampled indices must not wrap at high bit depth."""
+    camera = V4L2RawCamera({"v4l2_bit_depth": bit_depth})
+    full_scale = (1 << bit_depth) - 1
+    output = camera._debayer(np.full((4, 4), full_scale, dtype=np.uint16))
+
+    assert np.all(output == 255)
+    assert camera._lut_index_buffer is not None
+    assert camera._lut_index_buffer.dtype == index_dtype
 
 
 @pytest.mark.unit
