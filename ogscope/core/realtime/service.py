@@ -149,7 +149,57 @@ class RealtimeSolveService:
             # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
             self._snapshot = None
         self._has_fullsolve = False
-        self._task = asyncio.create_task(self._loop())
+        # 相机在会话之间通常持续采集（供预览使用），缓存里"最新"的那一帧可能是
+        # 移动/未稳定期间拍到的，比如刚结束的 GOTO 收尾阶段——但这只在底座
+        # 真的刚移动过、驱动仍处于"新鲜窗口"内才是风险；同一姿态内的重试
+        # （调用方没有再触发过移动结算）没有这个风险，当前缓存的那一帧本来
+        # 就是安全的。is_within_fresh_capture_epoch() 由调用方在真正的移动
+        # 结算时显式触发（见 begin_fresh_capture_epoch / Core
+        # camera/reset-temporal-history），不是每次 start() 都会置位——如果
+        # 这里也无条件调用 begin_fresh_capture_epoch，会让这个窗口在连续重
+        # 试时永远续期，等于每次重试都要多付一次完整曝光的等待成本，恰恰是
+        # 之前"同一姿态反复重试却几乎抓不到一帧"的根因。驱动没有这类状态
+        # （或测试替身）时默认永远安全，直接用当前缓存的那一帧。
+        # The camera usually keeps capturing between sessions (for the live
+        # preview), so the "latest" cached frame can be one taken during/
+        # right after a move, before settling finished - but that's only a
+        # risk if the mount actually just moved and the driver is still
+        # inside its "fresh window". A retry at an unchanged pose (no new
+        # settle happened) has no such risk; the currently cached frame is
+        # already safe. is_within_fresh_capture_epoch() is set explicitly by
+        # the caller on a real settle (see begin_fresh_capture_epoch / the
+        # Core camera/reset-temporal-history endpoint), not by every
+        # start() call - calling begin_fresh_capture_epoch
+        # unconditionally here would keep re-extending that window on every
+        # retry, forcing every single retry to pay a full exposure's wait
+        # again, which was exactly why repeated retries at the same pose
+        # were barely capturing a frame at all. Drivers with no such state
+        # (or test doubles) default to always-safe, using whatever is
+        # cached right now.
+        # get_raw_frame() must NOT be used for the baseline: without a
+        # resident raw cache (the default) it synchronously grabs a whole
+        # frame, which can mean waiting out whatever exposure the
+        # background grabber is currently holding and then grabbing
+        # another - measured to stretch this call past 8-10 seconds on real
+        # hardware. get_current_capture_sequence() reads the same counter
+        # without touching the camera at all.
+        camera = get_camera_manager().get_camera_instance()
+        still_within_fresh_epoch = getattr(
+            camera, "is_within_fresh_capture_epoch", None
+        )
+        needs_fresh_frame = False
+        if callable(still_within_fresh_epoch):
+            try:
+                needs_fresh_frame = bool(still_within_fresh_epoch())
+            except Exception:  # noqa: BLE001 - best-effort, default to fast path
+                needs_fresh_frame = False
+        baseline_frame_id = -1
+        if needs_fresh_frame:
+            try:
+                baseline_frame_id = get_camera_manager().get_current_capture_sequence()
+            except Exception:  # noqa: BLE001 - baseline is best-effort
+                baseline_frame_id = -1
+        self._task = asyncio.create_task(self._loop(baseline_frame_id))
         self._log_event(
             "session_started",
             fov_estimate=fov_estimate,
@@ -194,10 +244,10 @@ class RealtimeSolveService:
             "session_id": self.state.session_id,
         }
 
-    async def _loop(self) -> None:
+    async def _loop(self, initial_frame_id: int = -1) -> None:
         """后台循环 / Background loop"""
         last_started_mono = 0.0
-        last_frame_id = -1
+        last_frame_id = initial_frame_id
         while self.state.running:
             try:
                 remaining = self._analysis_interval_sec - (

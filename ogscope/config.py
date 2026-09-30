@@ -180,6 +180,69 @@ class Settings(BaseSettings):
     camera_v4l2_bayer_pattern: str = Field(
         default="RGGB", description="V4L2 Bayer 排列 / V4L2 Bayer pattern"
     )
+    camera_v4l2_gamma: float = Field(
+        default=2.2,
+        ge=1.0,
+        le=4.0,
+        description=(
+            "RAW 路径去马赛克后的 gamma 校正，用于匹配 picamera2/libcamera "
+            "ISP 色调曲线的对比度，使同一 solver_centroid_sigma 阈值在两条"
+            "后端上可复用 / Gamma correction applied after RAW demosaic, "
+            "matching picamera2/libcamera's ISP tone-curve contrast so the "
+            "same solver_centroid_sigma threshold works on both backends"
+        ),
+    )
+    camera_v4l2_temporal_nr_alpha: float = Field(
+        default=0.2,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "时域指数滑动平均降噪系数，1.0 关闭 / 不做累积：用真实静态场景连拍 "
+            "10 帧、逐像素算跨帧标准差测出，V4L2（仅 gamma）的噪声是 "
+            "picamera2 的 6.5 倍（3.55 对 0.55），因为这条路径完全没有降噪，"
+            "picamera2 的 ISP 默认有。产品场景是静态/跟踪的星空，用时域累积而"
+            "不是空间滤波，能在不牺牲空间分辨率的前提下压噪声。值越小压得越"
+            "狠但响应越慢（收敛约需 1/alpha 帧）；曝光或增益一变就会清空累积"
+            "器，不会把不同亮度的帧混在一起 / Temporal EMA noise-reduction "
+            "coefficient; 1.0 disables it (no accumulation). Measured on real "
+            "static-scene hardware (10-frame capture, per-pixel temporal std): "
+            "V4L2 (gamma only) has 6.5x picamera2's noise (3.55 vs 0.55) "
+            "because this path applies no noise reduction at all, while "
+            "picamera2's ISP does by default. The product's real scenes are "
+            "static/tracked astrophotography, so temporal accumulation (not "
+            "spatial filtering) reduces noise without sacrificing spatial "
+            "resolution. Lower = stronger reduction but slower response "
+            "(~1/alpha frames to converge); any exposure or gain change "
+            "clears the accumulator so frames of different brightness are "
+            "never blended together"
+        ),
+    )
+    camera_v4l2_temporal_nr_seconds: float = Field(
+        default=2.0,
+        ge=0.0,
+        le=30.0,
+        description=(
+            "时域降噪的时间常数（秒），0 表示退回固定 alpha：短曝光下每秒有"
+            "很多帧，多平均几十帧几乎不花墙钟时间，可以换到远强于固定 alpha "
+            "的降噪；长曝光下每帧几秒，平均更多帧就是实打实的延迟，于是夹回 "
+            "camera_v4l2_temporal_nr_alpha 这个上限 / Temporal-NR time "
+            "constant in seconds; 0 falls back to the fixed alpha. Short "
+            "exposures deliver many frames per second, so averaging tens of "
+            "them costs almost no wall-clock time and buys far more denoise "
+            "than a fixed alpha; long exposures cost seconds per frame, so "
+            "averaging more is real latency and it clamps back to the "
+            "camera_v4l2_temporal_nr_alpha bound"
+        ),
+    )
+    camera_v4l2_temporal_nr_max_frames: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description=(
+            "时域降噪最多平均多少帧（短曝光下的上限）/ Maximum frames the "
+            "temporal NR will average (the ceiling that short exposures hit)"
+        ),
+    )
     camera_v4l2_active_width: int = Field(
         default=1920, ge=160, description="传感器有效宽度 / Sensor active width"
     )
@@ -277,10 +340,18 @@ class Settings(BaseSettings):
         ),
     )
     camera_auto_exposure_max_us: int = Field(
-        default=1_000_000,
+        default=3_000_000,
         ge=10_000,
         le=10_000_000,
-        description="自动曝光最长帧周期 1s，暗场允许降帧 / Max auto-exposure frame duration, capped at 1s",
+        description=(
+            "自动曝光最长帧周期 3s，暗场允许降帧 / Max auto-exposure frame "
+            "duration, capped at 3s (raised from 1s 2026-09-20 after "
+            "validating 1-3s manual exposure on real Zero2W hardware via "
+            "the V4L2 backend - see "
+            "docs/development/v4l2-zero2w-board-validation.md; the "
+            "picamera2 backend keeps its own independent 1s ceiling, "
+            "camera.py's AUTO_EXPOSURE_MAX_US, unaffected by this)"
+        ),
     )
     camera_ae_flicker_mode: str = Field(
         default="off",
@@ -416,6 +487,40 @@ class Settings(BaseSettings):
     solver_centroid_sigma: float = Field(
         default=2.5,
         description="σ 阈值倍数；略高可减少假星 / Sigma multiplier for thresholding",
+    )
+    solver_centroid_sigma_v4l2: float = Field(
+        default=2.1,
+        description=(
+            "V4L2 RAW 后端专用 σ 阈值：gamma 校正后画面对比度仍明显低于 "
+            "picamera2/libcamera ISP 输出（尝试过再叠加 CLAHE 局部对比度增强，"
+            "但在实测中只是放大暗部噪声、没有真正提升星点可探测性，已撤销 - "
+            "见 docs/development/v4l2-zero2w-board-validation.md）。单独降低"
+            "这条后端的阈值，而不是让画面在视觉上冒充 ISP 输出，才能大致复现 "
+            "picamera2 在其默认 solver_centroid_sigma=2.5 下的检出数量级。"
+            "但这个值不是精确常数：在真实 Zero2W 上重复拍摄，能对齐 picamera2 "
+            "检出数的 σ 在不同轮次间落在约 1.9-2.2 之间（同一室内白天场景，"
+            "曝光/噪声实现每次略有不同），2.1 取的是这个区间的中点，偏保守 "
+            "（宁可少检出也不要让候选点数暴涨到 picamera2 的 3-4 倍，那样的一"
+            "轮实测出现过）。在真实夜空验证前不要把这个数当作精确标定值 / "
+            "Sigma threshold specific to the V4L2 RAW backend: even after "
+            "gamma correction, contrast still trails picamera2/libcamera's "
+            "ISP output measurably (a CLAHE local-contrast stage was tried "
+            "on top but just amplified dark-region noise without improving "
+            "real star detectability, and was reverted - see "
+            "docs/development/v4l2-zero2w-board-validation.md). A "
+            "separately-lowered threshold for this backend, not reshaping "
+            "the image, is what roughly reproduces picamera2's own "
+            "detection order-of-magnitude at its default "
+            "solver_centroid_sigma=2.5 - but this isn't a precise constant: "
+            "across repeated captures on real Zero2W hardware, the sigma "
+            "that matches picamera2's count varied between ~1.9 and ~2.2 "
+            "run to run (same indoor daylight scene, exposure/noise differ "
+            "slightly each capture). 2.1 is the midpoint, chosen "
+            "conservatively (better to under-detect than let the candidate "
+            "count balloon to 3-4x picamera2's, which happened in one "
+            "observed round). Do not treat this as a precisely calibrated "
+            "value until validated against real night sky"
+        ),
     )
     solver_centroid_max_area: int = Field(
         default=400,
@@ -738,9 +843,9 @@ class Settings(BaseSettings):
     @field_validator("camera_auto_exposure_max_us", mode="before")
     @classmethod
     def _cap_camera_auto_exposure_max_us(cls, value: object) -> object:
-        """兼容旧配置并限制暗场曝光为 1s / Keep legacy config bootable and cap AE at 1s."""
+        """兼容旧配置并限制暗场曝光为 3s / Keep legacy config bootable and cap AE at 3s."""
         try:
-            return min(1_000_000, int(value))
+            return min(3_000_000, int(value))
         except (TypeError, ValueError):
             return value
 

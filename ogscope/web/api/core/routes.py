@@ -25,11 +25,6 @@ from ogscope.web.api.models.schemas import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_MJPEG_LIMIT_DETAIL = (
-    "MJPEG stream limit reached; close other previews or tabs / "
-    "已达到 MJPEG 同时连接上限，请关闭其他标签页的预览"
-)
-
 
 @router.post(
     "/core/v1/analysis/start",
@@ -146,7 +141,6 @@ async def core_camera_preview_stream(
             request,
             image_format="jpeg",
             quality=effective_quality,
-            limit_detail=_MJPEG_LIMIT_DETAIL,
             timeout_log_message=(
                 "Core MJPEG 单帧取流超时，结束响应以释放名额 / "
                 "Core MJPEG frame fetch timed out, closing stream"
@@ -174,6 +168,27 @@ async def core_camera_stop() -> CoreCameraControlResponse:
     """停止相机（Core 标准契约）/ Stop camera (Core contract)."""
     try:
         data = await core_contract_service.stop_camera()
+        return CoreCameraControlResponse(**data)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/core/v1/camera/reset-temporal-history",
+    response_model=CoreCameraControlResponse,
+)
+async def core_camera_reset_temporal_history() -> CoreCameraControlResponse:
+    """底座移动结算后重置跨帧降噪历史（Core 标准契约）/ Reset cross-frame
+    temporal history after a mount move settles (Core contract).
+
+    调用方（如 ZenitAPA）在确认底座已经稳定后调用；OGScope 本身没有底座
+    状态，无法自己判断该何时重置。
+    The caller (e.g. ZenitAPA) invokes this once it has confirmed the mount
+    has settled; OGScope has no mount state of its own and cannot decide
+    this timing on its own.
+    """
+    try:
+        data = await core_contract_service.reset_camera_temporal_history()
         return CoreCameraControlResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc

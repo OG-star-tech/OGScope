@@ -43,6 +43,176 @@ def test_capture_time_payload_uses_exposure_midpoint() -> None:
 
 
 @pytest.mark.unit
+def test_start_seeds_loop_baseline_when_still_within_a_fresh_epoch(
+    monkeypatch,
+) -> None:
+    """刚结算过移动时必须跳过缓存里的旧帧 / Right after a real settle, starting
+    a session must skip the frame already cached from before it.
+
+    The camera keeps capturing between sessions (for the live preview), so
+    whatever frame is cached when start() is called may have been taken
+    during/before mount settling. While the driver reports we're still
+    inside that risk window (a real settle happened recently), the loop
+    must not treat the already-cached frame as this session's fresh first
+    frame - it needs to wait for a strictly newer frame_id.
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+
+    class _FakeCameraStillFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return True
+
+    camera = _FakeCameraStillFresh()
+
+    class _FakeManager:
+        def get_current_capture_sequence(self) -> int:
+            return 7
+
+        def get_camera_instance(self):
+            return camera
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    captured: dict[str, int] = {}
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        captured["initial_frame_id"] = initial_frame_id
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        # start() only schedules _loop as a task; yield once so it runs.
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert captured["initial_frame_id"] == 7
+
+
+@pytest.mark.unit
+def test_start_skips_the_fresh_frame_wait_for_a_retry_at_an_unchanged_pose(
+    monkeypatch,
+) -> None:
+    """同姿态重试不应该再等一帧全新的 / A retry at an unchanged pose must not
+    wait for another brand-new frame.
+
+    Regression for "repeated retries at the same pose were barely
+    capturing a frame at all": every _single_solve() attempt restarts the
+    OGScope analysis session, and previously start() always demanded a
+    frame newer than whatever was already cached - even when no real
+    settle had happened since the last attempt, forcing every retry to pay
+    a full exposure's wait. Once the driver reports we're past its fresh
+    window (no real settle recently), start() must accept the current
+    session id and start_gate immediately (baseline -1), never touching
+    get_current_capture_sequence() at all.
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+
+    class _FakeCameraNotFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return False
+
+    camera = _FakeCameraNotFresh()
+
+    class _FakeManager:
+        def get_current_capture_sequence(self) -> int:
+            raise AssertionError(
+                "start() must not need the capture sequence when the "
+                "driver reports the cached frame is already safe"
+            )
+
+        def get_camera_instance(self):
+            return camera
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    captured: dict[str, int] = {}
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        captured["initial_frame_id"] = initial_frame_id
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert captured["initial_frame_id"] == -1
+
+
+@pytest.mark.unit
+def test_start_never_calls_the_slow_synchronous_frame_grab(monkeypatch) -> None:
+    """回归：start() 建立基线绝不能触发同步抓帧 / Regression: establishing
+    the baseline in start() must never fall through to a synchronous
+    camera capture.
+
+    Without a resident raw cache (the default), get_raw_frame() blocks on a
+    real capture - which can mean waiting out whatever exposure the
+    background grabber is currently holding and then grabbing another.
+    Measured on real hardware, that stretched a single analysis/start call
+    past 8-10 seconds, well past the caller's own HTTP read timeout, so
+    every attempt timed out and was retried before any session ever lived
+    long enough to solve a single frame. start() must get its baseline
+    without going anywhere near get_raw_frame().
+    """
+    from ogscope.core.realtime import service as realtime_service_module
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+
+    class _FakeCameraStillFresh:
+        def is_within_fresh_capture_epoch(self) -> bool:
+            return True
+
+    camera = _FakeCameraStillFresh()
+
+    class _FakeManager:
+        def get_current_capture_sequence(self) -> int:
+            return 3
+
+        def get_camera_instance(self):
+            return camera
+
+        async def get_raw_frame(self):
+            raise AssertionError(
+                "start() must not call get_raw_frame() - it can block on a "
+                "real capture for as long as the current exposure"
+            )
+
+    monkeypatch.setattr(
+        realtime_service_module, "get_camera_manager", lambda: _FakeManager()
+    )
+
+    captured: dict[str, int] = {}
+
+    async def _fake_loop(self, initial_frame_id: int = -1) -> None:
+        captured["initial_frame_id"] = initial_frame_id
+
+    monkeypatch.setattr(RealtimeSolveService, "_loop", _fake_loop)
+
+    async def _run() -> None:
+        await service.start()
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    assert captured["initial_frame_id"] == 3
+
+
+@pytest.mark.unit
 def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve):
     """测试实时解算启停接口 / Test realtime solver start and stop endpoints."""
     from ogscope.web.api.debug import routes as debug_routes

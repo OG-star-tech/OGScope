@@ -176,6 +176,87 @@ async def test_core_camera_start_requires_confirmed_ready(monkeypatch) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_reset_camera_temporal_history_calls_the_driver_hook_when_present(
+    monkeypatch,
+) -> None:
+    """驱动实现钩子时必须真正调用 / The driver's hook must actually be invoked when present."""
+    from ogscope.core.application import core_service
+    from ogscope.domain.camera import services as camera_services_module
+
+    calls = 0
+
+    class _CameraWithHook:
+        def begin_fresh_capture_epoch(self) -> bool:
+            nonlocal calls
+            calls += 1
+            return True
+
+    monkeypatch.setattr(
+        camera_services_module.DebugCameraService,
+        "get_camera_instance",
+        staticmethod(lambda: _CameraWithHook()),
+    )
+
+    service = core_service.CoreContractService()
+    result = await service.reset_camera_temporal_history()
+
+    assert calls == 1
+    assert result["success"] is True
+    assert result["applied"]["temporal_history_reset"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reset_camera_temporal_history_reports_noop_driver_as_not_applied(
+    monkeypatch,
+) -> None:
+    """空实现不应谎报已清空历史 / A no-op driver must not claim a reset was applied."""
+    from ogscope.core.application import core_service
+    from ogscope.domain.camera import services as camera_services_module
+
+    class _CameraWithNoopHook:
+        def begin_fresh_capture_epoch(self) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        camera_services_module.DebugCameraService,
+        "get_camera_instance",
+        staticmethod(lambda: _CameraWithNoopHook()),
+    )
+
+    result = await core_service.CoreContractService().reset_camera_temporal_history()
+
+    assert result["success"] is True
+    assert result["applied"]["temporal_history_reset"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reset_camera_temporal_history_tolerates_a_driver_without_the_hook(
+    monkeypatch,
+) -> None:
+    """老驱动没有该钩子时不能报错 / An old driver without the hook must not error."""
+    from ogscope.core.application import core_service
+    from ogscope.domain.camera import services as camera_services_module
+
+    class _CameraWithoutHook:
+        pass
+
+    monkeypatch.setattr(
+        camera_services_module.DebugCameraService,
+        "get_camera_instance",
+        staticmethod(lambda: _CameraWithoutHook()),
+    )
+
+    service = core_service.CoreContractService()
+    result = await service.reset_camera_temporal_history()
+
+    assert result["success"] is True
+    assert result["applied"]["temporal_history_reset"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_core_camera_tune_writes_manual_baseline_before_enabling_ae(
     monkeypatch,
 ) -> None:
@@ -354,6 +435,14 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     async def _fake_stop_camera():
         return {"success": True, "message": "stopped"}
 
+    async def _fake_reset_temporal_history():
+        return {
+            "success": True,
+            "message": "",
+            "info": {},
+            "applied": {"temporal_history_reset": True},
+        }
+
     monkeypatch.setattr(
         core_service.core_contract_service, "get_camera_status", _fake_camera_status
     )
@@ -365,6 +454,11 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         core_service.core_contract_service, "stop_camera", _fake_stop_camera
+    )
+    monkeypatch.setattr(
+        core_service.core_contract_service,
+        "reset_camera_temporal_history",
+        _fake_reset_temporal_history,
     )
     monkeypatch.setattr(
         core_service.core_contract_service, "get_stream_status", _fake_stream_status
@@ -393,6 +487,10 @@ def test_core_camera_contract_endpoints(client, monkeypatch) -> None:
     stop = client.post("/api/core/v1/camera/stop")
     assert stop.status_code == 200
     assert stop.json()["success"] is True
+
+    reset_history = client.post("/api/core/v1/camera/reset-temporal-history")
+    assert reset_history.status_code == 200
+    assert reset_history.json()["applied"]["temporal_history_reset"] is True
 
     stream_status = client.get("/api/dev/debug/camera/stream/status")
     assert stream_status.status_code == 200

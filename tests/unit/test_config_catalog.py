@@ -43,8 +43,11 @@ def test_simulation_mode_tri_state(raw: str | None, expected: bool | None) -> No
 
 
 @pytest.mark.unit
-def test_legacy_auto_exposure_ceiling_is_capped_at_one_second() -> None:
-    """旧环境值不阻止启动且会收敛到 1 秒 / Legacy values boot and clamp to 1s."""
-    settings = Settings(camera_auto_exposure_max_us=2_000_000)
+def test_legacy_auto_exposure_ceiling_is_capped_at_three_seconds() -> None:
+    """旧环境值不阻止启动且会收敛到 3 秒（2026-09-20 从 1 秒放宽 - 见
+    docs/development/v4l2-zero2w-board-validation.md）/ Legacy values boot
+    and clamp to 3s (raised from 1s 2026-09-20 - see
+    docs/development/v4l2-zero2w-board-validation.md)."""
+    settings = Settings(camera_auto_exposure_max_us=5_000_000)
 
-    assert settings.camera_auto_exposure_max_us == 1_000_000
+    assert settings.camera_auto_exposure_max_us == 3_000_000

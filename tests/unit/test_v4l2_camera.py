@@ -506,11 +506,15 @@ def test_vblank_expands_dynamic_exposure_range(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_v4l2_auto_exposure_ceiling_is_capped_at_one_second() -> None:
-    camera = _ready_camera(auto_exposure_max_us=2_000_000)
+def test_v4l2_auto_exposure_ceiling_is_capped_at_three_seconds() -> None:
+    """2026-09-20 从 1 秒放宽到 3 秒 - 在真实 Zero2W 上验证 1s-3s 手动曝光后的
+    产品决策，见 docs/development/v4l2-zero2w-board-validation.md / Raised
+    from 1s to 3s on 2026-09-20 after validating 1s-3s manual exposure on a
+    real Zero2W - see docs/development/v4l2-zero2w-board-validation.md."""
+    camera = _ready_camera(auto_exposure_max_us=5_000_000)
 
-    assert camera.auto_exposure_max_us == 1_000_000
-    assert camera._ae.limits.max_exposure_us == 1_000_000
+    assert camera.auto_exposure_max_us == 3_000_000
+    assert camera._ae.limits.max_exposure_us == 3_000_000
 
 
 @pytest.mark.unit
@@ -521,9 +525,9 @@ def test_software_ae_gain_limit_respects_hardware_control_range() -> None:
     camera._ae = camera._create_auto_exposure()
 
     assert camera._ae.limits.max_gain == pytest.approx(1.995, abs=0.001)
-    assert camera.set_auto_exposure_max_us(3_000_000) is True
-    assert camera.auto_exposure_max_us == 1_000_000
-    assert camera._ae.limits.max_exposure_us == 1_000_000
+    assert camera.set_auto_exposure_max_us(5_000_000) is True
+    assert camera.auto_exposure_max_us == 3_000_000
+    assert camera._ae.limits.max_exposure_us == 3_000_000
 
 
 @pytest.mark.unit
@@ -604,3 +608,339 @@ def test_v4l2_capabilities_truthfully_report_software_ae() -> None:
     assert info["capabilities"]["software_auto_exposure"] is True
     assert info["capabilities"]["manual_digital_gain"] is False
     assert info["auto_exposure_engine"] == "software_night_sky"
+
+
+@pytest.mark.unit
+def test_temporal_nr_first_frame_is_passthrough() -> None:
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.5})
+    raw = np.full((4, 4), 1000, dtype=np.uint16)
+
+    output = camera._apply_temporal_nr(raw)
+
+    assert np.array_equal(output, raw)
+
+
+@pytest.mark.unit
+def test_temporal_nr_blends_consecutive_raw_frames_with_configured_alpha() -> None:
+    # temporal_nr_seconds=0 pins the fixed alpha, isolating the blend maths
+    # from the frame-duration-aware adaptation.
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.5, "v4l2_temporal_nr_seconds": 0.0}
+    )
+    raw_a = np.full((4, 4), 1000, dtype=np.uint16)
+    raw_b = np.full((4, 4), 2000, dtype=np.uint16)
+
+    camera._apply_temporal_nr(raw_a)
+    output = camera._apply_temporal_nr(raw_b)
+
+    assert np.all(output == 1500)  # 0.5 * 2000 + 0.5 * 1000
+
+
+@pytest.mark.unit
+def test_temporal_nr_keeps_sub_integer_precision_in_raw_domain() -> None:
+    """Averaging happens in the linear RAW domain, so the accumulator must
+    keep fractional values rather than rounding back to integer RAW codes -
+    that sub-integer precision is what the oversampled gamma LUT preserves."""
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.5, "v4l2_temporal_nr_seconds": 0.0}
+    )
+    camera._apply_temporal_nr(np.full((4, 4), 1000, dtype=np.uint16))
+
+    output = camera._apply_temporal_nr(np.full((4, 4), 1001, dtype=np.uint16))
+
+    assert np.allclose(output, 1000.5)
+
+
+@pytest.mark.unit
+def test_temporal_nr_alpha_averages_more_frames_at_short_exposures() -> None:
+    """Short exposures deliver many frames per second, so the EMA should
+    average far more of them (smaller alpha) than the fixed bound - the
+    wall-clock cost is negligible there, unlike at long exposures."""
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0}
+    )
+
+    camera._frame_duration_us = 10_000  # 10ms frames -> 200 in 2s, capped at 50
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(1.0 / 50)
+
+    camera._frame_duration_us = 200_000  # 200ms frames -> 10 frames in 2s
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.1)
+
+
+@pytest.mark.unit
+def test_temporal_nr_alpha_converges_to_no_averaging_at_long_exposures() -> None:
+    """A single long exposure already carries its own integration time, so
+    forcing extra frames on top of it multiplies the real temporal window
+    (and any motion during it) far past what the reported exposure implies.
+    Forcing a 5-frame floor at a 3s exposure produced a real 15s blended
+    window - invisible on a perfectly still scene, but a source of star
+    trailing whenever the mount hasn't fully settled. Long exposures must
+    converge to alpha=1 (no extra averaging), not clamp back up to the
+    configured alpha."""
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0}
+    )
+
+    camera._frame_duration_us = 3_000_000  # 3s frames -> 0.67 frames in 2s budget
+
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_temporal_nr_seconds_zero_falls_back_to_fixed_alpha() -> None:
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 0.0}
+    )
+    camera._frame_duration_us = 10_000
+
+    assert camera._effective_temporal_nr_alpha() == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_temporal_nr_disabled_at_alpha_one_is_pure_passthrough() -> None:
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 1.0})
+    raw_a = np.full((4, 4), 1000, dtype=np.uint16)
+    raw_b = np.full((4, 4), 2000, dtype=np.uint16)
+
+    camera._apply_temporal_nr(raw_a)
+    output = camera._apply_temporal_nr(raw_b)
+
+    assert np.array_equal(output, raw_b)
+
+
+@pytest.mark.unit
+def test_exposure_change_discards_temporal_nr_history(monkeypatch) -> None:
+    """An exposure change must discard the accumulated history (frames at a
+    different brightness), but must NOT free the buffer - reallocating a
+    full-frame float32 on every AE adjustment walks RSS upward."""
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+    monkeypatch.setattr(camera, "_set_control", lambda _name, _value: True)
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    buffer_before = camera._nr_accumulator
+
+    assert camera._apply_exposure_gain(30_000, 2.0) is True
+
+    assert camera._nr_accumulator_valid is False
+    assert camera._nr_accumulator is buffer_before  # buffer kept for reuse
+
+    # The next frame starts fresh rather than blending toward the old value.
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
+
+
+@pytest.mark.unit
+def test_start_capture_discards_temporal_nr_history() -> None:
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+    camera._capture = _FakeCapture(np.full((120, 160), 500, dtype=np.uint16))
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+
+    assert camera.start_capture() is True
+
+    assert camera._nr_accumulator_valid is False
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
+
+
+@pytest.mark.unit
+def test_fresh_capture_epoch_discards_history_without_reallocating() -> None:
+    """Regression for the "still solving a trailed frame" follow-up: preview
+    keeps capturing through a mount move (continuous frames at the pre-move
+    scene get blended into the EMA), and a fresh frame_id after analysis/start
+    is not the same guarantee as a frame free of that old history. Simulates
+    continuous preview -> mount movement/old frames -> analysis start
+    (begin_fresh_capture_epoch) -> first frame containing no previous EMA
+    history, and confirms the accumulator buffer itself is kept (RSS fix)."""
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+
+    # Continuous preview through a mount move: several frames at the
+    # pre-settle scene get blended into the EMA accumulator.
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
+    buffer_before = camera._nr_accumulator
+
+    # analysis/start begins.
+    camera.begin_fresh_capture_epoch()
+
+    assert camera._nr_accumulator_valid is False
+    assert camera._nr_accumulator is buffer_before  # buffer kept for reuse
+
+    # The first frame of the new session starts fresh, not blended toward
+    # the pre-move scene.
+    output = camera._apply_temporal_nr(np.full((120, 160), 900, dtype=np.uint16))
+    assert np.all(output == 900)
+
+
+@pytest.mark.unit
+def test_fresh_capture_epoch_rejects_a_seed_still_mid_exposure_at_reset(
+    monkeypatch,
+) -> None:
+    """Regression for "still see a fade between the old and new scene after
+    a move": a frame delivered before one full exposure duration has
+    elapsed since begin_fresh_capture_epoch() may itself have started
+    exposing before the reset (even before the mount stopped), so it can
+    already be trailed. It must not be trusted as the persisted seed - the
+    accumulator must stay invalid and keep being overwritten (not blended)
+    until a frame is guaranteed to have started exposing after the reset."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(v4l2_temporal_nr_alpha=0.5, exposure_us=10_000)  # 10ms
+
+    camera.begin_fresh_capture_epoch()
+
+    # A frame delivered immediately (0ms later) may have started exposing
+    # before the reset - must not become the trusted seed yet.
+    output = camera._apply_temporal_nr(np.full((120, 160), 111, dtype=np.uint16))
+    assert np.all(output == 111)
+    assert camera._nr_accumulator_valid is False
+
+    # Still within the one-exposure window (5ms of 10ms elapsed) - same story.
+    clock["t"] = 0.005
+    output = camera._apply_temporal_nr(np.full((120, 160), 222, dtype=np.uint16))
+    assert np.all(output == 222)
+    assert camera._nr_accumulator_valid is False
+
+    # A full exposure duration has now elapsed - this frame is guaranteed to
+    # have started exposing after the reset, so it becomes the trusted seed.
+    clock["t"] = 0.010
+    output = camera._apply_temporal_nr(np.full((120, 160), 333, dtype=np.uint16))
+    assert np.all(output == 333)
+    assert camera._nr_accumulator_valid is True
+
+    # From here on, genuinely new frames blend against the real seed as usual.
+    blended = camera._apply_temporal_nr(np.full((120, 160), 999, dtype=np.uint16))
+    assert np.all(blended > 333) and np.all(blended < 999)
+
+
+@pytest.mark.unit
+def test_is_within_fresh_capture_epoch_reports_the_same_window(monkeypatch) -> None:
+    """is_within_fresh_capture_epoch 与失效窗口保持一致 / Must track the same
+    window _apply_temporal_nr uses to decide whether to trust a seed.
+
+    A caller retrying at an unchanged pose (no real settle since the last
+    attempt) checks this before deciding whether to wait for a brand-new
+    frame - it must report False once the window has actually passed, or
+    every retry keeps paying a full exposure's wait for nothing."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(exposure_us=10_000)  # 10ms
+
+    assert camera.is_within_fresh_capture_epoch() is False  # never reset yet
+
+    camera.begin_fresh_capture_epoch()
+    assert camera.is_within_fresh_capture_epoch() is True
+
+    clock["t"] = 0.005
+    assert camera.is_within_fresh_capture_epoch() is True  # still mid-exposure
+
+    clock["t"] = 0.010
+    assert camera.is_within_fresh_capture_epoch() is False  # exposure has elapsed
+
+
+@pytest.mark.unit
+def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
+    monkeypatch,
+) -> None:
+    """No sensor black_level control (confirmed via v4l2-ctl --list-ctrls on
+    real hardware) must not silently fall back to 0 - that means zero
+    black-level correction is ever applied. Falls back to a value measured
+    with the lens covered on real hardware instead."""
+    camera = V4L2RawCamera({"v4l2_bit_depth": 12})
+    monkeypatch.setattr(camera, "_read_control", lambda _name: None)
+
+    camera._resolve_signal_levels()
+
+    assert camera.black_level != 0
+    from ogscope.platform.hardware.v4l2_camera import (
+        FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE,
+    )
+
+    expected = round(FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE * 4095)
+    assert camera.black_level == expected
+    assert camera._signal_level_sources["black_level"] == "fallback_measured_dark_frame"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("bit_depth", "index_dtype"), [(10, np.uint16), (16, np.uint32)]
+)
+def test_gamma_lut_index_preserves_full_supported_raw_range(
+    bit_depth: int,
+    index_dtype: type,
+) -> None:
+    """过采样索引不可在高位深溢出 / Oversampled indices must not wrap at high bit depth."""
+    camera = V4L2RawCamera({"v4l2_bit_depth": bit_depth})
+    full_scale = (1 << bit_depth) - 1
+    output = camera._debayer(np.full((4, 4), full_scale, dtype=np.uint16))
+
+    assert np.all(output == 255)
+    assert camera._lut_index_buffer is not None
+    assert camera._lut_index_buffer.dtype == index_dtype
+
+
+@pytest.mark.unit
+def test_tone_lut_matches_float_reference_for_night_white_balance() -> None:
+    """The LUT path replaces a float32 pipeline, so it must reproduce the
+    same values - WB gains, contrast and brightness are pointwise, so
+    folding them into a LUT is exact up to rounding."""
+    camera = V4L2RawCamera(
+        {
+            "v4l2_active_width": 160,
+            "v4l2_active_height": 120,
+            "width": 160,
+            "height": 120,
+            "rotation": 0,
+            "white_balance_mode": "night",
+        }
+    )
+    image = (
+        np.arange(120 * 160 * 3, dtype=np.int64).reshape(120, 160, 3) % 256
+    ).astype(np.uint8)
+
+    output = camera._apply_postprocessing(image)
+
+    gains = np.asarray((1.1, 1.0, 0.9), dtype=np.float32)
+    expected = np.clip(np.rint(image.astype(np.float32) * gains), 0, 255).astype(
+        np.uint8
+    )
+    assert np.array_equal(output, expected)
+
+
+@pytest.mark.unit
+def test_tone_lut_rebuilds_when_white_balance_changes() -> None:
+    camera = V4L2RawCamera({"white_balance_mode": "night"})
+    first = camera._tone_lut().copy()
+
+    camera.white_balance_mode = "manual"
+    camera.white_balance_gain_r = 2.0
+    camera.white_balance_gain_b = 0.5
+    second = camera._tone_lut()
+
+    assert not np.array_equal(first, second)
+
+
+@pytest.mark.unit
+def test_saturation_still_applies_via_float_path() -> None:
+    """Saturation is cross-channel so it cannot fold into the LUT; it must
+    still take effect rather than being silently dropped."""
+    camera = V4L2RawCamera(
+        {
+            "v4l2_active_width": 160,
+            "v4l2_active_height": 120,
+            "width": 160,
+            "height": 120,
+            "rotation": 0,
+            "white_balance_mode": "auto",
+            "saturation": 0.0,  # fully desaturated -> all channels equal
+        }
+    )
+    image = np.zeros((120, 160, 3), dtype=np.uint8)
+    image[..., 0] = 200
+    image[..., 2] = 50
+
+    output = camera._apply_postprocessing(image)
+
+    assert output[0, 0, 0] == output[0, 0, 1] == output[0, 0, 2]
