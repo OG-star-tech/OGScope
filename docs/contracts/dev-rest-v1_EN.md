@@ -31,6 +31,7 @@ This document describes OGScope **developer-domain** APIs (internal). They are *
     - `preview_encoder` / `jpeg_source_format`: active preview encoder and source format
     - `camera_driver` / `camera_backend`: camera driver and backend
     - `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format`: low-resolution stream status
+    - The V4L2 RAW backend also reports `capabilities.software_auto_exposure`, `ae_state`, `luminance_stats`, `signal_levels`, `control_readback`, `capture_format`, and `media_pipeline`. Failed hardware readback leaves `actual_exposure_us` / `actual_analogue_gain` as `null`; requested values must not masquerade as measured values.
 
 ### Debug camera settings
 

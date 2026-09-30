@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from loguru import logger
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.config import effective_solver_max_stars, get_settings
+from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.web.camera_shared import get_camera_manager
 
 
@@ -30,6 +32,20 @@ class RealtimeState:
     last_error: str = ""
     session_id: str = ""
     started_mono: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class SolveFrameSnapshot:
+    """与解算结果严格对应的单张 JPEG / Single JPEG corresponding exactly to a solve."""
+
+    content: bytes
+    session_id: str
+    frame_id: int
+    captured_at: float
+    width: int
+    height: int
+    encoder: str
+    encode_ms: float
 
 
 class RealtimeSolveService:
@@ -53,6 +69,13 @@ class RealtimeSolveService:
         self._fov_max_error: float | None = None
         self._solve_timeout_ms: int | None = None
         self._solve_context: Any | None = None
+        self._snapshot_lock = threading.Lock()
+        self._snapshot: SolveFrameSnapshot | None = None
+        self._snapshot_encoder = create_preview_encoder(
+            getattr(settings, "preview_encoder", "auto")
+        )
+        self._snapshot_quality = min(70, int(settings.preview_jpeg_quality))
+        self._snapshot_encode_failures = 0
         self._analysis_interval_sec = max(
             float(settings.star_analysis_min_interval_ms) / 1000.0,
             1.0 / max(0.01, float(settings.star_analysis_target_fps)),
@@ -122,6 +145,9 @@ class RealtimeSolveService:
             session_id=str(session_id or ""),
             started_mono=time.monotonic(),
         )
+        with self._snapshot_lock:
+            # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
+            self._snapshot = None
         self._has_fullsolve = False
         self._task = asyncio.create_task(self._loop())
         self._log_event(
@@ -220,7 +246,29 @@ class RealtimeSolveService:
                         self._solve_frame_sync,
                         frame,
                     )
-                    self._apply_solve_result(solved, capture_time=capture_time)
+                    snapshot: SolveFrameSnapshot | None = None
+                    snapshot_attempted = self._should_retain_snapshot(solved)
+                    if snapshot_attempted:
+                        source_format = str(
+                            getattr(cam, "output_pixel_format", None)
+                            or getattr(cam, "pixel_format", None)
+                            or "RGB888"
+                        )
+                        snapshot = await asyncio.to_thread(
+                            self._encode_snapshot_sync,
+                            frame,
+                            session_id=self.state.session_id,
+                            frame_id=frame_id,
+                            captured_at=frame_ts,
+                            source_format=source_format,
+                        )
+                    self._apply_solve_result(
+                        solved,
+                        capture_time=capture_time,
+                        frame_id=frame_id,
+                        snapshot=snapshot,
+                        snapshot_attempted=snapshot_attempted,
+                    )
                     self.state.fullsolve_count += 1
                     self._log_event(
                         "fullsolve_finished",
@@ -235,6 +283,11 @@ class RealtimeSolveService:
                         wall_ms=int((time.monotonic() - solve_started) * 1000),
                         rmse_arcsec=solved.rmse_arcsec,
                         observation_time_utc=capture_time.get("observation_time_utc"),
+                        solve_snapshot_bytes=len(snapshot.content) if snapshot else 0,
+                        solve_snapshot_encode_ms=(
+                            round(snapshot.encode_ms, 3) if snapshot else None
+                        ),
+                        solve_snapshot_encoder=snapshot.encoder if snapshot else None,
                     )
                     # ``solve_from_bgr_frame`` is the authoritative production
                     # image pipeline.  Keep only a sentinel here; StarExtractor
@@ -280,11 +333,72 @@ class RealtimeSolveService:
             solve_timeout_ms=self._solve_timeout_ms,
         )
 
+    @staticmethod
+    def _should_retain_snapshot(solved: SolveResult) -> bool:
+        """成功解算或存在结构证据时保留一帧 / Retain successes or structural evidence."""
+        if solved.status == "MATCH_FOUND":
+            return True
+        quality = solved.centroid_quality
+        scene = quality.get("scene") if isinstance(quality, dict) else None
+        return bool(
+            isinstance(scene, dict) and scene.get("has_structural_evidence", False)
+        )
+
+    def _encode_snapshot_sync(
+        self,
+        frame: Any,
+        *,
+        session_id: str,
+        frame_id: int,
+        captured_at: float,
+        source_format: str,
+    ) -> SolveFrameSnapshot | None:
+        """在线程中编码一次，失败不影响解算 / Encode once off-loop; failure is non-fatal."""
+        started = time.perf_counter()
+        try:
+            encoded = self._snapshot_encoder.encode_jpeg(
+                frame,
+                quality=self._snapshot_quality,
+                source_format=source_format,
+            )
+            if encoded is None:
+                encoded = OpenCVEncoder().encode_jpeg(
+                    frame,
+                    quality=self._snapshot_quality,
+                    source_format=source_format,
+                )
+        except Exception:  # noqa: BLE001 - snapshot is best effort / 快照为尽力而为
+            encoded = None
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        if encoded is None:
+            self._snapshot_encode_failures += 1
+            return None
+        height = int(getattr(frame, "shape", [0, 0])[0])
+        width = int(getattr(frame, "shape", [0, 0])[1])
+        return SolveFrameSnapshot(
+            content=encoded.data,
+            session_id=session_id,
+            frame_id=int(frame_id),
+            captured_at=float(captured_at),
+            width=width,
+            height=height,
+            encoder=encoded.encoder,
+            encode_ms=elapsed_ms,
+        )
+
+    def get_solve_frame_snapshot(self) -> SolveFrameSnapshot | None:
+        """返回不可变快照引用 / Return the immutable current snapshot."""
+        with self._snapshot_lock:
+            return self._snapshot
+
     def _apply_solve_result(
         self,
         solved: SolveResult,
         *,
         capture_time: dict[str, Any] | None = None,
+        frame_id: int | None = None,
+        snapshot: SolveFrameSnapshot | None = None,
+        snapshot_attempted: bool = False,
     ) -> None:
         """写入解算结果 / Persist solve result"""
         row = solved.to_dict()
@@ -292,6 +406,27 @@ class RealtimeSolveService:
             # Optional additive Core fields keep old consumers compatible. /
             # 可选增量字段保持旧版 Core 消费方兼容。
             row.update(capture_time)
+        if frame_id is not None:
+            row["solve_frame"] = {
+                "available": snapshot is not None,
+                "session_id": self.state.session_id,
+                "frame_id": int(frame_id),
+                "width": snapshot.width if snapshot else None,
+                "height": snapshot.height if snapshot else None,
+                "media_type": "image/jpeg" if snapshot else None,
+                "byte_size": len(snapshot.content) if snapshot else 0,
+                "encoder": snapshot.encoder if snapshot else None,
+                "encode_ms": round(snapshot.encode_ms, 3) if snapshot else None,
+                "encode_failures": self._snapshot_encode_failures,
+                "reason": (
+                    None
+                    if snapshot is not None
+                    else "encode_failed" if snapshot_attempted else "not_retained"
+                ),
+            }
+        with self._snapshot_lock:
+            # 始终覆盖，防止新结果错误搭配旧图 / Always replace to prevent result/frame mixing.
+            self._snapshot = snapshot
         attach_sensor_prediction(row, self._solve_context)
         self.state.last_result = row
         # A later completed frame supersedes a transient capture/solve exception.

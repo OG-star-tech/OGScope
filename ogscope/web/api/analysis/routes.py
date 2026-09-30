@@ -5,7 +5,7 @@
 import mimetypes
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from ogscope.domain.analysis.services import analysis_domain_service
 from ogscope.web.api.analysis.services import analysis_service
@@ -274,6 +274,25 @@ async def solve_analysis_frame(body: AnalysisSolveVideoFrameRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/analysis/solve/frame/jpeg")
+async def get_analysis_solve_frame(
+    token: str = Query(..., min_length=16, max_length=128)
+):
+    """读取当前调试解算帧 / Read the current developer solve frame."""
+    try:
+        content, meta = analysis_service.get_debug_solve_snapshot(token)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "X-Solve-Frame-Id": str(meta.get("frame_id", "")),
+        },
+    )
 
 
 @router.post("/analysis/solve/frame_upload")

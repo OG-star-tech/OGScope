@@ -8,6 +8,7 @@ import asyncio
 import json
 import math
 import shutil
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,7 @@ from ogscope.config import (
     effective_solver_max_stars,
     get_settings,
 )
+from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
 from ogscope.domain.shared.filesystem import (
     DEV_CAPTURES_DIR,
@@ -167,6 +169,14 @@ class AnalysisService:
             "camera": RealtimeSolveGateState(),
             "file": RealtimeSolveGateState(),
         }
+        self._solve_snapshot_lock = threading.Lock()
+        self._solve_snapshot_token = ""
+        self._solve_snapshot_bytes: bytes | None = None
+        self._solve_snapshot_meta: dict[str, Any] = {}
+        self._solve_snapshot_encoder = create_preview_encoder(
+            getattr(settings, "preview_encoder", "auto")
+        )
+        self._solve_snapshot_quality = min(70, int(settings.preview_jpeg_quality))
 
     @staticmethod
     def _clamp_centroid_rejection_level(v: int | None) -> int:
@@ -220,6 +230,72 @@ class AnalysisService:
         """判断实时解算源是否繁忙 / Check whether realtime source is busy."""
         state = self._realtime_gate_states.get(source)
         return bool(state and state.in_flight)
+
+    @staticmethod
+    def _row_needs_snapshot(row: dict[str, Any]) -> bool:
+        """成功或有结构证据时保留调试帧 / Keep successes or structural evidence."""
+        if str(row.get("status") or "") == "MATCH_FOUND":
+            return True
+        quality = row.get("centroid_quality")
+        scene = quality.get("scene") if isinstance(quality, dict) else None
+        return bool(
+            isinstance(scene, dict) and scene.get("has_structural_evidence", False)
+        )
+
+    def _encode_debug_solve_snapshot(self, frame: Any, frame_id: int) -> dict[str, Any]:
+        """只缓存一张压缩图，不保留 raw / Cache one compressed frame without raw history."""
+        started = time.perf_counter()
+        try:
+            encoded = self._solve_snapshot_encoder.encode_jpeg(
+                frame,
+                quality=self._solve_snapshot_quality,
+                source_format="RGB888",
+            )
+            if encoded is None:
+                encoded = OpenCVEncoder().encode_jpeg(
+                    frame,
+                    quality=self._solve_snapshot_quality,
+                    source_format="RGB888",
+                )
+        # 调试快照失败不能影响解算 / Snapshot failures must not affect solving.
+        except Exception:  # noqa: BLE001
+            encoded = None
+        if encoded is None:
+            with self._solve_snapshot_lock:
+                self._solve_snapshot_token = ""
+                self._solve_snapshot_bytes = None
+                self._solve_snapshot_meta = {}
+            return {"available": False, "reason": "encode_failed"}
+        token = uuid.uuid4().hex
+        height = int(frame.shape[0])
+        width = int(frame.shape[1])
+        meta = {
+            "available": True,
+            "token": token,
+            "frame_id": int(frame_id),
+            "width": width,
+            "height": height,
+            "byte_size": len(encoded.data),
+            "encoder": encoded.encoder,
+            "encode_ms": round((time.perf_counter() - started) * 1000.0, 3),
+            "url": f"/api/dev/analysis/solve/frame/jpeg?token={token}",
+        }
+        with self._solve_snapshot_lock:
+            self._solve_snapshot_token = token
+            self._solve_snapshot_bytes = encoded.data
+            self._solve_snapshot_meta = dict(meta)
+        return meta
+
+    def get_debug_solve_snapshot(self, token: str) -> tuple[bytes, dict[str, Any]]:
+        """按不可猜测令牌读取当前调试帧 / Read the current debug frame by token."""
+        with self._solve_snapshot_lock:
+            if (
+                not token
+                or token != self._solve_snapshot_token
+                or self._solve_snapshot_bytes is None
+            ):
+                raise FileNotFoundError("solve frame snapshot unavailable")
+            return self._solve_snapshot_bytes, dict(self._solve_snapshot_meta)
 
     def _resolve_realtime_interval_ms(
         self, requested_ms: int | None
@@ -1412,6 +1488,28 @@ class AnalysisService:
             detail_level = getattr(body, "detail_level", None) or "summary"
             if detail_level != "full":
                 row.pop("tetra", None)
+            if body.source == "camera":
+                if (
+                    self._row_needs_snapshot(row)
+                    and frame is not None
+                    and frame_id is not None
+                ):
+                    row["solve_frame"] = await loop.run_in_executor(
+                        self._solver_executor,
+                        self._encode_debug_solve_snapshot,
+                        frame,
+                        int(frame_id),
+                    )
+                else:
+                    # 新结果必须清除旧图 / A new result must invalidate an older frame.
+                    with self._solve_snapshot_lock:
+                        self._solve_snapshot_token = ""
+                        self._solve_snapshot_bytes = None
+                        self._solve_snapshot_meta = {}
+                    row["solve_frame"] = {
+                        "available": False,
+                        "reason": "not_retained",
+                    }
             return {
                 "success": True,
                 "input_name": body.input_name or "",

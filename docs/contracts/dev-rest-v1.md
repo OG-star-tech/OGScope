@@ -31,6 +31,7 @@
     - `preview_encoder` / `jpeg_source_format`：当前预览编码器与源格式
     - `camera_driver` / `camera_backend`：相机驱动与后端
     - `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format`：低分辨率支路状态
+    - V4L2 RAW 后端额外提供 `capabilities.software_auto_exposure`、`ae_state`、`luminance_stats`、`signal_levels`、`control_readback`、`capture_format` 与 `media_pipeline`；回读失败时 `actual_exposure_us` / `actual_analogue_gain` 为 `null`，不得用请求值冒充实测值
 
 ### 相机调试设置
 

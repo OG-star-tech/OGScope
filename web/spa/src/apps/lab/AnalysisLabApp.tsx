@@ -157,6 +157,7 @@ export default function AnalysisLabApp() {
     pattern: true,
     all: true,
     rejected: true,
+    evidenceRegions: true,
   });
   const [debugFiles, setDebugFiles] = useState<DebugFileRow[]>([]);
   const [debugPick, setDebugPick] = useState<string | null>(null);
@@ -183,6 +184,7 @@ export default function AnalysisLabApp() {
   const [isFrozen, setIsFrozen] = useState(false);
   const [frozenFrameId, setFrozenFrameId] = useState<string | null>(null);
   const [frozenImageUrl, setFrozenImageUrl] = useState<string | null>(null);
+  const [frozenImageReady, setFrozenImageReady] = useState(false);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [batchRawOpen, setBatchRawOpen] = useState<Record<number, boolean>>({});
@@ -206,9 +208,11 @@ export default function AnalysisLabApp() {
   const imgRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraPreviewImgRef = useRef<HTMLImageElement>(null);
+  const frozenPreviewImgRef = useRef<HTMLImageElement>(null);
   /** MJPEG <img> onError 重连次数（防死循环）/ Reconnect attempts after img error */
   const cameraMjpegImgRetryRef = useRef(0);
   const cameraSolveTimeoutRef = useRef<number | null>(null);
+  const cameraHoldTimeoutRef = useRef<number | null>(null);
   /** 视频连续解算：setTimeout 链式调度（与后端门禁对齐）/ Chained timeouts for gate alignment */
   const fileSolveTimeoutRef = useRef<number | null>(null);
   const cameraSolveInFlightRef = useRef(false);
@@ -217,28 +221,6 @@ export default function AnalysisLabApp() {
   const cameraSolveRunningRef = useRef(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
 
-  /** 从当前预览 img 截一帧为 JPEG blob URL（用于冻结与星点同帧）/ Snapshot current preview frame for freeze */
-  const captureCameraFrameAsBlobUrl = useCallback(async (): Promise<string | null> => {
-    const el = cameraPreviewImgRef.current;
-    if (!el || el.naturalWidth < 2) return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = el.naturalWidth;
-    canvas.height = el.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    try {
-      ctx.drawImage(el, 0, 0);
-    } catch {
-      return null;
-    }
-    return await new Promise((resolve) => {
-      canvas.toBlob(
-        (b) => resolve(b ? URL.createObjectURL(b) : null),
-        "image/jpeg",
-        0.92,
-      );
-    });
-  }, []);
   const [sysOverview, setSysOverview] = useState<import("@shared/api").SystemInfo | null>(null);
   const [labSettings, setLabSettings] = useState<LabPublicSettings | null>(null);
 
@@ -466,22 +448,32 @@ export default function AnalysisLabApp() {
   /** 设备相机预览：解算叠加在 JPEG 上 / Live camera JPEG + overlay */
   useEffect(() => {
     if (view !== "lab_video" || videoPreviewMode !== "camera") return;
-    const img = cameraPreviewImgRef.current;
+    const img =
+      isFrozen && frozenImageReady && frozenImageUrl
+        ? frozenPreviewImgRef.current
+        : cameraPreviewImgRef.current;
     const cv = cvRef.current;
     if (!img || !cv || !overlay) return;
     const draw = () => drawSolveOverlay(cv, img, overlay, layers);
     if (img.complete) draw();
-    else img.onload = draw;
-  }, [overlay, layers, view, videoPreviewMode, lastResult, cameraStreamNonce, isFrozen]);
+    img.addEventListener("load", draw);
+    return () => img.removeEventListener("load", draw);
+  }, [
+    overlay,
+    layers,
+    view,
+    videoPreviewMode,
+    lastResult,
+    cameraStreamNonce,
+    isFrozen,
+    frozenImageReady,
+    frozenImageUrl,
+  ]);
 
-  /** 进入设备相机模式：先查 stream/status 再设 nonce，避免多余 MJPEG 连接占满名额 / Check limiter before MJPEG */
+  /** 仅在进入设备相机模式时申请一次 MJPEG / Acquire one MJPEG stream only when entering camera mode. */
   useEffect(() => {
     if (view !== "lab_video" || videoPreviewMode !== "camera") {
       setCameraMjpegGate("unknown");
-      return;
-    }
-    if (isFrozen) {
-      setCameraMjpegGate("ok");
       return;
     }
     let cancelled = false;
@@ -508,7 +500,26 @@ export default function AnalysisLabApp() {
     return () => {
       cancelled = true;
     };
-  }, [view, videoPreviewMode, isFrozen]);
+  }, [view, videoPreviewMode]);
+
+  /** 离开相机预览时显式关闭唯一流连接 / Explicitly close the single stream when leaving camera preview. */
+  useEffect(() => {
+    if (
+      view !== "lab_video" ||
+      videoPreviewMode !== "camera" ||
+      cameraMjpegGate !== "ok"
+    ) {
+      return undefined;
+    }
+    const img = cameraPreviewImgRef.current;
+    return () => {
+      if (!img) return;
+      img.onload = null;
+      img.onerror = null;
+      img.src = "";
+      img.removeAttribute("src");
+    };
+  }, [cameraMjpegGate, videoPreviewMode, view]);
 
   useEffect(() => {
     const img = imgRef.current;
@@ -655,20 +666,45 @@ export default function AnalysisLabApp() {
       const outResult = (out as { result?: Record<string, unknown> }).result;
       const solveStatus =
         typeof outResult?.status === "string" ? String(outResult.status) : "";
-      if (autoHoldEnabled && solveStatus === "MATCH_FOUND") {
+      const structuralEvidence = Boolean(
+        (outResult?.centroid_quality as
+          | { scene?: { has_structural_evidence?: boolean } }
+          | undefined)?.scene?.has_structural_evidence,
+      );
+      const solveFrame =
+        outResult?.solve_frame && typeof outResult.solve_frame === "object"
+          ? (outResult.solve_frame as Record<string, unknown>)
+          : null;
+      const solveFrameUrl =
+        solveFrame?.available === true && typeof solveFrame.url === "string"
+          ? solveFrame.url
+          : null;
+      if (solveFrameUrl && (solveStatus === "MATCH_FOUND" || structuralEvidence)) {
+        setFrozenImageReady(false);
         setIsFrozen(true);
         setFrozenFrameId(
           (out as { frame_id?: number }).frame_id != null
             ? String((out as { frame_id?: number }).frame_id)
             : null,
         );
-        const snap = await captureCameraFrameAsBlobUrl();
-        setFrozenImageUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return snap;
-        });
-        stopCameraSolveLoop();
-      } else if (fromLoop) {
+        setFrozenImageUrl(solveFrameUrl);
+        if (cameraHoldTimeoutRef.current != null) {
+          window.clearTimeout(cameraHoldTimeoutRef.current);
+          cameraHoldTimeoutRef.current = null;
+        }
+        if (autoHoldEnabled) {
+          stopCameraSolveLoop();
+        } else {
+          // 短暂停留便于核对；解算调度继续 / Brief visual hold while solve scheduling continues.
+          cameraHoldTimeoutRef.current = window.setTimeout(() => {
+            cameraHoldTimeoutRef.current = null;
+            setIsFrozen(false);
+            setFrozenImageUrl(null);
+            setFrozenImageReady(false);
+          }, 2800);
+        }
+      }
+      if (fromLoop && (!autoHoldEnabled || solveStatus !== "MATCH_FOUND")) {
         clearCameraSolveSchedule();
         const wait = Math.max(50, Number(nextAllowed ?? effInt ?? starAnalysisIntervalMs));
         cameraSolveTimeoutRef.current = window.setTimeout(() => {
@@ -911,6 +947,10 @@ export default function AnalysisLabApp() {
 
   const stopCameraPreview = async () => {
     try {
+      if (cameraHoldTimeoutRef.current != null) {
+        window.clearTimeout(cameraHoldTimeoutRef.current);
+        cameraHoldTimeoutRef.current = null;
+      }
       const img = cameraPreviewImgRef.current;
       if (img) {
         img.onload = null;
@@ -918,6 +958,10 @@ export default function AnalysisLabApp() {
         img.src = "";
         img.removeAttribute("src");
       }
+      setIsFrozen(false);
+      setFrozenFrameId(null);
+      setFrozenImageUrl(null);
+      setFrozenImageReady(false);
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       await fetch("/api/dev/debug/camera/stop", { method: "POST" });
       setCameraStreamNonce(Date.now());
@@ -930,13 +974,14 @@ export default function AnalysisLabApp() {
   };
 
   const resumeLivePreview = () => {
+    if (cameraHoldTimeoutRef.current != null) {
+      window.clearTimeout(cameraHoldTimeoutRef.current);
+      cameraHoldTimeoutRef.current = null;
+    }
     setIsFrozen(false);
     setFrozenFrameId(null);
-    setFrozenImageUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
-    setCameraStreamNonce(Date.now());
+    setFrozenImageUrl(null);
+    setFrozenImageReady(false);
   };
 
   const togglePreset = (id: string) => {
@@ -1070,8 +1115,13 @@ export default function AnalysisLabApp() {
   useEffect(() => {
     if (view !== "lab_video" || videoPreviewMode !== "camera") {
       stopCameraSolveLoop();
+      if (cameraHoldTimeoutRef.current != null) {
+        window.clearTimeout(cameraHoldTimeoutRef.current);
+        cameraHoldTimeoutRef.current = null;
+      }
       setIsFrozen(false);
       setFrozenFrameId(null);
+      setFrozenImageReady(false);
       setFrozenImageUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
@@ -1092,6 +1142,10 @@ export default function AnalysisLabApp() {
     return () => {
       stopCameraSolveLoop();
       stopFileSolveLoop();
+      if (cameraHoldTimeoutRef.current != null) {
+        window.clearTimeout(cameraHoldTimeoutRef.current);
+        cameraHoldTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -1385,26 +1439,8 @@ export default function AnalysisLabApp() {
                 )}
                 {view === "lab_video" && videoPreviewMode === "camera" ? (
                   <div className="relative flex h-full min-h-[220px] flex-col items-center justify-center gap-3 bg-black p-2">
-                    <div className="relative inline-block max-h-[70vh] max-w-full">
-                      {isFrozen && frozenImageUrl ? (
-                        <img
-                          ref={cameraPreviewImgRef}
-                          src={frozenImageUrl}
-                          alt=""
-                          className="max-h-[70vh] w-full min-h-[120px] object-contain"
-                          onLoad={(e) =>
-                            setCameraPreviewNatural({
-                              w: e.currentTarget.naturalWidth,
-                              h: e.currentTarget.naturalHeight,
-                            })
-                          }
-                        />
-                      ) : isFrozen && !frozenImageUrl ? (
-                        <div className="flex min-h-[200px] w-full min-w-[280px] flex-col items-center justify-center gap-2 text-[11px] text-on-surface-variant">
-                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                          <span>{t("lab.cameraPreviewLoading")}</span>
-                        </div>
-                      ) : cameraMjpegGate === "busy" ? (
+                    <div className="relative inline-block min-h-[120px] min-w-[280px] max-h-[70vh] max-w-full">
+                      {cameraMjpegGate === "busy" ? (
                         <div className="flex min-h-[200px] max-w-md flex-col items-center justify-center gap-2 px-4 text-center text-[11px] text-on-surface-variant">
                           <span className="text-error">{t("lab.videoMjpegHint")}</span>
                         </div>
@@ -1422,7 +1458,9 @@ export default function AnalysisLabApp() {
                           ref={cameraPreviewImgRef}
                           src={`/api/dev/debug/camera/stream?t=${cameraStreamNonce}`}
                           alt=""
-                          className="max-h-[70vh] w-full min-h-[120px] object-contain"
+                          className={`max-h-[70vh] w-full min-h-[120px] object-contain ${
+                            isFrozen && frozenImageReady ? "opacity-0" : "opacity-100"
+                          }`}
                           onLoad={(e) =>
                             setCameraPreviewNatural({
                               w: e.currentTarget.naturalWidth,
@@ -1450,9 +1488,37 @@ export default function AnalysisLabApp() {
                           }}
                         />
                       )}
+                      {isFrozen && frozenImageUrl ? (
+                        <img
+                          ref={frozenPreviewImgRef}
+                          src={frozenImageUrl}
+                          alt=""
+                          className={`absolute inset-0 z-[1] h-full w-full object-contain ${
+                            frozenImageReady ? "opacity-100" : "opacity-0"
+                          }`}
+                          onLoad={(e) => {
+                            setFrozenImageReady(true);
+                            setCameraPreviewNatural({
+                              w: e.currentTarget.naturalWidth,
+                              h: e.currentTarget.naturalHeight,
+                            });
+                          }}
+                          onError={() => {
+                            // 快照失败时回退到仍在运行的实时流 / Fall back to the still-running live stream.
+                            setFrozenImageReady(false);
+                            setIsFrozen(false);
+                            setFrozenImageUrl(null);
+                          }}
+                        />
+                      ) : null}
+                      {isFrozen && frozenImageUrl && !frozenImageReady ? (
+                        <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        </div>
+                      ) : null}
                       <canvas
                         ref={cvRef}
-                        className="pointer-events-none absolute left-0 top-0"
+                        className="pointer-events-none absolute left-0 top-0 z-[2]"
                       />
                     </div>
                   </div>
@@ -1671,7 +1737,7 @@ export default function AnalysisLabApp() {
                     {t("lab.layers")}
                   </span>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {(["matched", "pattern", "all", "rejected"] as const).map((k) => (
+                    {(["matched", "pattern", "all", "rejected", "evidenceRegions"] as const).map((k) => (
                       <label key={k} className="flex cursor-pointer items-center gap-1">
                         <input
                           type="checkbox"
@@ -1688,7 +1754,9 @@ export default function AnalysisLabApp() {
                               ? t("lab.layer.pattern")
                               : k === "all"
                                 ? t("lab.layer.all")
-                                : t("lab.layer.rejected")}
+                                : k === "rejected"
+                                  ? t("lab.layer.rejected")
+                                  : t("lab.layer.evidenceRegions")}
                         </span>
                       </label>
                     ))}

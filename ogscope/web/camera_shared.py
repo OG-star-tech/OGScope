@@ -110,7 +110,49 @@ class CameraManager:
 
         settings = get_settings()
         base = {
-            "type": "imx327_mipi",
+            # Picamera2/libcamera 是默认产品路径；V4L2 RAW 必须显式启用。
+            # Picamera2/libcamera remains the default; V4L2 RAW requires opt-in.
+            "type": settings.camera_type,
+            "device": settings.camera_device,
+            "v4l2_sensor_subdev": settings.camera_v4l2_sensor_subdev,
+            "v4l2_media_device": settings.camera_v4l2_media_device,
+            "v4l2_configure_media_pipeline": (
+                settings.camera_v4l2_configure_media_pipeline
+            ),
+            "v4l2_sensor_entity": settings.camera_v4l2_sensor_entity,
+            "v4l2_receiver_entity": settings.camera_v4l2_receiver_entity,
+            "v4l2_sensor_pad": settings.camera_v4l2_sensor_pad,
+            "v4l2_receiver_sink_pad": settings.camera_v4l2_receiver_sink_pad,
+            "v4l2_receiver_source_pad": settings.camera_v4l2_receiver_source_pad,
+            "v4l2_media_bus_format": settings.camera_v4l2_media_bus_format,
+            "v4l2_pixel_format": settings.camera_v4l2_pixel_format,
+            "v4l2_bit_depth": settings.camera_v4l2_bit_depth,
+            "v4l2_black_level": settings.camera_v4l2_black_level,
+            "v4l2_white_level": settings.camera_v4l2_white_level,
+            "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
+            "v4l2_active_width": settings.camera_v4l2_active_width,
+            "v4l2_active_height": settings.camera_v4l2_active_height,
+            "v4l2_line_duration_us": settings.camera_v4l2_line_duration_us,
+            "v4l2_gain_db_per_step": settings.camera_v4l2_gain_db_per_step,
+            "v4l2_auto_gain_max": settings.camera_v4l2_auto_gain_max,
+            "v4l2_ae_target_background": (settings.camera_v4l2_ae_target_background),
+            "v4l2_ae_target_highlight": settings.camera_v4l2_ae_target_highlight,
+            "v4l2_ae_highlight_percentile": (
+                settings.camera_v4l2_ae_highlight_percentile
+            ),
+            "v4l2_ae_trace_enabled": settings.camera_v4l2_ae_trace_enabled,
+            "v4l2_ae_trace_dir": str(
+                settings.camera_v4l2_ae_trace_dir
+                or (settings.data_dir / "camera-ae-traces")
+            ),
+            "v4l2_ae_trace_max_events": settings.camera_v4l2_ae_trace_max_events,
+            "v4l2_ae_trace_raw_sample_interval": (
+                settings.camera_v4l2_ae_trace_raw_sample_interval
+            ),
+            "v4l2_ae_trace_max_raw_samples": (
+                settings.camera_v4l2_ae_trace_max_raw_samples
+            ),
+            "v4l2_ae_trace_raw_max_side": (settings.camera_v4l2_ae_trace_raw_max_side),
             "width": settings.camera_width,
             "height": settings.camera_height,
             "fps": max(1, int(getattr(settings, "camera_fps", 5) or 5)),
@@ -359,10 +401,16 @@ class CameraManager:
             if self._camera is None:
                 self._restart_required = False
                 return
-            _, stop_timed_out = await self._run_lifecycle_step_locked(
+            stop_ok, stop_timed_out = await self._run_lifecycle_step_locked(
                 "stop", self._safe_stop_capture_sync, self._stop_timeout_sec
             )
             if stop_timed_out:
+                return
+            if not stop_ok:
+                self._mark_restart_required(
+                    "相机采集未能安全停止，需要重启服务 / "
+                    "Camera capture did not stop safely; service restart required"
+                )
                 return
             close_ok, close_timed_out = await self._run_lifecycle_step_locked(
                 "close", self._safe_close_camera_sync, self._close_timeout_sec
@@ -397,6 +445,11 @@ class CameraManager:
         if camera is None:
             return True
         try:
+            # 驱动级 close() 负责释放 V4L2 fd；Picamera2 继续兼容内部对象关闭。
+            # Driver-level close() releases V4L2 fds; Picamera2 keeps its inner close path.
+            close_driver = getattr(camera, "close", None)
+            if callable(close_driver):
+                return close_driver() is not False
             inner_camera = getattr(camera, "camera", None)
             if inner_camera is not None and hasattr(inner_camera, "close"):
                 inner_camera.close()

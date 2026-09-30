@@ -4,6 +4,8 @@ Core 标准契约 API 测试 / Core standard contract API tests.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -25,6 +27,41 @@ def test_core_system_status(client) -> None:
         assert data["health_reasons"] == []
     else:
         assert len(data["health_reasons"]) >= 1
+
+
+@pytest.mark.unit
+def test_core_analysis_frame_returns_exact_uncached_jpeg(client, monkeypatch) -> None:
+    """精确解算帧按会话和帧号读取且禁止缓存 / Exact solve frame is keyed and uncached."""
+    from ogscope.web.api.core import routes
+
+    expected = b"\xff\xd8test\xff\xd9"
+
+    def _snapshot(*, session_id: str, frame_id: int):
+        assert session_id == "solve-session"
+        assert frame_id == 42
+        return SimpleNamespace(
+            content=expected,
+            session_id=session_id,
+            frame_id=frame_id,
+            width=640,
+            height=360,
+            encoder="test",
+        )
+
+    monkeypatch.setattr(
+        routes.core_contract_service,
+        "get_analysis_frame_snapshot",
+        _snapshot,
+    )
+    response = client.get(
+        "/api/core/v1/analysis/frame",
+        params={"session_id": "solve-session", "frame_id": 42},
+    )
+    assert response.status_code == 200
+    assert response.content == expected
+    assert response.headers["content-type"] == "image/jpeg"
+    assert "no-store" in response.headers["cache-control"]
+    assert response.headers["x-solve-frame-id"] == "42"
 
 
 @pytest.mark.unit
