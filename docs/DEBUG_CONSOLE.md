@@ -195,6 +195,11 @@ python -m ogscope.web.app
 | `camera_driver` / `camera_backend` | 相机驱动与后端名称 |
 | `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format` | 低分辨率辅助流状态 |
 
+选择 `OGSCOPE_CAMERA_TYPE=v4l2` 后，状态还会给出软件 AE、RAW 信号电平、
+媒体链路、协商格式和硬件回读诊断。V4L2 的数字增益、时域降噪和 lores 支路
+明确标记为不支持；完整配置与板端验收见
+[V4L2 RAW 相机与夜空软件 AE](development/v4l2-auto-exposure.md)。
+
 ### 预设管理
 - `GET /api/dev/debug/camera/presets` - 获取预设列表
 - `POST /api/dev/debug/camera/presets` - 保存预设

@@ -45,6 +45,7 @@
   "lab.layer.pattern": "图案星",
   "lab.layer.all": "全部质心",
   "lab.layer.rejected": "已剔除(红叉)",
+  "lab.layer.evidenceRegions": "干扰证据区域",
   "lab.previewConfidence": "置信度",
   "lab.grid": "网格",
   "lab.zoomIn": "放大",

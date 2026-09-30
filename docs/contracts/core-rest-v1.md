@@ -46,11 +46,26 @@
   - `result: object | null`
     - `observation_time_utc`：可选，当前图像曝光中点 UTC；天文坐标换算应优先使用该时刻
     - `capture_completed_at_utc`、`capture_exposure_us`：可选抓帧诊断字段
+    - `centroid_quality`：可选提星与遮挡回退诊断；`strategy`、`normal_status`、`fallback_attempted`、`fallback_status` 描述实际采用的路径
+      - `scene` 仅在常规解算失败后分析；`has_structural_evidence` 只表示发现大亮区或长结构边缘，星点密度本身不构成遮挡证据
+      - `metrics.filter_limited=true` 表示过滤达到保守上限，剩余候选已放行；调用方不得把该开发诊断转换为用户错误
+    - `solve_overlay.scene_evidence_regions`：可选、有界的干扰证据几何；黄色区域/线段只解释过滤依据，不能单独否定解算结果
+    - `solve_frame`：可选精确解算帧元数据；`available=true` 时包含 `session_id`、`frame_id`、尺寸、JPEG 字节数、编码器与耗时
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
 
 Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，避免调试轮询与产品对准争抢相机和 CPU；文件解算不受影响。
+
+常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
+
+### 2.1) Get Exact Solve Frame
+
+- `GET /api/core/v1/analysis/frame?session_id=...&frame_id=...`
+- 仅保留最新一张压缩 JPEG，不保留 raw 帧或历史队列；新结果会覆盖或清除旧图
+- 成功解算以及带结构证据的失败会尝试编码；编码失败不改变星图解算状态
+- `session_id` 或 `frame_id` 与当前结果不匹配时返回 `409`，当前没有快照时返回 `404`
+- 响应使用 `private, no-store`；调用方应使用当前 `result.solve_frame` 中的双键读取，避免错配
 
 ### 3) Stop Analysis
 
@@ -81,6 +96,8 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
   - 返回相机连接状态、流状态、runtime overrides 与可选 `ambient_hint`
   - `ambient_hint` 是环境亮度建议遥测，供上层设备做显示/交互策略参考；典型字段包括 `available`、`dark_score`（0.0 明亮到 1.0 昏暗）、`lux`、`exposure_us`、`digital_gain`
   - `info.optics` 是可选的产品光学描述；`lens` 保存 16mm F1.4、标称 500 万像素、M12 与红外截止滤镜等名义参数，`full_sensor_fov_deg` 保存 1920×1080 全幅光学视场，`effective_fov_deg` 保存当前采集模式经过产品标定后的有效视场。上层解算与寻星应优先使用 `effective_fov_deg`，字段缺失时再回退本地默认值
+  - `info.driver` / `info.backend` 与 `info.capabilities` 是可选的后端能力遥测。V4L2 RAW 使用 OGScope 软件 AE，仍保持相同的 RGB888、帧身份和解算契约；硬件控件回读失败时 `info.actual_exposure_us` / `info.actual_analogue_gain` 可为 `null`
+  - 上层不得依据驱动名称分叉业务逻辑；只消费 Core v1 的 `connected`、`streaming`、`info.optics.effective_fov_deg`、可选 capability/ambient 字段以及既有分析结果
   - `info.ae_scene_mode` 与 `info.ae_requested_exposure_mode` 是自主 AE 诊断；`starfield` 表示 OGScope 已独立识别暗天空并选择快门优先的长曝光曲线，不依赖上位机工作模式
 - `POST /api/core/v1/camera/start`
   - 仅当相机启动命令成功且状态确认 `connected=true`、`streaming=true` 时返回 `success=true`

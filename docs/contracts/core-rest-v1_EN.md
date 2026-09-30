@@ -47,11 +47,16 @@ upstream consumers should ignore results from an older session.
   - `result: object | null`
     - `observation_time_utc`: optional exposure-midpoint UTC for the current frame; astronomical coordinate conversion should prefer it
     - `capture_completed_at_utc`, `capture_exposure_us`: optional capture diagnostics
+    - `centroid_quality`: optional extraction and obstruction-fallback diagnostics; `strategy`, `normal_status`, `fallback_attempted`, and `fallback_status` describe the path actually used
+      - `scene` is analyzed only after a normal solve failure; `has_structural_evidence` requires a large bright region or long structural edges, and star density alone is never obstruction evidence
+      - `metrics.filter_limited=true` means filtering reached its conservative cap and retained the remaining candidates; callers must not turn this developer diagnostic into a user error
   - `last_error: str`
   - `frame_count: int`
   - `fullsolve_count: int`
 
 While Core realtime analysis is active, developer single-frame camera solves return `SKIPPED_BUSY` so debug polling cannot contend with product alignment for camera and CPU resources. File solving is unaffected.
+
+A normal `MATCH_FOUND` result is authoritative and is never overturned by scene classification. Only after a normal failure with independent structural evidence does OGScope remove dense or collinear candidates that overlap that evidence and retry once. At most 35% of the reserve candidate pool is removed.
 
 ### 3) Stop Analysis
 
@@ -81,6 +86,8 @@ While Core realtime analysis is active, developer single-frame camera solves ret
 - `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
   - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
   - Optional `info.optics` describes product optics. `lens` carries nominal 16mm F1.4, 5MP optical rating, M12, and IR-cut properties; `full_sensor_fov_deg` describes the 1920×1080 optical field, while `effective_fov_deg` is the product-calibrated field for the active capture mode. Upstream solving and sky search should prefer `effective_fov_deg`, with a local fallback for older servers.
+  - Optional `info.driver` / `info.backend` and `info.capabilities` describe backend capabilities. V4L2 RAW uses OGScope software AE while preserving the same RGB888, frame-identity, and solve contracts. Failed hardware-control readback may leave `info.actual_exposure_us` / `info.actual_analogue_gain` as `null`.
+  - Upstream business logic must not branch on driver names; it consumes Core v1 readiness, `info.optics.effective_fov_deg`, optional capability/ambient telemetry, and existing analysis results.
   - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently selected the shutter-first long-exposure curve and does not depend on an upstream work mode.
 - `POST /api/core/v1/camera/start`
   - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`

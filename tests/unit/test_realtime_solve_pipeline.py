@@ -7,7 +7,31 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from ogscope.core.realtime.service import RealtimeSolveService
+from ogscope.algorithms.plate_solve.solver import SolveResult
+from ogscope.core.realtime.service import RealtimeSolveService, SolveFrameSnapshot
+
+
+def _solve_result(status: str, *, structural: bool = False) -> SolveResult:
+    """构造最小解算结果 / Build a minimal solve result."""
+    return SolveResult(
+        ra_deg=12.0,
+        dec_deg=80.0,
+        detected_stars=8,
+        solve_source="realtime",
+        status=status,
+        status_code=1 if status == "MATCH_FOUND" else 2,
+        roll_deg=0.0,
+        fov_deg=16.0,
+        matches=6 if status == "MATCH_FOUND" else 0,
+        prob=0.001,
+        rmse_arcsec=7.5,
+        t_solve_ms=4.0,
+        t_extract_ms=2.0,
+        t_preprocess_ms=1.0,
+        centroid_quality={
+            "scene": {"has_structural_evidence": structural},
+        },
+    )
 
 
 def test_core_realtime_uses_authoritative_bgr_pipeline() -> None:
@@ -60,3 +84,41 @@ def test_analysis_event_carries_session_correlation() -> None:
     assert payload["session_id"] == "solve-123"
     assert payload["event"] == "fullsolve_finished"
     assert payload["status"] == "NO_MATCH"
+
+
+def test_snapshot_policy_keeps_success_and_structural_failure() -> None:
+    """成功与结构失败可检查，普通失败不额外编码 / Keep success and structural failures only."""
+    assert RealtimeSolveService._should_retain_snapshot(_solve_result("MATCH_FOUND"))
+    assert RealtimeSolveService._should_retain_snapshot(
+        _solve_result("NO_MATCH", structural=True)
+    )
+    assert not RealtimeSolveService._should_retain_snapshot(_solve_result("NO_MATCH"))
+
+
+def test_new_result_cannot_reuse_an_old_snapshot() -> None:
+    """新结果必须覆盖旧图，避免错帧 / A new result must invalidate an old frame."""
+    service = RealtimeSolveService()
+    service.state.session_id = "session-a"
+    snapshot = SolveFrameSnapshot(
+        content=b"jpeg",
+        session_id="session-a",
+        frame_id=7,
+        captured_at=1.0,
+        width=64,
+        height=48,
+        encoder="test",
+        encode_ms=1.5,
+    )
+    service._apply_solve_result(
+        _solve_result("MATCH_FOUND"),
+        frame_id=7,
+        snapshot=snapshot,
+        snapshot_attempted=True,
+    )
+    assert service.get_solve_frame_snapshot() == snapshot
+    assert service.state.last_result is not None
+    assert service.state.last_result["solve_frame"]["available"] is True
+
+    service._apply_solve_result(_solve_result("NO_MATCH"), frame_id=8)
+    assert service.get_solve_frame_snapshot() is None
+    assert service.state.last_result["solve_frame"]["reason"] == "not_retained"

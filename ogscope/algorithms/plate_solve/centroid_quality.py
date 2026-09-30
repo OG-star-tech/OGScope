@@ -11,6 +11,7 @@ import numpy as np
 
 _FLAG_DENSE = "DENSE_CLUSTER_REJECTED"
 _FLAG_LINE = "LINE_CLUSTER_REJECTED"
+_FLAG_LIMITED = "CENTROID_FILTER_LIMITED"
 
 
 def _level_params(level: int) -> dict[str, float | int]:
@@ -26,18 +27,18 @@ def _level_params(level: int) -> dict[str, float | int]:
     }
 
 
-def _reject_dense_clusters(
+def _dense_cluster_mask(
     xy: np.ndarray,
     h: int,
     w: int,
     *,
     cell_px: float,
     dense_min_points: int,
-) -> tuple[np.ndarray, int, np.ndarray]:
-    """网格密度：过密格及 3×3 邻域和超阈则整格丢弃 / Grid density rejection."""
+) -> np.ndarray:
+    """返回局部过密候选；密度本身不负责剔除 / Mark dense candidates without rejecting."""
     n = int(xy.shape[0])
     if n < dense_min_points:
-        return xy, 0, np.empty((0, 2), dtype=np.float64)
+        return np.zeros(n, dtype=bool)
 
     cols = max(1, int(math.ceil(w / cell_px)))
     rows = max(1, int(math.ceil(h / cell_px)))
@@ -60,11 +61,7 @@ def _reject_dense_clusters(
             if s >= neigh_thresh:
                 bad[r, c] = True
 
-    bad_flat = bad[iy, ix]
-    kept = xy[~bad_flat]
-    removed_pts = xy[bad_flat]
-    removed = int(n - kept.shape[0])
-    return kept, removed, removed_pts
+    return bad[iy, ix]
 
 
 def _point_line_dist(
@@ -94,7 +91,7 @@ def _span_along_line(inlier_yx: np.ndarray) -> float:
     return float(proj.max() - proj.min())
 
 
-def _reject_collinear_ransac(
+def _collinear_cluster_mask(
     xy: np.ndarray,
     h: int,
     w: int,
@@ -103,19 +100,19 @@ def _reject_collinear_ransac(
     min_inliers: int,
     max_dist_px: float,
     min_span_frac: float,
-) -> tuple[np.ndarray, int, np.ndarray]:
-    """随机采样直线，剔除强共线簇 / RANSAC-style collinear rejection."""
+) -> np.ndarray:
+    """随机采样并标记强共线簇 / Mark strong collinear clusters with RANSAC."""
     n = int(xy.shape[0])
     if n < min_inliers:
-        return xy, 0, np.empty((0, 2), dtype=np.float64)
+        return np.zeros(n, dtype=bool)
 
     min_span = min_span_frac * float(min(h, w))
     rng = np.random.default_rng(42)
-    remain = xy.copy()
-    total_removed = 0
-    removed_chunks: list[np.ndarray] = []
+    remain_idx = np.arange(n, dtype=np.int32)
+    rejected = np.zeros(n, dtype=bool)
 
     for _round in range(3):
+        remain = xy[remain_idx]
         m = int(remain.shape[0])
         if m < min_inliers:
             break
@@ -147,23 +144,103 @@ def _reject_collinear_ransac(
         if span < min_span:
             break
 
-        n_removed = int(best_mask.sum())
-        removed_chunks.append(remain[best_mask].copy())
-        remain = remain[~best_mask]
-        total_removed += n_removed
+        rejected[remain_idx[best_mask]] = True
+        remain_idx = remain_idx[~best_mask]
 
-    removed_pts = (
-        np.concatenate(removed_chunks, axis=0)
-        if removed_chunks
-        else np.empty((0, 2), dtype=np.float64)
+    return rejected
+
+
+def _points_on_evidence_mask(
+    xy: np.ndarray,
+    evidence_mask: np.ndarray | None,
+    shape_hw: tuple[int, int],
+) -> np.ndarray:
+    """采样候选点所在的结构证据 / Sample structural evidence at candidates."""
+    n = int(xy.shape[0])
+    if evidence_mask is None:
+        return np.zeros(n, dtype=bool)
+    mask = np.asarray(evidence_mask, dtype=bool)
+    h, w = int(shape_hw[0]), int(shape_hw[1])
+    if mask.shape != (h, w):
+        raise ValueError("evidence_mask shape must match shape_hw")
+    iy = np.clip(np.floor(xy[:, 0]).astype(np.int32), 0, h - 1)
+    ix = np.clip(np.floor(xy[:, 1]).astype(np.int32), 0, w - 1)
+    return mask[iy, ix]
+
+
+def _region_labels_at_points(
+    xy: np.ndarray,
+    evidence_region_labels: np.ndarray | None,
+    shape_hw: tuple[int, int],
+) -> np.ndarray:
+    """按比例采样缩略结构区域编号 / Sample downscaled evidence-region labels."""
+    n = int(xy.shape[0])
+    if evidence_region_labels is None:
+        return np.zeros(n, dtype=np.int32)
+    labels = np.asarray(evidence_region_labels)
+    if labels.ndim != 2 or labels.size == 0:
+        raise ValueError("evidence_region_labels must be a non-empty 2D array")
+    h, w = int(shape_hw[0]), int(shape_hw[1])
+    label_h, label_w = int(labels.shape[0]), int(labels.shape[1])
+    iy = np.clip(
+        np.floor(xy[:, 0] * label_h / max(1, h)).astype(np.int32),
+        0,
+        label_h - 1,
     )
-    return remain, total_removed, removed_pts
+    ix = np.clip(
+        np.floor(xy[:, 1] * label_w / max(1, w)).astype(np.int32),
+        0,
+        label_w - 1,
+    )
+    return labels[iy, ix].astype(np.int32, copy=False)
+
+
+def _balanced_rejection_indices(
+    reject_indices: np.ndarray,
+    region_labels: np.ndarray,
+    limit: int,
+) -> np.ndarray:
+    """在不同遮挡区域间轮询分配剔除额度 / Round-robin rejection across regions."""
+    if limit <= 0 or reject_indices.size == 0:
+        return np.empty(0, dtype=np.int32)
+
+    groups: dict[int, list[int]] = {}
+    unlabeled_group = -1
+    for raw_index in reject_indices:
+        index = int(raw_index)
+        region = int(region_labels[index])
+        # 未标号候选各自成组，避免它们合并后重新垄断额度。
+        # Keep unlabeled candidates separate so they cannot monopolize the cap.
+        key = region if region > 0 else unlabeled_group
+        groups.setdefault(key, []).append(index)
+        if region <= 0:
+            unlabeled_group -= 1
+
+    selected: list[int] = []
+    depth = 0
+    ordered_groups = list(groups.values())
+    while len(selected) < limit:
+        added = False
+        for group in ordered_groups:
+            if depth < len(group):
+                selected.append(group[depth])
+                added = True
+                if len(selected) >= limit:
+                    break
+        if not added:
+            break
+        depth += 1
+    return np.asarray(selected, dtype=np.int32)
 
 
 def filter_centroids_yx(
     centroids_yx: np.ndarray,
     shape_hw: tuple[int, int],
     level: int,
+    *,
+    evidence_mask: np.ndarray | None = None,
+    evidence_region_labels: np.ndarray | None = None,
+    max_rejected_fraction: float = 0.35,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """过滤质心并返回指标与提示 / Filter centroids; returns metrics and hints.
 
@@ -171,6 +248,11 @@ def filter_centroids_yx(
         centroids_yx: N×2 array, rows [y, x] in solve image pixels.
         shape_hw: (height, width) of solve image.
         level: 1 (mild) .. 5 (aggressive).
+        evidence_mask: Structural evidence from the source image. Dense or linear
+            geometry is only rejected where this independent evidence is present.
+        evidence_region_labels: Connected evidence labels on the analysis image.
+            Labels are sampled proportionally and balance the conservative cap.
+        max_rejected_fraction: Fail-open cap for one fallback attempt.
 
     Returns:
         Filtered centroids_yx, quality dict with flags, hints_zh_en, metrics.
@@ -192,22 +274,15 @@ def filter_centroids_yx(
 
     xy = arr[:, :2].copy()
 
-    xy2, r_dense, dense_removed = _reject_dense_clusters(
+    dense_candidates = _dense_cluster_mask(
         xy,
         h,
         w,
         cell_px=float(p["cell_px"]),
         dense_min_points=int(p["dense_min_points"]),
     )
-    if r_dense > 0:
-        flags.append(_FLAG_DENSE)
-        hints.append(
-            "局部区域星点过密已剔除（可能为树梢或亮斑）/ "
-            "Rejected dense local region (trees or bright clutter)"
-        )
-
-    xy3, r_line, line_removed = _reject_collinear_ransac(
-        xy2,
+    line_candidates = _collinear_cluster_mask(
+        xy,
         h,
         w,
         iters=int(p["line_ransac_iters"]),
@@ -215,6 +290,47 @@ def filter_centroids_yx(
         max_dist_px=float(p["line_max_dist_px"]),
         min_span_frac=float(p["line_min_span_frac"]),
     )
+    evidence = _points_on_evidence_mask(xy, evidence_mask, (h, w))
+    region_labels = _region_labels_at_points(
+        xy,
+        evidence_region_labels,
+        (h, w),
+    )
+
+    # 密度或共线只是候选特征，必须与图像结构证据重合才允许剔除。
+    # Density/collinearity is only a candidate feature; image evidence must corroborate it.
+    dense_reject = dense_candidates & evidence
+    line_reject = line_candidates & evidence
+    reject = dense_reject | line_reject
+
+    requested_rejected = int(reject.sum())
+    requested_indices = np.flatnonzero(reject)
+    max_fraction = max(0.0, min(0.8, float(max_rejected_fraction)))
+    max_rejected = min(max(0, n0 - 4), int(math.floor(n0 * max_fraction)))
+    limited = requested_rejected > max_rejected
+    if limited:
+        reject[:] = False
+        # 输入按亮度降序，但额度需在独立遮挡区域间均衡，避免亮树耗尽上限后
+        # 暗树候选全部保留。/ Input is brightness-sorted, but balance the cap
+        # across independent regions so bright clutter cannot starve dark regions.
+        balanced_idx = _balanced_rejection_indices(
+            requested_indices,
+            region_labels,
+            max_rejected,
+        )
+        reject[balanced_idx] = True
+
+    dense_final = dense_reject & reject
+    line_final = line_reject & reject
+    r_dense = int(dense_final.sum())
+    r_line = int((line_final & ~dense_final).sum())
+    if r_dense > 0:
+        flags.append(_FLAG_DENSE)
+        hints.append(
+            "局部区域星点过密已剔除（可能为树梢或亮斑）/ "
+            "Rejected dense local region (trees or bright clutter)"
+        )
+
     if r_line > 0:
         flags.append(_FLAG_LINE)
         hints.append(
@@ -222,12 +338,16 @@ def filter_centroids_yx(
             "Rejected collinear detections (power lines)"
         )
 
-    n1 = int(xy3.shape[0])
-    rejected_pts = (
-        np.concatenate([dense_removed, line_removed], axis=0)
-        if (dense_removed.size > 0 or line_removed.size > 0)
-        else np.empty((0, 2), dtype=np.float64)
-    )
+    if limited:
+        flags.append(_FLAG_LIMITED)
+        hints.append(
+            "结构过滤已达到保守上限，保留其余候选 / "
+            "Structural filtering reached its conservative cap; remaining candidates kept"
+        )
+
+    xy_out = xy[~reject]
+    n1 = int(xy_out.shape[0])
+    rejected_pts = xy[reject]
     quality: dict[str, Any] = {
         "level": lv,
         "flags": flags,
@@ -237,10 +357,26 @@ def filter_centroids_yx(
             "output_count": n1,
             "removed_dense": r_dense,
             "removed_line": r_line,
+            "dense_candidates": int(dense_candidates.sum()),
+            "line_candidates": int(line_candidates.sum()),
+            "evidence_candidates": int(evidence.sum()),
+            "requested_rejected": requested_rejected,
+            "filter_limited": limited,
+            "evidence_regions_considered": int(
+                np.unique(
+                    region_labels[requested_indices][
+                        region_labels[requested_indices] > 0
+                    ]
+                ).size
+            ),
+            "evidence_regions_rejected": int(
+                np.unique(region_labels[reject][region_labels[reject] > 0]).size
+            ),
+            "rejection_balanced": bool(limited and evidence_region_labels is not None),
         },
         "rejected_centroids_yx": rejected_pts.tolist(),
     }
-    return xy3, quality
+    return xy_out, quality
 
 
 def _empty_quality(level: int, n_in: int, n_out: int) -> dict[str, Any]:
@@ -253,6 +389,14 @@ def _empty_quality(level: int, n_in: int, n_out: int) -> dict[str, Any]:
             "output_count": n_out,
             "removed_dense": 0,
             "removed_line": 0,
+            "dense_candidates": 0,
+            "line_candidates": 0,
+            "evidence_candidates": 0,
+            "requested_rejected": 0,
+            "filter_limited": False,
+            "evidence_regions_considered": 0,
+            "evidence_regions_rejected": 0,
+            "rejection_balanced": False,
         },
         "rejected_centroids_yx": [],
     }
