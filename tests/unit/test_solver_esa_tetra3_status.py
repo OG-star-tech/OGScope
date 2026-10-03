@@ -10,6 +10,7 @@ import sys
 import types
 from typing import Any
 
+import cv2
 import numpy as np
 import pytest
 
@@ -59,16 +60,24 @@ class _FakeEsaTetra:
     def __init__(self, outputs: list[dict[str, Any]]) -> None:
         self.outputs = outputs
         self.calls = 0
+        self.centroid_calls: list[np.ndarray] = []
 
-    def solve_from_centroids(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def solve_from_centroids(
+        self, centroids: np.ndarray, *_args: Any, **_kwargs: Any
+    ) -> dict[str, Any]:
         self.calls += 1
+        self.centroid_calls.append(np.asarray(centroids).copy())
         return dict(self.outputs[self.calls - 1])
 
 
 def _solver_with(
-    monkeypatch: pytest.MonkeyPatch, outputs: list[dict[str, Any]]
+    monkeypatch: pytest.MonkeyPatch,
+    outputs: list[dict[str, Any]],
+    *,
+    centroids: np.ndarray | None = None,
 ) -> tuple[PlateSolver, _FakeEsaTetra]:
-    centroids = np.asarray([[20.0 + i * 8, 30.0 + i * 11] for i in range(12)])
+    if centroids is None:
+        centroids = np.asarray([[20.0 + i * 8, 30.0 + i * 11] for i in range(12)])
     fake_module = types.ModuleType("tetra3")
     fake_module.get_centroids_from_image = (  # type: ignore[attr-defined]
         lambda *_a, **_k: centroids.copy()
@@ -98,7 +107,32 @@ def test_esa_solution_is_match_found(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.status_code == 1
     assert result.to_dict()["status"] == "MATCH_FOUND"
     assert result.ra_deg == pytest.approx(309.22)
+    assert result.dec_deg == pytest.approx(57.74)
+    assert result.roll_deg == pytest.approx(265.57)
+    assert result.fov_deg == pytest.approx(13.01)
+    assert result.rmse_arcsec == pytest.approx(16.6)
     assert result.matches == 20
+    assert result.to_dict()["tetra"]["epoch_equinox"] == 2000
+    assert result.to_dict()["tetra"]["epoch_proper_motion"] == 2026.0
+
+
+@pytest.mark.unit
+def test_esa_zero_coordinates_after_deadline_remain_a_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """零坐标及超时后的有效解仍是匹配 / Zero coordinates and a late solution remain valid."""
+    solver, fake = _solver_with(
+        monkeypatch,
+        [{**_esa_solution(), "RA": 0.0, "Dec": 0.0, "T_solve": _TIMEOUT_MS + 12.0}],
+    )
+
+    result = _solve_frame(solver)
+
+    assert result.status == "MATCH_FOUND"
+    assert result.status_code == 1
+    assert result.ra_deg == 0.0
+    assert result.dec_deg == 0.0
+    assert fake.calls == 1
 
 
 @pytest.mark.unit
@@ -159,6 +193,54 @@ def test_star_list_solve_maps_esa_solution(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result.status == "MATCH_FOUND"
     assert result.status_code == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fallback_output", "expected_status", "expected_code"),
+    [
+        pytest.param(_esa_solution(), "MATCH_FOUND", 1, id="match"),
+        pytest.param(_esa_failure(900.0), "NO_MATCH", 2, id="no-match"),
+        pytest.param(_esa_failure(_TIMEOUT_MS + 12.0), "TIMEOUT", 3, id="timeout"),
+    ],
+)
+def test_structural_fallback_maps_esa_results(
+    monkeypatch: pytest.MonkeyPatch,
+    fallback_output: dict[str, Any],
+    expected_status: str,
+    expected_code: int,
+) -> None:
+    """真实结构过滤后的 ESA 回退正确映射状态 / Map ESA fallback after real structural filtering."""
+    image = np.full((360, 640, 3), 8, dtype=np.uint8)
+    cv2.line(image, (0, 300), (500, 80), (160, 160, 160), 8)
+    line_points = [[300.0 - i * 13.75, i * 31.25] for i in range(16)]
+    clean_points = [[30.0 + (i % 4) * 70, 350.0 + (i // 4) * 45] for i in range(16)]
+    solver, fake = _solver_with(
+        monkeypatch,
+        [_esa_failure(900.0), fallback_output],
+        centroids=np.asarray(line_points + clean_points, dtype=np.float64),
+    )
+
+    result = solver.solve_from_bgr_frame(image, max_stars=16)
+
+    assert fake.calls == 2
+    assert not np.array_equal(fake.centroid_calls[0], fake.centroid_calls[1])
+    assert result.status == expected_status
+    assert result.status_code == expected_code
+    assert result.to_dict()["status"] == expected_status
+    assert result.centroid_quality is not None
+    assert result.centroid_quality["fallback_attempted"] is True
+    assert result.centroid_quality["normal_status"] == "NO_MATCH"
+    assert result.centroid_quality["fallback_status"] == expected_status
+    assert result.centroid_quality["metrics"]["requested_rejected"] > 0
+    if expected_status == "MATCH_FOUND":
+        assert result.ra_deg == pytest.approx(fallback_output["RA"])
+        assert result.dec_deg == pytest.approx(fallback_output["Dec"])
+        assert result.roll_deg == pytest.approx(fallback_output["Roll"])
+        assert result.fov_deg == pytest.approx(fallback_output["FOV"])
+        assert result.rmse_arcsec == pytest.approx(fallback_output["RMSE"])
+        assert result.to_dict()["tetra"]["epoch_equinox"] == 2000
+        assert result.to_dict()["tetra"]["epoch_proper_motion"] == 2026.0
 
 
 @pytest.mark.unit

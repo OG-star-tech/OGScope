@@ -48,11 +48,13 @@ def _normalize_tetra_status(out: dict[str, Any], solve_timeout_ms: float) -> Non
     """为缺少状态码的 Tetra3 输出补齐状态 / Fill in the status a Tetra3 output lacks.
 
     ESA 上游 tetra3 没有 status 字段（设备镜像安装的是它，而非 vendored
-    cedar-solve）：有解时 RA/Dec 非空，无匹配与超时都返回空值，只有 T_solve
-    能区分超时。否则每个有效解都会变成 UNKNOWN，调用方都不会把它当作匹配。
+    cedar-solve）：有解时 RA/Dec 非空，无匹配与超时都返回空值，因此只能根据
+    T_solve 近似推断超时，无法确定搜索终止的具体原因。有效解优先于耗时判断。
+    否则每个有效解都会变成 UNKNOWN，调用方都不会把它当作匹配。
     Upstream ESA tetra3 has no status field (the device image ships it rather
     than the vendored cedar-solve): a solution carries RA/Dec, while no match
-    and timeout both return None and only T_solve tells a timeout apart.
+    and timeout both return None. T_solve only approximates a timeout and
+    cannot identify the exact termination reason. A solution takes precedence.
     Without this every valid solve reads UNKNOWN and no caller accepts it.
     """
     if out.get("status") is not None:
