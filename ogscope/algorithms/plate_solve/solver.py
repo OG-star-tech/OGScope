@@ -44,6 +44,29 @@ def _tetra_status_name(out: dict[str, Any]) -> str:
     return _STATUS_NAMES.get(code, str(status))
 
 
+def _normalize_tetra_status(out: dict[str, Any], solve_timeout_ms: float) -> None:
+    """为缺少状态码的 Tetra3 输出补齐状态 / Fill in the status a Tetra3 output lacks.
+
+    ESA 上游 tetra3 没有 status 字段（设备镜像安装的是它，而非 vendored
+    cedar-solve）：有解时 RA/Dec 非空，无匹配与超时都返回空值，因此只能根据
+    T_solve 近似推断超时，无法确定搜索终止的具体原因。有效解优先于耗时判断。
+    否则每个有效解都会变成 UNKNOWN，调用方都不会把它当作匹配。
+    Upstream ESA tetra3 has no status field (the device image ships it rather
+    than the vendored cedar-solve): a solution carries RA/Dec, while no match
+    and timeout both return None. T_solve only approximates a timeout and
+    cannot identify the exact termination reason. A solution takes precedence.
+    Without this every valid solve reads UNKNOWN and no caller accepts it.
+    """
+    if out.get("status") is not None:
+        return
+    if out.get("RA") is not None and out.get("Dec") is not None:
+        out["status"] = 1
+    elif (_maybe_float(out.get("T_solve")) or 0.0) >= solve_timeout_ms:
+        out["status"] = 3
+    else:
+        out["status"] = 2
+
+
 def _json_safe(obj: Any) -> Any:
     """将 numpy 标量/数组等转为 JSON/FastAPI 可序列化类型 / JSON-serializable conversion for API."""
     if obj is None or isinstance(obj, (str, bool, int, float)):
@@ -446,6 +469,7 @@ class PlateSolver:
                 solve_timeout=timeout,
                 return_matches=True,
             )
+            _normalize_tetra_status(out, timeout)
         except OSError as exc:
             return SolveResult(
                 ra_deg=0.0,
@@ -660,6 +684,7 @@ class PlateSolver:
                 centroid_quality=cq,
             )
 
+        _normalize_tetra_status(normal_out, timeout)
         normal_out["T_extract"] = t_extract_ms
         normal_out["T_preprocess"] = t_preprocess_ms
         normal_status = _tetra_status_name(normal_out)
@@ -746,6 +771,7 @@ class PlateSolver:
                 cq["fallback_status"] = "DATABASE_ERROR"
                 normal_out["fallback_error"] = str(exc)
             else:
+                _normalize_tetra_status(fallback_out, timeout)
                 fallback_out["T_extract"] = t_extract_ms
                 fallback_out["T_preprocess"] = t_preprocess_ms + scene_ms
                 cq["fallback_status"] = _tetra_status_name(fallback_out)
