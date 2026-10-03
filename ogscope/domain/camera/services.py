@@ -55,9 +55,7 @@ class CameraDomainService:
         """
         camera = DebugCameraService.get_camera_instance()
         hook = getattr(camera, "begin_fresh_capture_epoch", None)
-        applied = callable(hook)
-        if applied:
-            hook()
+        applied = bool(hook()) if callable(hook) else False
         return {"success": True, "applied": applied}
 
     async def set_auto_exposure_mode(self, enabled: bool):

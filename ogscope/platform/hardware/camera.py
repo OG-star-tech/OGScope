@@ -1051,13 +1051,13 @@ class IMX327MIPICamera(CameraInterface):
             logger.error(f"停止相机失败: {e}")
             return False
 
-    def begin_fresh_capture_epoch(self) -> None:
+    def begin_fresh_capture_epoch(self) -> bool:
         """新分析会话起点：本驱动无跨帧累积状态，空实现 / New analysis-session
         epoch: this driver keeps no cross-frame accumulator, so this is a
         no-op - Picamera2's ISP does its own real-time noise reduction,
         unlike the V4L2 RAW backend's software temporal-NR EMA.
         """
-        return None
+        return False
 
     def is_within_fresh_capture_epoch(self) -> bool:
         """本驱动无该状态，永远安全直接复用当前缓存帧 / This driver has no
