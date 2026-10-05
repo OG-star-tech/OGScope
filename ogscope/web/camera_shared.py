@@ -341,8 +341,18 @@ class CameraManager:
                     )
                     raise RuntimeError(self._health_error or "相机启动失败")
                 self._stream_started_at = time.time()
+            # Long 切换可能跳过临时手动帧；启动探测须覆盖驱动的长曝光等待预算。
+            # Long transitions discard temporary manual frames; startup must allow the driver's frame budget.
+            probe_budget = max(
+                self._probe_timeout_sec,
+                float(
+                    getattr(
+                        self._camera, "capture_timeout_sec", self._probe_timeout_sec
+                    )
+                ),
+            )
             probe_ok = await asyncio.to_thread(
-                self._probe_stream_health_sync, self._probe_timeout_sec
+                self._probe_stream_health_sync, probe_budget
             )
             if not probe_ok:
                 await self._invalidate_camera_locked(
