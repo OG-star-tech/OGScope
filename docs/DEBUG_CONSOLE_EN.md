@@ -192,7 +192,7 @@ These settings enter runtime through environment variables or config files. Name
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `camera_idle_shutdown_sec` | `20.0` | Warm-idle timeout after the last consumer |
+| `camera_idle_shutdown_sec` | `120.0` | Warm-idle timeout after the last consumer; analysis holds capture for its entire session |
 | `camera_frame_stale_timeout_sec` | `5.0` | Re-probe when no successful frame arrives within this duration |
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | Manual white-balance red/blue gains |
