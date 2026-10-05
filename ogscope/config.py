@@ -326,13 +326,9 @@ class Settings(BaseSettings):
         ge=10_000,
         le=10_000_000,
         description=(
-            "自动曝光最长帧周期 3s，暗场允许降帧 / Max auto-exposure frame "
-            "duration, capped at 3s (raised from 1s 2026-09-20 after "
-            "validating 1-3s manual exposure on real Zero2W hardware via "
-            "the V4L2 backend - see "
-            "docs/development/v4l2-zero2w-board-validation.md; the "
-            "picamera2 backend keeps its own independent 1s ceiling, "
-            "camera.py's AUTO_EXPOSURE_MAX_US, unaffected by this)"
+            "自动曝光最长帧周期，两个相机后端均限制为 3s，暗场允许降帧 / "
+            "Max auto-exposure frame duration, capped at 3s for both camera backends; "
+            "dark scenes may lower the frame rate"
         ),
     )
     camera_ae_flicker_mode: str = Field(
@@ -656,8 +652,8 @@ class Settings(BaseSettings):
         ge=0.5,
         le=120.0,
         description=(
-            "单次相机抓帧硬超时（秒）；1 秒 AE 首帧需要包含多帧收敛预算 / "
-            "Hard frame timeout; one-second AE startup needs a multi-frame convergence budget"
+            "单次相机抓帧硬超时（秒）；8 秒默认预算覆盖最长 3 秒曝光 / "
+            "Hard frame timeout; the default 8s budget accommodates exposures up to 3s"
         ),
     )
     camera_grab_failures_offline: int = Field(
