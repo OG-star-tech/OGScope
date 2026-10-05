@@ -109,6 +109,12 @@ def test_mode_acknowledgement_is_not_lost_when_preview_skips_frames(monkeypatch)
     camera._apply_polar_auto_exposure_controls()
     metadata = camera.camera.complete_frame()
     camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+    # 无预览消费者时也必须完成切换，单次分析不能停在临时手动曝光。
+    # Complete the switch without preview consumers; one-shot analysis must not stay manual.
+    assert camera.camera.pending["AeEnable"] is True
+    assert camera.get_camera_info()["ae_exposure_mode_status"] == "verified"
+    auto_metadata = camera.camera.complete_frame()
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: auto_metadata))
     image = np.zeros((120, 160, 3), dtype=np.uint8)
     request = SimpleNamespace(
         make_array=lambda _stream: image,
@@ -120,7 +126,7 @@ def test_mode_acknowledgement_is_not_lost_when_preview_skips_frames(monkeypatch)
     )
     monkeypatch.setattr(camera.camera, "wait", lambda job, **kw: job, raising=False)
     assert camera.capture_image() is not None
-    assert camera.camera.pending["AeEnable"] is True
+    assert camera.camera.auto is True
     assert camera.get_camera_info()["ae_actual_exposure_mode"] == "long"
 
 
@@ -209,3 +215,27 @@ def test_failed_mode_write_does_not_leave_auto_disabled(monkeypatch):
     assert not camera._ae_mode_pending
     assert camera.get_camera_info()["ae_exposure_mode_status"] == "unverified"
     assert camera.get_camera_info()["ae_control_error"] == "RuntimeError"
+
+
+@pytest.mark.unit
+def test_temporary_manual_frames_are_not_published_to_one_shot_analysis(monkeypatch):
+    """模式切换期间不发布手动帧，恢复自动后才可用于分析 / Publish analysis frames only after auto mode resumes."""
+    camera = _camera(monkeypatch)
+    camera._apply_polar_auto_exposure_controls()
+    image = np.zeros((120, 160, 3), dtype=np.uint8)
+    request = SimpleNamespace(
+        make_array=lambda _stream: image,
+        get_metadata=lambda: {"ExposureTime": 1_000},
+        release=lambda: None,
+    )
+    monkeypatch.setattr(
+        camera.camera, "capture_request", lambda **kw: request, raising=False
+    )
+    monkeypatch.setattr(camera.camera, "wait", lambda job, **kw: job, raising=False)
+    assert camera.capture_image() is None
+    metadata = camera.camera.complete_frame()
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+    assert camera.capture_image() is None
+    metadata = camera.camera.complete_frame()
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+    assert camera.capture_image() is not None
