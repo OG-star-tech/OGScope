@@ -239,3 +239,36 @@ def test_temporary_manual_frames_are_not_published_to_one_shot_analysis(monkeypa
     metadata = camera.camera.complete_frame()
     camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
     assert camera.capture_image() is not None
+
+
+@pytest.mark.unit
+def test_start_preserves_acknowledgement_arriving_before_start_returns(monkeypatch):
+    """首帧回调可能早于 start 返回，确认不能被随后重置 / First-frame acknowledgement may arrive before start returns."""
+    camera = _camera(monkeypatch)
+
+    def start():
+        metadata = camera.camera.complete_frame()
+        camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+
+    monkeypatch.setattr(camera.camera, "start", start, raising=False)
+    assert camera.start_capture()
+    assert camera.get_camera_info()["ae_actual_exposure_mode"] == "long"
+    assert camera.get_camera_info()["ae_exposure_mode_status"] == "verified"
+    assert camera.camera.pending["AeEnable"] is True
+
+
+@pytest.mark.unit
+def test_discarded_startup_acknowledgement_is_replayed_once(monkeypatch):
+    """启动模式回报丢失时，只重放一次请求并等待实际确认 / Replay a discarded startup acknowledgement once and await confirmation."""
+    camera = _camera(monkeypatch)
+    camera._apply_polar_auto_exposure_controls()
+    metadata = camera.camera.complete_frame()
+    metadata.pop("AeExposureMode")
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+    assert camera.camera.pending == {"AeEnable": False, "AeExposureMode": 2}
+    assert camera._ae_mode_replayed
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: {}))
+    metadata = camera.camera.complete_frame()
+    camera._observe_ae_request(SimpleNamespace(get_metadata=lambda: metadata))
+    assert camera.camera.pending == {"AeEnable": True}
+    assert camera.get_camera_info()["ae_exposure_mode_status"] == "verified"
