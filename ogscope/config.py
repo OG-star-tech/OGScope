@@ -684,7 +684,7 @@ class Settings(BaseSettings):
         ),
     )
     camera_idle_shutdown_sec: float = Field(
-        default=20.0,
+        default=120.0,
         ge=0.0,
         le=300.0,
         description="无消费者后相机热驻留秒数 / Camera warm-idle timeout after the last consumer",

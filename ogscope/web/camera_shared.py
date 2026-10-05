@@ -352,6 +352,21 @@ class CameraManager:
                     self._latest_jpeg = None
             self._schedule_idle_shutdown()
 
+    async def acquire_analysis_consumer(self) -> None:
+        """分析会话持有相机，直到结束 / Hold the camera for the analysis session."""
+        self._analysis_consumers += 1
+        try:
+            await self.ensure_started()
+        except (Exception, asyncio.CancelledError):
+            self._analysis_consumers = max(0, self._analysis_consumers - 1)
+            self._schedule_idle_shutdown()
+            raise
+
+    async def release_analysis_consumer(self) -> None:
+        """结束分析后开始热驻留计时 / Start warm-idle timing after analysis ends."""
+        self._analysis_consumers = max(0, self._analysis_consumers - 1)
+        self._schedule_idle_shutdown()
+
     async def acquire_recording_consumer(self) -> None:
         """注册录像消费者 / Register a recording consumer."""
         self._recording_consumers += 1
