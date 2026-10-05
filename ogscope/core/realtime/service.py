@@ -245,6 +245,23 @@ class RealtimeSolveService:
         }
 
     async def _loop(self, initial_frame_id: int = -1) -> None:
+        """分析全程持有相机，包括等帧与解算 / Hold capture through frame waits and solving."""
+        manager = get_camera_manager()
+        try:
+            await manager.acquire_analysis_consumer()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - report startup failure / 报告启动失败
+            self.state.last_error = str(exc)
+            self.state.running = False
+            self._log_event("camera_start_failed", error=str(exc))
+            return
+        try:
+            await self._run_loop(manager, initial_frame_id)
+        finally:
+            await manager.release_analysis_consumer()
+
+    async def _run_loop(self, manager: Any, initial_frame_id: int = -1) -> None:
         """后台循环 / Background loop"""
         last_started_mono = 0.0
         last_frame_id = initial_frame_id
@@ -255,7 +272,6 @@ class RealtimeSolveService:
                 )
                 if remaining > 0:
                     await asyncio.sleep(remaining)
-                manager = get_camera_manager()
                 cam = manager.get_camera_instance()
                 if not cam or not getattr(cam, "is_capturing", False):
                     await asyncio.sleep(0.1)

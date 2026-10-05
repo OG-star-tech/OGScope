@@ -243,7 +243,7 @@ python scripts/test_debug_console.py --test deps
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `camera_idle_shutdown_sec` | `20.0` | 无消费者后相机热驻留时间，超时后释放采集 |
+| `camera_idle_shutdown_sec` | `120.0` | 无消费者后相机热驻留时间，超时后释放采集；分析会话全程持有相机 |
 | `camera_frame_stale_timeout_sec` | `5.0` | 超过该时间没有成功帧时重新探测 |
 | `camera_white_balance_mode` | `auto` | `auto` / `manual` / `night` |
 | `camera_white_balance_gain_r` / `camera_white_balance_gain_b` | `1.0` | 手动白平衡红/蓝增益 |
