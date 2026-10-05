@@ -159,8 +159,10 @@ def test_initialize_auto_exposure_does_not_seed_manual_controls(monkeypatch) -> 
 
 
 @pytest.mark.unit
-def test_start_capture_reapplies_auto_exposure_after_stream_start(monkeypatch) -> None:
-    """相机开始出帧后再次启用 AE / Re-enable AE after streaming starts."""
+def test_start_capture_stages_auto_exposure_transition_before_stream_start(
+    monkeypatch,
+) -> None:
+    """先排队模式切换，首帧回报后再启用 AE / Queue the mode transition before starting, then enable AE on acknowledgement."""
     fake = _FakePicamera2()
     cam = IMX327MIPICamera(_minimal_config(auto_exposure=True))
     cam.camera = fake
@@ -173,7 +175,7 @@ def test_start_capture_reapplies_auto_exposure_after_stream_start(monkeypatch) -
     )
 
     assert cam.start_capture() is True
-    assert applied_after_start == [True]
+    assert applied_after_start == [False]
 
 
 @pytest.mark.unit

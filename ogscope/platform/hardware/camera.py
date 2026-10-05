@@ -182,6 +182,8 @@ class IMX327MIPICamera(CameraInterface):
         self._ae_exposure_mode_status = "unknown"
         self._ae_mode_pending = False
         self._ae_mode_started_at = 0.0
+        self._ae_pending_exposure_mode: Any = None
+        self._ae_mode_replayed = False
         self._ae_mode_lock = threading.RLock()
 
         logger.info(
@@ -701,6 +703,9 @@ class IMX327MIPICamera(CameraInterface):
         self._ae_exposure_mode_status = "unknown"
         self._ae_mode_pending = False
 
+        self._ae_pending_exposure_mode = None
+        self._ae_mode_replayed = False
+
     def _record_ae_control_metadata(self, metadata: dict[str, Any]) -> None:
         """记录帧回报的控制状态，而非请求值 / Record reported controls, not requested values."""
         exposure_mode = self._to_number(metadata.get("AeExposureMode"))
@@ -737,6 +742,22 @@ class IMX327MIPICamera(CameraInterface):
         if not confirmed and (
             time.monotonic() - self._ae_mode_started_at < self.AE_MODE_CONFIRM_TIMEOUT_S
         ):
+            # 启动帧的回报可能被 SDK 丢弃；在流运行后只重放一次模式请求。
+            # The SDK may discard startup acknowledgements; replay once after streaming begins.
+            if (
+                not self._ae_mode_replayed
+                and self._ae_pending_exposure_mode is not None
+            ):
+                try:
+                    self.camera.set_controls(
+                        {
+                            "AeEnable": False,
+                            "AeExposureMode": self._ae_pending_exposure_mode,
+                        }
+                    )
+                    self._ae_mode_replayed = True
+                except Exception as exc:
+                    self._ae_control_error = type(exc).__name__
             return
         try:
             # 必须跨过已完成的请求；SDK 会合并同一帧之前的 set_controls 调用。
@@ -906,6 +927,8 @@ class IMX327MIPICamera(CameraInterface):
             if "AeExposureMode" in updates:
                 self._ae_mode_pending = True
                 self._ae_mode_started_at = time.monotonic()
+                self._ae_pending_exposure_mode = updates["AeExposureMode"]
+                self._ae_mode_replayed = False
                 self._ae_exposure_mode_status = "awaiting_metadata"
             self._ae_applied_controls = sorted(updates)
             if self._ae_exposure_mode_status != "unverified":
@@ -938,6 +961,8 @@ class IMX327MIPICamera(CameraInterface):
             if "AeExposureMode" in applied and "AeEnable" in applied:
                 self._ae_mode_pending = True
                 self._ae_mode_started_at = time.monotonic()
+                self._ae_pending_exposure_mode = updates["AeExposureMode"]
+                self._ae_mode_replayed = False
                 self._ae_exposure_mode_status = "awaiting_metadata"
             elif not self._ae_mode_pending:
                 # 模式设置失败后恢复 AE，不能把设备留在临时手动阶段。
@@ -1128,11 +1153,13 @@ class IMX327MIPICamera(CameraInterface):
             except Exception as e:
                 logger.warning(f"重放曝光控制失败，使用驱动默认控制: {e}")
 
-            self.camera.start()
-            self.is_capturing = True
+            # 启动前建立切换状态，不能在快到的首帧回报之后把确认清掉。
+            # Stage the transition before start; do not clear an early first-frame acknowledgement.
             if self.auto_exposure:
                 self._reset_autonomous_ae_state()
                 self._apply_polar_auto_exposure_controls()
+            self.camera.start()
+            self.is_capturing = True
             logger.info("相机开始捕获")
             return True
         except Exception as e:
