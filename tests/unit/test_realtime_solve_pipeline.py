@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 
 from ogscope.algorithms.plate_solve.solver import SolveResult
@@ -39,19 +40,30 @@ def test_core_realtime_uses_authoritative_bgr_pipeline() -> None:
     service = RealtimeSolveService()
     service.solver = MagicMock()
     frame = np.zeros((32, 48, 3), dtype=np.uint8)
+    frame[0, 0] = [255, 0, 0]
+    frame[0, 1] = [0, 0, 255]
+    original = frame.copy()
 
     service._solve_frame_sync(frame)
 
-    service.solver.solve_from_bgr_frame.assert_called_once_with(
-        frame_bgr=frame,
-        max_stars=service._max_stars,
-        hint_ra_deg=service._hint_ra,
-        hint_dec_deg=service._hint_dec,
-        solve_source="realtime",
-        fov_estimate=service._fov_estimate,
-        fov_max_error=service._fov_max_error,
-        solve_timeout_ms=service._solve_timeout_ms,
+    service.solver.solve_from_bgr_frame.assert_called_once()
+    kwargs = service.solver.solve_from_bgr_frame.call_args.kwargs
+    bgr = kwargs.pop("frame_bgr")
+    np.testing.assert_array_equal(bgr[0, :2], [[0, 0, 255], [255, 0, 0]])
+    np.testing.assert_array_equal(
+        cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)[0, :2], [76, 29]
     )
+    np.testing.assert_array_equal(frame, original)
+    assert bgr is not frame
+    assert kwargs == {
+        "max_stars": service._max_stars,
+        "hint_ra_deg": service._hint_ra,
+        "hint_dec_deg": service._hint_dec,
+        "solve_source": "realtime",
+        "fov_estimate": service._fov_estimate,
+        "fov_max_error": service._fov_max_error,
+        "solve_timeout_ms": service._solve_timeout_ms,
+    }
     service.solver.solve.assert_not_called()
 
 

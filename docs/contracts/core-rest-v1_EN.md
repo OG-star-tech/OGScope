@@ -94,6 +94,7 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
   - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames
 - `POST /api/core/v1/camera/stop`
 - `GET /api/core/v1/camera/preview/stream?quality=75`
+  - JPEG previews always consume shared frames; a different client quality never triggers another camera read. Same-frame, same-quality requests share a bounded variant cache. Without retained RAW, variants transcode the shared JPEG; a higher output quality cannot restore source detail.
   - Product MJPEG preview using the shared preview consumer and concurrency limiter
   - `quality` ranges from `10` to `100`; omission uses the server preview-quality setting
   - Responses are non-cacheable; at the client limit, the stream with the oldest send progress is evicted to make room for the new connection
@@ -106,6 +107,8 @@ Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, deb
 
 - `GET /api/dev/debug/camera/stream?quality=75` — developer entry backed by the shared Core preview implementation
 - `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout, target preview FPS
+  - `camera_read_average_ms` includes driver capture and processing. `jpeg_average_encode_ms` measures shared-preview encoding; `jpeg_variant_average_encode_ms` and `jpeg_variant_cached_bytes` describe client-quality variants.
+  - Throughput uses the lower sensor/preview target. `preview_rate_limit` reports an intentional preview cap; `auto_exposure_long` requires actual exposure/frame-duration evidence relative to that effective target; other low throughput reports `processing_limit`.
 - `GET /api/dev/debug/camera/preview` — single-frame preview
 
 ### 6) Camera Tuning

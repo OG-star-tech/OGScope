@@ -584,7 +584,10 @@ class CoreStreamStatusResponse(BaseModel):
     preview_consumers: int = 0
     analysis_consumers: int = 0
     recording_consumers: int = 0
+    camera_read_average_ms: float = 0.0
     jpeg_average_encode_ms: float = 0.0
+    jpeg_variant_average_encode_ms: float = 0.0
+    jpeg_variant_cached_bytes: int = 0
     jpeg_cached_bytes: int = 0
     preview_encoder: str = ""
     jpeg_encode_failures: int = 0
