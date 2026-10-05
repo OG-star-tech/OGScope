@@ -32,7 +32,9 @@ class FrameCamera:
 
 
 @pytest.mark.asyncio
-async def test_analysis_reopens_idle_camera_and_holds_it_until_cancellation(monkeypatch):
+async def test_analysis_reopens_idle_camera_and_holds_it_until_cancellation(
+    monkeypatch,
+):
     """分析自动重开相机并跨越空闲预算持有 / Reopen capture and retain it beyond the idle budget."""
     manager = CameraManager()
     manager._idle_shutdown_sec = 0.01
