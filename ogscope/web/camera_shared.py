@@ -41,6 +41,11 @@ class CameraManager:
         self._camera = None
         self._control_lock = asyncio.Lock()
         self._read_lock = Lock()
+        # 预览和分析读帧固定在线程中，避免相机图像缓存散落到默认线程池。
+        # Pin preview and analysis reads to one worker instead of scattering native image caches.
+        self._capture_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="camera-capture"
+        )
         self._frame_lock = Lock()
         self._grabber_task: asyncio.Task | None = None
         self._inflight_read_future: asyncio.Future | None = None
@@ -568,7 +573,8 @@ class CameraManager:
         """启动后探测是否能读到至少一帧 / Probe at least one frame after start."""
         deadline = time.time() + max(0.1, float(timeout_sec))
         while time.time() < deadline:
-            frame = self._read_frame_sync()
+            # 健康探测也复用读帧工作线程 / Health probes reuse the capture worker too.
+            frame = self._capture_executor.submit(self._read_frame_sync).result()
             if frame is not None:
                 return True
             time.sleep(0.05)
@@ -649,7 +655,9 @@ class CameraManager:
                 interval = 1.0 / float(max(1, self._target_fps))
                 t0 = time.time()
                 try:
-                    read_future = loop.run_in_executor(None, self._read_frame_sync)
+                    read_future = loop.run_in_executor(
+                        self._capture_executor, self._read_frame_sync
+                    )
                     self._inflight_read_future = read_future
                     try:
                         frame = await asyncio.shield(read_future)
@@ -816,7 +824,9 @@ class CameraManager:
                         self._latest_ts,
                     )
             # 无常驻 raw 时同步抓一帧，供解算使用 / Sync-grab without retaining raw.
-            frame = await asyncio.to_thread(self._read_frame_sync)
+            frame = await asyncio.get_running_loop().run_in_executor(
+                self._capture_executor, self._read_frame_sync
+            )
             if frame is None:
                 raise RuntimeError("无可用视频帧 / No frame available")
             with self._frame_lock:
