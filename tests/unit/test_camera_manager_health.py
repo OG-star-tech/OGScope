@@ -100,6 +100,35 @@ async def test_ensure_started_succeeds_when_frames_available() -> None:
 
 
 @pytest.mark.asyncio
+async def test_startup_allows_long_mode_transition_before_first_analysis_frame(
+    monkeypatch,
+) -> None:
+    """3 秒模式切换不能被旧 2 秒探测预算误杀 / A 3s transition must outlive the old 2s startup probe."""
+    clock = [0.0]
+    monkeypatch.setattr("ogscope.web.camera_shared.time.time", lambda: clock[0])
+    monkeypatch.setattr("ogscope.web.camera_shared.time.sleep", lambda _seconds: None)
+
+    class LongCamera(_FrameCamera):
+        capture_timeout_sec = 8.0
+
+        def get_video_frame(self):
+            clock[0] += 3.0
+            self.read_count += 1
+            if self.read_count == 1:
+                return None
+            return np.zeros((360, 640, 3), dtype=np.uint8)
+
+    manager = CameraManager()
+    manager._probe_timeout_sec = 2.0
+    camera = LongCamera()
+    manager.attach_camera_instance(camera)
+    await manager.ensure_started()
+    assert camera.read_count == 2
+    assert (await manager.status())["connected"] is True
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_status_uses_successful_raw_probe_without_jpeg_grabber() -> None:
     """冷启动探测帧应直接建立流健康状态 / Cold-start raw probe must establish stream health."""
     manager = CameraManager()

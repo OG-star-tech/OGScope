@@ -23,17 +23,46 @@ def _camera(**extra: Any) -> IMX327MIPICamera:
 
 
 @pytest.mark.unit
-def test_product_tuning_long_curve_reaches_one_second() -> None:
-    """产品曲线优先延长曝光并最终到达 1 秒 / Product curve prioritizes shutter and reaches 1s."""
+def test_product_long_curve_allows_daylight_and_shutter_first_night_exposure() -> None:
+    """Long 允许亚毫秒日间曝光和快门优先的夜间曝光 / Permit sub-ms daylight and shutter-first night exposure."""
     with IMX327MIPICamera.PRODUCT_TUNING_FILE.open(encoding="utf-8") as file:
         tuning = json.load(file)
 
     agc = next(item["rpi.agc"] for item in tuning["algorithms"] if "rpi.agc" in item)
     long_mode = agc["exposure_modes"]["long"]
 
-    assert long_mode["shutter"][-1] == 1_000_000
+    # libcamera 把首点作为快门下限，再夹定到传感器合法范围；1ms 会挡住白天恢复。
+    # libcamera starts at the first shutter point and clamps to sensor limits; 1ms blocks daylight recovery.
+    assert long_mode["shutter"][0] == 10
+    assert long_mode["shutter"][0] < 1_000
+    assert long_mode["shutter"][1:] == [
+        30_000,
+        60_000,
+        120_000,
+        250_000,
+        500_000,
+        1_000_000,
+        2_000_000,
+        3_000_000,
+        3_000_000,
+        3_000_000,
+        3_000_000,
+    ]
+    assert long_mode["gain"] == [1.0] * 9 + [2.0, 4.0, 4.0]
+
+
+@pytest.mark.unit
+def test_product_tuning_long_curve_reaches_three_seconds() -> None:
+    """产品曲线先延长曝光至 3 秒再增益 / Product curve reaches 3s before raising gain."""
+    with IMX327MIPICamera.PRODUCT_TUNING_FILE.open(encoding="utf-8") as file:
+        tuning = json.load(file)
+
+    agc = next(item["rpi.agc"] for item in tuning["algorithms"] if "rpi.agc" in item)
+    long_mode = agc["exposure_modes"]["long"]
+
+    assert long_mode["shutter"][-1] == 3_000_000
     assert len(long_mode["shutter"]) == len(long_mode["gain"])
-    first_max_shutter = long_mode["shutter"].index(1_000_000)
+    first_max_shutter = long_mode["shutter"].index(3_000_000)
     assert long_mode["gain"][: first_max_shutter + 1] == [1.0] * (first_max_shutter + 1)
     assert max(long_mode["gain"]) == 4.0
     assert agc["constraint_modes"]["shadows"][0]["q_hi"] == pytest.approx(0.5)

@@ -6,6 +6,7 @@
 
 import logging
 import math
+import threading
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -65,11 +66,15 @@ class IMX327MIPICamera(CameraInterface):
     SENSOR_MAX_WIDTH = 1920
     SENSOR_MAX_HEIGHT = 1080
     PREVIEW_BUFFER_COUNT = 2
+    # libcamera 的 BGR888 在 ndarray 中排列为 RGB，符合本项目的像素契约。
+    # libcamera BGR888 yields RGB array bytes, matching our pixel contract.
+    PICAMERA_MAIN_FORMAT = "BGR888"
     AE_SUPERVISOR_INTERVAL_S = 1.0
     AE_SUPERVISOR_STEP_EV = 0.5
     AE_DARK_CONFIRM_FRAMES = 2
     AE_BRIGHT_CONFIRM_FRAMES = 2
-    AUTO_EXPOSURE_MAX_US = 1_000_000
+    AE_MODE_CONFIRM_TIMEOUT_S = 8.0
+    AUTO_EXPOSURE_MAX_US = 3_000_000
     LUMINANCE_STATS_MAX_SAMPLES = 32_768
     PRODUCT_TUNING_FILE = Path(__file__).with_name("tuning") / "imx327.json"
     MANUAL_CONTROL_RANGE_DEFAULTS = {
@@ -171,6 +176,15 @@ class IMX327MIPICamera(CameraInterface):
         self._ae_requested_constraint_mode = "normal"
         self._ae_applied_controls: list[str] = []
         self._ae_control_error: str | None = None
+        self._ae_actual_exposure_mode: str | None = None
+        self._ae_actual_auto_exposure: bool | None = None
+        self._ae_actual_auto_gain: bool | None = None
+        self._ae_exposure_mode_status = "unknown"
+        self._ae_mode_pending = False
+        self._ae_mode_started_at = 0.0
+        self._ae_pending_exposure_mode: Any = None
+        self._ae_mode_replayed = False
+        self._ae_mode_lock = threading.RLock()
 
         logger.info(
             f"初始化 IMX327 MIPI 相机: {self.width}x{self.height}@{self.fps}fps"
@@ -512,7 +526,10 @@ class IMX327MIPICamera(CameraInterface):
         """创建含可选 lores 的视频配置 / Create video config with optional lores stream."""
         if not self.camera:
             raise RuntimeError("camera missing")
-        main = {"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+        main = {
+            "size": (self.capture_width, self.capture_height),
+            "format": self.PICAMERA_MAIN_FORMAT,
+        }
         if self.lores_enabled:
             try:
                 cfg = self.camera.create_video_configuration(
@@ -680,6 +697,79 @@ class IMX327MIPICamera(CameraInterface):
         self._ae_requested_constraint_mode = "normal"
         self._ae_applied_controls = []
         self._ae_control_error = None
+        self._ae_actual_exposure_mode = None
+        self._ae_actual_auto_exposure = None
+        self._ae_actual_auto_gain = None
+        self._ae_exposure_mode_status = "unknown"
+        self._ae_mode_pending = False
+
+        self._ae_pending_exposure_mode = None
+        self._ae_mode_replayed = False
+
+    def _record_ae_control_metadata(self, metadata: dict[str, Any]) -> None:
+        """记录帧回报的控制状态，而非请求值 / Record reported controls, not requested values."""
+        exposure_mode = self._to_number(metadata.get("AeExposureMode"))
+        if exposure_mode is not None:
+            self._ae_actual_exposure_mode = {
+                0: "normal",
+                1: "short",
+                2: "long",
+                3: "custom",
+            }.get(int(exposure_mode))
+        exposure_auto = self._to_number(metadata.get("ExposureTimeMode"))
+        if exposure_auto is not None:
+            self._ae_actual_auto_exposure = exposure_auto == 0
+        gain_auto = self._to_number(metadata.get("AnalogueGainMode"))
+        if gain_auto is not None:
+            self._ae_actual_auto_gain = gain_auto == 0
+
+    def _observe_ae_request(self, request: Any) -> None:
+        """监听所有完成帧，避免低帧率消费者漏过控制回报 / Observe all frames so throttled readers do not miss control reports."""
+        with self._ae_mode_lock:
+            self._record_ae_control_metadata(dict(request.get_metadata() or {}))
+            self._advance_ae_mode_transition()
+
+    def _advance_ae_mode_transition(self) -> None:
+        """模式确认后再启用 AE；超时保持可预览并报告降级 / Enable AE after mode acknowledgement; report bounded fallback."""
+        with self._ae_mode_lock:
+            self._advance_ae_mode_transition_locked()
+
+    def _advance_ae_mode_transition_locked(self) -> None:
+        """调用方持锁，避免覆盖同时到达的手动操作 / Caller holds the lock to protect concurrent manual control."""
+        if not self._ae_mode_pending or not self.auto_exposure:
+            return
+        confirmed = self._ae_actual_exposure_mode == "long"
+        if not confirmed and (
+            time.monotonic() - self._ae_mode_started_at < self.AE_MODE_CONFIRM_TIMEOUT_S
+        ):
+            # 启动帧的回报可能被 SDK 丢弃；在流运行后只重放一次模式请求。
+            # The SDK may discard startup acknowledgements; replay once after streaming begins.
+            if (
+                not self._ae_mode_replayed
+                and self._ae_pending_exposure_mode is not None
+            ):
+                try:
+                    self.camera.set_controls(
+                        {
+                            "AeEnable": False,
+                            "AeExposureMode": self._ae_pending_exposure_mode,
+                        }
+                    )
+                    self._ae_mode_replayed = True
+                except Exception as exc:
+                    self._ae_control_error = type(exc).__name__
+            return
+        try:
+            # 必须跨过已完成的请求；SDK 会合并同一帧之前的 set_controls 调用。
+            # Cross a completed request: the SDK coalesces set_controls calls before a frame.
+            self.camera.set_controls({"AeEnable": True})
+            self._ae_mode_pending = False
+            self._ae_exposure_mode_status = "verified" if confirmed else "unverified"
+            self._ae_control_error = (
+                None if confirmed else "exposure_mode_not_confirmed"
+            )
+        except Exception as exc:
+            self._ae_control_error = type(exc).__name__
 
     def _update_aggressive_auto_exposure(self, stats: dict[str, Any]) -> None:
         """自主切换星空 AE 并慢速调整 EV / Autonomously select starfield AE and supervise EV."""
@@ -768,6 +858,11 @@ class IMX327MIPICamera(CameraInterface):
 
     def _apply_polar_auto_exposure_controls(self) -> None:
         """应用自主场景 AE：星空优先长曝光，明亮场景快速恢复 / Apply autonomous scene AE."""
+        with self._ae_mode_lock:
+            self._apply_polar_auto_exposure_controls_locked()
+
+    def _apply_polar_auto_exposure_controls_locked(self) -> None:
+        """模式切换与逐帧回报共用控制锁 / Serialize mode changes with frame acknowledgements."""
         if not self.camera or not self.auto_exposure:
             return
         if not self.ae_polar_preset:
@@ -802,7 +897,20 @@ class IMX327MIPICamera(CameraInterface):
             if metering_enum is not None and "AeMeteringMode" in cc:
                 updates["AeMeteringMode"] = metering_enum.Matrix
             if exposure_enum is not None and "AeExposureMode" in cc:
-                updates["AeExposureMode"] = exposure_enum.Long
+                # libcamera 0.5.2 在 AE/AG 自动运行时忽略 AeExposureMode。
+                # libcamera 0.5.2 ignores AeExposureMode while shutter/gain are automatic.
+                if self._ae_mode_pending:
+                    updates["AeEnable"] = False
+                elif (
+                    self._ae_actual_exposure_mode != "long"
+                    or self._ae_exposure_mode_status != "verified"
+                ):
+                    updates["AeEnable"] = False
+                    updates["AeExposureMode"] = exposure_enum.Long
+            else:
+                self._ae_exposure_mode_status = "unsupported"
+        else:
+            self._ae_exposure_mode_status = "unsupported"
         ev = float(self._ae_effective_exposure_value)
         # Explicitly write the neutral value too. Omitting zero can leave a
         # previous dark-scene bias active after returning to daylight.
@@ -816,11 +924,18 @@ class IMX327MIPICamera(CameraInterface):
             self._apply_frame_duration_controls()
             self._apply_ae_flicker_controls()
             self.camera.set_controls(updates)
+            if "AeExposureMode" in updates:
+                self._ae_mode_pending = True
+                self._ae_mode_started_at = time.monotonic()
+                self._ae_pending_exposure_mode = updates["AeExposureMode"]
+                self._ae_mode_replayed = False
+                self._ae_exposure_mode_status = "awaiting_metadata"
             self._ae_applied_controls = sorted(updates)
-            self._ae_control_error = None
+            if self._ae_exposure_mode_status != "unverified":
+                self._ae_control_error = None
             logger.info(
-                "已应用自主 AE 场景=%s constraint=%s exposure=%s EV≈%.2f / "
-                "Applied autonomous AE scene=%s constraint=%s exposure=%s EV≈%.2f",
+                "已提交自主 AE 场景=%s constraint=%s exposure=%s EV≈%.2f / "
+                "Submitted autonomous AE scene=%s constraint=%s exposure=%s EV≈%.2f",
                 self._ae_scene_mode,
                 self._ae_requested_constraint_mode,
                 self._ae_requested_exposure_mode,
@@ -843,6 +958,17 @@ class IMX327MIPICamera(CameraInterface):
                 except Exception as err:
                     logger.debug("AE 控制 %s 未生效: %s", key, err)
             self._ae_applied_controls = sorted(applied)
+            if "AeExposureMode" in applied and "AeEnable" in applied:
+                self._ae_mode_pending = True
+                self._ae_mode_started_at = time.monotonic()
+                self._ae_pending_exposure_mode = updates["AeExposureMode"]
+                self._ae_mode_replayed = False
+                self._ae_exposure_mode_status = "awaiting_metadata"
+            elif not self._ae_mode_pending:
+                # 模式设置失败后恢复 AE，不能把设备留在临时手动阶段。
+                # Restore AE on mode failure rather than leaving temporary manual control active.
+                self.camera.set_controls({"AeEnable": True})
+                self._ae_exposure_mode_status = "unverified"
 
     def _white_balance_controls(self) -> dict[str, Any]:
         """生成白平衡控制；auto 必须真正打开 AWB / Build WB controls; auto must really enable AWB."""
@@ -940,8 +1066,10 @@ class IMX327MIPICamera(CameraInterface):
                     )
                     self.camera = Picamera2()
 
-            # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
-            # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
+            self.camera.pre_callback = self._observe_ae_request
+
+            # 配置主流与可选 lores 流；BGR888 格式提供真正的 RGB 字节排列。
+            # Configure main and optional lores; BGR888 supplies true RGB byte order.
             camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
@@ -1025,11 +1153,13 @@ class IMX327MIPICamera(CameraInterface):
             except Exception as e:
                 logger.warning(f"重放曝光控制失败，使用驱动默认控制: {e}")
 
-            self.camera.start()
-            self.is_capturing = True
+            # 启动前建立切换状态，不能在快到的首帧回报之后把确认清掉。
+            # Stage the transition before start; do not clear an early first-frame acknowledgement.
             if self.auto_exposure:
                 self._reset_autonomous_ae_state()
                 self._apply_polar_auto_exposure_controls()
+            self.camera.start()
+            self.is_capturing = True
             logger.info("相机开始捕获")
             return True
         except Exception as e:
@@ -1045,6 +1175,7 @@ class IMX327MIPICamera(CameraInterface):
             self.camera.stop()
             self.is_capturing = False
             self._pending_capture_job = None
+            self._ae_mode_pending = False
             logger.info("相机停止捕获")
             return True
         except Exception as e:
@@ -1094,9 +1225,24 @@ class IMX327MIPICamera(CameraInterface):
             try:
                 image = request.make_array("main")
                 self._last_metadata = dict(request.get_metadata() or {})
+                self._advance_ae_mode_transition()
                 self._collect_lores_stats(request, main_image=image)
             finally:
                 request.release()
+
+            # 临时手动阶段的图像不能成为分析首帧；完成 AE 切换后再发布。
+            # Do not publish temporary manual frames as the first analysis image.
+            if self.auto_exposure and (
+                self._ae_mode_pending
+                or (
+                    self._ae_exposure_mode_status == "verified"
+                    and (
+                        self._ae_actual_auto_exposure is False
+                        or self._ae_actual_auto_gain is False
+                    )
+                )
+            ):
+                return None
 
             # 如果是 RAW 格式，需要转换为 RGB / If it is RAW format, it needs to be converted to RGB
             if len(image.shape) == 2:  # RAW 格式 / RAW format
@@ -1242,7 +1388,7 @@ class IMX327MIPICamera(CameraInterface):
                     still_cfg = self.camera.create_still_configuration(
                         main={
                             "size": (self.capture_width, self.capture_height),
-                            "format": "RGB888",
+                            "format": self.PICAMERA_MAIN_FORMAT,
                         }
                     )
                     self.camera.configure(still_cfg)
@@ -1291,9 +1437,13 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
+            with self._ae_mode_lock:
+                self.auto_exposure = False
+                self._ae_mode_pending = False
             self.camera.set_controls({"AeEnable": False, "ExposureTime": exposure_us})
             self.exposure_us = exposure_us
             self.auto_exposure = False
+            self._ae_mode_pending = False
             self._apply_frame_duration_controls()
             logger.info(f"曝光时间设置为: {exposure_us}μs")
             return True
@@ -1308,6 +1458,9 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
+            with self._ae_mode_lock:
+                self.auto_exposure = False
+                self._ae_mode_pending = False
             # 手动设置增益时显式关闭自动曝光，避免控制冲突 / Explicitly turn off automatic exposure when setting gain manually to avoid control conflicts
             try:
                 self.camera.set_controls({"AeEnable": False})
@@ -1324,6 +1477,7 @@ class IMX327MIPICamera(CameraInterface):
             self.analogue_gain = analogue_gain
             self.digital_gain = digital_gain
             self.auto_exposure = False
+            self._ae_mode_pending = False
             self._apply_frame_duration_controls()
             logger.info(f"增益设置为: 模拟={analogue_gain}, 数字={digital_gain}")
             return True
@@ -1338,12 +1492,14 @@ class IMX327MIPICamera(CameraInterface):
             return False
 
         try:
-            self.auto_exposure = enabled
-            if enabled:
-                self._reset_autonomous_ae_state()
-                self._apply_polar_auto_exposure_controls()
-            else:
-                self.camera.set_controls({"AeEnable": False})
+            with self._ae_mode_lock:
+                self.auto_exposure = enabled
+                if enabled:
+                    self._reset_autonomous_ae_state()
+                    self._apply_polar_auto_exposure_controls()
+                else:
+                    self._ae_mode_pending = False
+                    self.camera.set_controls({"AeEnable": False})
             self._apply_frame_duration_controls()
 
             # 关闭自动曝光时，立即重放当前手动参数，确保状态一致 / When auto-exposure is turned off, the current manual parameters are immediately replayed to ensure consistent status.
@@ -1436,7 +1592,7 @@ class IMX327MIPICamera(CameraInterface):
                 still_cfg = self.camera.create_still_configuration(
                     main={
                         "size": (self.capture_width, self.capture_height),
-                        "format": "RGB888",
+                        "format": self.PICAMERA_MAIN_FORMAT,
                     }
                 )
                 self.camera.configure(still_cfg)
@@ -1539,6 +1695,10 @@ class IMX327MIPICamera(CameraInterface):
                 "ae_scene_mode": self._ae_scene_mode,
                 "ae_control_backend": self._ae_control_backend,
                 "ae_requested_exposure_mode": self._ae_requested_exposure_mode,
+                "ae_actual_exposure_mode": self._ae_actual_exposure_mode,
+                "ae_exposure_mode_status": self._ae_exposure_mode_status,
+                "actual_auto_exposure": self._ae_actual_auto_exposure,
+                "actual_auto_gain": self._ae_actual_auto_gain,
                 "ae_requested_constraint_mode": self._ae_requested_constraint_mode,
                 "ae_applied_controls": self._ae_applied_controls,
                 "ae_control_error": self._ae_control_error,

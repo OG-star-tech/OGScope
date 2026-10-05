@@ -33,6 +33,9 @@ class AutoExposureLimits:
     max_step_stops: float = 1.0
     hysteresis_stops: float = 0.12
     settle_frames: int = 2
+    # 真实曝光步长；未知时保留旧版 50us 调整死区 / Actual exposure step;
+    # retain the legacy 50us adjustment deadband when the step is unknown.
+    exposure_step_us: float | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -66,7 +69,17 @@ def measure_luminance(
     if values.ndim >= 3:
         values = np.mean(values[..., :3], axis=-1)
 
-    stride = max(1, int(math.ceil(math.sqrt(values.size / max(1, max_samples)))))
+    sample_limit = max(1, int(max_samples))
+    stride = max(1, int(math.ceil(math.sqrt(values.size / sample_limit))))
+    # 奇数步长交替覆盖四个 Bayer 相位，均衡信号抽样；这不是经过色权的 Y。
+    # An odd stride alternates all four Bayer phases for balanced signal sampling, not color-weighted Y.
+    stride |= 1
+    height, width = values.shape[:2]
+    # 窄幅或奇数尺寸也必须遵守样本上限 / Keep narrow or odd-sized images within the sample cap too.
+    while ((height + stride - 1) // stride) * (
+        (width + stride - 1) // stride
+    ) > sample_limit:
+        stride += 2
     sampled = np.asarray(values[::stride, ::stride], dtype=np.float32).reshape(-1)
     if sampled.size == 0:
         return LuminanceStats(0.0, 0.0, 0.0, 0)
@@ -225,9 +238,28 @@ class NightSkyAutoExposure:
                 ),
             )
 
-        changed = abs(next_exposure - exposure_us) >= max(
-            50, exposure_us * 0.02
-        ) or abs(next_gain - analogue_gain) >= max(0.02, analogue_gain * 0.02)
+        exposure_step_us = self.limits.exposure_step_us
+        if exposure_step_us is not None and exposure_step_us > 0:
+            # 比较最近的硬件档位，识别亚毫秒调整并避免重复写回同一曝光行数。
+            # Compare nearest hardware steps to detect sub-ms changes without repeatedly writing the same line count.
+            # 这里只判定 changed，不改请求值；实际量化和回读仍由驱动负责。
+            # This only decides changed, preserving requests; the driver owns actual quantization and readback.
+            current_step = round(
+                (exposure_us - self.limits.min_exposure_us) / exposure_step_us
+            )
+            next_step = round(
+                (next_exposure - self.limits.min_exposure_us) / exposure_step_us
+            )
+            exposure_changed = current_step != next_step and abs(
+                next_exposure - exposure_us
+            ) >= max(1, exposure_us * 0.02)
+        else:
+            exposure_changed = abs(next_exposure - exposure_us) >= max(
+                50, exposure_us * 0.02
+            )
+        changed = exposure_changed or abs(next_gain - analogue_gain) >= max(
+            0.02, analogue_gain * 0.02
+        )
         if changed:
             self._settle_remaining = max(0, int(self.limits.settle_frames))
 

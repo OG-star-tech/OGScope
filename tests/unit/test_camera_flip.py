@@ -159,8 +159,10 @@ def test_initialize_auto_exposure_does_not_seed_manual_controls(monkeypatch) -> 
 
 
 @pytest.mark.unit
-def test_start_capture_reapplies_auto_exposure_after_stream_start(monkeypatch) -> None:
-    """相机开始出帧后再次启用 AE / Re-enable AE after streaming starts."""
+def test_start_capture_stages_auto_exposure_transition_before_stream_start(
+    monkeypatch,
+) -> None:
+    """先排队模式切换，首帧回报后再启用 AE / Queue the mode transition before starting, then enable AE on acknowledgement."""
     fake = _FakePicamera2()
     cam = IMX327MIPICamera(_minimal_config(auto_exposure=True))
     cam.camera = fake
@@ -173,7 +175,7 @@ def test_start_capture_reapplies_auto_exposure_after_stream_start(monkeypatch) -
     )
 
     assert cam.start_capture() is True
-    assert applied_after_start == [True]
+    assert applied_after_start == [False]
 
 
 @pytest.mark.unit
@@ -275,13 +277,19 @@ def test_frame_duration_limits_allow_long_auto_exposure() -> None:
 
 
 @pytest.mark.unit
-def test_auto_exposure_ceiling_is_capped_at_one_second() -> None:
+def test_auto_exposure_ceiling_is_capped_at_three_seconds() -> None:
     cam = IMX327MIPICamera(
-        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=2_000_000)
+        _minimal_config(fps=8, auto_exposure=True, auto_exposure_max_us=10_000_000)
     )
 
-    assert cam.auto_exposure_max_us == 1_000_000
-    assert cam._compute_frame_duration_limits() == (125_000, 1_000_000)
+    assert cam.auto_exposure_max_us == 3_000_000
+    assert cam._compute_frame_duration_limits() == (125_000, 3_000_000)
+    cam.camera = _FakePicamera2()
+    cam.is_initialized = True
+    assert cam.set_auto_exposure_max_us(2_000_000)
+    assert cam._compute_frame_duration_limits() == (125_000, 2_000_000)
+    assert cam.set_auto_exposure_max_us(10_000_000)
+    assert cam._compute_frame_duration_limits() == (125_000, 3_000_000)
 
 
 @pytest.mark.unit

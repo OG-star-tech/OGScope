@@ -611,6 +611,183 @@ def test_v4l2_capabilities_truthfully_report_software_ae() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("pattern", "red_position", "blue_position"),
+    [
+        ("RGGB", (0, 0), (1, 1)),
+        ("BGGR", (1, 1), (0, 0)),
+        ("GRBG", (0, 1), (1, 0)),
+        ("GBRG", (1, 0), (0, 1)),
+    ],
+)
+def test_debayer_preserves_asymmetric_red_and_blue_channels(
+    pattern: str, red_position: tuple[int, int], blue_position: tuple[int, int]
+) -> None:
+    """四种真实 CFA 均须输出正确 RGB 通道 / All four physical CFA patterns must produce the correct RGB channels."""
+    camera = V4L2RawCamera(
+        {"v4l2_bayer_pattern": pattern, "v4l2_bit_depth": 10, "v4l2_gamma": 1.0}
+    )
+    raw = np.full((8, 8), 256, dtype=np.uint16)
+    raw[red_position[0] :: 2, red_position[1] :: 2] = 1023
+    raw[blue_position[0] :: 2, blue_position[1] :: 2] = 64
+
+    output = camera._debayer(raw)
+
+    assert np.array_equal(output[2:-2, 2:-2], np.full((4, 4, 3), [255, 64, 16]))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("minimum_lines", "line_duration_us", "expected_minimum_us"),
+    [(1, 22.222222, 22), (4, 26.532, 106)],
+)
+def test_software_ae_minimum_matches_real_sensor_lines(
+    minimum_lines: int, line_duration_us: float, expected_minimum_us: int
+) -> None:
+    """AE 下限与实际控件和回读使用同一行时间换算 / AE minimum uses the same sensor-line conversion as control readback."""
+    camera = _ready_camera()
+    camera._control_ranges["exposure"] = _control_range(minimum_lines, 300_000)
+    camera._line_duration_us = line_duration_us
+    camera._ae = camera._create_auto_exposure()
+
+    assert camera._ae.limits.min_exposure_us == expected_minimum_us
+    assert camera._ae.limits.exposure_step_us == pytest.approx(line_duration_us)
+    assert (
+        camera.get_manual_control_ranges()["exposure_us"]["min"] == expected_minimum_us
+    )
+    assert (
+        camera.get_camera_info()["effective_auto_exposure_min_us"]
+        == expected_minimum_us
+    )
+
+
+@pytest.mark.unit
+def test_software_ae_reaches_sensor_minimum_without_repeated_control_writes(
+    monkeypatch,
+) -> None:
+    """强亮场可从 1ms 降到一行曝光，最低点不重复写控件 / Bright scenes reach one sensor line from 1ms without repeated writes at the limit."""
+    camera = _ready_camera()
+    camera._line_duration_us = 22.222222
+    camera._ae = camera._create_auto_exposure()
+    writes: dict[str, int] = {}
+    write_count = 0
+
+    def _set_control(name: str, value: int) -> bool:
+        nonlocal write_count
+        writes[name] = value
+        write_count += 1
+        return True
+
+    monkeypatch.setattr(camera, "_set_control", _set_control)
+    monkeypatch.setattr(camera, "_read_controls", lambda *_names: writes.copy())
+    assert camera._apply_exposure_gain(1000, 1.0) is True
+    raw = np.full((120, 160), 1023, dtype=np.uint16)
+
+    for _ in range(60):
+        camera._observe_auto_exposure(raw)
+
+    assert writes["exposure"] == 1
+    assert camera.actual_exposure_us == 22
+    assert camera.get_camera_info()["ae_state"] == "limited_bright"
+    settled_write_count = write_count
+    for _ in range(5):
+        camera._observe_auto_exposure(raw)
+    assert write_count == settled_write_count
+
+
+@pytest.mark.unit
+def test_realtime_default_does_not_blend_moving_scenes() -> None:
+    """默认预览输出当前帧，不把旧场景混入新场景 / Default preview passes through current frames without blending old scenes."""
+    camera = V4L2RawCamera({})
+    old_scene = np.full((4, 4), 1000, dtype=np.uint16)
+    new_scene = np.full((4, 4), 2000, dtype=np.uint16)
+
+    camera._apply_temporal_nr(old_scene)
+    output = camera._apply_temporal_nr(new_scene)
+
+    assert output is new_scene
+    assert camera._nr_accumulator is None
+    info = camera.get_camera_info()
+    assert info["noise_reduction_mode"] == "off"
+    assert info["temporal_noise_reduction"]["enabled"] is False
+
+
+@pytest.mark.unit
+def test_static_temporal_nr_uses_actual_capture_intervals(monkeypatch) -> None:
+    """慢速采集不能按传感器帧率放大 EMA 时长 / Slow capture must not stretch EMA duration using sensor FPS."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = V4L2RawCamera(
+        {"v4l2_temporal_nr_alpha": 0.2, "v4l2_temporal_nr_seconds": 2.0}
+    )
+    camera._frame_duration_us = 16_667
+    camera._apply_temporal_nr(np.full((4, 4), 1000, dtype=np.uint16))
+
+    clock["t"] = 0.5
+    output = camera._apply_temporal_nr(np.full((4, 4), 2000, dtype=np.uint16))
+    assert np.all(output == 1250)
+    info = camera.get_camera_info()
+    assert info["noise_reduction_mode"] == "temporal"
+    assert info["temporal_noise_reduction"]["effective_alpha"] == pytest.approx(0.25)
+
+    clock["t"] = 2.5
+    output = camera._apply_temporal_nr(np.full((4, 4), 3000, dtype=np.uint16))
+    assert np.all(output == 3000)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mode", "configured_alpha", "expected_alpha"),
+    [
+        ("off", 0.2, 1.0),
+        ("temporal", 1.0, 0.2),
+        ("temporal", 0.3, 0.3),
+        ("fast", 0.2, 0.2),
+    ],
+)
+def test_constructor_restores_explicit_noise_reduction_mode(
+    mode: str, configured_alpha: float, expected_alpha: float
+) -> None:
+    """持久化模式重建后仍控制真实混帧行为 / Restored modes continue to control actual frame blending."""
+    camera = V4L2RawCamera(
+        {
+            "noise_reduction_mode": mode,
+            "v4l2_temporal_nr_alpha": configured_alpha,
+            "v4l2_temporal_nr_seconds": 0.0,
+        }
+    )
+    camera._apply_temporal_nr(np.full((4, 4), 1000, dtype=np.uint16))
+    new_scene = np.full((4, 4), 2000, dtype=np.uint16)
+    output = camera._apply_temporal_nr(new_scene)
+
+    assert camera.temporal_nr_alpha == expected_alpha
+    if expected_alpha == 1.0:
+        assert output is new_scene
+        assert camera.noise_reduction_mode == "off"
+    else:
+        assert np.all(output == 1000 + 1000 * expected_alpha)
+        assert camera.noise_reduction_mode == "temporal"
+
+
+@pytest.mark.unit
+def test_off_disables_explicit_static_temporal_nr() -> None:
+    """关闭降噪必须真正停止跨帧累积 / NR off must actually stop cross-frame accumulation."""
+    camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.2})
+    camera._apply_temporal_nr(np.full((4, 4), 1000, dtype=np.uint16))
+
+    assert camera.set_noise_reduction_mode("off") is True
+    new_scene = np.full((4, 4), 2000, dtype=np.uint16)
+    assert camera._apply_temporal_nr(new_scene) is new_scene
+    assert camera.get_camera_info()["temporal_noise_reduction"]["enabled"] is False
+    assert camera.set_noise_reduction_mode("fast") is False
+    assert camera.set_noise_reduction_mode("high_quality") is False
+    assert camera.set_noise_reduction_mode("temporal") is True
+    assert camera.get_camera_info()["temporal_noise_reduction"]["enabled"] is True
+
+
+@pytest.mark.unit
 def test_temporal_nr_first_frame_is_passthrough() -> None:
     camera = V4L2RawCamera({"v4l2_temporal_nr_alpha": 0.5})
     raw = np.full((4, 4), 1000, dtype=np.uint16)
