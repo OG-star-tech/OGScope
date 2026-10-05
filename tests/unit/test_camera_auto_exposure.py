@@ -37,6 +37,53 @@ def test_measure_luminance_removes_sensor_black_level() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("shape", [(720, 1280), (1080, 1920)])
+@pytest.mark.parametrize("phase", [(0, 0), (0, 1), (1, 0), (1, 1)])
+def test_measure_luminance_covers_every_bayer_phase(
+    shape: tuple[int, int], phase: tuple[int, int]
+) -> None:
+    raw = np.full(shape, 100, dtype=np.uint16)
+    raw[phase[0] :: 2, phase[1] :: 2] = 1023
+
+    stats = measure_luminance(raw, bit_depth=10, black_level=64)
+
+    assert stats.background == pytest.approx(36 / 959)
+    assert stats.highlight == pytest.approx(1.0)
+    assert stats.saturation_fraction == pytest.approx(0.25, abs=0.004)
+    assert 0 < stats.sample_count <= 32_768
+
+
+@pytest.mark.unit
+def test_measure_luminance_balances_bayer_colors_without_averaging_peaks() -> None:
+    raw = np.empty((1080, 1920), dtype=np.uint16)
+    raw[0::2, 0::2] = 100
+    raw[0::2, 1::2] = 500
+    raw[1::2, 0::2] = 500
+    raw[1::2, 1::2] = 900
+
+    stats = measure_luminance(raw, bit_depth=10)
+
+    assert stats.background == pytest.approx(500 / 1023)
+    assert stats.highlight == pytest.approx(900 / 1023)
+    assert stats.saturation_fraction == 0.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "shape, max_samples", [((3, 1001), 16), ((127, 129), 100), ((2, 3), 1)]
+)
+def test_measure_luminance_bounds_odd_and_narrow_images(
+    shape: tuple[int, int], max_samples: int
+) -> None:
+    raw = np.full(shape, 100, dtype=np.uint16)
+
+    stats = measure_luminance(raw, bit_depth=10, max_samples=max_samples)
+
+    assert 0 < stats.sample_count <= max_samples
+    assert stats.background == pytest.approx(100 / 1023)
+
+
+@pytest.mark.unit
 def test_dark_scene_increases_exposure_before_gain() -> None:
     ae = NightSkyAutoExposure(
         AutoExposureLimits(max_exposure_us=2_000_000, max_gain=16.0, settle_frames=0)
@@ -101,3 +148,62 @@ def test_disabled_controller_reports_manual_without_changes() -> None:
     assert decision.state == "manual"
     assert decision.exposure_us == 40_000
     assert decision.analogue_gain == 3.0
+
+
+@pytest.mark.unit
+def test_bright_scene_reaches_one_sensor_line_with_integer_readback() -> None:
+    line_us = 22.222222
+    ae = NightSkyAutoExposure(
+        AutoExposureLimits(min_exposure_us=22, exposure_step_us=line_us, max_gain=1.0)
+    )
+    bright = LuminanceStats(1.0, 1.0, 0.638, 10_000)
+    exposure_us = 1000
+    applied: list[int] = []
+
+    for _ in range(30):
+        decision = ae.observe(bright, exposure_us=exposure_us, analogue_gain=1.0)
+        if decision.changed:
+            # 模拟驱动最近行量化和整数 us 回读 / Model nearest-line driver quantization and integer-us readback.
+            lines = max(1, round(decision.exposure_us / line_us))
+            exposure_us = int(round(lines * line_us))
+            applied.append(exposure_us)
+
+    assert applied[-1] == 22
+    assert len(applied) == len(set(applied))
+    assert decision.state == "limited_bright"
+    assert decision.changed is False
+
+
+@pytest.mark.unit
+def test_sensor_step_detects_partial_step_request_that_changes_one_line() -> None:
+    ae = NightSkyAutoExposure(
+        AutoExposureLimits(
+            min_exposure_us=22, exposure_step_us=22.222222, settle_frames=0
+        )
+    )
+
+    decision = ae.observe(
+        LuminanceStats(0.2, 0.5, 0.002, 10_000),
+        exposure_us=67,
+        analogue_gain=1.0,
+    )
+
+    assert decision.exposure_us == 47
+    assert decision.changed is True
+
+
+@pytest.mark.unit
+def test_sensor_step_holds_request_that_rounds_back_to_the_same_line() -> None:
+    ae = NightSkyAutoExposure(
+        AutoExposureLimits(
+            min_exposure_us=22, exposure_step_us=22.222222, settle_frames=0
+        )
+    )
+    factor = 2.0**0.6
+    dim = LuminanceStats(0.035 / factor, 0.45 / factor, 0.0, 10_000)
+
+    for _ in range(5):
+        decision = ae.observe(dim, exposure_us=22, analogue_gain=1.0)
+
+        assert decision.exposure_us == 33
+        assert decision.changed is False

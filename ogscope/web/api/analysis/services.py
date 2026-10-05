@@ -1451,8 +1451,15 @@ class AnalysisService:
             )
 
             def _run() -> dict[str, Any]:
+                # 相机 RGB 在分析边界转换一次；原帧保留给快照，文件解码仍为 BGR。
+                # Convert camera RGB once at the analysis boundary; preserve snapshot RGB and decoded file BGR.
+                frame_bgr = (
+                    cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    if body.source == "camera" and getattr(frame, "ndim", 0) == 3
+                    else frame
+                )
                 return self._solve_bgr_to_row(
-                    frame,
+                    frame_bgr,
                     body.hint_ra_deg,
                     body.hint_dec_deg,
                     body.fov_estimate,

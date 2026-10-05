@@ -106,6 +106,7 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 - `GET /api/core/v1/camera/preview/stream?quality=75`
   - 产品级 MJPEG 连续预览；使用与相机分析共享的预览消费者和并发限制
   - `quality` 范围为 `10`–`100`；省略时使用服务端预览质量配置
+  - JPEG 预览始终消费共享帧，不因客户端质量不同而再次抓帧；同帧同质量共用有界变体缓存。未保留 RAW 时从共享 JPEG 转码，提高输出质量不能恢复源 JPEG 已丢失的细节
   - 响应禁止缓存；达到并发上限时淘汰最久未完成发送进展的旧连接，并为新连接腾出名额
 - `POST /api/core/v1/camera/reset-temporal-history`
   - 无请求体；底座移动并确认稳定后由上层显式调用，清空驱动跨帧降噪历史。OGScope 不自行判断底座是否移动
@@ -116,6 +117,8 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 
 - `GET /api/dev/debug/camera/stream?quality=75` — 与 Core 预览共享实现的开发入口
 - `GET /api/dev/debug/camera/stream/status` — `max_clients`、`active_clients`、取帧超时、目标预览帧率
+  - `camera_read_average_ms` 包含驱动取帧与处理；`jpeg_average_encode_ms` 是共享预览编码；`jpeg_variant_average_encode_ms` 与 `jpeg_variant_cached_bytes` 是客户端质量变体的耗时与缓存字节数
+  - 吞吐目标取传感器与预览目标的较小值；`throttle_reason=preview_rate_limit` 表示主动预览限帧。`auto_exposure_long` 需要实际曝光或帧周期超出有效目标周期的证据；其余产帧吞吐不足报告 `processing_limit`
 - `GET /api/dev/debug/camera/preview` — 单帧预览
 
 ### 6) Camera Tuning

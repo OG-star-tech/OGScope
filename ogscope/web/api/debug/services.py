@@ -422,13 +422,14 @@ class DebugCameraService:
 
         fmt = image_format.lower()
         q = int(max(10, min(100, int(quality))))
-        default_q = int(manager.preview_jpeg_quality)
-
         if since_frame_id is not None and since_frame_id == snap.frame_id:
             return 304, None, snap.frame_id
 
-        if fmt == "jpeg" and q == default_q and snap.jpeg_frame is not None:
-            return 200, snap.jpeg_frame, snap.frame_id
+        if fmt == "jpeg":
+            # 质量变体仍来自同一共享帧，不因客户端质量不同额外抓 RAW。
+            # Quality variants use the same shared frame, never an extra camera read.
+            encoded = await manager.get_stream_jpeg(snap, q)
+            return (200 if encoded is not None else 500), encoded, snap.frame_id
 
         raw, _fid, _ts = await manager.get_raw_frame()
         encoded = await asyncio.to_thread(manager.encode_frame, raw, image_format, q)

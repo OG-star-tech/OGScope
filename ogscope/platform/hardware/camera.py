@@ -65,6 +65,9 @@ class IMX327MIPICamera(CameraInterface):
     SENSOR_MAX_WIDTH = 1920
     SENSOR_MAX_HEIGHT = 1080
     PREVIEW_BUFFER_COUNT = 2
+    # libcamera 的 BGR888 在 ndarray 中排列为 RGB，符合本项目的像素契约。
+    # libcamera BGR888 yields RGB array bytes, matching our pixel contract.
+    PICAMERA_MAIN_FORMAT = "BGR888"
     AE_SUPERVISOR_INTERVAL_S = 1.0
     AE_SUPERVISOR_STEP_EV = 0.5
     AE_DARK_CONFIRM_FRAMES = 2
@@ -512,7 +515,10 @@ class IMX327MIPICamera(CameraInterface):
         """创建含可选 lores 的视频配置 / Create video config with optional lores stream."""
         if not self.camera:
             raise RuntimeError("camera missing")
-        main = {"size": (self.capture_width, self.capture_height), "format": "RGB888"}
+        main = {
+            "size": (self.capture_width, self.capture_height),
+            "format": self.PICAMERA_MAIN_FORMAT,
+        }
         if self.lores_enabled:
             try:
                 cfg = self.camera.create_video_configuration(
@@ -940,8 +946,8 @@ class IMX327MIPICamera(CameraInterface):
                     )
                     self.camera = Picamera2()
 
-            # 配置主流 + 可选 lores 流；RGB888 保证预览/解算色序一致
-            # Configure main + optional lores stream; RGB888 keeps preview/solve color order stable.
+            # 配置主流与可选 lores 流；BGR888 格式提供真正的 RGB 字节排列。
+            # Configure main and optional lores; BGR888 supplies true RGB byte order.
             camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
@@ -1242,7 +1248,7 @@ class IMX327MIPICamera(CameraInterface):
                     still_cfg = self.camera.create_still_configuration(
                         main={
                             "size": (self.capture_width, self.capture_height),
-                            "format": "RGB888",
+                            "format": self.PICAMERA_MAIN_FORMAT,
                         }
                     )
                     self.camera.configure(still_cfg)
@@ -1436,7 +1442,7 @@ class IMX327MIPICamera(CameraInterface):
                 still_cfg = self.camera.create_still_configuration(
                     main={
                         "size": (self.capture_width, self.capture_height),
-                        "format": "RGB888",
+                        "format": self.PICAMERA_MAIN_FORMAT,
                     }
                 )
                 self.camera.configure(still_cfg)

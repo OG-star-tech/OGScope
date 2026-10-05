@@ -80,6 +80,17 @@ and structural-obstruction fallback. Compatibility still depends on verified RAW
 normalization, Bayer order, output geometry, effective FOV, and truthful control
 readback.
 
+Picamera2 主流配置使用 libcamera 的 `BGR888` 格式，它在 ndarray 中对应 RGB
+字节排列。相机帧进入解算器时转换一次 RGB→BGR；上传图片和视频的 OpenCV
+解码结果原本就是 BGR，不重复转换。产品 `imx327.json` 的 Long 曝光曲线从
+10µs 开始，由传感器实际范围限制，避免长曝光模式把白天快门限制在 1ms。
+
+The Picamera2 main stream uses libcamera `BGR888`, which supplies RGB array bytes.
+Camera frames are converted once to BGR at the solver boundary; OpenCV-decoded
+uploads and videos already use BGR. The product `imx327.json` Long exposure curve
+starts at 10µs and is clamped to the sensor range, allowing sub-millisecond daytime
+exposure without changing the remaining night-exposure curve.
+
 ## 算法 / Algorithm
 
 每帧从 RAW Bayer 平面抽样，计算三个信号：
@@ -90,6 +101,11 @@ readback.
 
 The loop samples the RAW Bayer plane and tracks background median, a configurable
 upper percentile for sparse stars, and saturated-pixel fraction.
+
+抽样步长保持奇数，均衡覆盖 Bayer 四种相位，避免只测到一种颜色；这仍是
+RAW 信号统计，不等同于经过 ISP 处理的亮度值。
+The sampling stride is odd to cover all four Bayer phases rather than one colour.
+These remain RAW signal statistics, not ISP-processed luminance values.
 
 统计和去马赛克都会先使用同一组 `black_level` / `white_level` 去除 RAW
 pedestal 并归一化。默认优先读取 V4L2 控件，控件缺失时黑电平回退为 0、
@@ -116,6 +132,8 @@ limits each update to one stop, and exposes an explicit convergence state.
 ## 硬件换算 / Hardware conversion
 
 - 首选通过 `pixel_rate` 与 `horizontal_blanking` 推导行周期。
+- AE 最短曝光与改变判定使用传感器曝光控件及行周期，允许合法的亚毫秒快门；
+  最终行数取整、范围限制和 actual 回读由驱动负责。
 - 仅当驱动不暴露这些只读控件时，才使用 `OGSCOPE_CAMERA_V4L2_LINE_DURATION_US`；
   未配置时的 8µs 只是 IMX327 回退值，状态会标记 `line_duration_source=fallback`。
 - 长曝光先提高 `vertical_blanking`，再写 `exposure`。曝光最大值会随 vblank
@@ -130,6 +148,9 @@ limits each update to one stop, and exposes an explicit convergence state.
   推算值仍在 `exposure_us` / `analogue_gain`，错误见 `control_readback`。
 
 - Line time is derived from `pixel_rate` and `horizontal_blanking` when available.
+- AE minimum exposure and change detection use the sensor exposure controls and
+  line time, allowing legal sub-millisecond shutters. The driver remains responsible
+  for line quantization, range clamping and actual control readback.
 - Long exposure raises `vertical_blanking` before writing `exposure`; the stale
   pre-vblank exposure maximum must not clamp the request.
 - The product auto-exposure ceiling is 3 seconds (raised from 1s on
@@ -141,6 +162,21 @@ limits each update to one stop, and exposes an explicit convergence state.
 - Analogue gain is converted in dB steps and requires board calibration.
 - Requested values, estimated applied values, and verified control readback are
   reported separately. Failed readback never masquerades as actual telemetry.
+
+## 可选时域降噪 / Optional temporal denoising
+
+`OGSCOPE_CAMERA_V4L2_TEMPORAL_NR_ALPHA` 默认 `1.0`，关闭跨帧累积，移动预览
+直接使用新帧。静态场景可显式设为小于 `1.0`；启用后时间系数按实际处理帧间隔
+计算，不使用传感器名义周期代替。`noise_reduction_mode=off` 会真正关闭累积。
+状态中的 `temporal_noise_reduction` 报告实际开关和参数；移动并稳定后仍可使用
+Core 的 `reset-temporal-history` 接口失效旧历史。
+
+`OGSCOPE_CAMERA_V4L2_TEMPORAL_NR_ALPHA` defaults to `1.0`, disabling cross-frame
+accumulation so moving previews use fresh frames. Static scenes may explicitly use
+a value below `1.0`; time-based weighting then uses actual processed-frame intervals,
+not nominal sensor periods. `noise_reduction_mode=off` disables accumulation.
+`temporal_noise_reduction` reports the effective state and parameters. The Core
+`reset-temporal-history` hook still invalidates old history after movement settles.
 
 ## 遥测与交互 / Telemetry and UX
 
