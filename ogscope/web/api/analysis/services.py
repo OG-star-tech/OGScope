@@ -11,7 +11,6 @@ import shutil
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +26,7 @@ from ogscope.algorithms.plate_solve import (
     merge_centroid_params,
 )
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
+from ogscope.algorithms.plate_solve.worker import get_solver_executor, run_solver_job
 from ogscope.algorithms.star_extract import StarExtractor
 from ogscope.config import (
     effective_solver_max_image_side,
@@ -146,10 +146,9 @@ class AnalysisService:
         self.upload_root.mkdir(parents=True, exist_ok=True)
         self.jobs_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
-        # 解算专用线程池（避免与相机预览等争用默认线程池）；默认单 worker 降低 Zero 2W 等低内存设备上并发解算的内存峰值 / Dedicated executor for solving; default 1 worker to reduce peak RAM on low-memory boards
-        self._solver_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="solver"
-        )
+        # 与实时解算复用单 worker，避免原生图像缓存分散及并发内存峰值。
+        # Share one worker with realtime solving to avoid scattered native caches and concurrent memory peaks.
+        self._solver_executor = get_solver_executor()
         self._solver_max_stars = effective_solver_max_stars(settings)
         self.extractor = StarExtractor(max_stars=self._solver_max_stars)
         self.solver = PlateSolver(
@@ -1185,7 +1184,7 @@ class AnalysisService:
                 downsample_max_side=int(settings.solver_large_scale_bg_downsample),
             )
 
-        return await asyncio.to_thread(_run)
+        return await run_solver_job(_run)
 
     async def get_job_status(self, job_id: str) -> dict[str, Any]:
         """获取任务状态 / Get job status"""

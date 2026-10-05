@@ -54,7 +54,9 @@ upstream consumers should ignore results from an older session.
   - `frame_count: int`
   - `fullsolve_count: int`
 
-While Core realtime analysis is active, developer single-frame camera solves return `SKIPPED_BUSY` so debug polling cannot contend with product alignment for camera and CPU resources. File solving is unaffected.
+While Core realtime analysis is active, developer single-frame camera solves return `SKIPPED_BUSY` so debug polling cannot contend with product alignment for camera and CPU resources. File solves can still be submitted and queue serially with realtime solves.
+
+Realtime solving, snapshot encoding and developer image analysis share one worker to limit native image caches and concurrent memory peaks on low-memory devices. Stopping a session cancels its wait and discards later results from that session. Native work already running finishes on its own; the next solve waits for it to finish.
 
 A normal `MATCH_FOUND` result is authoritative and is never overturned by scene classification. Only after a normal failure with independent structural evidence does OGScope remove dense or collinear candidates that overlap that evidence and retry once. At most 35% of the reserve candidate pool is removed.
 
