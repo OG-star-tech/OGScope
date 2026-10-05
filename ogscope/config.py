@@ -193,28 +193,15 @@ class Settings(BaseSettings):
         ),
     )
     camera_v4l2_temporal_nr_alpha: float = Field(
-        default=0.2,
+        default=1.0,
         ge=0.01,
         le=1.0,
         description=(
-            "时域指数滑动平均降噪系数，1.0 关闭 / 不做累积：用真实静态场景连拍 "
-            "10 帧、逐像素算跨帧标准差测出，V4L2（仅 gamma）的噪声是 "
-            "picamera2 的 6.5 倍（3.55 对 0.55），因为这条路径完全没有降噪，"
-            "picamera2 的 ISP 默认有。产品场景是静态/跟踪的星空，用时域累积而"
-            "不是空间滤波，能在不牺牲空间分辨率的前提下压噪声。值越小压得越"
-            "狠但响应越慢（收敛约需 1/alpha 帧）；曝光或增益一变就会清空累积"
-            "器，不会把不同亮度的帧混在一起 / Temporal EMA noise-reduction "
-            "coefficient; 1.0 disables it (no accumulation). Measured on real "
-            "static-scene hardware (10-frame capture, per-pixel temporal std): "
-            "V4L2 (gamma only) has 6.5x picamera2's noise (3.55 vs 0.55) "
-            "because this path applies no noise reduction at all, while "
-            "picamera2's ISP does by default. The product's real scenes are "
-            "static/tracked astrophotography, so temporal accumulation (not "
-            "spatial filtering) reduces noise without sacrificing spatial "
-            "resolution. Lower = stronger reduction but slower response "
-            "(~1/alpha frames to converge); any exposure or gain change "
-            "clears the accumulator so frames of different brightness are "
-            "never blended together"
+            "RAW 时域降噪默认关闭（1.0），避免移动预览混入旧画面；"
+            "静态场景可显式设为小于 1.0，曝光或增益改变时清空历史 / "
+            "RAW temporal denoising is disabled by default (1.0) to keep "
+            "moving previews fresh. Explicitly use a value below 1.0 for "
+            "static scenes; exposure or gain changes invalidate history"
         ),
     )
     camera_v4l2_temporal_nr_seconds: float = Field(
@@ -222,16 +209,11 @@ class Settings(BaseSettings):
         ge=0.0,
         le=30.0,
         description=(
-            "时域降噪的时间常数（秒），0 表示退回固定 alpha：短曝光下每秒有"
-            "很多帧，多平均几十帧几乎不花墙钟时间，可以换到远强于固定 alpha "
-            "的降噪；长曝光下每帧几秒，平均更多帧就是实打实的延迟，于是夹回 "
-            "camera_v4l2_temporal_nr_alpha 这个上限 / Temporal-NR time "
-            "constant in seconds; 0 falls back to the fixed alpha. Short "
-            "exposures deliver many frames per second, so averaging tens of "
-            "them costs almost no wall-clock time and buys far more denoise "
-            "than a fixed alpha; long exposures cost seconds per frame, so "
-            "averaging more is real latency and it clamps back to the "
-            "camera_v4l2_temporal_nr_alpha bound"
+            "显式启用时域降噪后的时间常数（秒），按实际处理帧间隔计算；"
+            "0 使用固定 alpha，平均帧数受 max_frames 限制 / "
+            "Time constant for explicitly enabled temporal denoising, "
+            "computed from actual processed-frame intervals; zero uses "
+            "fixed alpha and max_frames bounds the averaging depth"
         ),
     )
     camera_v4l2_temporal_nr_max_frames: int = Field(
@@ -344,13 +326,9 @@ class Settings(BaseSettings):
         ge=10_000,
         le=10_000_000,
         description=(
-            "自动曝光最长帧周期 3s，暗场允许降帧 / Max auto-exposure frame "
-            "duration, capped at 3s (raised from 1s 2026-09-20 after "
-            "validating 1-3s manual exposure on real Zero2W hardware via "
-            "the V4L2 backend - see "
-            "docs/development/v4l2-zero2w-board-validation.md; the "
-            "picamera2 backend keeps its own independent 1s ceiling, "
-            "camera.py's AUTO_EXPOSURE_MAX_US, unaffected by this)"
+            "自动曝光最长帧周期，两个相机后端均限制为 3s，暗场允许降帧 / "
+            "Max auto-exposure frame duration, capped at 3s for both camera backends; "
+            "dark scenes may lower the frame rate"
         ),
     )
     camera_ae_flicker_mode: str = Field(
@@ -359,7 +337,10 @@ class Settings(BaseSettings):
     )
     camera_noise_reduction_mode: str = Field(
         default="fast",
-        description="降噪语义模式 off/fast/high_quality / Semantic noise reduction mode",
+        description=(
+            "降噪模式 off/fast/high_quality，V4L2 另支持 temporal / "
+            "Noise reduction: off/fast/high_quality; V4L2 also supports temporal"
+        ),
     )
     camera_lores_enabled: bool = Field(
         default=True,
@@ -671,8 +652,8 @@ class Settings(BaseSettings):
         ge=0.5,
         le=120.0,
         description=(
-            "单次相机抓帧硬超时（秒）；1 秒 AE 首帧需要包含多帧收敛预算 / "
-            "Hard frame timeout; one-second AE startup needs a multi-frame convergence budget"
+            "单次相机抓帧硬超时（秒）；8 秒默认预算覆盖最长 3 秒曝光 / "
+            "Hard frame timeout; the default 8s budget accommodates exposures up to 3s"
         ),
     )
     camera_grab_failures_offline: int = Field(
@@ -867,7 +848,7 @@ class Settings(BaseSettings):
         text = str(value or "fast").strip().lower().replace("-", "_")
         aliases = {"hq": "high_quality", "highquality": "high_quality", "0": "off"}
         text = aliases.get(text, text)
-        if text in {"off", "fast", "high_quality"}:
+        if text in {"off", "fast", "high_quality", "temporal"}:
             return text
         return "fast"
 

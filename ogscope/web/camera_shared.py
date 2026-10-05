@@ -21,6 +21,10 @@ from ogscope.domain.camera.encoding import (
     create_preview_encoder,
 )
 
+# 仅缓存少量压缩质量变体，不增加常驻 RAW / Bound compressed variants without retaining RAW.
+_STREAM_JPEG_VARIANT_LIMIT = 4
+_STREAM_JPEG_VARIANT_BYTE_LIMIT = 1024 * 1024
+
 
 @dataclass(slots=True)
 class SharedFrame:
@@ -32,6 +36,7 @@ class SharedFrame:
     jpeg_frame: bytes | None
     width: int
     height: int
+    source_format: str = "RGB888"
 
 
 class CameraManager:
@@ -52,6 +57,8 @@ class CameraManager:
         self._latest_ts = 0.0
         self._latest_w = 0
         self._latest_h = 0
+        self._stream_jpeg_variants: dict[tuple[int, int], bytes] = {}
+        self._stream_jpeg_tasks: dict[tuple[int, int], asyncio.Task] = {}
         self._runtime_overrides: dict[str, Any] = {}
         settings = get_settings()
         self._jpeg_quality = int(settings.preview_jpeg_quality)
@@ -87,6 +94,8 @@ class CameraManager:
         self._capture_timestamps: deque[float] = deque(maxlen=120)
         self._jpeg_timestamps: deque[float] = deque(maxlen=120)
         self._jpeg_encode_ms: deque[float] = deque(maxlen=60)
+        self._camera_read_ms: deque[float] = deque(maxlen=60)
+        self._jpeg_variant_encode_ms: deque[float] = deque(maxlen=60)
         self._jpeg_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="ogscope-jpeg"
         )
@@ -131,7 +140,9 @@ class CameraManager:
             "v4l2_white_level": settings.camera_v4l2_white_level,
             "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
             "v4l2_gamma": settings.camera_v4l2_gamma,
-            "v4l2_temporal_nr_alpha": settings.camera_v4l2_temporal_nr_alpha,
+            "v4l2_temporal_nr_alpha": getattr(
+                settings, "camera_v4l2_temporal_nr_alpha", 1.0
+            ),
             "v4l2_temporal_nr_seconds": settings.camera_v4l2_temporal_nr_seconds,
             "v4l2_temporal_nr_max_frames": (
                 settings.camera_v4l2_temporal_nr_max_frames
@@ -217,15 +228,18 @@ class CameraManager:
             return camera
         return None
 
-    def _encode_preview_jpeg_sync(self, frame) -> EncodedImage | None:
-        source_format = str(
+    def _encode_preview_jpeg_sync(
+        self, frame, *, quality: int | None = None, source_format: str | None = None
+    ) -> EncodedImage | None:
+        source_format = source_format or str(
             getattr(self._camera, "output_pixel_format", None)
             or getattr(self._camera, "pixel_format", None)
             or "RGB888"
         )
+        jpeg_quality = int(self._jpeg_quality if quality is None else quality)
         try:
             encoded = self._preview_encoder.encode_jpeg(
-                frame, quality=int(self._jpeg_quality), source_format=source_format
+                frame, quality=jpeg_quality, source_format=source_format
             )
             if encoded is not None:
                 return encoded
@@ -235,7 +249,7 @@ class CameraManager:
         # Fall back to OpenCV for this frame if the preferred encoder fails.
         try:
             return OpenCVEncoder().encode_jpeg(
-                frame, quality=int(self._jpeg_quality), source_format=source_format
+                frame, quality=jpeg_quality, source_format=source_format
             )
         except Exception as exc:
             self._logger.debug(
@@ -247,7 +261,14 @@ class CameraManager:
         with self._read_lock:
             if self._camera is None or not getattr(self._camera, "is_capturing", False):
                 return None
-            frame = self._camera.get_video_frame()
+            read_started = time.perf_counter()
+            try:
+                frame = self._camera.get_video_frame()
+            finally:
+                with self._frame_lock:
+                    self._camera_read_ms.append(
+                        (time.perf_counter() - read_started) * 1000.0
+                    )
             if frame is not None:
                 now = time.monotonic()
                 self._capture_sequence += 1
@@ -320,8 +341,18 @@ class CameraManager:
                     )
                     raise RuntimeError(self._health_error or "相机启动失败")
                 self._stream_started_at = time.time()
+            # Long 切换可能跳过临时手动帧；启动探测须覆盖驱动的长曝光等待预算。
+            # Long transitions discard temporary manual frames; startup must allow the driver's frame budget.
+            probe_budget = max(
+                self._probe_timeout_sec,
+                float(
+                    getattr(
+                        self._camera, "capture_timeout_sec", self._probe_timeout_sec
+                    )
+                ),
+            )
             probe_ok = await asyncio.to_thread(
-                self._probe_stream_health_sync, self._probe_timeout_sec
+                self._probe_stream_health_sync, probe_budget
             )
             if not probe_ok:
                 await self._invalidate_camera_locked(
@@ -482,6 +513,7 @@ class CameraManager:
         with self._frame_lock:
             self._latest_raw = None
             self._latest_jpeg = None
+            self._stream_jpeg_variants.clear()
             self._latest_ts = 0.0
             self._latest_w = 0
             self._latest_h = 0
@@ -683,6 +715,7 @@ class CameraManager:
                             # By default do not retain raw to avoid dual large buffers; set env to keep.
                             self._latest_raw = frame if self._keep_raw_cache else None
                             self._latest_jpeg = jpeg
+                            self._stream_jpeg_variants.clear()
                             self._latest_ts = capture_completed_ts
                             self._latest_w = w
                             self._latest_h = h
@@ -797,6 +830,7 @@ class CameraManager:
                         jpeg_frame=self._latest_jpeg,
                         width=self._latest_w,
                         height=self._latest_h,
+                        source_format=self._last_jpeg_source_format,
                     )
                     return 200, snap
             if time.time() >= deadline:
@@ -863,7 +897,91 @@ class CameraManager:
                 jpeg_frame=self._latest_jpeg,
                 width=self._latest_w,
                 height=self._latest_h,
+                source_format=self._last_jpeg_source_format,
             )
+
+    def _encode_stream_jpeg_sync(self, snap: SharedFrame, quality: int) -> bytes | None:
+        """同一帧的 RAW 可用时优先使用，否则转码共享 JPEG；绝不重新抓帧。
+        Use the same frame's RAW when retained, otherwise transcode its shared JPEG;
+        never read the camera. A higher output quality cannot recover source JPEG detail.
+        JPEG 源的细节上限不因提高输出质量而恢复。
+        """
+        frame = snap.raw_frame
+        source_format = snap.source_format
+        if frame is None:
+            if snap.jpeg_frame is None:
+                return None
+            import cv2
+            import numpy as np
+
+            frame = cv2.imdecode(
+                np.frombuffer(snap.jpeg_frame, dtype=np.uint8), cv2.IMREAD_COLOR
+            )
+            source_format = "BGR888"
+        if frame is None:
+            return None
+        encoded = self._encode_preview_jpeg_sync(
+            frame, quality=quality, source_format=source_format
+        )
+        return encoded.data if encoded is not None else None
+
+    async def _encode_and_cache_stream_jpeg(
+        self, snap: SharedFrame, quality: int
+    ) -> bytes | None:
+        key = (snap.frame_id, quality)
+        try:
+            started = time.perf_counter()
+            encoded = await asyncio.get_running_loop().run_in_executor(
+                self._jpeg_executor, self._encode_stream_jpeg_sync, snap, quality
+            )
+            self._jpeg_variant_encode_ms.append(
+                (time.perf_counter() - started) * 1000.0
+            )
+            with self._frame_lock:
+                if (
+                    encoded is not None
+                    and len(encoded) <= _STREAM_JPEG_VARIANT_BYTE_LIMIT
+                    and snap.frame_id == self._frame_id
+                    and snap.jpeg_frame is self._latest_jpeg
+                ):
+                    while self._stream_jpeg_variants and (
+                        len(self._stream_jpeg_variants) >= _STREAM_JPEG_VARIANT_LIMIT
+                        or sum(map(len, self._stream_jpeg_variants.values()))
+                        + len(encoded)
+                        > _STREAM_JPEG_VARIANT_BYTE_LIMIT
+                    ):
+                        self._stream_jpeg_variants.pop(
+                            next(iter(self._stream_jpeg_variants))
+                        )
+                    self._stream_jpeg_variants[key] = encoded
+            return encoded
+        except Exception as exc:
+            self._logger.debug(
+                "共享 JPEG 转码失败 / Shared JPEG transcode failed: %s", exc
+            )
+            return None
+        finally:
+            self._stream_jpeg_tasks.pop(key, None)
+
+    async def get_stream_jpeg(self, snap: SharedFrame, quality: int) -> bytes | None:
+        """同帧同质量共享一次转码，断连不会取消其他消费者的编码。
+        Share one encode per frame/quality; a disconnect cannot cancel another consumer's work.
+        """
+        quality = max(10, min(100, int(quality)))
+        if quality == self.preview_jpeg_quality:
+            return snap.jpeg_frame
+        key = (snap.frame_id, quality)
+        with self._frame_lock:
+            encoded = self._stream_jpeg_variants.get(key)
+        if encoded is not None:
+            return encoded
+        task = self._stream_jpeg_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                self._encode_and_cache_stream_jpeg(snap, quality)
+            )
+            self._stream_jpeg_tasks[key] = task
+        return await asyncio.shield(task)
 
     @staticmethod
     def encode_frame(
@@ -913,14 +1031,29 @@ class CameraManager:
             info.get("actual_exposure_us", info.get("exposure_us", 0)) or 0
         )
         frame_duration_us = int(info.get("frame_duration_us", 0) or 0)
+        preview_target_fps = float(self.preview_target_fps)
+        effective_target_fps = (
+            min(sensor_target_fps, preview_target_fps)
+            if sensor_target_fps > 0
+            else preview_target_fps
+        )
         throttle_reason = None
-        if (
-            bool(info.get("auto_exposure"))
-            and sensor_target_fps > 0
-            and actual_capture_fps > 0
-            and actual_capture_fps < sensor_target_fps * 0.75
-        ):
-            throttle_reason = "auto_exposure_long"
+        if actual_capture_fps > 0 and actual_capture_fps < effective_target_fps * 0.75:
+            # 按有效预览目标核对真实曝光/周期，不把主动限帧误报为处理瓶颈。
+            # Check duration against the effective target; intentional pacing is not a processing limit.
+            long_frame = max(exposure_us, frame_duration_us) > (
+                1_000_000.0 / (effective_target_fps * 0.75)
+            )
+            throttle_reason = (
+                "auto_exposure_long"
+                if bool(info.get("auto_exposure")) and long_frame
+                else "processing_limit"
+            )
+        elif actual_capture_fps > 0 and preview_target_fps < sensor_target_fps:
+            throttle_reason = "preview_rate_limit"
+        with self._frame_lock:
+            read_times = list(self._camera_read_ms)
+            variant_bytes = sum(map(len, self._stream_jpeg_variants.values()))
         memory = self._memory_metrics()
         return {
             "sensor_target_fps": sensor_target_fps,
@@ -938,6 +1071,19 @@ class CameraManager:
                 else 0.0
             ),
             "jpeg_cached_bytes": len(self._latest_jpeg or b""),
+            "camera_read_average_ms": (
+                round(sum(read_times) / len(read_times), 2) if read_times else 0.0
+            ),
+            "jpeg_variant_average_encode_ms": (
+                round(
+                    sum(self._jpeg_variant_encode_ms)
+                    / len(self._jpeg_variant_encode_ms),
+                    2,
+                )
+                if self._jpeg_variant_encode_ms
+                else 0.0
+            ),
+            "jpeg_variant_cached_bytes": variant_bytes,
             "preview_encoder": self._last_jpeg_encoder,
             "jpeg_encode_failures": int(self._jpeg_encode_failures),
             "jpeg_source_format": self._last_jpeg_source_format,

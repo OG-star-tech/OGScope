@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import cv2
 from loguru import logger
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
@@ -372,8 +373,15 @@ class RealtimeSolveService:
         frame: Any,
     ) -> SolveResult:
         """同步解算单帧（线程池中调用）/ Sync solve for one frame."""
+        # 相机输出 RGB；解算器接收 BGR 副本，原帧仍供精确快照使用。
+        # Camera output is RGB; solve a BGR copy and keep the original for its exact snapshot.
+        frame_bgr = (
+            cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            if getattr(frame, "ndim", 0) == 3
+            else frame
+        )
         return self.solver.solve_from_bgr_frame(
-            frame_bgr=frame,
+            frame_bgr=frame_bgr,
             max_stars=self._max_stars,
             hint_ra_deg=self._hint_ra,
             hint_dec_deg=self._hint_dec,

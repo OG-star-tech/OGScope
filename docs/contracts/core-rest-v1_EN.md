@@ -88,12 +88,15 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
   - Optional `info.optics` describes product optics. `lens` carries nominal 16mm F1.4, 5MP optical rating, M12, and IR-cut properties; `full_sensor_fov_deg` describes the 1920×1080 optical field, while `effective_fov_deg` is the product-calibrated field for the active capture mode. Upstream solving and sky search should prefer `effective_fov_deg`, with a local fallback for older servers.
   - Optional `info.driver` / `info.backend` and `info.capabilities` describe backend capabilities. V4L2 RAW uses OGScope software AE while preserving the same RGB888, frame-identity, and solve contracts. Failed hardware-control readback may leave `info.actual_exposure_us` / `info.actual_analogue_gain` as `null`.
   - Upstream business logic must not branch on driver names; it consumes Core v1 readiness, `info.optics.effective_fov_deg`, optional capability/ambient telemetry, and existing analysis results.
-  - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently selected the shutter-first long-exposure curve and does not depend on an upstream work mode.
+  - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently requested the shutter-first long-exposure curve and does not depend on an upstream work mode. A request does not prove the driver applied it.
+  - Optional Picamera2 diagnostics: `info.ae_actual_exposure_mode` comes from completed-frame mode metadata; `info.ae_exposure_mode_status` is `unknown`, `awaiting_metadata`, `verified`, `unverified`, or `unsupported`. `verified` confirms only the mode acknowledgement; actual exposure/gain still come from frame metadata. `info.actual_auto_exposure` / `info.actual_auto_gain` are `null` when mode metadata is unavailable. Long selection for libcamera 0.5.2 pauses AE and resumes it after frame acknowledgement. If unconfirmed within 8 seconds, AE resumes with `exposure_mode_not_confirmed` rather than false success.
+  - `info.auto_exposure_max_us` is an adjustable frame-duration ceiling capped at 3 seconds for both Picamera2 and V4L2. The Long curve extends shutter before raising gain. Long exposures reduce actual frame rate; a ceiling does not force every frame to use the longest exposure.
 - `POST /api/core/v1/camera/start`
   - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`
   - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames
 - `POST /api/core/v1/camera/stop`
 - `GET /api/core/v1/camera/preview/stream?quality=75`
+  - JPEG previews always consume shared frames; a different client quality never triggers another camera read. Same-frame, same-quality requests share a bounded variant cache. Without retained RAW, variants transcode the shared JPEG; a higher output quality cannot restore source detail.
   - Product MJPEG preview using the shared preview consumer and concurrency limiter
   - `quality` ranges from `10` to `100`; omission uses the server preview-quality setting
   - Responses are non-cacheable; at the client limit, the stream with the oldest send progress is evicted to make room for the new connection
@@ -106,6 +109,8 @@ Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, deb
 
 - `GET /api/dev/debug/camera/stream?quality=75` — developer entry backed by the shared Core preview implementation
 - `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout, target preview FPS
+  - `camera_read_average_ms` includes driver capture and processing. `jpeg_average_encode_ms` measures shared-preview encoding; `jpeg_variant_average_encode_ms` and `jpeg_variant_cached_bytes` describe client-quality variants.
+  - Throughput uses the lower sensor/preview target. `preview_rate_limit` reports an intentional preview cap; `auto_exposure_long` requires actual exposure/frame-duration evidence relative to that effective target; other low throughput reports `processing_limit`.
 - `GET /api/dev/debug/camera/preview` — single-frame preview
 
 ### 6) Camera Tuning

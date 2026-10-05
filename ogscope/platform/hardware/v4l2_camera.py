@@ -226,45 +226,23 @@ class V4L2RawCamera:
         # reshaping the image to imitate picamera2's output. See
         # docs/development/v4l2-zero2w-board-validation.md for the retest.
         #
-        # 真正的根因随后在真实硬件上用时域方法测出来了：对着完全静止的场景连拍
-        # 10 帧，逐像素算跨帧标准差（场景没变，帧间差异就是纯噪声），picamera2
-        # 是 0.55，V4L2（仅 gamma）是 3.55 —— 差 6.5 倍，SNR 差了近 10 倍。根因是
-        # V4L2 这条路径完全没有降噪（noise_reduction_mode 硬编码 "off"，见下），
-        # 而 picamera2 的 ISP 默认做真实降噪。这解释了之前对比度不够的很大一部分
-        # 原因：gamma/CLAHE 都只是在给同一份带噪声的信号重新分布亮度，没有真正去
-        # 噪声。这里加一级时域指数滑动平均（EMA）：产品场景是静态/跟踪的星空，帧
-        # 间场景基本不变，时域累积能在不损失空间分辨率的前提下把随机噪声降下去
-        # （空间滤波比如高斯/双边会牺牲真实细节）。曝光/增益一变就清空累积器，
-        # 避免在 AE 调整/收敛过程中把不同亮度的帧混在一起。
-        # The real root cause was found afterward via a proper hardware
-        # methodology: 10 frames of a completely static scene, per-pixel
-        # temporal std (scene didn't change, so any frame-to-frame variation
-        # IS noise) - picamera2: 0.55, V4L2 (gamma only): 3.55, a 6.5x gap,
-        # ~10x worse SNR. Root cause: this path applies zero noise reduction
-        # (noise_reduction_mode hardcoded "off", see below) while picamera2's
-        # ISP applies real denoising by default. This explains much of the
-        # earlier contrast shortfall - gamma/CLAHE were both just redistributing
-        # brightness on the same noisy signal, never actually removing noise.
-        # Adds a temporal exponential-moving-average (EMA) stage: the product's
-        # real scenes are static/tracked astrophotography, so temporal
-        # accumulation reduces random noise without sacrificing spatial
-        # resolution (unlike spatial filtering, e.g. Gaussian/bilateral, which
-        # trades away real detail). Resets on any exposure/gain change to avoid
-        # blending frames of different brightness during AE adjustment/settling.
+        # 实时预览默认不混合历史帧；静态场景可显式用 alpha<1 开启 RAW EMA。
+        # Live preview does not blend history by default; static scenes may opt into RAW EMA with alpha<1.
         self.temporal_nr_alpha = max(
-            0.01, min(1.0, float(config.get("v4l2_temporal_nr_alpha", 0.2)))
+            0.01, min(1.0, float(config.get("v4l2_temporal_nr_alpha", 1.0)))
         )
-        # EMA 的时间常数按"秒"而不是按"帧"来定：短曝光下每秒能拿到很多帧，
-        # 多平均几十帧的墙钟代价可以忽略，所以可以用小得多的 alpha 换大得多
-        # 的降噪；长曝光下每帧就要好几秒，平均更多帧的代价是实打实的延迟，
-        # 所以退回 temporal_nr_alpha 这个上限（= 最少平均帧数 1/alpha）。
-        # The EMA time constant is defined in SECONDS rather than frames:
-        # at short exposures many frames arrive per second, so averaging
-        # tens of them costs negligible wall-clock time and buys a much
-        # smaller alpha (much stronger denoise); at long exposures each
-        # frame costs seconds, so averaging more of them is real latency and
-        # it falls back to the temporal_nr_alpha bound (= a floor of 1/alpha
-        # averaged frames).
+        # 保存的显式模式优先；通用 ISP 模式仍由 V4L2 alpha 决定是否混帧。
+        # Persisted explicit modes take precedence; generic ISP modes leave blending to the V4L2 alpha.
+        requested_nr_mode = str(config.get("noise_reduction_mode", "")).lower()
+        if requested_nr_mode == "off":
+            self.temporal_nr_alpha = 1.0
+        elif requested_nr_mode == "temporal" and self.temporal_nr_alpha >= 1.0:
+            self.temporal_nr_alpha = 0.2
+        self.noise_reduction_mode = (
+            "temporal" if self.temporal_nr_alpha < 1.0 else "off"
+        )
+        # 使用实际帧间墙钟时间，避免慢速软件采集把秒数放大成数十秒。
+        # Use actual wall-clock frame intervals so slow software capture cannot stretch seconds into tens of seconds.
         self.temporal_nr_seconds = max(
             0.0, float(config.get("v4l2_temporal_nr_seconds", 2.0))
         )
@@ -272,6 +250,8 @@ class V4L2RawCamera:
             1, int(config.get("v4l2_temporal_nr_max_frames", 50))
         )
         self._nr_accumulator: np.ndarray | None = None
+        self._nr_last_frame_mono: float | None = None
+        self._nr_effective_alpha = 1.0
         # 累积器是否持有有效历史。曝光/增益一变要丢弃历史，但不能把数组
         # 本身丢掉：AE 收敛期间每帧都可能触发一次，反复重新分配整幅
         # float32 会让 RSS 一路涨上去（实测开着 AE 抓 40 帧涨了 38MB）。
@@ -338,6 +318,7 @@ class V4L2RawCamera:
         )
 
     def _create_auto_exposure(self) -> NightSkyAutoExposure:
+        exposure_control = self._control_ranges.get("exposure")
         effective_max_gain = max(1.0, float(self.auto_gain_max))
         gain_control = self._control_ranges.get("analogue_gain")
         if gain_control is not None:
@@ -347,7 +328,12 @@ class V4L2RawCamera:
             )
         return NightSkyAutoExposure(
             AutoExposureLimits(
-                min_exposure_us=1_000,
+                min_exposure_us=self._minimum_exposure_us(),
+                exposure_step_us=(
+                    exposure_control.step * self._line_duration_us
+                    if exposure_control is not None
+                    else None
+                ),
                 max_exposure_us=max(
                     10_000,
                     min(
@@ -368,6 +354,13 @@ class V4L2RawCamera:
                 ),
             )
         )
+
+    def _minimum_exposure_us(self) -> int:
+        """按真实传感器曝光行下限换算微秒 / Convert the real sensor exposure-line minimum to microseconds."""
+        exposure_control = self._control_ranges.get("exposure")
+        if exposure_control is None:
+            return 1_000
+        return max(1, round(exposure_control.minimum * self._line_duration_us))
 
     def _run_v4l2(
         self, *args: str, timeout: float = 2.0
@@ -684,6 +677,7 @@ class V4L2RawCamera:
         # invalidate it so the next frame isn't blended back toward the old
         # level, but keep the array itself for in-place reuse.
         self._nr_accumulator_valid = False
+        self._nr_last_frame_mono = None
         return True
 
     def _create_capture(self) -> Any | None:
@@ -816,6 +810,7 @@ class V4L2RawCamera:
         # / Each capture start is a fresh sequence - a stale accumulator from
         # a previous run could hold a since-changed scene.
         self._nr_accumulator_valid = False
+        self._nr_last_frame_mono = None
         return True
 
     def begin_fresh_capture_epoch(self) -> bool:
@@ -844,6 +839,7 @@ class V4L2RawCamera:
         Arrays are not reallocated, preserving the earlier RSS fix.
         """
         self._nr_accumulator_valid = False
+        self._nr_last_frame_mono = None
         frame_duration_s = max(
             1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
         )
@@ -978,10 +974,10 @@ class V4L2RawCamera:
         np.copyto(indices, scratch, casting="unsafe")
         raw8 = lut[indices]
         codes = {
-            "RGGB": cv2.COLOR_BayerRG2RGB,
-            "BGGR": cv2.COLOR_BayerBG2RGB,
-            "GRBG": cv2.COLOR_BayerGR2RGB,
-            "GBRG": cv2.COLOR_BayerGB2RGB,
+            "RGGB": cv2.COLOR_BayerRGGB2RGB,
+            "BGGR": cv2.COLOR_BayerBGGR2RGB,
+            "GRBG": cv2.COLOR_BayerGRBG2RGB,
+            "GBRG": cv2.COLOR_BayerGBRG2RGB,
         }
         return cv2.cvtColor(raw8, codes[self.bayer_pattern])
 
@@ -1179,13 +1175,18 @@ class V4L2RawCamera:
         """
         if self.temporal_nr_alpha >= 1.0:
             return raw
+        now = time.monotonic()
+        previous_frame_mono = self._nr_last_frame_mono
+        self._nr_last_frame_mono = now
         accumulator = self._nr_accumulator
         if accumulator is None or accumulator.shape != raw.shape:
             accumulator = np.empty(raw.shape, dtype=np.float32)
             self._nr_accumulator = accumulator
+            self._nr_accumulator_valid = False
         if not self._nr_accumulator_valid:
             np.copyto(accumulator, raw, casting="unsafe")
-            if time.monotonic() >= self._nr_fresh_epoch_deadline_mono:
+            self._nr_effective_alpha = 1.0
+            if now >= self._nr_fresh_epoch_deadline_mono:
                 self._nr_accumulator_valid = True
             return accumulator
         # 就地更新，复用一块 scratch：acc += alpha * (raw - acc)。写成
@@ -1199,44 +1200,34 @@ class V4L2RawCamera:
             self._frame_scratch = scratch
         np.copyto(scratch, raw, casting="unsafe")
         np.subtract(scratch, accumulator, out=scratch)
-        np.multiply(scratch, self._effective_temporal_nr_alpha(), out=scratch)
+        elapsed_s = (
+            max(0.0, now - previous_frame_mono)
+            if previous_frame_mono is not None
+            else None
+        )
+        self._nr_effective_alpha = self._effective_temporal_nr_alpha(elapsed_s)
+        np.multiply(scratch, self._nr_effective_alpha, out=scratch)
         np.add(accumulator, scratch, out=accumulator)
         return accumulator
 
-    def _effective_temporal_nr_alpha(self) -> float:
-        """按帧时长换算实际 EMA 系数 / Frame-duration-aware EMA coefficient.
+    def _effective_temporal_nr_alpha(self, elapsed_s: float | None = None) -> float:
+        """按实际帧间墙钟时间换算 EMA 系数 / Derive EMA strength from actual wall-clock frame intervals.
 
-        平均帧数 = temporal_nr_seconds / 帧时长，夹在 [1, temporal_nr_max_frames]
-        之间：短曝光多平均（墙钟代价可忽略），长曝光则自然收敛到很少的帧数。
-
-        这里曾经还夹着一个下界 1/temporal_nr_alpha（=5 帧）：单帧曝光已经逼近
-        上限（如 2s）时，仍强制至少平均 5 帧，真实时域积分窗口被拖到 5 倍单帧
-        曝光（10s+）。场景完全静止时看不出来，但曝光期间只要有一点残留机械
-        振动/未完全静止，就会被拉成远超单帧曝光时长的星轨——这正是"最大自动
-        曝光下出现拖线，看起来像几十秒堆栈"的根因。取消这个下界，长曝光按同样
-        的时间预算自然收敛到 1 帧（不再额外平均），不再制造超出单帧曝光的
-        隐藏积分窗口。
-        Frames averaged = temporal_nr_seconds / frame duration, clamped to
-        [1, temporal_nr_max_frames]: short exposures average more (negligible
-        wall-clock cost); long exposures now naturally converge to very few
-        frames.
-
-        This used to also have a floor of 1/temporal_nr_alpha (=5 frames):
-        once a single exposure was already near the ceiling (e.g. 2s), it
-        still forced averaging at least 5 frames, stretching the real
-        temporal integration window to 5x one frame's exposure (10s+).
-        Invisible on a perfectly still scene, but any residual mechanical
-        settling during that window smears into star trails far longer than
-        the single-frame exposure - this was the root cause of "trailing at
-        maximum auto exposure, looking like a multi-ten-second stack".
-        Removing the floor lets long exposures converge to 1 frame (no extra
-        averaging) from the same time budget, instead of manufacturing a
-        hidden integration window beyond the single frame's own exposure.
+        seconds=0 保留固定 alpha；否则平均帧数按实际交付间隔计算。
+        首帧尚无间隔时只使用传感器时长估算，首帧本身不参与历史混合。
+        seconds=0 retains fixed alpha; otherwise the frame count uses actual delivery intervals.
+        Sensor duration is only a fallback before an interval exists; the first frame seeds history without blending.
         """
-        frame_duration_us = self._frame_duration_us or self.exposure_us
-        if self.temporal_nr_seconds <= 0.0 or frame_duration_us <= 0:
+        frame_duration_s = (
+            elapsed_s
+            if elapsed_s is not None
+            else float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
+        )
+        if self.temporal_nr_seconds <= 0.0:
             return self.temporal_nr_alpha
-        frames = (self.temporal_nr_seconds * 1_000_000.0) / float(frame_duration_us)
+        if frame_duration_s <= 0.0:
+            return 1.0 / self.temporal_nr_max_frames
+        frames = self.temporal_nr_seconds / frame_duration_s
         frames = max(1.0, min(float(self.temporal_nr_max_frames), frames))
         return 1.0 / frames
 
@@ -1352,14 +1343,24 @@ class V4L2RawCamera:
         return True
 
     def set_noise_reduction(self, level: int) -> bool:
-        """兼容旧接口；RAW 路径暂不做时域降噪 / Compat hook; RAW path has no temporal NR yet."""
-        self.noise_reduction_mode = "off"
-        return int(level) == 0
+        """旧数值接口只支持关闭软件降噪 / The legacy numeric interface only supports disabling software NR."""
+        return self.set_noise_reduction_mode("off") if int(level) == 0 else False
 
     def set_noise_reduction_mode(self, mode: str) -> bool:
-        """明确 RAW 路径仅支持关闭降噪 / RAW path explicitly supports NR off only."""
-        self.noise_reduction_mode = "off"
-        return str(mode) == "off"
+        """显式选择关闭或静态时域降噪 / Explicitly select off or static temporal NR."""
+        if mode not in {"off", "temporal"}:
+            return False
+        configured_alpha = float(self.config.get("v4l2_temporal_nr_alpha", 0.2))
+        self.temporal_nr_alpha = (
+            1.0
+            if mode == "off"
+            else max(0.01, configured_alpha) if configured_alpha < 1.0 else 0.2
+        )
+        self.noise_reduction_mode = mode
+        self._nr_accumulator_valid = False
+        self._nr_last_frame_mono = None
+        self._nr_effective_alpha = 1.0
+        return True
 
     def set_ae_flicker_mode(self, mode: str) -> bool:
         """RAW 夜空 AE 不做市电量化 / RAW night AE does not quantize to mains flicker."""
@@ -1387,7 +1388,7 @@ class V4L2RawCamera:
         max_exposure = self.auto_exposure_max_us
         max_gain = self.auto_gain_max
         if exposure_control is not None:
-            min_exposure = int(exposure_control.minimum * self._line_duration_us)
+            min_exposure = self._minimum_exposure_us()
             max_exposure = int(exposure_control.maximum * self._line_duration_us)
         vblank_control = self._control_ranges.get("vertical_blanking")
         if vblank_control is not None:
@@ -1441,7 +1442,7 @@ class V4L2RawCamera:
             software_auto_exposure=True,
             manual_exposure=True,
             ae_flicker=False,
-            noise_reduction_modes=("off",),
+            noise_reduction_modes=("off", "temporal"),
             manual_digital_gain=False,
         )
         return {
@@ -1484,6 +1485,7 @@ class V4L2RawCamera:
             "auto_exposure_max_us": self.auto_exposure_max_us,
             "effective_auto_exposure_max_us": self._ae.limits.max_exposure_us,
             "effective_auto_gain_max": round(self._ae.limits.max_gain, 3),
+            "effective_auto_exposure_min_us": self._ae.limits.min_exposure_us,
             "ae_state": self._last_ae.get("state", "starting"),
             "ae_error_stops": self._last_ae.get("error_stops"),
             "luminance_stats": self._last_luminance,
@@ -1511,6 +1513,14 @@ class V4L2RawCamera:
             "white_balance_gain_b": self.white_balance_gain_b,
             "night_mode": self.night_mode,
             "noise_reduction_mode": self.noise_reduction_mode,
+            "temporal_noise_reduction": {
+                "enabled": self.temporal_nr_alpha < 1.0,
+                "alpha": self.temporal_nr_alpha,
+                "seconds": self.temporal_nr_seconds,
+                "max_frames": self.temporal_nr_max_frames,
+                "effective_alpha": self._nr_effective_alpha,
+                "clock": "capture_monotonic",
+            },
             "ae_flicker_mode": self.ae_flicker_mode,
             "control_ranges": self.get_manual_control_ranges(),
         }
