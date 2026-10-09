@@ -17,6 +17,7 @@ from loguru import logger
 
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
+from ogscope.algorithms.plate_solve.worker import run_solver_job
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.web.camera_shared import get_camera_manager
@@ -309,7 +310,7 @@ class RealtimeSolveService:
                 )
                 if use_fullsolve:
                     solve_started = time.monotonic()
-                    solved = await asyncio.to_thread(
+                    solved = await run_solver_job(
                         self._solve_frame_sync,
                         frame,
                     )
@@ -321,7 +322,7 @@ class RealtimeSolveService:
                             or getattr(cam, "pixel_format", None)
                             or "RGB888"
                         )
-                        snapshot = await asyncio.to_thread(
+                        snapshot = await run_solver_job(
                             self._encode_snapshot_sync,
                             frame,
                             session_id=self.state.session_id,
