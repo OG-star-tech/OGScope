@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import shutil
 import threading
 import time
@@ -364,6 +363,7 @@ class AnalysisService:
     def _build_polar_guide(self, row: dict[str, Any]) -> dict[str, Any] | None:
         """Share the Core target calculation / 与 Core 共用目标计算。"""
         from ogscope.domain.analysis.polar_guide import build_catalog_polar_guide
+
         return build_catalog_polar_guide(row)
 
     def _attach_overlay_ext(
