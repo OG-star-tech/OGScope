@@ -343,6 +343,7 @@ class V4L2RawCamera:
                 ),
                 min_gain=1.0,
                 max_gain=effective_max_gain,
+                max_step_stops=float(self.config.get("v4l2_ae_max_step_stops", 2.0)),
                 target_background=float(
                     self.config.get("v4l2_ae_target_background", 0.035)
                 ),
@@ -1482,6 +1483,11 @@ class V4L2RawCamera:
             "actual_digital_gain": 1.0,
             "auto_exposure": self.auto_exposure,
             "auto_exposure_engine": "software_night_sky",
+            "ae_policy": {
+                "max_step_stops": self._ae.limits.max_step_stops,
+                "settle_frames": self._ae.limits.settle_frames,
+                "filter_reset_on_control_change": True,
+            },
             "auto_exposure_max_us": self.auto_exposure_max_us,
             "effective_auto_exposure_max_us": self._ae.limits.max_exposure_us,
             "effective_auto_gain_max": round(self._ae.limits.max_gain, 3),

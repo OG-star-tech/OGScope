@@ -121,13 +121,18 @@ sensor-calibrated value.
 
 - 增亮：先延长曝光，达到时长上限后再增加模拟增益。
 - 变暗：先降低模拟增益，再缩短曝光。
-- 每次最多移动 1 EV，带亮度滤波、滞回和控制生效等待帧。
+- 每次最多移动 2 EV，接近目标自动缩小步长；保留滞回和两帧控制生效等待。
+- 控制改变后清除旧亮度滤波，等待帧不进入滤波，避免混用不同曝光的统计。
 - AE 状态为 `starting`、`adjusting`、`settling`、`converged`、
   `limited_dark`、`limited_bright`、`control_error` 或 `manual`。
 
 The controller works in photographic stops. It lengthens exposure before adding
 analogue gain for SNR, removes gain before shortening exposure for dynamic range,
-limits each update to one stop, and exposes an explicit convergence state.
+limits each update to two stops (smaller near convergence), and exposes an explicit convergence state.
+After changing controls it clears the old brightness filter and excludes two settling frames
+from metering. Old-exposure statistics cannot bias the next decision.
+This retains the product Picamera2 Long curve’s shutter-first policy, not its ISP-specific
+brightness thresholds; V4L2 meters normalized linear RAW.
 
 ## 硬件换算 / Hardware conversion
 
@@ -284,3 +289,48 @@ the target OS must independently provide the kernel/media graph, permissions,
 This probe validates the application/driver boundary on one board only. It does
 not close the required dark-frame, night-sky, solve-rate, long-run, or motor-system
 acceptance gates.
+
+
+## BSP 打包与配置验收 / BSP packaging and configuration acceptance
+
+打包时必须一起更新 OGScope Python 包（含 `domain/camera/auto_exposure.py`、
+`platform/hardware/v4l2_camera.py`、`web/camera_shared.py`、`config.py`），不要只复制前端。
+RPi 后端还必须包含 `platform/hardware/tuning/imx327.json`；V4L2 软件 AE 不读取这个
+libcamera tuning 文件，复制该 JSON 不能替代软件 AE 更新。
+
+Ship the complete OGScope Python package, not only frontend assets. Include the product
+`platform/hardware/tuning/imx327.json` for Picamera2. V4L2 does not consume libcamera tuning;
+copying that JSON alone cannot update its software AE.
+
+发布配置保持以下值；节点、位深与 Bayer 顺序仍按具体板型配置：
+Keep these release settings; discover device nodes, bit depth and Bayer order per board:
+
+```ini
+OGSCOPE_CAMERA_AUTO_EXPOSURE_MAX_US=3000000
+OGSCOPE_CAMERA_V4L2_AE_MAX_STEP_STOPS=2.0
+OGSCOPE_CAMERA_V4L2_TEMPORAL_NR_ALPHA=1.0
+```
+
+现场发现旧 BSP 的 `ogscope-camera.conf` 仍设 500000µs，旧 env 示例也残留 1s。
+更新镜像默认值，同时保留用户已有显式偏好；不要依赖调试机 `/data` 下的临时覆盖。
+检查 systemd 的全部 `Environment` / `EnvironmentFile`：环境文件可覆盖 unit 中的值，
+多个环境文件后加载者优先，尤其注意最后的 `build.env` 可能固定相机后端。
+
+Older BSP drop-ins cap exposure at 500000µs and older env examples used 1s. Update image
+defaults while preserving explicit user preferences. Do not rely on a development board's
+temporary data-partition overrides. Audit every systemd Environment and EnvironmentFile;
+environment files override unit values and later files win, including a build.env backend pin.
+
+重启后打开预览并持续取帧，通过 Core `GET /api/core/v1/camera/status` 检查：
+Restart, open a preview and keep consuming frames, then check Core camera status:
+
+- `info.driver=v4l2-imx327-software-ae`（仅 V4L2 板型 / V4L2 boards only）。
+- `effective_auto_exposure_max_us=3000000`（硬件支持时 / when hardware supports it）。
+- `ae_policy.max_step_stops=2`、`settle_frames=2`、`filter_reset_on_control_change=true`。
+- `control_readback.verified=true`，实际曝光/增益随场景收敛 / actual controls converge with the scene。
+- 确认 `signal_levels`、`capture_format` 和 Bayer 配置一致 / verify signal levels and RAW format。
+
+仅轮询 status 不会主动取帧；`streaming=true` 不能单独证明 AE 正在推进。3s 曝光时
+真实帧率仍受曝光时间限制，快速 AE 不会让长曝光达到 8fps。
+Polling status alone does not acquire frames; streaming=true alone does not prove AE progress.
+Three-second exposure still limits physical frame rate; faster AE does not make it 8fps.
