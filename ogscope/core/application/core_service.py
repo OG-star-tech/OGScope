@@ -220,6 +220,9 @@ class CoreContractService:
         status = await realtime_solve_service.get_status()
         running = bool(status.get("running", False))
         last_result = status.get("last_result")
+        if isinstance(last_result, dict):
+            from ogscope.domain.analysis.polar_guide import attach_catalog_polar_guide
+            last_result = attach_catalog_polar_guide(last_result)
         state = "running" if running else "stopped"
         if not running and last_result:
             state = "completed"

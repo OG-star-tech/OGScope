@@ -61,6 +61,14 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 
 常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
 
+The successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation. 成功解算在投影数据有效时返回同一极轴目标。
+
+- `target_policy=catalog_visual_v1`, `target_frame=catalog_j2000`: original catalog visual baseline; all `corrections` flags are false. 原始星库视觉基线，全部天文修正关闭。
+- `angular_sep_deg`: centre-to-target separation in degrees. 中心至目标的角距离（度）。
+- `image_offset_deg.dx/dy`: signed image error in degrees, x right / y down, already accounting for the solved image orientation. 图像误差（度），右/下为正，已包含解算画面方向。
+- Missing guide means the target is unavailable; motion consumers must not substitute a different local target. 缺少目标时不得自行换用其他目标运动。
+- Existing raw RA/Dec/Roll and exact-frame identifiers retain their meanings. 原始解算及精确帧标识语义不变。
+
 ### 2.1) Get Exact Solve Frame
 
 - `GET /api/core/v1/analysis/frame?session_id=...&frame_id=...`

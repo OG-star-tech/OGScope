@@ -60,6 +60,17 @@ Realtime solving, snapshot encoding and developer image analysis share one worke
 
 A normal `MATCH_FOUND` result is authoritative and is never overturned by scene classification. Only after a normal failure with independent structural evidence does OGScope remove dense or collinear candidates that overlap that evidence and retry once. At most 35% of the reserve candidate pool is removed.
 
+### Shared visual alignment target
+
+A successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation:
+
+- `target_policy: "catalog_visual_v1"`, `target_frame: "catalog_j2000"`.
+- `corrections` explicitly reports precession, nutation, aberration and refraction as `false`.
+- `angular_sep_deg` is the center-to-target angular distance in degrees; `image_offset_deg.{dx,dy}` is the signed image-plane offset in degrees, x right and y down. Roll already includes image orientation; consumers must not rotate it again.
+- Existing `frame_center`, `target`, and `delta_px` remain available for overlays.
+
+Alignment consumers must use this supplied target for motion, verification and display. Missing or incompatible targets must block motion rather than silently reconstructing a different target. This adds no user-facing target-source selector.
+
 ### 3) Stop Analysis
 
 - `POST /api/core/v1/analysis/stop`
