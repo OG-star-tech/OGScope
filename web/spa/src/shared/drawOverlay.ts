@@ -1,5 +1,7 @@
 /** 解算叠加绘制（与旧 debug-analysis 逻辑一致）/ Solve overlay drawing */
 
+import { formatArcsec } from "./utils/solveDisplay";
+
 export type LayerToggles = {
   matched: boolean;
   pattern: boolean;
@@ -156,9 +158,10 @@ function drawOverlayCore(
     ctx.beginPath();
     ctx.arc(tx, ty, 6, 0, Math.PI * 2);
     ctx.stroke();
-    const ang = typeof guide.angular_sep_deg === "number" ? guide.angular_sep_deg.toFixed(2) : "-";
-    ctx.font = "12px system-ui, sans-serif";
-    ctx.fillText(`Polar ${ang}deg`, tx + 10, ty - 6);
+    ctx.font = "14px system-ui, sans-serif";
+    const label = `Polar ${formatArcsec(guide.angular_sep_deg, 3600)}`;
+    const labelX = Math.max(4, Math.min(tx + 10, w - ctx.measureText(label).width - 4));
+    ctx.fillText(label, labelX, Math.max(16, Math.min(ty - 8, h - 4)));
   }
 }
 

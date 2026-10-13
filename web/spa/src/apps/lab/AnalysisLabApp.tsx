@@ -45,7 +45,7 @@ import { useI18n } from "@shared/i18n/I18nProvider";
 import { buildMetaCaptionRows } from "@shared/utils/metaCaption";
 import { formatDateTime, formatFileSize } from "@shared/utils/format";
 import {
-  formatArcminArcsecFromArcsec,
+  formatArcsec,
   formatAngleDeg,
   formatProbLine,
   parseSolveResult,
@@ -1877,7 +1877,7 @@ export default function AnalysisLabApp() {
                                     {t("lab.metric.rmse")}
                                   </span>{" "}
                                   <span className="font-mono">
-                                    {formatArcminArcsecFromArcsec(solveHud.rmseArcsec)}
+                                    {formatArcsec(solveHud.rmseArcsec)}
                                   </span>
                                 </span>
                               )}

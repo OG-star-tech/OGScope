@@ -54,10 +54,10 @@ export function formatAngleDeg(v: number | null): string {
   return `${v.toFixed(4)}°`;
 }
 
-/** 同时显示角分与角秒，避免调试时误读单位 / Show arcminutes and arcseconds together for unambiguous debugging. */
-export function formatArcminArcsecFromArcsec(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return `${(value / 60).toFixed(2)}′ / ${value.toFixed(1)}″`;
+/** 精度误差统一显示角秒 / Display precision errors in arcseconds. */
+export function formatArcsec(value: number | null | undefined, multiplier = 1): string {
+  if (typeof value !== "number" || !Number.isFinite(value * multiplier)) return "—";
+  return `${(value * multiplier).toFixed(1)}″`;
 }
 
 /**
