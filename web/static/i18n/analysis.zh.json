@@ -579,5 +579,7 @@
   "sys.sensors.mag.calModeLocked": "已锁定（使用保存方向）",
   "sys.sensors.mag.calSamplesPrefix": "录制样本：",
   "sys.sensors.mag.calRecordingHint": "操作提示：保持水平，缓慢旋转设备，建议累计 10+ 样本后保存。",
-  "sys.sensors.mag.calLockedHint": "已锁定方向参数："
+  "sys.sensors.mag.calLockedHint": "已锁定方向参数：",
+  "lab.target.error": "目标误差（角秒）",
+  "lab.target.original": "原始目标 · 附加修正全关"
 }

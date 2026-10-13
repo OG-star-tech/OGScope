@@ -49,6 +49,7 @@ jobs:
       run: |
         cd web/spa
         npm ci
+        npm test
         npm run build
 
     - name: 代码格式检查 (Black)

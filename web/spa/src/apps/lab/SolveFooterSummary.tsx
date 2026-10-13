@@ -1,5 +1,5 @@
 import {
-  formatArcminArcsecFromArcsec,
+  formatArcsec,
   formatAngleDeg,
   formatProbLine,
   parseSolveResult,
@@ -16,11 +16,19 @@ export function SolveFooterSummary({
   roundTripMs: number | null;
 }) {
   const s = parseSolveResult(result ?? undefined);
+  const ext = result?.overlay_ext as { polar_guide?: { angular_sep_deg?: number; corrections?: Record<string, boolean> } } | undefined;
+  const guide = ext?.polar_guide;
+  const correctionsOff = guide?.corrections != null && ["precession", "nutation", "aberration", "refraction"].every((key) => guide.corrections?.[key] === false);
   if (!result) {
     return <p className="mt-2 text-[10px] text-on-surface-variant">—</p>;
   }
   return (
     <div className="mt-2 space-y-2 text-[10px]">
+      {guide && <div className="rounded border border-outline-variant/25 p-3 text-sm">
+        <div className="text-on-surface-variant">{t("lab.target.error")}</div>
+        <strong className="text-xl tabular-nums">{formatArcsec(guide.angular_sep_deg, 3600)}</strong>
+        {correctionsOff && <p className="mt-1 text-xs text-on-surface-variant">{t("lab.target.original")}</p>}
+      </div>}
       <div className="grid grid-cols-2 gap-2">
         {s.tBackendTotalMs != null && (
           <div>
@@ -80,7 +88,7 @@ export function SolveFooterSummary({
           <div>
             <div className="text-on-surface-variant">{t("lab.metric.rmse")}</div>
             <div className="font-semibold tabular-nums text-on-surface">
-              {formatArcminArcsecFromArcsec(s.rmseArcsec)}
+              {formatArcsec(s.rmseArcsec)}
             </div>
           </div>
         )}
