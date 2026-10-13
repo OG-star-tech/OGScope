@@ -108,14 +108,15 @@ The sampling stride is odd to cover all four Bayer phases rather than one colour
 These remain RAW signal statistics, not ISP-processed luminance values.
 
 统计和去马赛克都会先使用同一组 `black_level` / `white_level` 去除 RAW
-pedestal 并归一化。默认优先读取 V4L2 控件，控件缺失时黑电平回退为 0、
-白电平按位深推导；板端可显式设置
+pedestal 并归一化。默认优先读取 V4L2 控件，控件缺失时使用已测暗场的黑电平比例
+（12 位时约 240），白电平按位深推导；这不是每台设备的独立标定，板端可显式设置
 `OGSCOPE_CAMERA_V4L2_BLACK_LEVEL` 与 `OGSCOPE_CAMERA_V4L2_WHITE_LEVEL`。
 状态中的 `signal_levels.sources` 会标明每个值来自控件、配置还是回退值。
 
 Both metering and debayer preview use the same black/white-level normalization.
-Telemetry exposes each value and its source so a fallback is never mistaken for a
-sensor-calibrated value.
+When controls are absent, black level uses the measured dark-frame fallback ratio
+(about 240 at 12 bits), not zero; white level follows bit depth. This is not per-device
+calibration. Telemetry exposes each value and source so the fallback remains identifiable.
 
 控制误差使用摄影 EV（log2）表示，并执行：
 
