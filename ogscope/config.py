@@ -247,6 +247,12 @@ class Settings(BaseSettings):
         le=64.0,
         description="软件 AE 最大模拟增益 / Software-AE maximum analogue gain",
     )
+    camera_v4l2_ae_max_step_stops: float = Field(
+        default=2.0,
+        ge=0.25,
+        le=4.0,
+        description="软件 AE 单次最大 EV；临近目标自动缩小 / Maximum software-AE step in EV; shrinks near the target",
+    )
     camera_v4l2_ae_target_background: float = Field(
         default=0.035,
         ge=0.005,

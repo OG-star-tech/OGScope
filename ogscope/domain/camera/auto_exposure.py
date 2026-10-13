@@ -30,7 +30,7 @@ class AutoExposureLimits:
     target_highlight: float = 0.45
     highlight_percentile: float = 99.8
     max_saturation_fraction: float = 0.001
-    max_step_stops: float = 1.0
+    max_step_stops: float = 2.0
     hysteresis_stops: float = 0.12
     settle_frames: int = 2
     # 真实曝光步长；未知时保留旧版 50us 调整死区 / Actual exposure step;
@@ -165,7 +165,6 @@ class NightSkyAutoExposure:
         analogue_gain = float(
             max(self.limits.min_gain, min(self.limits.max_gain, analogue_gain))
         )
-        background, highlight = self._filtered_stats(stats)
 
         if not self.enabled:
             return self._decision(
@@ -176,6 +175,15 @@ class NightSkyAutoExposure:
             return self._decision(
                 exposure_us, analogue_gain, "no_signal", False, 0.0, stats
             )
+
+        # 等待帧可能来自上次曝光，不能污染新曝光下的滤波统计。
+        # Settling frames may use old controls; keep them out of the new exposure's filter.
+        if self._settle_remaining > 0:
+            self._settle_remaining -= 1
+            return self._decision(
+                exposure_us, analogue_gain, "settling", False, 0.0, stats
+            )
+        background, highlight = self._filtered_stats(stats)
 
         # 星空背景应保持暗，星点高分位负责可见性；对数误差对应摄影 EV。
         # Keep sky background dark while the upper percentile drives star visibility.
@@ -192,12 +200,6 @@ class NightSkyAutoExposure:
                 stats.saturation_fraction / self.limits.max_saturation_fraction
             )
             error_stops = min(-0.5, -0.5 * math.log2(max(1.0, saturation_ratio)))
-
-        if self._settle_remaining > 0:
-            self._settle_remaining -= 1
-            return self._decision(
-                exposure_us, analogue_gain, "settling", False, error_stops, stats
-            )
 
         if abs(error_stops) <= self.limits.hysteresis_stops:
             return self._decision(
@@ -262,6 +264,10 @@ class NightSkyAutoExposure:
         )
         if changed:
             self._settle_remaining = max(0, int(self.limits.settle_frames))
+            # 控制改变后重新计量，避免旧暗帧使 AE 持续增亮并过冲。
+            # Re-meter after a control change so old dark frames cannot drive overshoot.
+            self._filtered_background = None
+            self._filtered_highlight = None
 
         at_dark_limit = (
             next_exposure >= self.limits.max_exposure_us

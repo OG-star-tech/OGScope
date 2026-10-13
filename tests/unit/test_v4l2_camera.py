@@ -402,7 +402,7 @@ def test_dark_raw_frame_advances_software_ae(monkeypatch) -> None:
 
     assert frame is not None
     assert frame.shape == (120, 160, 3)
-    assert camera.exposure_us == 20_000
+    assert camera.exposure_us == 40_000
     assert camera.get_camera_info()["ae_state"] == "adjusting"
     assert [name for name, _value in writes] == [
         "vertical_blanking",
@@ -439,7 +439,7 @@ def test_camera_trace_records_observation_decision_and_readback(
     assert camera._trace.session_dir is not None
     events = load_trace_events(camera._trace.session_dir)
     assert events[0]["observed"]["exposure_us"] == 10_000
-    assert events[0]["decision"]["exposure_us"] == 20_000
+    assert events[0]["decision"]["exposure_us"] == 40_000
     assert events[0]["applied"]["actual_exposure_us"] == 20_000
     assert events[0]["applied"]["readback_verified"] is True
     assert events[0]["raw_sample"].startswith("raw/frame-")
@@ -1121,3 +1121,14 @@ def test_saturation_still_applies_via_float_path() -> None:
     output = camera._apply_postprocessing(image)
 
     assert output[0, 0, 0] == output[0, 0, 1] == output[0, 0, 2]
+
+
+@pytest.mark.unit
+def test_v4l2_ae_response_setting_reaches_controller_and_telemetry() -> None:
+    camera = _ready_camera(v4l2_ae_max_step_stops=1.5)
+    assert camera._ae.limits.max_step_stops == 1.5
+    assert camera.get_camera_info()["ae_policy"] == {
+        "max_step_stops": 1.5,
+        "settle_frames": 2,
+        "filter_reset_on_control_change": True,
+    }
