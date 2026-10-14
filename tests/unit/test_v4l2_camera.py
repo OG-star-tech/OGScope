@@ -1123,14 +1123,14 @@ def test_v4l2_ae_response_setting_reaches_controller_and_telemetry() -> None:
         "max_step_stops": 1.5,
         "fast_step_stops": 4.0,
         "probe_exposure_us": 100_000,
-        "settle_frames": 1,
-        "settle_policy": "queued_frame_plus_old_and_new_frame_duration",
+        "settle_frames": 2,
+        "settle_policy": "two_queued_frames_plus_old_and_new_frame_duration",
         "filter_reset_on_control_change": True,
     }
 
 
 @pytest.mark.unit
-def test_control_settling_covers_old_long_integration_and_one_queued_frame(monkeypatch):
+def test_control_settling_covers_old_long_integration_and_two_queued_frames(monkeypatch):
     """缩短曝光仍须等旧长帧完成；耗时处理也不使排队帧变新 / Cover old integration and discard queued data."""
     import ogscope.platform.hardware.v4l2_camera as module
 
