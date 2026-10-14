@@ -5,6 +5,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+# cffi 生成的绑定源码 / cffi-generated binding sources
+ogscope/platform/hardware/_bcm2835_isp_cffi.*
 .Python
 build/
 develop-eggs/

@@ -1,9 +1,13 @@
-"""bcm2835-isp 驱动单元测试（无需硬件）/ bcm2835-isp driver unit tests (no hardware)."""
+"""bcm2835-isp 驱动单元测试（无需硬件）/ bcm2835-isp driver unit tests (no hardware).
+
+载荷测试需要已构建的内核头文件绑定，未构建时跳过（见 _bcm2835_isp_build.py）。
+Payload tests need the built kernel header bindings and are skipped without
+them (see _bcm2835_isp_build.py).
+"""
 
 from __future__ import annotations
 
-import ctypes
-import struct
+import errno
 
 import pytest
 
@@ -17,14 +21,14 @@ from ogscope.platform.hardware.bcm2835_isp import (
 
 
 @pytest.mark.unit
-def test_v4l2_structures_match_the_64bit_kernel_abi() -> None:
-    assert ctypes.sizeof(isp_module.v4l2_format) == 208
-    assert ctypes.sizeof(isp_module.v4l2_buffer) == 88
-    assert ctypes.sizeof(isp_module.v4l2_ext_control) == 20
-    assert ctypes.sizeof(isp_module.v4l2_ext_controls) == 32
-    assert isp_module.VIDIOC_S_FMT == 0xC0D05605
-    assert isp_module.VIDIOC_QBUF == 0xC058560F
-    assert isp_module.VIDIOC_S_EXT_CTRLS == 0xC0205648
+def test_missing_bindings_leave_the_isp_unavailable(monkeypatch) -> None:
+    """未构建绑定时不打开任何节点 / Without bindings no node is opened."""
+    monkeypatch.setattr(
+        isp_module, "_BINDINGS_ERROR", "bcm2835-isp bindings not built: x"
+    )
+    monkeypatch.setattr(isp_module.os, "open", lambda *_a: pytest.fail("node opened"))
+    with pytest.raises(IspError, match="bindings not built"):
+        Bcm2835Isp(1280, 720, output_node="/dev/video13", capture_node="/dev/video14")
 
 
 @pytest.mark.unit
@@ -39,41 +43,70 @@ def test_gamma_curve_is_strictly_increasing_and_dense_near_black() -> None:
     assert ys[1] == round(65535 * (xs[1] / 65535) ** (1 / 2.2))
 
 
+def _bindings():
+    return pytest.importorskip("ogscope.platform.hardware._bcm2835_isp_cffi")
+
+
 class _RecordingIsp(Bcm2835Isp):
     """不打开设备、只记录控件载荷 / Records control payloads without a device."""
 
     def __init__(self) -> None:  # noqa: D107 - no hardware
-        self.sent: list[tuple[int, int | bytes]] = []
+        self.sent: list[tuple[int, object]] = []
 
     def _set_controls(self, controls):  # type: ignore[override]
         self.sent.extend(controls)
 
 
 @pytest.mark.unit
-def test_control_payloads_match_the_uapi_structures() -> None:
+def test_controls_fill_the_kernel_structures() -> None:
+    lib = _bindings().lib
     isp = _RecordingIsp()
     isp.disable_enhancements()
     isp.set_black_level(240 << 4)
-    isp.set_gamma(*gamma_curve(2.2))
+    xs, ys = gamma_curve(2.2)
+    isp.set_gamma(xs, ys)
     isp.set_identity_ccm()
     isp.set_white_balance(1.5, 0.75)
-    sizes = {cid: len(value) for cid, value in isp.sent if isinstance(value, bytes)}
-    assert sizes[isp_module.CID_DENOISE] == 24
-    assert sizes[isp_module.CID_SHARPEN] == 28
-    assert sizes[isp_module.CID_BLACK_LEVEL] == 12
-    assert sizes[isp_module.CID_GAMMA] == 136
-    assert sizes[isp_module.CID_CC_MATRIX] == 88
-    payloads = dict(isp.sent)
+    sent = dict(isp.sent)
+
     # Enhancements off; black level enabled on all three channels.
-    assert struct.unpack("<I", payloads[isp_module.CID_DENOISE][:4]) == (0,)
-    assert struct.unpack("<I3H", payloads[isp_module.CID_BLACK_LEVEL][:10]) == (
+    # 增强关闭；三个通道都启用黑电平。
+    assert sent[lib.V4L2_CID_USER_BCM2835_ISP_DENOISE].enabled == 0
+    assert sent[lib.V4L2_CID_USER_BCM2835_ISP_SHARPEN].enabled == 0
+    assert sent[lib.V4L2_CID_USER_BCM2835_ISP_DPC].enabled == 0
+    assert sent[lib.V4L2_CID_USER_BCM2835_ISP_CDN].enabled == 0
+    black = sent[lib.V4L2_CID_USER_BCM2835_ISP_BLACK_LEVEL]
+    assert (
+        black.enabled,
+        black.black_level_r,
+        black.black_level_g,
+        black.black_level_b,
+    ) == (
         1,
         3840,
         3840,
         3840,
     )
-    assert payloads[isp_module.V4L2_CID_RED_BALANCE] == 1500
-    assert payloads[isp_module.V4L2_CID_BLUE_BALANCE] == 750
+    gamma = sent[lib.V4L2_CID_USER_BCM2835_ISP_GAMMA]
+    assert gamma.enabled == 1 and list(gamma.x) == xs and list(gamma.y) == ys
+    ccm = sent[lib.V4L2_CID_USER_BCM2835_ISP_CC_MATRIX].ccm
+    assert [[(c.num, c.den) for c in row] for row in ccm.ccm] == [
+        [(1, 1), (0, 1), (0, 1)],
+        [(0, 1), (1, 1), (0, 1)],
+        [(0, 1), (0, 1), (1, 1)],
+    ]
+    assert sent[lib.V4L2_CID_RED_BALANCE] == 1500
+    assert sent[lib.V4L2_CID_BLUE_BALANCE] == 750
+
+
+@pytest.mark.unit
+def test_failed_ioctls_raise_oserror_with_errno() -> None:
+    _bindings()
+    isp = object.__new__(Bcm2835Isp)
+    isp._out_fd = -1
+    with pytest.raises(OSError) as raised:
+        isp.set_white_balance(1.0, 1.0)
+    assert raised.value.errno == errno.EBADF
 
 
 def _sysfs(tmp_path, nodes: dict[int, tuple[str, int]]):
