@@ -590,6 +590,8 @@ class CoreStreamStatusResponse(BaseModel):
     jpeg_variant_cached_bytes: int = 0
     jpeg_cached_bytes: int = 0
     preview_encoder: str = ""
+    preview_pipeline_enabled: bool = False
+    hardware_encoder_error: Optional[str] = None
     jpeg_encode_failures: int = 0
     jpeg_source_format: str = ""
     camera_driver: str = ""

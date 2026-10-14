@@ -131,7 +131,7 @@ The successful solve includes `result.overlay_ext.polar_guide` when projection m
 流控诊断状态和单帧 JPEG 预览（轮询、`since_frame_id`、调试限频）仍仅暴露于开发路径：
 
 - `GET /api/dev/debug/camera/stream?quality=75` — 与 Core 预览共享实现的开发入口
-- `GET /api/dev/debug/camera/stream/status` — `max_clients`、`active_clients`、取帧超时、目标预览帧率
+- `GET /api/dev/debug/camera/stream/status` — `max_clients`、`active_clients`、取帧超时、目标预览帧率；`preview_pipeline_enabled` 描述配置的预读开关，`hardware_encoder_error` 描述硬件编码失败后的软件回退原因（未失败时为 `null`）
   - `camera_read_average_ms` 包含驱动取帧与处理；`jpeg_average_encode_ms` 是共享预览编码；`jpeg_variant_average_encode_ms` 与 `jpeg_variant_cached_bytes` 是客户端质量变体的耗时与缓存字节数
   - 吞吐目标取传感器与预览目标的较小值；`throttle_reason=preview_rate_limit` 表示主动预览限帧。`auto_exposure_long` 需要实际曝光或帧周期超出有效目标周期的证据；其余产帧吞吐不足报告 `processing_limit`
 - `GET /api/dev/debug/camera/preview` — 单帧预览
