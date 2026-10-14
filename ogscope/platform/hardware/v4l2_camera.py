@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -146,7 +148,8 @@ class V4L2RawCamera:
         self._linear_lut_key = None
         self._linear_luts = None
         self._linear_mosaic = None
-        self._gamma_coordinates = None
+        self._gamma_workers = max(1, min(4, os.cpu_count() or 1))
+        self._gamma_pool: ThreadPoolExecutor | None = None
         self._control_discard_remaining = 0
         self._controls_ready_at = 0.0
         self.white_balance_gain_r = float(config.get("white_balance_gain_r", 1.0))
@@ -892,6 +895,9 @@ class V4L2RawCamera:
         self._trace.close()
         released = self.stop_capture()
         self.is_initialized = False
+        if self._gamma_pool is not None:
+            self._gamma_pool.shutdown(wait=True)
+            self._gamma_pool = None
         return released
 
     def _unpack_raw(self, frame: np.ndarray) -> np.ndarray:
@@ -964,46 +970,40 @@ class V4L2RawCamera:
         return self._apply_gamma_lut(rgb)
 
     def _apply_gamma_lut(self, rgb: np.ndarray) -> np.ndarray:
-        """按完整 16 位索引查表，不重采样图像 / Look up full 16-bit values without resampling image coordinates."""
-        import cv2
-
-        height, width, channels = rgb.shape
-        columns = width * channels
-        if columns >= 32767:
-            # OpenCV remap 尺寸有上限，超大图像保留原实现。
-            # Preserve the original lookup beyond OpenCV remap's size limit.
+        """完整精度查表，只并行独立像素 / Full-precision lookup, parallelizing independent pixels only."""
+        if rgb.size < 128 * 128 * 3 or self._gamma_workers == 1 or rgb.shape[0] < 4:
             return self._gamma_lut[rgb]
-        # 索引高低字节是 256×256 查找表的 y/x；零字节令坐标保持正整数。
-        # High/low bytes address a 256×256 table as y/x; zero bytes keep coordinates positive.
-        rows = min(height, 128, max(1, (2 * 1024 * 1024) // (columns * 4)))
-        shape = (rows, columns, 2)
-        if self._gamma_coordinates is None or self._gamma_coordinates.shape != shape:
-            self._gamma_coordinates = np.zeros(shape, dtype=np.int16)
-        coordinates = self._gamma_coordinates
-        coordinate_bytes = coordinates.view(np.uint8).reshape(rows, columns, 4)
-        source_bytes = (
-            np.ascontiguousarray(rgb).view(np.uint8).reshape(height, columns, 2)
-        )
-        byte_channels = [0, 0, 1, 2] if np.little_endian else [1, 1, 0, 3]
-        table = self._gamma_lut.reshape(256, 256)
-        # 只复用最多 2MiB 的索引暂存；每帧独立输出，不能改写已发布的解算帧。
-        # Reuse only the <=2MiB index scratch; each output owns memory so published solve frames stay immutable.
+        if self._gamma_pool is None:
+            # 每台相机最多四个工作线程，关闭时释放；不改变 OpenCV 全局线程设置。
+            # Bound each camera to four workers, release on close; leave OpenCV globals alone.
+            self._gamma_pool = ThreadPoolExecutor(
+                max_workers=self._gamma_workers, thread_name_prefix="v4l2-gamma"
+            )
+        height = rgb.shape[0]
+        lut = self._gamma_lut
+        # 输出每帧独立，最多提交四块；不保留帧队列，不分块去马赛克。
+        # Own each output and submit at most four slices; no frame queue or tiled demosaic.
         output = np.empty(rgb.shape, dtype=np.uint8)
-        flat = output.reshape(height, columns)
-        for top in range(0, height, rows):
-            count = min(rows, height - top)
-            cv2.mixChannels(
-                [source_bytes[top : top + count]],
-                [coordinate_bytes[:count]],
-                byte_channels,
-            )
-            cv2.remap(
-                table,
-                coordinates[:count],
-                None,
-                cv2.INTER_NEAREST,
-                dst=flat[top : top + count],
-            )
+
+        def lookup(top: int, bottom: int) -> None:
+            output[top:bottom] = lut[rgb[top:bottom]]
+
+        pending = []
+        try:
+            for i in range(self._gamma_workers):
+                pending.append(
+                    self._gamma_pool.submit(
+                        lookup,
+                        height * i // self._gamma_workers,
+                        height * (i + 1) // self._gamma_workers,
+                    )
+                )
+        finally:
+            # 异常也等所有写入完成，避免下一帧与残余工作交错。
+            # Join all writes even on failure so leftover work cannot overlap the next frame.
+            wait(pending)
+        for future in pending:
+            future.result()
         return output
 
     def _control_frame_ready(self) -> bool:
