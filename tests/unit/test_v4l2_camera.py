@@ -1188,3 +1188,67 @@ def test_capture_loop_converges_with_two_real_queued_exposure_frames(monkeypatch
     assert stable >= 8
     assert camera.exposure_us * camera.analogue_gain == pytest.approx(target, rel=0.1)
     assert clock["t"] < 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize(
+    "flip_h,flip_v", [(False, False), (True, False), (False, True), (True, True)]
+)
+def test_rotation_and_flips_preserve_original_pixel_coordinates(
+    rotation, flip_h, flip_v
+):
+    """旋转优化不改变星点坐标、颜色和翻转顺序 / Preserve star coordinates, colors and flip ordering."""
+    camera = _ready_camera(
+        rotation=rotation, flip_horizontal=flip_h, flip_vertical=flip_v
+    )
+    source = np.random.default_rng(327).integers(0, 256, (120, 160, 3), dtype=np.uint8)
+    expected = np.rot90(source, rotation // 90)
+    if flip_h:
+        expected = np.fliplr(expected)
+    if flip_v:
+        expected = np.flipud(expected)
+    output = camera._apply_postprocessing(source)
+    np.testing.assert_array_equal(output, expected)
+    assert output.flags.c_contiguous
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("gamma", [0.8, 1.0, 2.2, 3.0])
+def test_fast_gamma_lookup_is_exact_for_every_16bit_value(gamma):
+    """所有 65536 个值与原查表逐值一致 / Every 16-bit value exactly matches the original LUT."""
+    camera = _ready_camera(v4l2_gamma=gamma)
+    camera._gamma_lut = camera._build_gamma_lut()
+    values = np.arange(65536, dtype=np.uint16).reshape(256, 256)
+    rgb = np.stack((values, values ^ 65535, np.roll(values, 17)), axis=-1)
+    np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), camera._gamma_lut[rgb])
+
+
+@pytest.mark.unit
+def test_gamma_lookup_reuses_bounded_scratch_but_never_published_frames():
+    """尾块与非连续输入不丢像素，后续帧不覆盖先前输出 / Preserve tail/strided pixels and prior outputs."""
+    camera = _ready_camera()
+    camera._gamma_lut = camera._build_gamma_lut()
+    rgb = np.random.default_rng(327).integers(0, 65536, (257, 641, 3), dtype=np.uint16)
+    first = camera._apply_gamma_lut(rgb)
+    saved = first.copy()
+    scratch = camera._gamma_coordinates
+    second = camera._apply_gamma_lut(rgb[::-1, ::-1])
+    assert camera._gamma_coordinates is scratch
+    assert scratch.nbytes <= 2 * 1024 * 1024
+    np.testing.assert_array_equal(second, camera._gamma_lut[rgb[::-1, ::-1]])
+    np.testing.assert_array_equal(first, saved)
+    assert not np.shares_memory(first, second)
+    smaller = rgb[:33, :55]
+    np.testing.assert_array_equal(
+        camera._apply_gamma_lut(smaller), camera._gamma_lut[smaller]
+    )
+
+
+@pytest.mark.unit
+def test_gamma_lookup_preserves_large_width_fallback():
+    """超出 OpenCV 坐标尺寸仍返回原始值 / Preserve original values beyond OpenCV dimensions."""
+    camera = _ready_camera()
+    camera._gamma_lut = camera._build_gamma_lut()
+    rgb = np.full((1, 11000, 3), 32768, dtype=np.uint16)
+    np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), camera._gamma_lut[rgb])
