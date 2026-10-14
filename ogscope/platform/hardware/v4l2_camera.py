@@ -27,6 +27,14 @@ from ogscope.platform.hardware.bcm2835_isp import Bcm2835Isp, IspError, gamma_cu
 
 logger = logging.getLogger(__name__)
 
+# 逆时针旋转角度 -> cv2.rotate 代码（与 np.rot90 方向一致）/ Counter-clockwise
+# rotation -> cv2.rotate code (the same direction as np.rot90)
+_CV2_ROTATIONS = {
+    90: "ROTATE_90_COUNTERCLOCKWISE",
+    180: "ROTATE_180",
+    270: "ROTATE_90_CLOCKWISE",
+}
+
 # 软件自动曝光引擎允许的最长曝光时间上限（策略性，不是硬件限制 - 真实硬件
 # 上限由 vertical_blanking 等控件动态推导，见 _resolve_line_duration）。
 # 2026-09-20 在真实 Zero2W (192.168.0.41) 上验证 1s-3s 手动曝光（控件写入/
@@ -1254,8 +1262,10 @@ class V4L2RawCamera:
             rgb8 = cv2.resize(
                 rgb8, (self.width, self.height), interpolation=cv2.INTER_AREA
             )
-        if self.rotation in {90, 180, 270}:
-            rgb8 = np.rot90(rgb8, self.rotation // 90)
+        if self.rotation in _CV2_ROTATIONS:
+            # cv2.rotate 用 SIMD，比 np.rot90 + 连续化快约 6 倍 / cv2.rotate is
+            # SIMD code, about 6x faster than np.rot90 plus making it contiguous.
+            rgb8 = cv2.rotate(rgb8, getattr(cv2, _CV2_ROTATIONS[self.rotation]))
         if self.flip_horizontal and self.flip_vertical:
             rgb8 = cv2.flip(rgb8, -1)
         elif self.flip_horizontal:
@@ -1376,15 +1386,8 @@ class V4L2RawCamera:
             denoised = self._apply_temporal_nr(raw)
             rgb = self._isp_debayer(denoised)
             if rgb is None:
-                return self._apply_postprocessing(self._debayer(denoised))
-            image = self._apply_postprocessing(rgb)
-            # ISP 输出是会被下一帧覆盖的映射缓冲区；返回前确保是独立副本
-            # / The ISP output is a mapped buffer the next frame overwrites;
-            # make sure the returned frame is an independent copy.
-            isp = self._isp
-            if isp is not None and isp.owns(image):
-                image = image.copy()
-            return image
+                rgb = self._debayer(denoised)
+            return self._apply_postprocessing(rgb)
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
