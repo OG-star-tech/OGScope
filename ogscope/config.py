@@ -192,6 +192,17 @@ class Settings(BaseSettings):
             "same solver_centroid_sigma threshold works on both backends"
         ),
     )
+    camera_v4l2_isp: str = Field(
+        default="auto",
+        description=(
+            "V4L2 RAW 路径的硬件 ISP（bcm2835-isp）：auto 在可用时由 ISP 去马赛克、"
+            "扣黑电平、做白平衡与 gamma，不可用或出错时回退 CPU；off 始终用 CPU "
+            "/ Hardware ISP (bcm2835-isp) for the V4L2 RAW path: auto lets the "
+            "ISP demosaic and apply black level, white balance and gamma when "
+            "available, falling back to the CPU when it is missing or fails; "
+            "off always uses the CPU"
+        ),
+    )
     camera_v4l2_temporal_nr_alpha: float = Field(
         default=1.0,
         ge=0.01,

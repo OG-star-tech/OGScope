@@ -82,6 +82,7 @@ _CATALOG_SECTIONS: tuple[
             "camera_v4l2_white_level",
             "camera_v4l2_bayer_pattern",
             "camera_v4l2_gamma",
+            "camera_v4l2_isp",
             "camera_v4l2_temporal_nr_alpha",
             "camera_v4l2_temporal_nr_seconds",
             "camera_v4l2_temporal_nr_max_frames",
