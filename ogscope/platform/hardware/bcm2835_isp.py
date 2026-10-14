@@ -2,50 +2,40 @@
 
 ISP 是 V4L2 内存到内存设备：Bayer 帧送入其输出节点，处理后的图像从采集节点
 取回（节点从 V4L2 设备列表中查找）。去马赛克、黑电平、白平衡、颜色矩阵和 gamma
-都在硬件里完成，这些工作在 RAW V4L2 路径里原本由 CPU 承担。只用 ctypes 调用
-V4L2 ioctl，不依赖 libcamera：RAW 路径存在的意义就是避开 libcamera 的内存占用。
+都在硬件里完成，这些工作在 RAW V4L2 路径里原本由 CPU 承担。ioctl 与结构体来自
+内核头文件绑定（见 _bcm2835_isp_build.py），不依赖 libcamera：RAW 路径存在的意义
+就是避开 libcamera 的内存占用。
 The ISP is a V4L2 memory-to-memory device: Bayer frames are queued on its
 output node, processed images come back on its capture node (both looked up in
-the V4L2 device list). Demosaic, black level, white balance, colour matrix and gamma
-run in hardware - work the RAW V4L2 path otherwise does on the CPU. Plain V4L2
-ioctls through ctypes, no libcamera: the RAW path exists to avoid libcamera's
+the V4L2 device list). Demosaic, black level, white balance, colour matrix and
+gamma run in hardware - work the RAW V4L2 path otherwise does on the CPU.
+ioctls and structs come from the kernel header bindings (see
+_bcm2835_isp_build.py), no libcamera: the RAW path exists to avoid libcamera's
 memory footprint.
 """
 
 from __future__ import annotations
 
-import ctypes
-import fcntl
 import mmap
 import os
 import re
 import select
-import struct
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-# V4L2 接口常量（64 位 ABI）/ V4L2 ABI constants (64-bit)
-V4L2_BUF_TYPE_VIDEO_CAPTURE = 1
-V4L2_BUF_TYPE_VIDEO_OUTPUT = 2
-V4L2_MEMORY_MMAP = 1
-V4L2_FIELD_NONE = 1
-V4L2_COLORSPACE_SRGB = 8
-V4L2_COLORSPACE_RAW = 11
+try:
+    from ogscope.platform.hardware._bcm2835_isp_cffi import ffi, lib
+except (
+    ImportError
+) as exc:  # 绑定未构建（如开发机）/ bindings not built (e.g. a development host)
+    ffi = lib = None
+    _BINDINGS_ERROR: str | None = f"bcm2835-isp bindings not built: {exc}"
+else:
+    _BINDINGS_ERROR = None
 
-# ISP 控件 / ISP controls (include/uapi/linux/bcm2835-isp.h)
-V4L2_CID_RED_BALANCE = 0x0098090E
-V4L2_CID_BLUE_BALANCE = 0x0098090F
-V4L2_CID_DIGITAL_GAIN = 0x009F0905
-_ISP_CID_BASE = 0x009819E0
-CID_CC_MATRIX = _ISP_CID_BASE + 0x1
-CID_BLACK_LEVEL = _ISP_CID_BASE + 0x3
-CID_GAMMA = _ISP_CID_BASE + 0x5
-CID_DENOISE = _ISP_CID_BASE + 0x6
-CID_SHARPEN = _ISP_CID_BASE + 0x7
-CID_DPC = _ISP_CID_BASE + 0x8
-CID_CDN = _ISP_CID_BASE + 0x9
 GAMMA_POINTS = 33
 
 # V4L2 设备列表与 ISP 节点名 / V4L2 device list and ISP node names
@@ -53,8 +43,13 @@ V4L2_SYSFS = "/sys/class/video4linux"
 ISP_OUTPUT_NAME = "bcm2835-isp-output0"
 ISP_CAPTURE_NAME = "bcm2835-isp-capture0"
 
-# Bayer 排列 -> 16 位 Bayer 格式 / Bayer pattern -> 16-bit Bayer format
-BAYER_16BIT = {"RGGB": "RG16", "BGGR": "BYR2", "GRBG": "GR16", "GBRG": "GB16"}
+# Bayer 排列 -> 16 位 Bayer 像素格式 / Bayer pattern -> 16-bit Bayer pixel format
+BAYER_16BIT = {
+    "RGGB": "V4L2_PIX_FMT_SRGGB16",
+    "BGGR": "V4L2_PIX_FMT_SBGGR16",
+    "GRBG": "V4L2_PIX_FMT_SGRBG16",
+    "GBRG": "V4L2_PIX_FMT_SGBRG16",
+}
 
 
 def find_isp_nodes(
@@ -92,139 +87,6 @@ def find_isp_nodes(
     ]
 
 
-def fourcc(code: str) -> int:
-    """四字符码 / FourCC value."""
-    return sum(ord(character) << (8 * index) for index, character in enumerate(code))
-
-
-class v4l2_pix_format(ctypes.Structure):  # noqa: N801 - kernel name
-    _fields_ = [
-        ("width", ctypes.c_uint32),
-        ("height", ctypes.c_uint32),
-        ("pixelformat", ctypes.c_uint32),
-        ("field", ctypes.c_uint32),
-        ("bytesperline", ctypes.c_uint32),
-        ("sizeimage", ctypes.c_uint32),
-        ("colorspace", ctypes.c_uint32),
-        ("priv", ctypes.c_uint32),
-        ("flags", ctypes.c_uint32),
-        ("ycbcr_enc", ctypes.c_uint32),
-        ("quantization", ctypes.c_uint32),
-        ("xfer_func", ctypes.c_uint32),
-    ]
-
-
-class _FormatUnion(ctypes.Union):
-    # 内核联合体含指针，按 8 字节对齐 / The kernel union holds pointers: 8-byte aligned.
-    _fields_ = [
-        ("pix", v4l2_pix_format),
-        ("raw_data", ctypes.c_uint8 * 200),
-        ("_align", ctypes.c_void_p),
-    ]
-
-
-class v4l2_format(ctypes.Structure):  # noqa: N801
-    _fields_ = [("type", ctypes.c_uint32), ("fmt", _FormatUnion)]
-
-
-class v4l2_requestbuffers(ctypes.Structure):  # noqa: N801
-    _fields_ = [
-        ("count", ctypes.c_uint32),
-        ("type", ctypes.c_uint32),
-        ("memory", ctypes.c_uint32),
-        ("capabilities", ctypes.c_uint32),
-        ("flags", ctypes.c_uint8),
-        ("reserved", ctypes.c_uint8 * 3),
-    ]
-
-
-class _Timeval(ctypes.Structure):
-    _fields_ = [("tv_sec", ctypes.c_long), ("tv_usec", ctypes.c_long)]
-
-
-class _Timecode(ctypes.Structure):
-    _fields_ = [
-        ("type", ctypes.c_uint32),
-        ("flags", ctypes.c_uint32),
-        ("frames", ctypes.c_uint8),
-        ("seconds", ctypes.c_uint8),
-        ("minutes", ctypes.c_uint8),
-        ("hours", ctypes.c_uint8),
-        ("userbits", ctypes.c_uint8 * 4),
-    ]
-
-
-class _BufferM(ctypes.Union):
-    _fields_ = [
-        ("offset", ctypes.c_uint32),
-        ("userptr", ctypes.c_ulong),
-        ("planes", ctypes.c_void_p),
-        ("fd", ctypes.c_int32),
-    ]
-
-
-class v4l2_buffer(ctypes.Structure):  # noqa: N801
-    _fields_ = [
-        ("index", ctypes.c_uint32),
-        ("type", ctypes.c_uint32),
-        ("bytesused", ctypes.c_uint32),
-        ("flags", ctypes.c_uint32),
-        ("field", ctypes.c_uint32),
-        ("timestamp", _Timeval),
-        ("timecode", _Timecode),
-        ("sequence", ctypes.c_uint32),
-        ("memory", ctypes.c_uint32),
-        ("m", _BufferM),
-        ("length", ctypes.c_uint32),
-        ("reserved2", ctypes.c_uint32),
-        ("request_fd", ctypes.c_int32),
-    ]
-
-
-class _ExtControlValue(ctypes.Union):
-    _fields_ = [
-        ("value", ctypes.c_int32),
-        ("value64", ctypes.c_int64),
-        ("ptr", ctypes.c_void_p),
-    ]
-
-
-class v4l2_ext_control(ctypes.Structure):  # noqa: N801
-    _pack_ = 1  # uapi 中为 packed / packed in the uapi header
-    _fields_ = [
-        ("id", ctypes.c_uint32),
-        ("size", ctypes.c_uint32),
-        ("reserved2", ctypes.c_uint32),
-        ("u", _ExtControlValue),
-    ]
-
-
-class v4l2_ext_controls(ctypes.Structure):  # noqa: N801
-    _fields_ = [
-        ("which", ctypes.c_uint32),
-        ("count", ctypes.c_uint32),
-        ("error_idx", ctypes.c_uint32),
-        ("request_fd", ctypes.c_int32),
-        ("reserved", ctypes.c_uint32),
-        ("controls", ctypes.POINTER(v4l2_ext_control)),
-    ]
-
-
-def _ioc(direction: int, number: int, size: int) -> int:
-    return (direction << 30) | (size << 16) | (ord("V") << 8) | number
-
-
-_IOW, _IOWR = 1, 3
-VIDIOC_S_FMT = _ioc(_IOWR, 5, ctypes.sizeof(v4l2_format))
-VIDIOC_REQBUFS = _ioc(_IOWR, 8, ctypes.sizeof(v4l2_requestbuffers))
-VIDIOC_QUERYBUF = _ioc(_IOWR, 9, ctypes.sizeof(v4l2_buffer))
-VIDIOC_QBUF = _ioc(_IOWR, 15, ctypes.sizeof(v4l2_buffer))
-VIDIOC_DQBUF = _ioc(_IOWR, 17, ctypes.sizeof(v4l2_buffer))
-VIDIOC_STREAMON = _ioc(_IOW, 18, ctypes.sizeof(ctypes.c_int))
-VIDIOC_STREAMOFF = _ioc(_IOW, 19, ctypes.sizeof(ctypes.c_int))
-VIDIOC_S_EXT_CTRLS = _ioc(_IOWR, 72, ctypes.sizeof(v4l2_ext_controls))
-
-
 class IspError(RuntimeError):
     """ISP 不可用或处理失败 / The ISP is unavailable or failed to process a frame."""
 
@@ -249,52 +111,63 @@ def gamma_curve(gamma: float) -> tuple[list[int], list[int]]:
     return xs, ys
 
 
+def _ioctl(fd: int, request: int, argument: Any) -> None:
+    if lib.ioctl(fd, request, argument) < 0:
+        error = ffi.errno
+        raise OSError(error, os.strerror(error))
+
+
 class _Queue:
     """ISP 节点上的单个 mmap 缓冲区 / One mmap'd buffer on one ISP node."""
 
     def __init__(self, fd: int, buf_type: int) -> None:
         self.fd = fd
         self.type = buf_type
-        request = v4l2_requestbuffers(count=1, type=buf_type, memory=V4L2_MEMORY_MMAP)
-        fcntl.ioctl(fd, VIDIOC_REQBUFS, request)
+        request = ffi.new("struct v4l2_requestbuffers *")
+        request.count = 1
+        request.type = buf_type
+        request.memory = lib.V4L2_MEMORY_MMAP
+        _ioctl(fd, lib.VIDIOC_REQBUFS, request)
         if request.count < 1:
             raise IspError("ISP allocated no buffers")
-        buffer = v4l2_buffer(index=0, type=buf_type, memory=V4L2_MEMORY_MMAP)
-        fcntl.ioctl(fd, VIDIOC_QUERYBUF, buffer)
+        buffer = self._buffer()
+        _ioctl(fd, lib.VIDIOC_QUERYBUF, buffer)
         self.map = mmap.mmap(
             fd,
             buffer.length,
             mmap.MAP_SHARED,
             mmap.PROT_READ | mmap.PROT_WRITE,
-            offset=buffer.m.offset,
+            offset=lib.ogscope_buffer_offset(buffer),
         )
 
+    def _buffer(self) -> Any:
+        buffer = ffi.new("struct v4l2_buffer *")
+        buffer.index = 0
+        buffer.type = self.type
+        buffer.memory = lib.V4L2_MEMORY_MMAP
+        return buffer
+
     def queue(self, bytesused: int = 0) -> None:
-        buffer = v4l2_buffer(
-            index=0,
-            type=self.type,
-            memory=V4L2_MEMORY_MMAP,
-            bytesused=bytesused,
-            field=V4L2_FIELD_NONE,
-        )
-        fcntl.ioctl(self.fd, VIDIOC_QBUF, buffer)
+        buffer = self._buffer()
+        buffer.bytesused = bytesused
+        buffer.field = lib.V4L2_FIELD_NONE
+        _ioctl(self.fd, lib.VIDIOC_QBUF, buffer)
 
     def dequeue(self, timeout_s: float) -> None:
         ready = (
             select.POLLIN
-            if self.type == V4L2_BUF_TYPE_VIDEO_CAPTURE
+            if self.type == lib.V4L2_BUF_TYPE_VIDEO_CAPTURE
             else select.POLLOUT
         )
         poller = select.poll()
         poller.register(self.fd, ready | select.POLLERR)
         if not poller.poll(int(timeout_s * 1000)):
             raise IspError("ISP did not return a buffer in time")
-        buffer = v4l2_buffer(type=self.type, memory=V4L2_MEMORY_MMAP)
-        fcntl.ioctl(self.fd, VIDIOC_DQBUF, buffer)
+        _ioctl(self.fd, lib.VIDIOC_DQBUF, self._buffer())
 
     def stream(self, enabled: bool) -> None:
-        request = VIDIOC_STREAMON if enabled else VIDIOC_STREAMOFF
-        fcntl.ioctl(self.fd, request, ctypes.c_int(self.type))
+        request = lib.VIDIOC_STREAMON if enabled else lib.VIDIOC_STREAMOFF
+        _ioctl(self.fd, request, ffi.new("int *", self.type))
 
     def close(self) -> None:
         try:
@@ -326,6 +199,8 @@ class Bcm2835Isp:
         capture_node: str,
         timeout_s: float = 2.0,
     ) -> None:
+        if _BINDINGS_ERROR is not None:
+            raise IspError(_BINDINGS_ERROR)
         if bayer_pattern not in BAYER_16BIT:
             raise IspError(f"unsupported Bayer pattern {bayer_pattern}")
         self.width = int(width)
@@ -344,20 +219,20 @@ class Bcm2835Isp:
             self._cap_fd = os.open(capture_node, os.O_RDWR | os.O_NONBLOCK)
             self.in_stride = self._set_format(
                 self._out_fd,
-                V4L2_BUF_TYPE_VIDEO_OUTPUT,
-                BAYER_16BIT[bayer_pattern],
+                lib.V4L2_BUF_TYPE_VIDEO_OUTPUT,
+                getattr(lib, BAYER_16BIT[bayer_pattern]),
                 self.width * 2,
-                V4L2_COLORSPACE_RAW,
+                lib.V4L2_COLORSPACE_RAW,
             )
             self.out_stride = self._set_format(
                 self._cap_fd,
-                V4L2_BUF_TYPE_VIDEO_CAPTURE,
-                "RGB3",
+                lib.V4L2_BUF_TYPE_VIDEO_CAPTURE,
+                lib.V4L2_PIX_FMT_RGB24,
                 self.width * 3,
-                V4L2_COLORSPACE_SRGB,
+                lib.V4L2_COLORSPACE_SRGB,
             )
-            self._input = _Queue(self._out_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT)
-            self._output = _Queue(self._cap_fd, V4L2_BUF_TYPE_VIDEO_CAPTURE)
+            self._input = _Queue(self._out_fd, lib.V4L2_BUF_TYPE_VIDEO_OUTPUT)
+            self._output = _Queue(self._cap_fd, lib.V4L2_BUF_TYPE_VIDEO_CAPTURE)
             self.disable_enhancements()
             self._input.stream(True)
             self._output.stream(True)
@@ -399,92 +274,112 @@ class Bcm2835Isp:
         raise IspError("; ".join(errors) or "no bcm2835-isp in the V4L2 device list")
 
     def _set_format(
-        self, fd: int, buf_type: int, code: str, stride: int, colorspace: int
+        self, fd: int, buf_type: int, pixelformat: int, stride: int, colorspace: int
     ) -> int:
-        fmt = v4l2_format(type=buf_type)
-        pix = fmt.fmt.pix
+        fmt = ffi.new("struct v4l2_format *")
+        fmt.type = buf_type
+        pix = lib.ogscope_format_pix(fmt)
         pix.width = self.width
         pix.height = self.height
-        pix.pixelformat = fourcc(code)
-        pix.field = V4L2_FIELD_NONE
+        pix.pixelformat = pixelformat
+        pix.field = lib.V4L2_FIELD_NONE
         pix.bytesperline = stride
         pix.colorspace = colorspace
-        fcntl.ioctl(fd, VIDIOC_S_FMT, fmt)
+        _ioctl(fd, lib.VIDIOC_S_FMT, fmt)
         if (pix.width, pix.height, pix.pixelformat) != (
             self.width,
             self.height,
-            fourcc(code),
+            pixelformat,
         ):
-            raise IspError(f"ISP refused {code} {self.width}x{self.height}")
+            raise IspError(
+                f"ISP refused format {pixelformat:#x} {self.width}x{self.height}"
+            )
         return int(pix.bytesperline)
 
     # 控件 / Controls --------------------------------------------------------
 
-    def _set_controls(self, controls: Sequence[tuple[int, int | bytes]]) -> None:
-        array = (v4l2_ext_control * len(controls))()
-        payloads = []
-        for slot, (cid, value) in zip(array, controls):
+    def _set_controls(self, controls: Sequence[tuple[int, Any]]) -> None:
+        """整数为普通控件值，cdata 指针为复合控件载荷 / Integers are plain
+        control values, cdata pointers compound control payloads."""
+        array = ffi.new("struct v4l2_ext_control[]", len(controls))
+        for index, (cid, value) in enumerate(controls):
+            slot = ffi.addressof(array, index)
             slot.id = cid
-            if isinstance(value, bytes):
-                payload = ctypes.create_string_buffer(value, len(value))
-                payloads.append(payload)
-                slot.size = len(value)
-                slot.u.ptr = ctypes.cast(payload, ctypes.c_void_p)
+            if isinstance(value, int):
+                lib.ogscope_control_set_value(slot, value)
             else:
-                slot.u.value = int(value)
-        request = v4l2_ext_controls(which=0, count=len(controls), controls=array)
-        fcntl.ioctl(self._out_fd, VIDIOC_S_EXT_CTRLS, request)
+                slot.size = ffi.sizeof(ffi.typeof(value).item)
+                lib.ogscope_control_set_ptr(slot, value)
+        request = ffi.new("struct v4l2_ext_controls *")
+        request.count = len(controls)
+        request.controls = array
+        _ioctl(self._out_fd, lib.VIDIOC_S_EXT_CTRLS, request)
 
     def disable_enhancements(self) -> None:
         """关闭降噪、锐化、坏点校正与色彩降噪 / Turn off denoise, sharpening,
         defective-pixel correction and colour denoise."""
+        # 未用到的有理数分母取 1，零值即 disabled / Unused rationals get
+        # denominator 1; zeroed fields mean disabled.
+        denoise = ffi.new("struct bcm2835_isp_denoise *")
+        denoise.slope.den = denoise.strength.den = 1
+        sharpen = ffi.new("struct bcm2835_isp_sharpen *")
+        sharpen.threshold.den = sharpen.strength.den = sharpen.limit.den = 1
         self._set_controls(
             [
-                # {enabled, constant, slope{num,den}, strength{num,den}}
-                (CID_DENOISE, struct.pack("<IIiIiI", 0, 0, 0, 1, 0, 1)),
-                # {enabled, threshold{num,den}, strength{num,den}, limit{num,den}}
-                (CID_SHARPEN, struct.pack("<IiIiIiI", 0, 0, 1, 0, 1, 0, 1)),
-                (CID_DPC, struct.pack("<II", 0, 0)),
-                (CID_CDN, struct.pack("<II", 0, 0)),
+                (lib.V4L2_CID_USER_BCM2835_ISP_DENOISE, denoise),
+                (lib.V4L2_CID_USER_BCM2835_ISP_SHARPEN, sharpen),
+                (
+                    lib.V4L2_CID_USER_BCM2835_ISP_DPC,
+                    ffi.new("struct bcm2835_isp_dpc *"),
+                ),
+                (
+                    lib.V4L2_CID_USER_BCM2835_ISP_CDN,
+                    ffi.new("struct bcm2835_isp_cdn *"),
+                ),
             ]
         )
 
     def set_black_level(self, level_16bit: int) -> None:
         """16 位输入尺度上的黑电平 / Black level on the 16-bit input scale."""
         level = max(0, min(0xFFFF, int(level_16bit)))
-        self._set_controls(
-            [(CID_BLACK_LEVEL, struct.pack("<I3H2x", 1, level, level, level))]
-        )
+        black = ffi.new("struct bcm2835_isp_black_level *")
+        black.enabled = 1
+        black.black_level_r = black.black_level_g = black.black_level_b = level
+        self._set_controls([(lib.V4L2_CID_USER_BCM2835_ISP_BLACK_LEVEL, black)])
 
     def set_white_balance(self, red_gain: float, blue_gain: float) -> None:
         """线性域白平衡增益（绿通道为 1）/ Linear white-balance gains (green is 1)."""
         self._set_controls(
             [
-                (V4L2_CID_RED_BALANCE, max(1, round(red_gain * 1000))),
-                (V4L2_CID_BLUE_BALANCE, max(1, round(blue_gain * 1000))),
+                (lib.V4L2_CID_RED_BALANCE, max(1, round(red_gain * 1000))),
+                (lib.V4L2_CID_BLUE_BALANCE, max(1, round(blue_gain * 1000))),
             ]
         )
 
     def set_digital_gain(self, gain: float) -> None:
         """黑电平之后、gamma 之前的数字增益 / Digital gain after black level, before gamma."""
-        self._set_controls([(V4L2_CID_DIGITAL_GAIN, max(1, round(gain * 1000)))])
+        self._set_controls([(lib.V4L2_CID_DIGITAL_GAIN, max(1, round(gain * 1000)))])
 
     def set_gamma(self, xs: Sequence[int], ys: Sequence[int]) -> None:
         """33 点曲线，x 严格递增 / 33-point curve, x strictly increasing."""
         if len(xs) != GAMMA_POINTS or len(ys) != GAMMA_POINTS:
             raise ValueError("gamma needs 33 points")
-        payload = struct.pack(f"<I{GAMMA_POINTS}H{GAMMA_POINTS}H", 1, *xs, *ys)
-        self._set_controls([(CID_GAMMA, payload)])
+        gamma = ffi.new("struct bcm2835_isp_gamma *")
+        gamma.enabled = 1
+        gamma.x = list(xs)
+        gamma.y = list(ys)
+        self._set_controls([(lib.V4L2_CID_USER_BCM2835_ISP_GAMMA, gamma)])
 
     def set_identity_ccm(self) -> None:
         """单位颜色矩阵：RAW 路径不使用传感器颜色模型 / Identity colour matrix:
         the RAW path applies no sensor colour model."""
-        rationals: list[int] = []
+        custom = ffi.new("struct bcm2835_isp_custom_ccm *")
+        custom.enabled = 1
         for row in range(3):
             for column in range(3):
-                rationals += [1 if row == column else 0, 1]
-        payload = struct.pack("<I" + "iI" * 9 + "3i", 1, *rationals, 0, 0, 0)
-        self._set_controls([(CID_CC_MATRIX, payload)])
+                custom.ccm.ccm[row][column].num = 1 if row == column else 0
+                custom.ccm.ccm[row][column].den = 1
+        self._set_controls([(lib.V4L2_CID_USER_BCM2835_ISP_CC_MATRIX, custom)])
 
     # 帧 / Frames --------------------------------------------------------------
 
