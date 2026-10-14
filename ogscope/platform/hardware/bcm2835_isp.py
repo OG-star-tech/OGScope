@@ -384,9 +384,16 @@ class Bcm2835Isp:
     # 帧 / Frames --------------------------------------------------------------
 
     def process(self, raw: np.ndarray, *, shift: int = 0) -> np.ndarray:
-        """处理一帧 H x W Bayer，返回 ISP 输出缓冲区视图，下一次调用前有效
-        / Process one H x W Bayer frame; returns a view of the ISP's output
-        buffer, valid until the next call - copy it to keep it.
+        """处理一帧 H x W Bayer，返回调用方独占的 H x W x 3 RGB 数组
+        / Process one H x W Bayer frame into an H x W x 3 RGB array the caller
+        owns.
+
+        映射的 V4L2 缓冲区不经 CPU 缓存：逆序或跨步读取（如 180° 旋转）每帧
+        要 400 ms，因此这里一次顺序拷出（约 19 ms），后续处理都在普通内存上。
+        The mapped V4L2 buffer bypasses the CPU cache: reversed or strided reads
+        (a 180 degree rotation) cost 400 ms a frame, so the frame is copied out
+        in one sequential pass (about 19 ms) and everything after works on
+        ordinary memory.
 
         整数输入左移 shift 位；浮点输入（时域降噪后的累加器）按 2**shift 缩放
         并四舍五入，保留其亚整数精度。
@@ -421,13 +428,7 @@ class Bcm2835Isp:
             self._input.dequeue(self.timeout_s)
         except OSError as exc:
             raise IspError(f"ISP frame failed: {exc}") from exc
-        return self._out_view
-
-    def owns(self, array: np.ndarray) -> bool:
-        """数组是否与 ISP 输出缓冲区共享内存 / Whether an array shares the ISP output buffer."""
-        if self._out_view is None:
-            return False
-        return bool(np.may_share_memory(array, self._out_view))
+        return self._out_view.copy()
 
     def close(self) -> None:
         """停止流并释放节点 / Stop streaming and release the nodes."""

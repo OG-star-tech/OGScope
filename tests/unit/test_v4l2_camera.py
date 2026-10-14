@@ -1154,11 +1154,6 @@ class _FakeIsp:
         self._buffer = np.repeat(grey[..., None], 3, axis=2)
         return self._buffer
 
-    def owns(self, array: np.ndarray) -> bool:
-        return self._buffer is not None and bool(
-            np.may_share_memory(array, self._buffer)
-        )
-
     def set_white_balance(self, red: float, blue: float) -> None:
         self.white_balance = (red, blue)
 
@@ -1188,9 +1183,6 @@ def test_frames_go_through_the_hardware_isp_when_it_is_active(monkeypatch) -> No
     assert frame is not None and frame.shape == (120, 160, 3)
     # 10-bit RAW is MSB-aligned into the ISP's 16-bit input. / 10 位 RAW 高位对齐到 16 位。
     assert isp.calls == [("u", 6)]
-    # The ISP buffer is overwritten by the next frame: the frame must be a copy.
-    # ISP 缓冲区会被下一帧覆盖，返回的必须是副本。
-    assert not isp.owns(frame)
     info = camera.get_camera_info()
     assert info["isp"] == "active" and info["backend"].endswith("+bcm2835-isp")
 
@@ -1255,3 +1247,15 @@ def test_isp_off_or_missing_keeps_the_cpu_path(monkeypatch) -> None:
         missing.get_camera_info()["isp"]
         == "unavailable: no bcm2835-isp in the V4L2 device list"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+def test_rotation_matches_np_rot90(rotation: int) -> None:
+    """cv2.rotate 与原 np.rot90 方向一致 / cv2.rotate turns the same way np.rot90 did."""
+    image = (
+        np.arange(120 * 160 * 3, dtype=np.uint32).reshape(120, 160, 3).astype(np.uint8)
+    )
+    upright = _ready_camera()._apply_postprocessing(image)
+    turned = _ready_camera(rotation=rotation)._apply_postprocessing(image)
+    assert np.array_equal(turned, np.rot90(upright, rotation // 90))
