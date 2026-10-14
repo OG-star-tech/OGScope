@@ -154,6 +154,14 @@ Paired indoor curtain images at 50ms manual exposure confirmed matching software
 
 A developer-board trial can select ISP `auto`, hardware transforms and preview overlap, keeping `turbojpeg` encoding and explicitly verified ISP nodes. Preserve existing FPS/exposure limits/geometry and persistent settings, place the application in a separate data-partition release directory, and restart only OGScope. Back up config, source hashes, camera state and H/V controls before switching. Rollback stops the camera process before restoring H/V controls and config.
 
+2026-10-14 的开发板试用已启用以上配置，运行代码为 `2819404`，保留 1280×720、180°、8 fps 目标与 3s 曝光上限。30 秒真实 MJPEG 检查处理了 160 多帧 ISP 图像，AE/AWB 收敛，没有软件回退、JPEG 错误、OOM 或内核异常。暗室内约 183ms 曝光时，实际约 5.4–5.5 fps，受快门时长限制。部署验收过程中也实际恢复过旧配置和 H/V 控件，再启用试用版本。
+
+The 2026-10-14 developer-board trial runs code `2819404` with this profile, retaining 1280×720, 180°, target 8 fps and the 3s exposure ceiling. Thirty seconds of real MJPEG monitoring processed over 160 ISP frames with converged AE/AWB and no software fallback, JPEG errors, OOM or kernel fault. At approximately 183ms indoor exposure, actual throughput was about 5.4–5.5 fps due to shutter duration. Acceptance also restored the previous config/H/V controls before final trial activation.
+
+正式打包或 OTA 验收前必须处理开发板的 `PYTHONPATH` 覆盖：先回退试用覆盖，或将其迁移到受版本管理的发布路径，再核对服务实际导入代码和配置。只更新只读根分区的应用包、仍保留数据分区旧源码覆盖，不能视为完成升级。
+
+Before image packaging or OTA acceptance, remove/rollback the developer `PYTHONPATH` overlay or migrate it to a versioned release mechanism, then verify actual module origins and effective config. Updating the read-only-root application package while a stale data-partition source overlay still wins does not establish a completed upgrade.
+
 部署验收必须通过 HTTP 实际检查 `info.image_processing.effective` 与有效帧计数、回读确认的硬件方向，以及流状态中的 `preview_pipeline_enabled`、`hardware_encoder_error` 和实际编码器；不能只检查环境变量。流响应模型显式保留这两个加速诊断字段，兼容旧指标时分别默认为 `false` 和 `null`。同时核对有效 JPEG、两服务健康、轴位置、内核异常标记与根分区只读状态。
 
 Acceptance checks actual HTTP processing mode/frame count, verified transforms, stream `preview_pipeline_enabled`/`hardware_encoder_error` and the effective encoder, not merely environment variables. The stream response model explicitly preserves both diagnostics and defaults legacy metrics to `false`/`null`. Verify complete JPEGs, both services, unchanged axes, kernel fault state and read-only root as well.
