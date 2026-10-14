@@ -156,6 +156,15 @@ Manual/night remain explicit fixed modes. This is gray-world AWB, **not** a cali
 color matrix; single-color scenes remain a limitation. `color_pipeline` reports effective
 mode/gains and algorithm version. Old gamma-domain manual gains may need re-tuning.
 
+完整 16 位 gamma 查表最多由四个工作线程分担，每帧独立输出，所有分块完成后才返回。
+不分块去马赛克、不降低位深、不积压帧；小图和单核采用普通查表，相机关闭时释放线程。
+90°/180°/270° 使用 OpenCV 旋转，与原 NumPy 旋转和翻转逐像素一致。
+
+The full 16-bit gamma lookup uses at most four workers and independently owned frame
+outputs, joining all slices before returning. Demosaicing stays whole-frame; precision is
+unchanged and no frame queue is added. Small images/single-core machines use ordinary
+lookup; camera close releases workers. OpenCV rotation preserves original pixel geometry.
+
 ## 打包、升级和回退 / Packaging, upgrade and rollback
 
 1. 完整交付 `ogscope` Python 包，尤其是 `domain/camera/auto_exposure.py`、新增 `domain/camera/white_balance.py`、`domain/camera/ae_diagnostics.py` 与 `platform/hardware/v4l2_camera.py`。新策略与颜色默认值内置，不依赖新外部 JSON。
@@ -164,7 +173,11 @@ mode/gains and algorithm version. Old gamma-domain manual gains may need re-tuni
 4. 只读系统把开发覆盖放在可写数据分区，先克隆当前完整运行包再覆盖经过核对的变更文件，保留旧包和环境文件。不要重挂载系统分区或覆盖整个 data 目录。正式镜像必须包含完整新包，并处理可能遮蔽新包的旧热修复选择器。
 5. 停止正在执行的分析/录像后，在允许中断预览的维护窗口切换。先确认没有对齐、校准、固件升级和系统更新；不执行电机运动。重启相机服务后检查 Core health、开启预览、持续取帧，再读状态：只有 status 轮询不会推进 AE。
 6. 核验 `ae_policy.version=adaptive-raw-v2`、`color_pipeline.version=linear-raw-awb-v1`、`white_balance_mode` 与配置一致、`control_readback.verified=true`，以及 3s 上限、FOV/旋转和时域降噪关闭状态。核对 RSS、实际 FPS、日志和双向曝光；不能只检查配置中的 fps。
-7. 回退时恢复备份环境选择器并重启相机服务，检查旧策略、健康与预览恢复。保留原始日志与照片；如果环境文件已被别人改动，停止自动覆盖并人工核对。
+7. 随运行时交付项目已声明的 `PyTurboJPEG`（当前 lock 为 1.8.3，约束 `>=1.7,<2`）
+   及本机架构的 `libturbojpeg`。只有 `libturbojpeg.so` 而缺少 Python 模块时仍会走
+   OpenCV 后备编码；在**服务实际 Python/PYTHONPATH** 中验证 `TurboJPEG()` 可加载。
+   预览取帧后读取 `preview_encoder`，auto 会按首帧测速选择后端；可回退不等于依赖已交付。
+8. 回退时恢复备份环境选择器并重启相机服务，检查旧策略、健康与预览恢复。保留原始日志与照片；如果环境文件已被别人改动，停止自动覆盖并人工核对。
 
 Ship the complete Python package including the new `white_balance.py`; policy/color
 defaults are built in and need no new external JSON. Preserve board topology, calibration,
@@ -178,6 +191,13 @@ After restart, consume preview frames and verify both policy versions, WB mode, 
 control readback, geometry, limits, actual FPS and memory. Test both bright and dark
 transitions. Roll back by restoring the exact previous selectors, restart and verify old
 policy/preview health; refuse to overwrite env files changed by another actor.
+
+Include the already-declared PyTurboJPEG dependency (lock 1.8.3, constraint >=1.7,<2)
+and the target-architecture libturbojpeg. A native library without the Python binding still
+falls back to OpenCV. Instantiate `TurboJPEG()` under the service's actual interpreter and
+paths, then check `preview_encoder` after frames are consumed; auto benchmarks its first
+frame. The supported fallback must not hide a packaging omission. The two JPEG backends
+are lossy and need not produce identical bytes; RGB order and frame geometry must agree.
 
 Daytime transitions, synthetic dark-scene convergence and color-reference checks do not
 replace real-sky star extraction, solve success and long-exposure tracking acceptance.
@@ -207,22 +227,38 @@ A second physical cover test captured the ramp from 3.2ms / 1× to 3s / 15.849×
 WB held steady. The first recorded sample was already adjusting, so the ramp timing
 does not start at the physical cover instant and is not a night-sky convergence guarantee.
 
-当前软件颜色处理仍限制吞吐：预览目标 8fps，实际约 3.7–3.8fps，RSS 约 219000KiB、
-swap 为 0；早前同板旧颜色路径约 4.6fps、196000KiB。颜色正确性修复有开销，帧率与
-内存仍需优化，不能以配置的 8fps 作为验收结果。本板 RAW 已为 1280×720，离线
-全幅 RAW 裁剪基准不能代表本板收益，因此未加入该优化。
+颜色修复后的初始性能约 3.7–3.8fps；同日、同板、同窗口画面进一步优化后：
 
-Two queued stale frames were observed after control writes; the driver gate and delayed
-feedback regression cover them. The cover transition began before recording, so its total
-dark-acquisition time is unknown. The table distinguishes parameter resets from physical
-lighting changes. `limited_dark` at 3s is a limit, not convergence, and measured timings are
-not universal guarantees. Neutral colors improved, but calibrated color and night-sky
-acceptance remain pending.
+| 路径 / Path | 实际 fps / Actual fps | 取帧及颜色 / Read + color | JPEG |
+|---|---:|---:|---:|
+| 修复颜色后的基线 / Corrected-color baseline | 3.74 | 227ms | 40ms |
+| 最终查表与旋转优化、补齐 JPEG 依赖 / Final LUT + rotation, JPEG dependency present | 6.16 | 128ms | 34ms |
 
-The corrected software color path still costs throughput and memory: ~3.7–3.8 actual fps
-at an 8fps target, ~219000KiB RSS and no swap, versus earlier ~4.6fps/~196000KiB on the same board.
-The board already supplies 1280×720 RAW; an offline full-sensor crop optimization would
-not help this configuration and is not included. Performance remains an open limitation.
+最终读数来自持续消费预览、启动后 20–90s 的中位数；目标 8fps，仍有处理瓶颈，
+不能宣称已达到 8fps。最终 RSS 约 200128KiB、进程 swap 22360KiB，总计约 217MiB；
+交换页随后保持稳定，约五分钟观察内没有新增换出或 OOM。基线 RSS 约 212522KiB、
+swap 0。RSS 下降不能单独证明总内存下降，长时间运行和星库同时解算仍需夜间验收。
+本板 RAW 已为 1280×720，未加入全幅裁剪或缩小分辨率。
+
+额外复测只改变起始曝光参数：100µs / 1× → 自动约 0.8s 收敛；2s / 15.849× → 自动
+约 7.1s 收敛。后者含旧长曝光排队帧等待；这些不是真实照度突变的计时，也不替代前述
+遮挡测试。可回退覆盖验证未修改的 126 个运行文件，保持上层进程、FOV/180°旋转、
+用户配置和轴位置；未执行电机动作。
+
+On the same daytime board/window, the final full-precision lookup/rotation optimization
+and restored JPEG binding improved the measured median from 3.74 to 6.16fps, read/color
+from 227 to 128ms, and JPEG from 40 to 34ms. These are post-startup 20–90s medians with
+an active preview consumer at an 8fps target, not an 8fps acceptance claim. Final RSS was
+~200128KiB plus ~22360KiB process swap (~217MiB total); swapped pages then stayed stable,
+with no additional swap-out or OOM over about five minutes. Baseline RSS was ~212522KiB
+with no swap. Lower RSS alone does not establish lower total memory; long runs together
+with solving remain pending. RAW stayed 1280×720, with no resolution reduction.
+
+Parameter-reset retests converged in ~0.8s from 100µs/1× and ~7.1s from 2s/15.849×,
+including old long-exposure queue latency. These are not physical lighting-transition
+measurements. The isolated runtime verified 126 untouched files and preserved upper-service
+processes, camera geometry/settings and axes. No motor motion was used. Physical cover
+results above and earlier alignment tests do not establish new-color real-sky acceptance.
 
 ## 硬件换算 / Hardware conversion
 
