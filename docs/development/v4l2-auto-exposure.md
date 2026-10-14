@@ -234,11 +234,13 @@ does not start at the physical cover instant and is not a night-sky convergence 
 | 修复颜色后的基线 / Corrected-color baseline | 3.74 | 227ms | 40ms |
 | 最终查表与旋转优化、补齐 JPEG 依赖 / Final LUT + rotation, JPEG dependency present | 6.16 | 128ms | 34ms |
 
-最终读数来自持续消费预览、启动后 20–90s 的中位数；目标 8fps，仍有处理瓶颈，
-不能宣称已达到 8fps。最终 RSS 约 200128KiB、进程 swap 22360KiB，总计约 217MiB；
+首次启用读数来自持续消费预览、启动后 20–90s 的中位数；目标 8fps，仍有处理瓶颈，
+不能宣称已达到 8fps。首次启用 RSS 约 200128KiB、进程 swap 22360KiB，总计约 217MiB；
 交换页随后保持稳定，约五分钟观察内没有新增换出或 OOM。基线 RSS 约 212522KiB、
 swap 0。RSS 下降不能单独证明总内存下降，长时间运行和星库同时解算仍需夜间验收。
 本板 RAW 已为 1280×720，未加入全幅裁剪或缩小分辨率。
+回退并再激活后的 90s 复测中位约 6.07fps、RSS 215918KiB（约 211MiB）、swap 0；
+这次复测未显示持续换出。两次内存状态不同，保留原始记录，不将 RSS 变化视作节省总内存。
 
 额外复测只改变起始曝光参数：100µs / 1× → 自动约 0.8s 收敛；2s / 15.849× → 自动
 约 7.1s 收敛。后者含旧长曝光排队帧等待；这些不是真实照度突变的计时，也不替代前述
@@ -253,6 +255,9 @@ an active preview consumer at an 8fps target, not an 8fps acceptance claim. Fina
 with no additional swap-out or OOM over about five minutes. Baseline RSS was ~212522KiB
 with no swap. Lower RSS alone does not establish lower total memory; long runs together
 with solving remain pending. RAW stayed 1280×720, with no resolution reduction.
+A separate 90s run after rollback/reactivation measured a 6.07fps median, ~215918KiB
+RSS (~211MiB) and zero process swap, without sustained swap-out. Keep both observations;
+the changed residency does not establish a reduction in total memory.
 
 Parameter-reset retests converged in ~0.8s from 100µs/1× and ~7.1s from 2s/15.849×,
 including old long-exposure queue latency. These are not physical lighting-transition
