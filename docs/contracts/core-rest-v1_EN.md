@@ -124,7 +124,7 @@ Alignment consumers must use this supplied target for motion, verification and d
 Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) remain developer-only:
 
 - `GET /api/dev/debug/camera/stream?quality=75` — developer entry backed by the shared Core preview implementation
-- `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout, target preview FPS
+- `GET /api/dev/debug/camera/stream/status` — `max_clients`, `active_clients`, grab timeout and target preview FPS; `preview_pipeline_enabled` reports the configured prefetch switch, while `hardware_encoder_error` explains software fallback after a hardware-encoding failure (`null` when no failure occurred).
   - `camera_read_average_ms` includes driver capture and processing. `jpeg_average_encode_ms` measures shared-preview encoding; `jpeg_variant_average_encode_ms` and `jpeg_variant_cached_bytes` describe client-quality variants.
   - Throughput uses the lower sensor/preview target. `preview_rate_limit` reports an intentional preview cap; `auto_exposure_long` requires actual exposure/frame-duration evidence relative to that effective target; other low throughput reports `processing_limit`.
 - `GET /api/dev/debug/camera/preview` — single-frame preview

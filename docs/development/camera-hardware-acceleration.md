@@ -150,6 +150,14 @@ Paired indoor curtain images at 50ms manual exposure confirmed matching software
 
 ## 验收与回退 / Acceptance and rollback
 
+开发板试用配置可选择 `OGSCOPE_CAMERA_V4L2_PROCESSING=auto`、`OGSCOPE_CAMERA_HARDWARE_TRANSFORM=true`、`OGSCOPE_PREVIEW_PIPELINE_ENABLED=true`、`OGSCOPE_PREVIEW_ENCODER=turbojpeg`，同时明确经过验证的 ISP 节点。保留原帧率、曝光上限、图像尺寸及持久配置，将新应用放入独立的数据分区版本目录，仅重启 OGScope。切换前备份原配置、源文件校验值、相机状态和 H/V 控件；回退时先停止相机进程，再恢复 H/V 控件和配置。
+
+A developer-board trial can select ISP `auto`, hardware transforms and preview overlap, keeping `turbojpeg` encoding and explicitly verified ISP nodes. Preserve existing FPS/exposure limits/geometry and persistent settings, place the application in a separate data-partition release directory, and restart only OGScope. Back up config, source hashes, camera state and H/V controls before switching. Rollback stops the camera process before restoring H/V controls and config.
+
+部署验收必须通过 HTTP 实际检查 `info.image_processing.effective` 与有效帧计数、回读确认的硬件方向，以及流状态中的 `preview_pipeline_enabled`、`hardware_encoder_error` 和实际编码器；不能只检查环境变量。流响应模型显式保留这两个加速诊断字段，兼容旧指标时分别默认为 `false` 和 `null`。同时核对有效 JPEG、两服务健康、轴位置、内核异常标记与根分区只读状态。
+
+Acceptance checks actual HTTP processing mode/frame count, verified transforms, stream `preview_pipeline_enabled`/`hardware_encoder_error` and the effective encoder, not merely environment variables. The stream response model explicitly preserves both diagnostics and defaults legacy metrics to `false`/`null`. Verify complete JPEGs, both services, unchanged axes, kernel fault state and read-only root as well.
+
 - 本地：四个旋转角与全部硬件/软件镜像组合、RGB 顺序、帧所有权、DMA 控件保护、超时/初始化失败、严格 ISP 策略、编码失败回退、重叠模式停止收尾。 / Local: geometry combinations, RGB order, frame ownership, DMA control guard, initialization/timeout policy, encoder fallback and overlap cancellation/drain.
 - 板端：重启清除异常后，先合成 RAW 验证 ISP 的尺寸、颜色顺序、连续多帧和关闭；再验证实际相机、手动曝光、双向 AE/AWB、帧率、峰值内存及并发解算。 / Board: after recovery, synthetic RAW dimensions/color/multiple-frame/close checks, followed by real capture, manual controls, bidirectional AE/AWB, throughput, peak memory and concurrent solving.
 - 夜间：硬件翻转后的视场中心、极轴目标、解算精度与主相机跟踪效果。 / Night: field center, polar target, solve precision and main-camera tracking with hardware flips.
