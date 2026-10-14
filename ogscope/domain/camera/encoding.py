@@ -190,9 +190,84 @@ class AutoPreviewEncoder:
         return self._opencv.encode_png(frame, source_format=source_format)
 
 
-def create_preview_encoder(preference: str = "auto") -> PreviewEncoder:
+class HardwarePreviewEncoder:
+    """可选硬件编码失败只回退一次 / Optional hardware encoding with a one-time software fallback."""
+
+    name = "v4l2_mjpeg"
+
+    def __init__(self, device: str = ""):
+        self.device = device
+        self._hardware = None
+        self._layout = None
+        self.error: str | None = None
+        self._fallback = AutoPreviewEncoder()
+
+    def encode_jpeg(
+        self, frame: Any, *, quality: int = 75, source_format: str = "RGB888"
+    ) -> EncodedImage | None:
+        """同一帧失败后用软件编码，不重新抓相机 / Encode the same frame in software after failure, never recapture."""
+        if self.error is None:
+            try:
+                from ogscope.platform.hardware.v4l2_mjpeg import HardwareMjpeg
+
+                layout = (frame.shape[1], frame.shape[0], source_format, quality)
+                if layout != self._layout:
+                    self.close()
+                    self._hardware = HardwareMjpeg(
+                        layout[0],
+                        layout[1],
+                        source_format=source_format,
+                        quality=quality,
+                        device=self.device,
+                    )
+                    self._layout = layout
+                return EncodedImage(
+                    self._hardware.encode(frame), self.name, source_format
+                )
+            except Exception as exc:
+                self.error = str(exc)
+                try:
+                    self.close()
+                except (OSError, BufferError) as cleanup_error:
+                    logger.warning(
+                        "硬件编码清理失败 / Hardware encoder cleanup failed: %s",
+                        cleanup_error,
+                    )
+                logger.warning(
+                    "硬件编码不可用，回退软件 / Hardware encoding unavailable; software fallback: %s",
+                    exc,
+                )
+        return self._fallback.encode_jpeg(
+            frame, quality=quality, source_format=source_format
+        )
+
+    def encode_png(self, frame: Any, *, source_format: str = "RGB888") -> bytes | None:
+        return OpenCVEncoder().encode_png(frame, source_format=source_format)
+
+    def close(self) -> None:
+        """释放原生编码缓冲 / Release native encoder buffers."""
+        hardware = self._hardware
+        self._hardware = None
+        self._layout = None
+        if hardware is not None:
+            hardware.close()
+
+    def encode_variant(
+        self, frame: Any, *, quality: int, source_format: str
+    ) -> EncodedImage | None:
+        """质量变体用软件，避免重建硬件流 / Use software for variants, avoiding hardware stream churn."""
+        return self._fallback.encode_jpeg(
+            frame, quality=quality, source_format=source_format
+        )
+
+
+def create_preview_encoder(
+    preference: str = "auto", *, hardware_device: str = ""
+) -> PreviewEncoder:
     """创建预览编码器，auto 优先 TurboJPEG / Create preview encoder; auto prefers TurboJPEG."""
     pref = str(preference or "auto").lower()
+    if pref == "v4l2_mjpeg":
+        return HardwarePreviewEncoder(hardware_device)
     if pref == "auto":
         return AutoPreviewEncoder()
     if pref == "turbojpeg":

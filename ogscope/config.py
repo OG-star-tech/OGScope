@@ -103,6 +103,28 @@ class Settings(BaseSettings):
         default=720, description="图像高度 / Default capture height"
     )
     camera_fps: int = Field(default=8, description="传感器目标帧率 / Target sensor FPS")
+    camera_rotation: int = Field(
+        default=180, description="画面逆时针旋转 / Counterclockwise image rotation"
+    )
+    camera_hardware_transform: bool = Field(
+        default=False,
+        description="实验性传感器硬件翻转 / Experimental sensor hardware flips",
+    )
+    camera_v4l2_processing: str = Field(
+        default="software",
+        description="RAW 处理 software/auto/bcm2835_isp / RAW processing mode",
+    )
+    camera_v4l2_isp_input_device: str = Field(
+        default="/dev/video13",
+        description="板级 ISP 输入节点 / Board-specific ISP input node",
+    )
+    camera_v4l2_isp_output_device: str = Field(
+        default="/dev/video14",
+        description="板级 ISP RGB 输出节点 / Board-specific ISP RGB output node",
+    )
+    camera_v4l2_isp_timeout_sec: float = Field(
+        default=2, ge=0.1, le=10, description="ISP 单帧超时 / ISP per-frame timeout"
+    )
     camera_sampling_mode: str = Field(
         default="native", description="采样模式: supersample/native/crop"
     )
@@ -639,6 +661,14 @@ class Settings(BaseSettings):
         default="auto",
         description="预览编码器 auto/turbojpeg/opencv / Preview encoder: auto/turbojpeg/opencv",
     )
+    preview_pipeline_enabled: bool = Field(
+        default=False,
+        description="有界采集编码重叠 / Bounded capture/encode overlap",
+    )
+    preview_hardware_encoder_device: str = Field(
+        default="",
+        description="可选硬件 MJPEG 节点；空值自动发现 / Optional hardware MJPEG node; empty discovers it",
+    )
     debug_preview_min_interval_ms: int = Field(
         default=150,
         ge=0,
@@ -863,9 +893,26 @@ class Settings(BaseSettings):
     def _parse_preview_encoder(cls, value: object) -> str:
         """校验预览编码器偏好 / Validate preview encoder preference."""
         text = str(value or "auto").strip().lower()
-        if text in {"auto", "turbojpeg", "opencv"}:
+        if text in {"auto", "turbojpeg", "opencv", "v4l2_mjpeg"}:
             return text
         return "auto"
+
+    @field_validator("camera_rotation")
+    @classmethod
+    def _validate_camera_rotation(cls, value: int) -> int:
+        """保持四种明确旋转 / Accept only the four exact quarter-turn rotations."""
+        if value not in {0, 90, 180, 270}:
+            raise ValueError("rotation must be 0/90/180/270 / 旋转必须为 0/90/180/270")
+        return value
+
+    @field_validator("camera_v4l2_processing")
+    @classmethod
+    def _validate_v4l2_processing(cls, value: str) -> str:
+        """拒绝拼错的 ISP 策略 / Reject misspelled ISP policies."""
+        value = value.strip().lower()
+        if value not in {"software", "auto", "bcm2835_isp"}:
+            raise ValueError("unknown RAW processing policy / 未知 RAW 处理策略")
+        return value
 
     @model_validator(mode="after")
     def _apply_development_mode_defaults(self) -> "Settings":
