@@ -1225,17 +1225,18 @@ def test_fast_gamma_lookup_is_exact_for_every_16bit_value(gamma):
 
 
 @pytest.mark.unit
-def test_gamma_lookup_reuses_bounded_scratch_but_never_published_frames():
+def test_gamma_lookup_reuses_workers_but_never_published_frames():
     """尾块与非连续输入不丢像素，后续帧不覆盖先前输出 / Preserve tail/strided pixels and prior outputs."""
     camera = _ready_camera()
+    camera._gamma_workers = 4
     camera._gamma_lut = camera._build_gamma_lut()
     rgb = np.random.default_rng(327).integers(0, 65536, (257, 641, 3), dtype=np.uint16)
     first = camera._apply_gamma_lut(rgb)
     saved = first.copy()
-    scratch = camera._gamma_coordinates
+    pool = camera._gamma_pool
     second = camera._apply_gamma_lut(rgb[::-1, ::-1])
-    assert camera._gamma_coordinates is scratch
-    assert scratch.nbytes <= 2 * 1024 * 1024
+    assert camera._gamma_pool is pool
+    assert pool is not None
     np.testing.assert_array_equal(second, camera._gamma_lut[rgb[::-1, ::-1]])
     np.testing.assert_array_equal(first, saved)
     assert not np.shares_memory(first, second)
@@ -1246,9 +1247,43 @@ def test_gamma_lookup_reuses_bounded_scratch_but_never_published_frames():
 
 
 @pytest.mark.unit
-def test_gamma_lookup_preserves_large_width_fallback():
-    """超出 OpenCV 坐标尺寸仍返回原始值 / Preserve original values beyond OpenCV dimensions."""
+def test_gamma_lookup_preserves_single_row_large_width():
+    """单行超宽输入仍返回原始值 / Preserve original values for a wide single row."""
     camera = _ready_camera()
     camera._gamma_lut = camera._build_gamma_lut()
     rgb = np.full((1, 11000, 3), 32768, dtype=np.uint16)
     np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), camera._gamma_lut[rgb])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workers", [1, 2, 3, 4])
+def test_gamma_workers_close_and_reopen_without_changing_pixels(workers):
+    """关闭释放线程，重新取帧仍逐值一致 / Release workers on close and preserve pixels on reuse."""
+    camera = _ready_camera()
+    camera._gamma_workers = workers
+    camera._gamma_lut = camera._build_gamma_lut()
+    rgb = np.random.default_rng(7).integers(0, 65536, (129, 131, 3), dtype=np.uint16)
+    expected = camera._gamma_lut[rgb]
+    np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), expected)
+    pool = camera._gamma_pool
+    camera.close()
+    assert camera._gamma_pool is None
+    if pool is not None:
+        with pytest.raises(RuntimeError):
+            pool.submit(lambda: None)
+    np.testing.assert_array_equal(camera._apply_gamma_lut(rgb[::-1]), expected[::-1])
+    camera.close()
+
+
+@pytest.mark.unit
+def test_gamma_worker_error_finishes_before_next_frame():
+    """错误不能留下未完成写入，下一帧可恢复 / Errors leave no unfinished writes; the next frame recovers."""
+    camera = _ready_camera()
+    camera._gamma_workers = 4
+    camera._gamma_lut = np.arange(16, dtype=np.uint8)
+    with pytest.raises(IndexError):
+        camera._apply_gamma_lut(np.full((129, 131, 3), 65535, dtype=np.uint16))
+    camera._gamma_lut = camera._build_gamma_lut()
+    rgb = np.full((129, 131, 3), 32768, dtype=np.uint16)
+    np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), camera._gamma_lut[rgb])
+    camera.close()
