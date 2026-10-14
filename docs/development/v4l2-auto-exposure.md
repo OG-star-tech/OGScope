@@ -144,10 +144,6 @@ existing `ae_state` values and adds policy version, scene mode and acquisition p
 `linear-raw-awb-v1` 的顺序是：黑电平 → 线性 RAW 白平衡 → 16 位去马赛克 → gamma → 8 位 RGB888。
 不再对 Bayer 先做 gamma，也不在线性处理后重复施加白平衡。整数 RAW 使用缓存查找表，默认增强直接复用缓冲，避免整幅 float RGB 临时数组。
 
-`native` / `crop` 只对中央预览区域及八像素邻域做颜色转换，避免处理最终被裁掉的像素。
-对称偶数边界保持 Bayer 相位、图像中心和 FOV；测光、AWB 与可选 RAW 降噪仍使用原始全帧。
-`supersample` 保留全幅。回归测试逐像素比较优化前后输出，包括奇偶尺寸、四种 Bayer、旋转、锐化及小数 RAW。
-
 - `auto` 真正执行软件 AWB；采样四种 Bayer 排列，使用较亮有效样本的中位颜色比值。
 - 严重过曝、欠曝、旧帧和低照度时保持现有增益；夜空不会靠稀疏星点或噪声追逐颜色。
 - `manual` 使用指定线性 R/B 增益；`night` 使用固定线性 1.1/0.9。两者不运行 AWB。
@@ -159,11 +155,6 @@ WB uses robust ratios from a small Bayer grid; clipped, dark and stale frames ho
 Manual/night remain explicit fixed modes. This is gray-world AWB, **not** a calibrated
 color matrix; single-color scenes remain a limitation. `color_pipeline` reports effective
 mode/gains and algorithm version. Old gamma-domain manual gains may need re-tuning.
-
-Native/crop color conversion uses the centered preview region plus an eight-pixel halo.
-Symmetric even bounds preserve Bayer phase, image center and FOV; AE, AWB and optional
-RAW denoising still use the full frame. Supersampling keeps the full sensor. Pixel-exact
-regressions cover odd/even dimensions, all Bayer patterns, rotation, sharpening and fractional RAW.
 
 ## 打包、升级和回退 / Packaging, upgrade and rollback
 
@@ -190,6 +181,38 @@ policy/preview health; refuse to overwrite env files changed by another actor.
 
 Daytime transitions, synthetic dark-scene convergence and color-reference checks do not
 replace real-sky star extraction, solve success and long-exposure tracking acceptance.
+
+## 2026-10-14 日间验收 / Daytime acceptance
+
+IMX327 板端、1280×720 native、180°旋转、关闭时域降噪，持续消费预览测得：
+
+| 条件 / Condition | 观察 / Observation |
+|---|---|
+| 窗外场景，2s / 15.849× 手动切自动 / Window, 2s and 15.849× → auto | 旧策略约 22.4s，新策略约 8.8s 首次稳定 / Old ~22.4s, new ~8.8s to first convergence |
+| 日间约 1 EV 欠曝，89µs / 1× 切自动 / Daylight ~1 EV underexposure, 89µs and 1× → auto | 约 1s 稳定 / ~1s to convergence |
+| 用户遮挡后移开 / Physical cover and uncover | 黑暗达到 3s / 15.849× 上限；检测到亮场后约 7.7s 稳定 / Dark reached the 3s / 15.849× limit; ~7.7s from detected bright frame to convergence |
+| 自动白平衡 / Auto white balance | 窗外白灰建筑明显偏绿消除；不是色卡验收 / Visible green cast removed from neutral window buildings; not a color-chart validation |
+
+遮挡起点早于连续记录，不能据此给出完整变暗响应时间。上述时间分别基于手动参数
+重置和实际遮挡，不能相互替代，也不能推广为所有场景保证。3s 上限处的
+`limited_dark` 表示照度不足，不是已成功收敛。
+
+当前软件颜色处理仍限制吞吐：预览目标 8fps，实际约 3.7–3.8fps，RSS 约 219000KiB、
+swap 为 0；早前同板旧颜色路径约 4.6fps、196000KiB。颜色正确性修复有开销，帧率与
+内存仍需优化，不能以配置的 8fps 作为验收结果。本板 RAW 已为 1280×720，离线
+全幅 RAW 裁剪基准不能代表本板收益，因此未加入该优化。
+
+Two queued stale frames were observed after control writes; the driver gate and delayed
+feedback regression cover them. The cover transition began before recording, so its total
+dark-acquisition time is unknown. The table distinguishes parameter resets from physical
+lighting changes. `limited_dark` at 3s is a limit, not convergence, and measured timings are
+not universal guarantees. Neutral colors improved, but calibrated color and night-sky
+acceptance remain pending.
+
+The corrected software color path still costs throughput and memory: ~3.7–3.8 actual fps
+at an 8fps target, ~219000KiB RSS and no swap, versus earlier ~4.6fps/~196000KiB on the same board.
+The board already supplies 1280×720 RAW; an offline full-sensor crop optimization would
+not help this configuration and is not included. Performance remains an open limitation.
 
 ## 硬件换算 / Hardware conversion
 
