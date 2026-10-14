@@ -107,6 +107,8 @@ The successful solve includes `result.overlay_ext.polar_guide` when projection m
   - `ambient_hint` 是环境亮度建议遥测，供上层设备做显示/交互策略参考；典型字段包括 `available`、`dark_score`（0.0 明亮到 1.0 昏暗）、`lux`、`exposure_us`、`digital_gain`
   - `info.optics` 是可选的产品光学描述；`lens` 保存 16mm F1.4、标称 500 万像素、M12 与红外截止滤镜等名义参数，`full_sensor_fov_deg` 保存 1920×1080 全幅光学视场，`effective_fov_deg` 保存当前采集模式经过产品标定后的有效视场。上层解算与寻星应优先使用 `effective_fov_deg`，字段缺失时再回退本地默认值
   - `info.driver` / `info.backend` 与 `info.capabilities` 是可选的后端能力遥测。V4L2 RAW 使用 OGScope 软件 AE，仍保持相同的 RGB888、帧身份和解算契约；硬件控件回读失败时 `info.actual_exposure_us` / `info.actual_analogue_gain` 可为 `null`
+  - `info.image_processing`：可选实验遥测，包含请求/实际处理模式、错误和 `frames_processed`；已配置 ISP 不等于已处理有效帧
+  - `info.hardware_transform`：可选实验遥测，描述经回读确认的传感器翻转；最终输出仍应用必要的软件残余变换，`rotation` 的含义保持不变
   - 上层不得依据驱动名称分叉业务逻辑；只消费 Core v1 的 `connected`、`streaming`、`info.optics.effective_fov_deg`、可选 capability/ambient 字段以及既有分析结果
   - `info.ae_scene_mode` 与 `info.ae_requested_exposure_mode` 是自主 AE 诊断；`starfield` 表示 OGScope 已独立识别暗天空并请求快门优先的长曝光曲线，不依赖上位机工作模式。请求值不代表驱动已生效
   - Picamera2 可选诊断：`info.ae_actual_exposure_mode` 来自完成帧的模式回报；`info.ae_exposure_mode_status` 为 `unknown`、`awaiting_metadata`、`verified`、`unverified` 或 `unsupported`。`verified` 只证明模式已回报；实际曝光/增益仍以帧元数据为准。`info.actual_auto_exposure` / `info.actual_auto_gain` 缺少模式元数据时为 `null`。libcamera 0.5.2 的 Long 切换先暂停 AE，收到帧确认后再开启；8 秒内未确认会恢复 AE 并报告 `exposure_mode_not_confirmed`，避免假报成功

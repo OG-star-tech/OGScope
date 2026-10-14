@@ -54,6 +54,7 @@ class CameraManager:
         self._frame_lock = Lock()
         self._grabber_task: asyncio.Task | None = None
         self._inflight_read_future: asyncio.Future | None = None
+        self._inflight_encode_future: asyncio.Future | None = None
         self._idle_shutdown_task: asyncio.Task | None = None
         self._frame_id = 0
         self._capture_sequence = 0
@@ -68,7 +69,11 @@ class CameraManager:
         settings = get_settings()
         self._jpeg_quality = int(settings.preview_jpeg_quality)
         self._preview_encoder = create_preview_encoder(
-            getattr(settings, "preview_encoder", "auto")
+            getattr(settings, "preview_encoder", "auto"),
+            hardware_device=getattr(settings, "preview_hardware_encoder_device", ""),
+        )
+        self._preview_pipeline_enabled = bool(
+            getattr(settings, "preview_pipeline_enabled", False)
         )
         self._last_jpeg_encoder = getattr(self._preview_encoder, "name", "opencv")
         self._last_jpeg_source_format = "RGB888"
@@ -202,7 +207,12 @@ class CameraManager:
             "lores_width": int(getattr(settings, "camera_lores_width", 320)),
             "lores_height": int(getattr(settings, "camera_lores_height", 240)),
             "lores_format": getattr(settings, "camera_lores_format", "YUV420"),
-            "rotation": 180,
+            "rotation": settings.camera_rotation,
+            "hardware_transform": settings.camera_hardware_transform,
+            "v4l2_processing": settings.camera_v4l2_processing,
+            "v4l2_isp_input_device": settings.camera_v4l2_isp_input_device,
+            "v4l2_isp_output_device": settings.camera_v4l2_isp_output_device,
+            "v4l2_isp_timeout_sec": settings.camera_v4l2_isp_timeout_sec,
             "flip_horizontal": bool(getattr(settings, "camera_flip_horizontal", False)),
             "flip_vertical": bool(getattr(settings, "camera_flip_vertical", False)),
             "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
@@ -637,6 +647,10 @@ class CameraManager:
                 return
         elif self._grabber_task is current:
             self._grabber_task = None
+            # 当前循环不能等待自身，但必须收回预读帧再关闭相机。
+            # The loop cannot await itself, but must drain prefetched reads before closing the camera.
+            if not await self._drain_preview_workers_locked():
+                return
         _, stop_timed_out = await self._run_lifecycle_step_locked(
             "stop", self._safe_stop_capture_sync, self._stop_timeout_sec
         )
@@ -660,11 +674,11 @@ class CameraManager:
 
     async def _stop_grabber_locked(self) -> bool:
         if not self._grabber_task:
-            return True
+            return await self._drain_preview_workers_locked()
         task = self._grabber_task
         if task is asyncio.current_task():
             self._grabber_task = None
-            return True
+            return await self._drain_preview_workers_locked()
         task.cancel()
         try:
             await asyncio.wait_for(task, timeout=2.0)
@@ -674,6 +688,12 @@ class CameraManager:
             pass
         except Exception:
             pass
+        drained = await self._drain_preview_workers_locked()
+        self._grabber_task = None
+        return drained
+
+    async def _drain_preview_workers_locked(self) -> bool:
+        """关闭原生资源前收回所有工作线程 / Drain every worker before closing native resources."""
         inflight = self._inflight_read_future
         if inflight is not None and not inflight.done():
             try:
@@ -693,22 +713,67 @@ class CameraManager:
                 pass
         if self._inflight_read_future is inflight:
             self._inflight_read_future = None
+        encode = self._inflight_encode_future
+        if encode is not None and not encode.done():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(encode), timeout=self._grabber_drain_timeout_sec
+                )
+            except asyncio.TimeoutError:
+                self._mark_restart_required(
+                    "编码线程未能退出 / Encoder worker did not drain"
+                )
+                self._grabber_task = None
+                return False
+            except Exception:
+                pass
+        self._inflight_encode_future = None
+        close_encoder = getattr(self._preview_encoder, "close", None)
+        if callable(close_encoder):
+            # 关闭操作排在已提交编码后面，避免释放使用中的硬件缓冲。
+            # Queue close after submitted encodes to avoid freeing buffers still in use.
+            closed = asyncio.get_running_loop().run_in_executor(
+                self._jpeg_executor, close_encoder
+            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(closed), timeout=self._grabber_drain_timeout_sec
+                )
+            except asyncio.TimeoutError:
+                self._mark_restart_required(
+                    "硬件编码器关闭超时 / Hardware encoder close timed out"
+                )
+                self._grabber_task = None
+                return False
+            except (OSError, BufferError) as exc:
+                self._mark_restart_required(
+                    f"Hardware encoder close failed / 硬件编码器关闭失败: {exc}"
+                )
+                self._grabber_task = None
+                return False
         self._grabber_task = None
         return True
 
+    def _read_preview_frame_sync(self):
+        """在读帧完成时刻取时间，不使用晚到的编码时间 / Timestamp read completion, never delayed encoding completion."""
+        frame = self._read_frame_sync()
+        return frame, time.time()
+
     async def _grabber_loop(self) -> None:
         loop = asyncio.get_running_loop()
+        prefetched = None
         try:
             while True:
                 interval = 1.0 / float(max(1, self._target_fps))
                 t0 = time.time()
                 try:
-                    read_future = loop.run_in_executor(
-                        self._capture_executor, self._read_frame_sync
+                    read_future = prefetched or loop.run_in_executor(
+                        self._capture_executor, self._read_preview_frame_sync
                     )
+                    prefetched = None
                     self._inflight_read_future = read_future
                     try:
-                        frame = await asyncio.shield(read_future)
+                        frame, capture_completed_ts = await asyncio.shield(read_future)
                     finally:
                         if (
                             read_future.done()
@@ -719,12 +784,29 @@ class CameraManager:
                         # Timestamp the completed sensor read before JPEG work so cached raw
                         # frames retain capture time rather than encoder completion time. /
                         # 在 JPEG 编码前记录传感器读帧完成时刻，避免缓存 raw 帧误用编码完成时间。
-                        capture_completed_ts = time.time()
                         self._consecutive_grab_failures = 0
+                        if self._preview_pipeline_enabled:
+                            read_ms = (
+                                self._camera_read_ms[-1] if self._camera_read_ms else 0
+                            )
+                            jpeg_ms = (
+                                self._jpeg_encode_ms[-1] if self._jpeg_encode_ms else 0
+                            )
+                            if read_ms + jpeg_ms >= interval * 1000:
+                                # 最多预读一帧，不建立无界队列 / Prefetch at most one frame, never an unbounded queue.
+                                prefetched = loop.run_in_executor(
+                                    self._capture_executor,
+                                    self._read_preview_frame_sync,
+                                )
+                                self._inflight_read_future = prefetched
                         encode_t0 = time.perf_counter()
-                        encoded = await loop.run_in_executor(
+                        encode_future = loop.run_in_executor(
                             self._jpeg_executor, self._encode_preview_jpeg_sync, frame
                         )
+                        self._inflight_encode_future = encode_future
+                        encoded = await asyncio.shield(encode_future)
+                        if self._inflight_encode_future is encode_future:
+                            self._inflight_encode_future = None
                         encode_ms = (time.perf_counter() - encode_t0) * 1000.0
                         if encoded is None:
                             self._jpeg_encode_failures += 1
@@ -946,9 +1028,15 @@ class CameraManager:
             source_format = "BGR888"
         if frame is None:
             return None
-        encoded = self._encode_preview_jpeg_sync(
-            frame, quality=quality, source_format=source_format
-        )
+        encode_variant = getattr(self._preview_encoder, "encode_variant", None)
+        if callable(encode_variant):
+            encoded = encode_variant(
+                frame, quality=quality, source_format=source_format
+            )
+        else:
+            encoded = self._encode_preview_jpeg_sync(
+                frame, quality=quality, source_format=source_format
+            )
         return encoded.data if encoded is not None else None
 
     async def _encode_and_cache_stream_jpeg(
@@ -1111,6 +1199,8 @@ class CameraManager:
             ),
             "jpeg_variant_cached_bytes": variant_bytes,
             "preview_encoder": self._last_jpeg_encoder,
+            "preview_pipeline_enabled": self._preview_pipeline_enabled,
+            "hardware_encoder_error": getattr(self._preview_encoder, "error", None),
             "jpeg_encode_failures": int(self._jpeg_encode_failures),
             "jpeg_source_format": self._last_jpeg_source_format,
             "camera_driver": str(info.get("driver", "")),
