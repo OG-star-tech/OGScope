@@ -23,6 +23,11 @@ from ogscope.domain.camera.auto_exposure import (
     measure_luminance,
 )
 from ogscope.domain.camera.driver import CameraCapabilities
+from ogscope.domain.camera.white_balance import (
+    BAYER_CHANNELS,
+    COLOR_PIPELINE_VERSION,
+    RawAutoWhiteBalance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +65,6 @@ AUTO_EXPOSURE_MAX_CEILING_US = 3_000_000
 # measured value, scaled proportionally by bit depth - see
 # docs/development/v4l2-zero2w-board-validation.md for the calibration.
 FALLBACK_BLACK_LEVEL_FRACTION_OF_FULL_RANGE = 240.5 / 4095.0
-
-# gamma 查找表的过采样倍数：时域降噪在线性 RAW 域完成，平均后的 RAW 带亚整数
-# 精度，查表前四舍五入回整数会把这部分精度量化掉。16 倍过采样把量化步长压到
-# 1/16 个 RAW 编码值，远低于实测的最小输出噪声（10ms 曝光约 0.17 个编码值），
-# 代价只有 12 位下 64KB 的表。
-# Oversampling factor for the gamma LUT: temporal NR runs in the linear RAW
-# domain, so averaged RAW values carry sub-integer precision that rounding to
-# integers before the lookup would quantize away. 16x puts the quantization
-# step at 1/16 of a RAW code, well under the smallest measured output noise
-# (~0.17 codes at 10ms), for a 64KB table at 12-bit.
-GAMMA_LUT_OVERSAMPLE = 16
 
 
 @dataclass(slots=True, frozen=True)
@@ -147,11 +141,13 @@ class V4L2RawCamera:
         )
         self.color_mode = str(config.get("color_mode", "color"))
         requested_white_balance = str(config.get("white_balance_mode", "night"))
-        # RAW 路径没有 ISP AWB；把产品默认 auto 明确映射为稳定的夜空白平衡。
-        # The RAW path has no ISP AWB; map the product default auto to stable night WB.
-        self.white_balance_mode = (
-            "night" if requested_white_balance == "auto" else requested_white_balance
-        )
+        self.white_balance_mode = requested_white_balance
+        self._awb = RawAutoWhiteBalance()
+        self._linear_lut_key = None
+        self._linear_luts = None
+        self._linear_mosaic = None
+        self._control_discard_remaining = 0
+        self._controls_ready_at = 0.0
         self.white_balance_gain_r = float(config.get("white_balance_gain_r", 1.0))
         self.white_balance_gain_b = float(config.get("white_balance_gain_b", 1.0))
         self.night_mode = bool(config.get("night_mode", True))
@@ -282,7 +278,6 @@ class V4L2RawCamera:
         # with it before _debayer needs one, so their lifetimes never
         # overlap and separate buffers would just waste 3.7MB.
         self._frame_scratch: np.ndarray | None = None
-        self._lut_index_buffer: np.ndarray | None = None
         # 色调查找表及其参数键 / Tone LUT and the parameter key it was built for.
         self._tone_lut_cache: np.ndarray | None = None
         self._tone_lut_key: tuple | None = None
@@ -605,6 +600,7 @@ class V4L2RawCamera:
 
     def _apply_exposure_gain(self, exposure_us: int, gain: float) -> bool:
         """按 vblank、曝光、增益顺序原子化更新 / Update vblank, exposure, then gain."""
+        previous_duration_us = max(self.exposure_us, self._frame_duration_us)
         exposure_control = self._control_ranges["exposure"]
         requested_lines = max(1, int(round(exposure_us / self._line_duration_us)))
 
@@ -679,6 +675,13 @@ class V4L2RawCamera:
         # level, but keep the array itself for in-place reuse.
         self._nr_accumulator_valid = False
         self._nr_last_frame_mono = None
+        # 回读是控件确认，不是帧元数据；丢弃排队帧，并覆盖旧积分和新积分时长。
+        # Readback confirms controls, not frame metadata: discard a queued frame and cover old/new integrations.
+        self._control_discard_remaining = 1
+        self._controls_ready_at = (
+            time.monotonic()
+            + (previous_duration_us + self._frame_duration_us) / 1_000_000
+        )
         return True
 
     def _create_capture(self) -> Any | None:
@@ -788,9 +791,12 @@ class V4L2RawCamera:
             self.is_initialized = True
             logger.info(
                 "V4L2 软件 AE 相机初始化成功 / V4L2 software-AE camera initialized: "
-                "line=%.3fus source=%s",
+                "line=%.3fus source=%s ae=adaptive-raw-v2 max_us=%s color=%s wb=%s",
                 self._line_duration_us,
                 self._line_duration_source,
+                self._ae.limits.max_exposure_us,
+                COLOR_PIPELINE_VERSION,
+                self.white_balance_mode,
             )
             return True
         except Exception as exc:  # noqa: BLE001
@@ -908,79 +914,60 @@ class V4L2RawCamera:
         )
 
     def _build_gamma_lut(self) -> np.ndarray:
-        """构建 RAW 编码值 -> 8 位 gamma 校正输出的查找表 / Build a RAW-code ->
-        8-bit gamma-corrected-output lookup table.
-
-        必须在 float32 线性域里对每个 RAW 编码值做 gamma，再量化成 8 位一次；
-        如果先线性拉伸到 8 位再查表，暗部（比如星点）在拉伸阶段就已经被压进
-        寥寥几个 8 位编码，gamma 再怎么展开也找不回损失的精度。
-        Gamma must be applied per RAW code in float32 linear space, quantizing
-        to 8-bit only once at the end; linearly stretching to 8-bit first and
-        then applying gamma via a 256-entry LUT crushes dim detail (e.g. faint
-        stars) into a handful of 8-bit codes before gamma ever sees it, and no
-        amount of gamma afterward can recover precision already lost there.
-
-        以 GAMMA_LUT_OVERSAMPLE 倍过采样建表：时域降噪现在在线性 RAW 域做
-        （见 _apply_temporal_nr），多帧平均后的 RAW 值带有亚整数精度——实测
-        10ms 曝光下输出噪声只有约 0.17 个 RAW 编码值，如果查表前先四舍五入回
-        整数，这部分精度会被量化掉，短曝光的降噪效果就白做了。
-        The table is oversampled by GAMMA_LUT_OVERSAMPLE: temporal NR now runs
-        in the linear RAW domain (see _apply_temporal_nr), so the averaged RAW
-        values carry sub-integer precision - measured output noise at 10ms is
-        only ~0.17 RAW codes, which rounding to integers before the lookup
-        would quantize away, throwing out the short-exposure NR gain.
-        """
-        max_code = (1 << max(1, self.bit_depth)) - 1
-        steps = max_code * GAMMA_LUT_OVERSAMPLE + 1
-        codes = np.arange(steps, dtype=np.float32) / GAMMA_LUT_OVERSAMPLE
-        span = max(1, self.white_level - self.black_level)
-        linear = np.clip((codes - self.black_level) / span, 0.0, 1.0)
-        gamma_corrected = np.power(linear, 1.0 / self.gamma) * 255.0
-        return np.clip(np.round(gamma_corrected), 0, 255).astype(np.uint8)
+        """16 位线性 RGB 最后一次量化到 8 位 / Quantize linear RGB to 8 bits only at the end."""
+        linear = np.arange(65536, dtype=np.float32) / 65535.0
+        return np.rint(np.power(linear, 1.0 / self.gamma) * 255).astype(np.uint8)
 
     def _debayer(self, raw: np.ndarray) -> np.ndarray:
-        """把右对齐 Bayer RAW 转为 RGB888，并做 gamma 校正 / Convert right-aligned
-        Bayer RAW to RGB888, gamma-corrected to match ISP-path contrast."""
+        """黑电平、线性白平衡、16 位去马赛克、gamma / Black level, linear WB, 16-bit demosaic, gamma."""
         import cv2
 
-        lut = self._gamma_lut
-        if lut is None:
-            lut = self._build_gamma_lut()
-            self._gamma_lut = lut
-        # 复用预分配缓冲做查表下标，避免每帧新建整幅 float32/int32 临时数组
-        # ——这条路径存在的意义就是省内存，每帧分配几个 3.7MB 的临时量会把
-        # 峰值 RSS 推上去 / Reuse preallocated buffers for the LUT indices
-        # instead of allocating full-frame float32/int32 temporaries every
-        # frame - this path exists to save memory, and a few 3.7MB
-        # per-frame temporaries push peak RSS up.
-        raw_f = np.asarray(raw, dtype=np.float32)
-        scratch = self._frame_scratch
-        if scratch is None or scratch.shape != raw_f.shape:
-            scratch = np.empty(raw_f.shape, dtype=np.float32)
-            self._frame_scratch = scratch
-        # 13–16 位 RAW 的过采样 LUT 下标超过 uint16，按表长选择索引位宽。 /
-        # Oversampled LUT indices exceed uint16 for 13–16-bit RAW; size the index buffer accordingly.
-        index_dtype = np.uint16 if len(lut) <= 1 << 16 else np.uint32
-        indices = self._lut_index_buffer
-        if (
-            indices is None
-            or indices.shape != raw_f.shape
-            or indices.dtype != index_dtype
-        ):
-            indices = np.empty(raw_f.shape, dtype=index_dtype)
-            self._lut_index_buffer = indices
-        np.multiply(raw_f, GAMMA_LUT_OVERSAMPLE, out=scratch)
-        np.rint(scratch, out=scratch)
-        np.clip(scratch, 0, len(lut) - 1, out=scratch)
-        np.copyto(indices, scratch, casting="unsafe")
-        raw8 = lut[indices]
+        gains = self._white_balance_gains()
+        key = (self.bit_depth, self.black_level, self.white_level, gains)
+        span = max(1, self.white_level - self.black_level)
+        if self._linear_lut_key != key:
+            codes = np.arange(1 << self.bit_depth, dtype=np.float32)
+            linear = np.maximum(codes - self.black_level, 0) * (65535.0 / span)
+            self._linear_luts = [
+                np.rint(np.clip(linear * gain, 0, 65535)).astype(np.uint16)
+                for gain in gains
+            ]
+            self._linear_lut_key = key
+        if self._linear_mosaic is None or self._linear_mosaic.shape != raw.shape:
+            self._linear_mosaic = np.empty(raw.shape, dtype=np.uint16)
+        mosaic = self._linear_mosaic
+        for y in range(2):
+            for x in range(2):
+                channel = BAYER_CHANNELS[self.bayer_pattern][y][x]
+                values = raw[y::2, x::2]
+                if np.issubdtype(raw.dtype, np.integer):
+                    mosaic[y::2, x::2] = self._linear_luts[channel][values]
+                else:
+                    # 保留可选时域降噪产生的亚整数 RAW 精度。
+                    # Preserve fractional RAW precision from optional temporal denoising.
+                    linear = (values - self.black_level) * (
+                        65535.0 * gains[channel] / span
+                    )
+                    mosaic[y::2, x::2] = np.rint(np.clip(linear, 0, 65535)).astype(
+                        np.uint16
+                    )
         codes = {
             "RGGB": cv2.COLOR_BayerRGGB2RGB,
             "BGGR": cv2.COLOR_BayerBGGR2RGB,
             "GRBG": cv2.COLOR_BayerGRBG2RGB,
             "GBRG": cv2.COLOR_BayerGBRG2RGB,
         }
-        return cv2.cvtColor(raw8, codes[self.bayer_pattern])
+        rgb = cv2.cvtColor(mosaic, codes[self.bayer_pattern])
+        if self._gamma_lut is None:
+            self._gamma_lut = self._build_gamma_lut()
+        return self._gamma_lut[rgb]
+
+    def _control_frame_ready(self) -> bool:
+        """保守过滤控制改变前的帧 / Conservatively exclude frames predating control changes."""
+        if self._control_discard_remaining > 0:
+            self._control_discard_remaining -= 1
+            return False
+        return time.monotonic() >= self._controls_ready_at
 
     def _observe_auto_exposure(self, raw: np.ndarray) -> None:
         """从当前 RAW 帧更新下一帧曝光 / Update the next-frame exposure from RAW."""
@@ -993,11 +980,22 @@ class V4L2RawCamera:
             white_level=self.white_level,
             highlight_percentile=self._ae.limits.highlight_percentile,
         )
+        frame_ready = self._control_frame_ready()
         decision = self._ae.observe(
             stats,
             exposure_us=self.exposure_us,
             analogue_gain=self.analogue_gain,
+            frame_ready=frame_ready,
         )
+        if self.white_balance_mode == "auto":
+            self._awb.observe(
+                raw,
+                pattern=self.bayer_pattern,
+                black=self.black_level,
+                white=self.white_level,
+                exposure_product=observed_exposure_us * observed_analogue_gain,
+                ready=frame_ready and not decision.changed,
+            )
         self._last_luminance = {
             "background": decision.background,
             "highlight": decision.highlight,
@@ -1021,6 +1019,7 @@ class V4L2RawCamera:
         self._trace.record(
             {
                 "stats": asdict(stats),
+                "frame_ready": frame_ready,
                 "observed": {
                     "exposure_us": observed_exposure_us,
                     "analogue_gain": observed_analogue_gain,
@@ -1042,6 +1041,8 @@ class V4L2RawCamera:
 
     def _white_balance_gains(self) -> tuple[float, float, float]:
         """当前白平衡增益 / Current white-balance gains."""
+        if self.white_balance_mode == "auto":
+            return self._awb.gains
         if self.white_balance_mode == "night":
             return (1.1, 1.0, 0.9)
         if self.white_balance_mode == "manual":
@@ -1049,11 +1050,9 @@ class V4L2RawCamera:
         return (1.0, 1.0, 1.0)
 
     def _tone_lut(self) -> np.ndarray:
-        """白平衡+对比度+亮度折叠成的 256x3 查找表（按参数缓存）/ The
-        white-balance + contrast + brightness chain folded into one 256x3
-        LUT, cached against the parameters that define it."""
+        """缓存对比度与亮度查找表；白平衡已在线性域完成 / Cache tone LUT; WB is already linear."""
         key = (
-            self._white_balance_gains(),
+            (1.0, 1.0, 1.0),
             self.contrast,
             self.brightness,
         )
@@ -1073,27 +1072,16 @@ class V4L2RawCamera:
         """应用轻量 RAW 后处理和几何变换 / Apply lightweight RAW post-processing and geometry."""
         import cv2
 
-        # 白平衡增益、对比度、亮度全都是逐像素逐通道的点运算，输入又是 uint8，
-        # 所以可以整条折叠成一张 256x3 的查找表，一次 cv2.LUT 搞定 —— 完全不
-        # 需要把整幅图转成 float32。原来的写法每帧要产生多个 11MB 的 float32
-        # 临时量（astype、减、乘、加、clip 各一份），这条路径本来就是为省内存
-        # 存在的。只有饱和度是跨通道运算（要先求通道均值），没法并进查找表，
-        # 所以仅在它非默认值时才回退到 float 路径。
-        # White-balance gains, contrast and brightness are all pointwise
-        # per-channel operations on a uint8 input, so the whole chain folds
-        # into one 256x3 lookup table applied by a single cv2.LUT - no
-        # full-frame float32 conversion at all. The previous form allocated
-        # several 11MB float32 temporaries per frame (astype, subtract,
-        # multiply, add, clip), and this path exists to save memory.
-        # Saturation is the one cross-channel op (it needs the per-pixel
-        # channel mean), so it can't fold into the LUT and only it falls
-        # back to the float path.
+        # 默认参数直接复用 RGB 缓冲；仅非默认增强需要额外处理。
+        # Reuse RGB for neutral defaults; only requested enhancements add processing.
         if abs(self.saturation - 1.0) <= 1e-3:
-            rgb8: np.ndarray = cv2.LUT(image, self._tone_lut())
+            rgb8 = (
+                image
+                if self.contrast == 1.0 and self.brightness == 0.0
+                else cv2.LUT(image, self._tone_lut())
+            )
         else:
             rgb = image.astype(np.float32)
-            gains = self._white_balance_gains()
-            rgb *= np.asarray(gains, dtype=np.float32)
             np.multiply(rgb, self.contrast, out=rgb)
             np.add(
                 rgb, 127.5 * (1.0 - self.contrast) + self.brightness * 127.5, out=rgb
@@ -1328,7 +1316,7 @@ class V4L2RawCamera:
         """设置轻量软件白平衡 / Set lightweight software white balance."""
         if mode not in {"manual", "night", "auto"}:
             return False
-        self.white_balance_mode = "night" if mode == "auto" else mode
+        self.white_balance_mode = mode
         self.white_balance_gain_r = float(gain_r)
         self.white_balance_gain_b = float(gain_b)
         return True
@@ -1438,7 +1426,7 @@ class V4L2RawCamera:
         caps = CameraCapabilities(
             driver=self.driver_name,
             backend=self.backend_name,
-            awb_modes=("manual", "night"),
+            awb_modes=("auto", "manual", "night"),
             auto_exposure=True,
             software_auto_exposure=True,
             manual_exposure=True,
@@ -1484,8 +1472,12 @@ class V4L2RawCamera:
             "auto_exposure": self.auto_exposure,
             "auto_exposure_engine": "software_night_sky",
             "ae_policy": {
+                "version": "adaptive-raw-v2",
                 "max_step_stops": self._ae.limits.max_step_stops,
-                "settle_frames": self._ae.limits.settle_frames,
+                "fast_step_stops": self._ae.limits.fast_step_stops,
+                "probe_exposure_us": self._ae.limits.probe_exposure_us,
+                "settle_frames": 1,
+                "settle_policy": "queued_frame_plus_old_and_new_frame_duration",
                 "filter_reset_on_control_change": True,
             },
             "auto_exposure_max_us": self.auto_exposure_max_us,
@@ -1493,6 +1485,8 @@ class V4L2RawCamera:
             "effective_auto_gain_max": round(self._ae.limits.max_gain, 3),
             "effective_auto_exposure_min_us": self._ae.limits.min_exposure_us,
             "ae_state": self._last_ae.get("state", "starting"),
+            "ae_scene_mode": self._ae.scene_mode,
+            "ae_phase": self._ae.phase,
             "ae_error_stops": self._last_ae.get("error_stops"),
             "luminance_stats": self._last_luminance,
             "signal_levels": {
@@ -1515,8 +1509,18 @@ class V4L2RawCamera:
             "sampling_mode": self.sampling_mode,
             "color_mode": self.color_mode,
             "white_balance_mode": self.white_balance_mode,
-            "white_balance_gain_r": self.white_balance_gain_r,
-            "white_balance_gain_b": self.white_balance_gain_b,
+            "white_balance_gain_r": self._white_balance_gains()[0],
+            "white_balance_gain_b": self._white_balance_gains()[2],
+            "color_pipeline": {
+                "version": COLOR_PIPELINE_VERSION,
+                "white_balance_domain": "linear_raw",
+                "gamma_after_demosaic": True,
+                "awb_state": (
+                    self._awb.state if self.white_balance_mode == "auto" else "fixed"
+                ),
+                "awb_samples": self._awb.samples,
+                "effective_rgb_gains": list(self._white_balance_gains()),
+            },
             "night_mode": self.night_mode,
             "noise_reduction_mode": self.noise_reduction_mode,
             "temporal_noise_reduction": {

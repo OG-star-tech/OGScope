@@ -84,7 +84,7 @@ def test_measure_luminance_bounds_odd_and_narrow_images(
 
 
 @pytest.mark.unit
-def test_dark_scene_increases_exposure_before_gain() -> None:
+def test_dark_scene_searches_with_short_exposure_and_temporary_gain() -> None:
     ae = NightSkyAutoExposure(
         AutoExposureLimits(max_exposure_us=2_000_000, max_gain=16.0, settle_frames=0)
     )
@@ -93,8 +93,8 @@ def test_dark_scene_increases_exposure_before_gain() -> None:
     decision = ae.observe(dark, exposure_us=10_000, analogue_gain=1.0)
 
     assert decision.changed is True
-    assert decision.exposure_us == 40_000
-    assert decision.analogue_gain == 1.0
+    assert decision.exposure_us == 100_000
+    assert decision.analogue_gain == 1.6
     assert decision.state == "adjusting"
 
 
@@ -108,7 +108,7 @@ def test_dark_scene_uses_gain_after_exposure_limit() -> None:
     decision = ae.observe(dark, exposure_us=500_000, analogue_gain=2.0)
 
     assert decision.exposure_us == 500_000
-    assert decision.analogue_gain == pytest.approx(8.0)
+    assert decision.analogue_gain == pytest.approx(16.0)
 
 
 @pytest.mark.unit
@@ -183,12 +183,12 @@ def test_sensor_step_detects_partial_step_request_that_changes_one_line() -> Non
     )
 
     decision = ae.observe(
-        LuminanceStats(0.2, 0.5, 0.002, 10_000),
+        LuminanceStats(0.3, 0.9, 0, 10_000),
         exposure_us=67,
         analogue_gain=1.0,
     )
 
-    assert decision.exposure_us == 47
+    assert 40 <= decision.exposure_us <= 50
     assert decision.changed is True
 
 
@@ -200,7 +200,7 @@ def test_sensor_step_holds_request_that_rounds_back_to_the_same_line() -> None:
         )
     )
     factor = 2.0**0.6
-    dim = LuminanceStats(0.035 / factor, 0.45 / factor, 0.0, 10_000)
+    dim = LuminanceStats(0.12 / factor, 0.8 / factor, 0.0, 10_000)
 
     for _ in range(5):
         decision = ae.observe(dim, exposure_us=22, analogue_gain=1.0)
@@ -228,45 +228,44 @@ def test_settling_frames_do_not_bias_the_next_exposure_measurement() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "initial_product,target_product", [(10_000, 24_000_000), (24_000_000, 10_000)]
+    "initial_product,target_product,background,highlight,max_seconds",
+    [
+        (10_000, 24_000_000, 0.035, 0.45, 20),
+        (24_000_000, 10_000, 0.12, 0.8, 12),
+    ],
 )
 def test_fast_ae_converges_with_delayed_controls_without_overshoot(
-    initial_product, target_product
+    initial_product, target_product, background, highlight, max_seconds
 ) -> None:
-    """模拟两帧控制延迟和线性场景 / Simulate two-frame control latency and a linear scene."""
-
-    def run(step):
-        ae = NightSkyAutoExposure(
-            AutoExposureLimits(max_exposure_us=3_000_000, max_step_stops=step)
+    """含两帧延迟的双向场景模型，不把设置值当作当前图像 / Bidirectional delayed-frame scene model."""
+    ae = NightSkyAutoExposure(AutoExposureLimits(max_exposure_us=3_000_000))
+    exposure = min(initial_product, 3_000_000)
+    gain = initial_product / exposure
+    pending = [float(initial_product)] * 2
+    elapsed = 0.0
+    for _frame in range(100):
+        ratio = pending.pop(0) / target_product
+        stats = LuminanceStats(
+            min(1, background * ratio),
+            min(1, highlight * ratio),
+            0.25 if background * ratio >= 0.985 else 0.0,
+            1000,
         )
-        exposure = min(initial_product, 3_000_000)
-        gain = initial_product / exposure
-        pending = [float(initial_product)] * 2
-        elapsed = 0.0
-        products = []
-        for _frame in range(100):
-            product = pending.pop(0)
-            ratio = product / target_product
-            stats = LuminanceStats(
-                min(1, 0.035 * ratio),
-                min(1, 0.45 * ratio),
-                0.25 if 0.035 * ratio >= 0.985 else 0.0,
-                1000,
-            )
-            elapsed += max(0.125, exposure / 1_000_000)
-            decision = ae.observe(stats, exposure_us=exposure, analogue_gain=gain)
+        elapsed += max(0.125, exposure / 1_000_000)
+        decision = ae.observe(stats, exposure_us=exposure, analogue_gain=gain)
+        if decision.changed:
             exposure, gain = decision.exposure_us, decision.analogue_gain
-            pending.append(exposure * gain)
-            products.append(exposure * gain)
-            if decision.state == "converged":
-                assert exposure * gain == pytest.approx(target_product, rel=0.09)
-                return elapsed, products
+        pending.append(exposure * gain)
+        assert 1 <= gain <= 16
+        assert exposure <= 3_000_000
+        assert exposure * gain <= max(initial_product, target_product) * 1.1
+        if decision.state == "converged":
+            assert exposure * gain == pytest.approx(target_product, rel=0.09)
+            assert elapsed < max_seconds
+            assert exposure == min(round(target_product), 3_000_000)
+            break
+    else:
         pytest.fail("AE did not converge / AE 未收敛")
-
-    fast_seconds, products = run(2)
-    slow_seconds, _ = run(1)
-    assert fast_seconds < slow_seconds * 0.8
-    assert max(products) <= max(initial_product, target_product) * 1.1
 
 
 @pytest.mark.unit
@@ -279,3 +278,40 @@ def test_fast_ae_still_makes_small_adjustments_near_the_target() -> None:
         analogue_gain=1,
     )
     assert decision.exposure_us == pytest.approx(100_000 * factor, abs=1)
+
+
+@pytest.mark.unit
+def test_broad_clipping_immediately_exits_long_exposure_and_high_gain():
+    """全白时首个决策即退出长曝光 / Escape a long shutter on the first fully clipped observation."""
+    ae = NightSkyAutoExposure(AutoExposureLimits(max_exposure_us=3_000_000))
+    d = ae.observe(
+        LuminanceStats(1, 1, 1, 1000), exposure_us=3_000_000, analogue_gain=16
+    )
+    assert d.exposure_us <= 100_000
+    assert d.analogue_gain == 1
+    assert d.changed
+
+
+@pytest.mark.unit
+def test_small_lamp_does_not_black_out_dark_background():
+    """小面积路灯不能触发整幅压暗 / A small lamp must not darken the whole field."""
+    ae = NightSkyAutoExposure(AutoExposureLimits(settle_frames=0))
+    d = ae.observe(
+        LuminanceStats(0.002, 1, 0.01, 1000), exposure_us=500_000, analogue_gain=1
+    )
+    assert d.exposure_us * d.analogue_gain > 500_000
+
+
+@pytest.mark.unit
+def test_explicit_stale_frame_is_ignored_even_when_fully_clipped():
+    """旧饱和帧不能驱动新曝光 / An old saturated frame must not drive the new exposure."""
+    ae = NightSkyAutoExposure(AutoExposureLimits(settle_frames=0))
+    d = ae.observe(
+        LuminanceStats(1, 1, 1, 1000),
+        exposure_us=1000,
+        analogue_gain=1,
+        frame_ready=False,
+    )
+    assert d.state == "settling"
+    assert not d.changed
+    assert ae._filtered_background is None

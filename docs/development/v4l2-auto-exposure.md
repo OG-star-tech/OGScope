@@ -1,4 +1,4 @@
-# V4L2 夜空自动曝光 / V4L2 Night-Sky Auto Exposure
+# V4L2 自动曝光与颜色 / V4L2 Auto Exposure and Color
 
 ## 产品边界 / Product boundary
 
@@ -118,22 +118,69 @@ When controls are absent, black level uses the measured dark-frame fallback rati
 (about 240 at 12 bits), not zero; white level follows bit depth. This is not per-device
 calibration. Telemetry exposes each value and source so the fallback remains identifiable.
 
-控制误差使用摄影 EV（log2）表示，并执行：
+控制误差使用摄影 EV（log2）。`adaptive-raw-v2` 把快速搜索与稳定拍摄分开：
 
-- 增亮：先延长曝光，达到时长上限后再增加模拟增益。
-- 变暗：先降低模拟增益，再缩短曝光。
-- 每次最多移动 2 EV，接近目标自动缩小步长；保留滞回和两帧控制生效等待。
-- 控制改变后清除旧亮度滤波，等待帧不进入滤波，避免混用不同曝光的统计。
-- AE 状态为 `starting`、`adjusting`、`settling`、`converged`、
-  `limited_dark`、`limited_bright`、`control_error` 或 `manual`。
+- 过暗且偏差大时，最多增加 4 EV，先使用 100ms 探测曝光和临时增益；达到增益限制后才继续拉长探测曝光。
+- 大面积过曝时立即撤掉增益、把快门缩至最多 100ms，再重新测光。
+- 接近目标后恢复快门优先的低噪声分配，并使用细步进与滞回。最大自动曝光仍是 3s，模拟增益仍受硬件与配置上限约束。
+- 按单位曝光信号选择 `daylight` / `starfield`；日间中位数/高光目标为 0.12/0.8，星空沿用配置目标。允许少量高光，避免一盏路灯压黑背景。
+- V4L2 控件回读不包含帧元数据。每次写入后丢弃一个排队帧，并等待旧帧周期加新帧周期；未通过这个保守门限的帧不参与曝光或 AWB。不能简单按预览帧率减少等待。
+- `ae_state` 保留兼容值；新增 `ae_phase`、`ae_scene_mode` 和带版本的 `ae_policy`。达到限制不等于成功收敛。
 
-The controller works in photographic stops. It lengthens exposure before adding
-analogue gain for SNR, removes gain before shortening exposure for dynamic range,
-limits each update to two stops (smaller near convergence), and exposes an explicit convergence state.
-After changing controls it clears the old brightness filter and excludes two settling frames
-from metering. Old-exposure statistics cannot bias the next decision.
-This retains the product Picamera2 Long curve’s shutter-first policy, not its ISP-specific
-brightness thresholds; V4L2 meters normalized linear RAW.
+`adaptive-raw-v2` separates acquisition from steady capture. Dark acquisition uses up to
+4 EV steps, a 100ms probe and temporary gain before longer exposures. Broad clipping
+immediately removes gain and caps the next shutter at 100ms. Near convergence it returns
+to shutter-first low-noise allocation, smaller steps and hysteresis, within the existing
+3-second/hardware gain limits. Signal per exposure distinguishes daylight from starfield;
+small clipped highlights must not black out the background.
+
+Control readback is **not per-frame metadata**. The driver discards one queued frame and
+waits the previous plus next frame duration before re-metering. This conservative gate
+also protects AWB. Recorded traces include `frame_ready` for faithful replay. Status keeps
+existing `ae_state` values and adds policy version, scene mode and acquisition phase.
+
+## 颜色处理 / Color processing
+
+`linear-raw-awb-v1` 的顺序是：黑电平 → 线性 RAW 白平衡 → 16 位去马赛克 → gamma → 8 位 RGB888。
+不再对 Bayer 先做 gamma，也不在线性处理后重复施加白平衡。整数 RAW 使用缓存查找表，默认增强直接复用缓冲，避免整幅 float RGB 临时数组。
+
+- `auto` 真正执行软件 AWB；采样四种 Bayer 排列，使用较亮有效样本的中位颜色比值。
+- 严重过曝、欠曝、旧帧和低照度时保持现有增益；夜空不会靠稀疏星点或噪声追逐颜色。
+- `manual` 使用指定线性 R/B 增益；`night` 使用固定线性 1.1/0.9。两者不运行 AWB。
+- `color_pipeline` 报告版本、处理域、有效增益与 AWB 状态。这是通用灰世界估计，不是色卡标定，也不包含已验证的相机颜色矩阵；单一颜色场景可能产生偏差。
+
+The pipeline is black subtraction → linear Bayer WB → 16-bit demosaic → gamma → RGB888.
+Integer RAW uses cached lookup tables and avoids full-frame float RGB temporaries. Auto
+WB uses robust ratios from a small Bayer grid; clipped, dark and stale frames hold gains.
+Manual/night remain explicit fixed modes. This is gray-world AWB, **not** a calibrated
+color matrix; single-color scenes remain a limitation. `color_pipeline` reports effective
+mode/gains and algorithm version. Old gamma-domain manual gains may need re-tuning.
+
+## 打包、升级和回退 / Packaging, upgrade and rollback
+
+1. 完整交付 `ogscope` Python 包，尤其是 `domain/camera/auto_exposure.py`、新增 `domain/camera/white_balance.py`、`domain/camera/ae_diagnostics.py` 与 `platform/hardware/v4l2_camera.py`。新策略与颜色默认值内置，不依赖新外部 JSON。
+2. 保留板端拓扑、黑白电平、FOV、旋转、曝光上限和用户配置。先检查 systemd 的 EnvironmentFile 顺序、实际进程 PYTHONPATH、`/data` 覆盖；安装目录版本不一定等于运行版本。
+3. 使用 `OGSCOPE_CAMERA_WHITE_BALANCE_MODE=auto` 选择 AWB；显式 `manual`/`night` 保持原意。`OGSCOPE_CAMERA_V4L2_AE_MAX_STEP_STOPS` 现在约束微调；搜索上限由内置策略决定。不要把 Picamera2 `imx327.json` 当作 V4L2 的配置来源。
+4. 只读系统把开发覆盖放在可写数据分区，先克隆当前完整运行包再覆盖经过核对的变更文件，保留旧包和环境文件。不要重挂载系统分区或覆盖整个 data 目录。正式镜像必须包含完整新包，并处理可能遮蔽新包的旧热修复选择器。
+5. 停止正在执行的分析/录像后，在允许中断预览的维护窗口切换。先确认没有对齐、校准、固件升级和系统更新；不执行电机运动。重启相机服务后检查 Core health、开启预览、持续取帧，再读状态：只有 status 轮询不会推进 AE。
+6. 核验 `ae_policy.version=adaptive-raw-v2`、`color_pipeline.version=linear-raw-awb-v1`、`white_balance_mode` 与配置一致、`control_readback.verified=true`，以及 3s 上限、FOV/旋转和时域降噪关闭状态。核对 RSS、实际 FPS、日志和双向曝光；不能只检查配置中的 fps。
+7. 回退时恢复备份环境选择器并重启相机服务，检查旧策略、健康与预览恢复。保留原始日志与照片；如果环境文件已被别人改动，停止自动覆盖并人工核对。
+
+Ship the complete Python package including the new `white_balance.py`; policy/color
+defaults are built in and need no new external JSON. Preserve board topology, calibration,
+FOV, rotation, exposure limits and user settings. Inspect actual process paths and env-file
+precedence, including persistent hotfix overrides. Picamera2 tuning JSON is not consumed
+by V4L2. On read-only images stage an isolated copy on writable data, retain prior package
+and env selectors, and switch only during an idle maintenance window. Production images
+must include the new package and retire or repoint stale selectors deliberately.
+
+After restart, consume preview frames and verify both policy versions, WB mode, verified
+control readback, geometry, limits, actual FPS and memory. Test both bright and dark
+transitions. Roll back by restoring the exact previous selectors, restart and verify old
+policy/preview health; refuse to overwrite env files changed by another actor.
+
+Daytime transitions, synthetic dark-scene convergence and color-reference checks do not
+replace real-sky star extraction, solve success and long-exposure tracking acceptance.
 
 ## 硬件换算 / Hardware conversion
 

@@ -111,6 +111,7 @@ The successful solve includes `result.overlay_ext.polar_guide` when projection m
   - `info.ae_scene_mode` 与 `info.ae_requested_exposure_mode` 是自主 AE 诊断；`starfield` 表示 OGScope 已独立识别暗天空并请求快门优先的长曝光曲线，不依赖上位机工作模式。请求值不代表驱动已生效
   - Picamera2 可选诊断：`info.ae_actual_exposure_mode` 来自完成帧的模式回报；`info.ae_exposure_mode_status` 为 `unknown`、`awaiting_metadata`、`verified`、`unverified` 或 `unsupported`。`verified` 只证明模式已回报；实际曝光/增益仍以帧元数据为准。`info.actual_auto_exposure` / `info.actual_auto_gain` 缺少模式元数据时为 `null`。libcamera 0.5.2 的 Long 切换先暂停 AE，收到帧确认后再开启；8 秒内未确认会恢复 AE 并报告 `exposure_mode_not_confirmed`，避免假报成功
   - `info.auto_exposure_max_us` 是可调的曝光帧周期上限，Picamera2 与 V4L2 均限制为最多 3 秒；Long 曲线先延长快门再增加增益。长曝光会降低实际帧率，上限不表示每帧都会使用最长曝光
+  - V4L2 可选 `info.ae_policy` 提供 `version`、搜索/微调步幅和控制生效等待策略；`info.ae_phase` 区分搜索与微调，`info.ae_scene_mode` 为 `daylight`/`starfield`。`info.color_pipeline` 提供颜色处理版本、线性域白平衡、实际 RGB 增益及 AWB 状态。`auto` 表示真实软件 AWB；低照度保持增益。旧服务缺失这些字段时，上层应继续按原契约工作，不依赖具体版本号分叉业务。
 - `POST /api/core/v1/camera/start`
   - 仅当相机启动命令成功且状态确认 `connected=true`、`streaming=true` 时返回 `success=true`
   - `applied` 包含 `action`、`hardware_plane_ok`、`ready`、`connected`、`streaming`；调用方应以 `ready` 判断是否可立即取帧
