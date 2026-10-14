@@ -23,6 +23,7 @@ from ogscope.domain.camera.auto_exposure import (
     measure_luminance,
 )
 from ogscope.domain.camera.driver import CameraCapabilities
+from ogscope.platform.hardware.bcm2835_isp import Bcm2835Isp, IspError, gamma_curve
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,15 @@ class V4L2RawCamera:
         # 电平）/ Built in initialize(), after _resolve_signal_levels() (needs
         # the resolved black/white levels).
         self._gamma_lut: np.ndarray | None = None
+        # 硬件 ISP（bcm2835-isp）：可用时由它去马赛克、扣黑电平、做白平衡与
+        # gamma，否则走下面的 CPU 路径。"off" 强制 CPU 路径。
+        # Hardware ISP (bcm2835-isp): when available it demosaics, subtracts
+        # the black level and applies white balance and gamma; otherwise the
+        # CPU path below runs. "off" forces the CPU path.
+        requested_isp = str(config.get("v4l2_isp", "auto")).lower()
+        self.isp_mode = requested_isp if requested_isp in {"auto", "off"} else "auto"
+        self._isp: Any | None = None
+        self._isp_status = "off" if self.isp_mode == "off" else "not_started"
         # 曾在此处加过一级 CLAHE 局部对比度增强，已撤销：在真实 Zero2W 上实测
         # （不同 clip_limit 1.0-3.0），即便很保守的设置也会把 patch_noise_std
         # 从 gamma-only 的 0.58 推到 1.2+（picamera2 是 0.68），提星命中数始终
@@ -756,6 +766,7 @@ class V4L2RawCamera:
             self._resolve_line_duration()
             self._resolve_signal_levels()
             self._gamma_lut = self._build_gamma_lut()
+            self._open_isp()
             enabled = self.auto_exposure
             self._ae = self._create_auto_exposure()
             self._ae.set_enabled(enabled)
@@ -884,8 +895,108 @@ class V4L2RawCamera:
         """释放 V4L2 视频节点 / Release the V4L2 video node."""
         self._trace.close()
         released = self.stop_capture()
+        self._close_isp()
         self.is_initialized = False
         return released
+
+    # 硬件 ISP / Hardware ISP ------------------------------------------------
+
+    def _create_isp(self) -> Any:
+        """打开 ISP（测试可替换）/ Open the ISP (replaceable in tests)."""
+        return Bcm2835Isp.open_first(
+            self.active_width, self.active_height, self.bayer_pattern
+        )
+
+    def _open_isp(self) -> None:
+        """打开并配置硬件 ISP；不可用时保持 CPU 路径 / Open and configure the
+        hardware ISP; keep the CPU path when it is unavailable."""
+        self._close_isp()
+        if self.isp_mode == "off":
+            self._isp_status = "off"
+            return
+        try:
+            isp = self._create_isp()
+        except (IspError, OSError) as exc:
+            self._isp_status = f"unavailable: {exc}"
+            logger.info(
+                "硬件 ISP 不可用，使用 CPU 去马赛克 / Hardware ISP unavailable, "
+                "using CPU demosaic: %s",
+                exc,
+            )
+            return
+        try:
+            shift = self._isp_shift()
+            isp.set_identity_ccm()
+            isp.set_black_level(self.black_level << shift)
+            # ISP 把（满量程 - 黑电平）拉满；白电平低于满量程时用数字增益补齐，
+            # 与 CPU 查找表把白电平映射到 255 保持一致。
+            # The ISP stretches (full scale - black) to full range; when the
+            # white level sits below full scale, digital gain makes up the
+            # difference, matching the CPU table that maps white to 255.
+            full_scale = (1 << self.bit_depth) - 1
+            span = max(1, self.white_level - self.black_level)
+            isp.set_digital_gain(max(1.0, (full_scale - self.black_level) / span))
+            isp.set_gamma(*gamma_curve(self.gamma))
+            self._isp = isp
+            self._configure_isp_white_balance()
+        except (IspError, OSError) as exc:
+            isp.close()
+            self._isp = None
+            self._isp_status = f"unavailable: {exc}"
+            logger.warning(
+                "硬件 ISP 配置失败，使用 CPU 去马赛克 / Hardware ISP setup failed, "
+                "using CPU demosaic: %s",
+                exc,
+            )
+            return
+        self._isp_status = "active"
+        logger.info(
+            "硬件 ISP 已启用 / Hardware ISP enabled: %s", getattr(isp, "nodes", "")
+        )
+
+    def _close_isp(self) -> None:
+        isp = self._isp
+        self._isp = None
+        if isp is not None:
+            try:
+                isp.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("关闭 ISP 失败 / Failed to close the ISP: %s", exc)
+
+    def _isp_shift(self) -> int:
+        """把 RAW 值高位对齐到 16 位所需的位移 / Shift that MSB-aligns RAW to 16 bits."""
+        return max(0, 16 - self.bit_depth)
+
+    def _configure_isp_white_balance(self) -> None:
+        """把白平衡放进 ISP 的线性域 / Move white balance into the ISP's linear domain.
+
+        CPU 路径在 gamma 之后对 8 位值乘增益；在线性域里等效的增益是
+        gain ** gamma，这样两条路径的画面色调一致。
+        The CPU path multiplies the 8-bit values after gamma; the equivalent
+        gain in the linear domain is gain ** gamma, so both paths look alike.
+        """
+        if self._isp is None:
+            return
+        red, _green, blue = self._white_balance_gains()
+        self._isp.set_white_balance(red**self.gamma, blue**self.gamma)
+
+    def _isp_debayer(self, raw: np.ndarray) -> np.ndarray | None:
+        """用硬件 ISP 处理一帧；失败时关闭 ISP 并回退 CPU / Process one frame in
+        the hardware ISP; on failure close it and fall back to the CPU."""
+        isp = self._isp
+        if isp is None:
+            return None
+        try:
+            return isp.process(raw, shift=self._isp_shift())
+        except (IspError, OSError) as exc:
+            logger.warning(
+                "硬件 ISP 处理失败，回退 CPU 去马赛克 / Hardware ISP failed, "
+                "falling back to CPU demosaic: %s",
+                exc,
+            )
+            self._close_isp()
+            self._isp_status = f"failed: {exc}"
+            return None
 
     def _unpack_raw(self, frame: np.ndarray) -> np.ndarray:
         """将 RG10 容器统一成二维 uint16 / Normalize RG10 containers to 2-D uint16."""
@@ -1040,6 +1151,13 @@ class V4L2RawCamera:
             raw,
         )
 
+    def _postprocess_white_balance_gains(self) -> tuple[float, float, float]:
+        """后处理中仍需施加的白平衡增益；ISP 已施加时为 1 / White-balance gains
+        still to apply in post-processing; 1 when the ISP already applied them."""
+        if self._isp is not None:
+            return (1.0, 1.0, 1.0)
+        return self._white_balance_gains()
+
     def _white_balance_gains(self) -> tuple[float, float, float]:
         """当前白平衡增益 / Current white-balance gains."""
         if self.white_balance_mode == "night":
@@ -1053,7 +1171,7 @@ class V4L2RawCamera:
         white-balance + contrast + brightness chain folded into one 256x3
         LUT, cached against the parameters that define it."""
         key = (
-            self._white_balance_gains(),
+            self._postprocess_white_balance_gains(),
             self.contrast,
             self.brightness,
         )
@@ -1088,11 +1206,18 @@ class V4L2RawCamera:
         # Saturation is the one cross-channel op (it needs the per-pixel
         # channel mean), so it can't fold into the LUT and only it falls
         # back to the float path.
+        identity_tone = (
+            self._postprocess_white_balance_gains() == (1.0, 1.0, 1.0)
+            and abs(self.contrast - 1.0) <= 1e-3
+            and abs(self.brightness) <= 1e-3
+        )
         if abs(self.saturation - 1.0) <= 1e-3:
-            rgb8: np.ndarray = cv2.LUT(image, self._tone_lut())
+            # 色调查找表为恒等映射时（ISP 已做白平衡）直接跳过 / Skip the
+            # tone table when it is the identity (the ISP did white balance).
+            rgb8: np.ndarray = image if identity_tone else cv2.LUT(image, self._tone_lut())
         else:
             rgb = image.astype(np.float32)
-            gains = self._white_balance_gains()
+            gains = self._postprocess_white_balance_gains()
             rgb *= np.asarray(gains, dtype=np.float32)
             np.multiply(rgb, self.contrast, out=rgb)
             np.add(
@@ -1249,7 +1374,17 @@ class V4L2RawCamera:
             # AE behaviour unchanged.
             self._observe_auto_exposure(raw)
             denoised = self._apply_temporal_nr(raw)
-            return self._apply_postprocessing(self._debayer(denoised))
+            rgb = self._isp_debayer(denoised)
+            if rgb is None:
+                return self._apply_postprocessing(self._debayer(denoised))
+            image = self._apply_postprocessing(rgb)
+            # ISP 输出是会被下一帧覆盖的映射缓冲区；返回前确保是独立副本
+            # / The ISP output is a mapped buffer the next frame overwrites;
+            # make sure the returned frame is an independent copy.
+            isp = self._isp
+            if isp is not None and isp.owns(image):
+                image = image.copy()
+            return image
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
@@ -1331,6 +1466,12 @@ class V4L2RawCamera:
         self.white_balance_mode = "night" if mode == "auto" else mode
         self.white_balance_gain_r = float(gain_r)
         self.white_balance_gain_b = float(gain_b)
+        try:
+            self._configure_isp_white_balance()
+        except (IspError, OSError) as exc:
+            logger.warning(
+                "ISP 白平衡设置失败 / Failed to set ISP white balance: %s", exc
+            )
         return True
 
     def set_image_enhancement(
@@ -1435,9 +1576,12 @@ class V4L2RawCamera:
             sampling_mode=self.sampling_mode,
             rotation_deg=self.rotation,
         )
+        backend = (
+            f"{self.backend_name}+bcm2835-isp" if self._isp is not None else self.backend_name
+        )
         caps = CameraCapabilities(
             driver=self.driver_name,
-            backend=self.backend_name,
+            backend=backend,
             awb_modes=("manual", "night"),
             auto_exposure=True,
             software_auto_exposure=True,
@@ -1448,7 +1592,8 @@ class V4L2RawCamera:
         )
         return {
             "driver": self.driver_name,
-            "backend": self.backend_name,
+            "backend": backend,
+            "isp": self._isp_status,
             "sensor": "IMX327",
             "optics": optics,
             "capabilities": {

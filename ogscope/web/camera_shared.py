@@ -145,6 +145,7 @@ class CameraManager:
             "v4l2_white_level": settings.camera_v4l2_white_level,
             "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
             "v4l2_gamma": settings.camera_v4l2_gamma,
+            "v4l2_isp": getattr(settings, "camera_v4l2_isp", "auto"),
             "v4l2_temporal_nr_alpha": getattr(
                 settings, "camera_v4l2_temporal_nr_alpha", 1.0
             ),

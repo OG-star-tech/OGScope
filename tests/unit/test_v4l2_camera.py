@@ -1132,3 +1132,126 @@ def test_v4l2_ae_response_setting_reaches_controller_and_telemetry() -> None:
         "settle_frames": 2,
         "filter_reset_on_control_change": True,
     }
+
+
+class _FakeIsp:
+    """硬件 ISP 替身：把 RAW 右移成灰度 RGB / Hardware-ISP double turning RAW into grey RGB."""
+
+    def __init__(self, *, fail: bool = False):
+        self.fail = fail
+        self.calls: list[tuple[str, int]] = []
+        self.white_balance: tuple[float, float] | None = None
+        self.closed = False
+        self._buffer: np.ndarray | None = None
+
+    def process(self, raw: np.ndarray, *, shift: int) -> np.ndarray:
+        if self.fail:
+            from ogscope.platform.hardware.bcm2835_isp import IspError
+
+            raise IspError("frame timeout")
+        self.calls.append((raw.dtype.kind, shift))
+        grey = np.clip(np.asarray(raw, dtype=np.float32) / 4, 0, 255).astype(np.uint8)
+        self._buffer = np.repeat(grey[..., None], 3, axis=2)
+        return self._buffer
+
+    def owns(self, array: np.ndarray) -> bool:
+        return self._buffer is not None and bool(
+            np.may_share_memory(array, self._buffer)
+        )
+
+    def set_white_balance(self, red: float, blue: float) -> None:
+        self.white_balance = (red, blue)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _isp_camera(isp: _FakeIsp, **extra: object) -> V4L2RawCamera:
+    camera = _ready_camera(**extra)
+    camera._capture = _FakeCapture(np.full((120, 160), 400, dtype=np.uint16))
+    camera._isp = isp
+    camera._isp_status = "active"
+    return camera
+
+
+@pytest.mark.unit
+def test_frames_go_through_the_hardware_isp_when_it_is_active(monkeypatch) -> None:
+    """ISP 可用时不走 CPU 去马赛克 / With the ISP active the CPU demosaic is skipped."""
+    isp = _FakeIsp()
+    camera = _isp_camera(isp)
+    monkeypatch.setattr(
+        camera, "_debayer", lambda _raw: pytest.fail("CPU demosaic used")
+    )
+
+    frame = camera.capture_image()
+
+    assert frame is not None and frame.shape == (120, 160, 3)
+    # 10-bit RAW is MSB-aligned into the ISP's 16-bit input. / 10 位 RAW 高位对齐到 16 位。
+    assert isp.calls == [("u", 6)]
+    # The ISP buffer is overwritten by the next frame: the frame must be a copy.
+    # ISP 缓冲区会被下一帧覆盖，返回的必须是副本。
+    assert not isp.owns(frame)
+    info = camera.get_camera_info()
+    assert info["isp"] == "active" and info["backend"].endswith("+bcm2835-isp")
+
+
+@pytest.mark.unit
+def test_a_failing_isp_falls_back_to_the_cpu_demosaic() -> None:
+    isp = _FakeIsp(fail=True)
+    camera = _isp_camera(isp)
+
+    frame = camera.capture_image()
+
+    assert frame is not None and frame.shape == (120, 160, 3)
+    assert isp.closed and camera._isp is None
+    assert camera.get_camera_info()["isp"].startswith("failed:")
+    assert camera.get_camera_info()["backend"] == "opencv/v4l2-raw"
+
+
+@pytest.mark.unit
+def test_white_balance_moves_into_the_isp_linear_domain() -> None:
+    """CPU 在 gamma 后乘增益；ISP 在线性域用 gain**gamma / The CPU applies gains
+    after gamma; the ISP uses gain ** gamma in the linear domain."""
+    isp = _FakeIsp()
+    camera = _isp_camera(isp, v4l2_gamma=2.2)
+
+    camera.set_white_balance("manual", 1.2, 0.8)
+
+    assert isp.white_balance == pytest.approx((1.2**2.2, 0.8**2.2))
+    # Post-processing must not apply the gains a second time. / 后处理不得重复施加增益。
+    assert camera._postprocess_white_balance_gains() == (1.0, 1.0, 1.0)
+    camera._isp = None
+    assert camera._postprocess_white_balance_gains() == (1.2, 1.0, 0.8)
+
+
+@pytest.mark.unit
+def test_the_temporal_nr_accumulator_reaches_the_isp_as_float() -> None:
+    isp = _FakeIsp()
+    camera = _isp_camera(isp, v4l2_temporal_nr_alpha=0.5)
+
+    assert camera.capture_image() is not None
+
+    assert isp.calls == [("f", 6)]
+
+
+@pytest.mark.unit
+def test_isp_off_or_missing_keeps_the_cpu_path(monkeypatch) -> None:
+    from ogscope.platform.hardware.bcm2835_isp import IspError
+
+    off = _ready_camera(v4l2_isp="off")
+    monkeypatch.setattr(off, "_create_isp", lambda: pytest.fail("ISP opened while off"))
+    off._open_isp()
+    assert off._isp is None and off.get_camera_info()["isp"] == "off"
+
+    missing = _ready_camera()
+
+    def _unavailable():
+        raise IspError("no bcm2835-isp in the V4L2 device list")
+
+    monkeypatch.setattr(missing, "_create_isp", _unavailable)
+    missing._open_isp()
+    assert missing._isp is None
+    assert (
+        missing.get_camera_info()["isp"]
+        == "unavailable: no bcm2835-isp in the V4L2 device list"
+    )
