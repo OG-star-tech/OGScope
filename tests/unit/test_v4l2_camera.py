@@ -1130,7 +1130,9 @@ def test_v4l2_ae_response_setting_reaches_controller_and_telemetry() -> None:
 
 
 @pytest.mark.unit
-def test_control_settling_covers_old_long_integration_and_two_queued_frames(monkeypatch):
+def test_control_settling_covers_old_long_integration_and_two_queued_frames(
+    monkeypatch,
+):
     """缩短曝光仍须等旧长帧完成；耗时处理也不使排队帧变新 / Cover old integration and discard queued data."""
     import ogscope.platform.hardware.v4l2_camera as module
 
@@ -1152,3 +1154,79 @@ def test_control_settling_covers_old_long_integration_and_two_queued_frames(monk
     camera._control_discard_remaining = 1
     assert camera._control_frame_ready() is False
     assert camera._control_frame_ready() is True
+
+
+@pytest.mark.unit
+def test_capture_loop_converges_with_two_real_queued_exposure_frames(monkeypatch):
+    """控制回读先变化而队列保留两帧旧图像时仍稳定 / Remain stable when readback leads images by two frames."""
+    from collections import deque
+
+    import ogscope.platform.hardware.v4l2_camera as module
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera()
+    camera._ae = camera._create_auto_exposure()
+    writes = {}
+    monkeypatch.setattr(
+        camera, "_set_control", lambda n, v: writes.update({n: v}) or True
+    )
+    monkeypatch.setattr(camera, "_read_controls", lambda *_names: writes.copy())
+    pending = deque([10_000.0] * 2)
+    target = 200.0
+    desired_signal = 0.12**0.35 * 0.8**0.65
+    stable = 0
+    for _ in range(80):
+        clock["t"] += 0.25
+        signal = min(1.0, pending.popleft() / target * desired_signal)
+        raw = np.full((120, 160), round(1023 * signal), dtype=np.uint16)
+        camera._observe_auto_exposure(raw)
+        pending.append(camera.exposure_us * camera.analogue_gain)
+        stable = stable + 1 if camera._last_ae["state"] == "converged" else 0
+        if stable >= 8:
+            break
+    assert stable >= 8
+    assert camera.exposure_us * camera.analogue_gain == pytest.approx(target, rel=0.1)
+    assert clock["t"] < 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pattern", ["RGGB", "BGGR", "GRBG", "GBRG"])
+@pytest.mark.parametrize("fractional", [False, True])
+@pytest.mark.parametrize(
+    "shape,mode,rotation,sharpness",
+    [
+        ((198, 270), "native", 180, 1.0),
+        ((199, 271), "crop", 90, 2.0),
+        ((199, 270), "native", 270, 0.5),
+        ((120, 160), "crop", 0, 1.0),
+    ],
+)
+def test_raw_preview_roi_preserves_full_frame_output(
+    pattern, fractional, shape, mode, rotation, sharpness
+):
+    """优化前后像素、奇偶尺寸、旋转与降噪精度一致 / Preserve pixels, odd sizes, rotation and NR precision."""
+    camera = _ready_camera()
+    camera.width, camera.height = 160, 120
+    camera.bayer_pattern = pattern
+    camera.sampling_mode = mode
+    camera.rotation = rotation
+    camera.sharpness = sharpness
+    camera.flip_horizontal = True
+    raw = np.random.default_rng(12).integers(0, 1024, shape, dtype=np.uint16)
+    if fractional:
+        raw = raw.astype(np.float32) + 0.25
+    expected = camera._apply_postprocessing(camera._debayer(raw))
+    region = camera._raw_preview_region(raw)
+    actual = camera._apply_postprocessing(camera._debayer(region))
+    np.testing.assert_array_equal(actual, expected)
+    assert np.shares_memory(region, raw)
+
+
+@pytest.mark.unit
+def test_supersample_retains_full_sensor_for_color_conversion():
+    """全幅缩放不能裁掉边缘视场 / Full-field downsampling must retain sensor edges."""
+    camera = _ready_camera()
+    camera.sampling_mode = "supersample"
+    raw = np.zeros((1080, 1920), dtype=np.uint16)
+    assert camera._raw_preview_region(raw) is raw
