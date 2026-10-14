@@ -969,17 +969,6 @@ class V4L2RawCamera:
             return False
         return time.monotonic() >= self._controls_ready_at
 
-    def _raw_preview_region(self, raw: np.ndarray) -> np.ndarray:
-        """只转换实际预览区域及邻域，保持视场与 Bayer 相位 / Convert the preview ROI without changing FOV or Bayer phase."""
-        if self.sampling_mode not in {"native", "crop"}:
-            return raw
-        height, width = raw.shape
-        # 对称偶数边界保持中心与 Bayer 相位；八像素边缘覆盖插值和锐化邻域。
-        # Symmetric even bounds preserve center and Bayer phase; eight pixels cover demosaic and sharpening.
-        left = max(0, (width - self.width) // 2 - 8) & ~1
-        top = max(0, (height - self.height) // 2 - 8) & ~1
-        return raw[top : height - top, left : width - left]
-
     def _observe_auto_exposure(self, raw: np.ndarray) -> None:
         """从当前 RAW 帧更新下一帧曝光 / Update the next-frame exposure from RAW."""
         observed_exposure_us = self.exposure_us
@@ -1248,9 +1237,7 @@ class V4L2RawCamera:
             # AE behaviour unchanged.
             self._observe_auto_exposure(raw)
             denoised = self._apply_temporal_nr(raw)
-            return self._apply_postprocessing(
-                self._debayer(self._raw_preview_region(denoised))
-            )
+            return self._apply_postprocessing(self._debayer(denoised))
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
