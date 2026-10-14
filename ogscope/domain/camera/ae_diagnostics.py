@@ -182,6 +182,7 @@ def replay_trace_events(
                 stats,
                 exposure_us=int(observed["exposure_us"]),
                 analogue_gain=float(observed["analogue_gain"]),
+                frame_ready=event.get("frame_ready"),
             )
         )
     return decisions

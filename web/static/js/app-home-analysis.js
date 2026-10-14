@@ -472,8 +472,8 @@ class OGScopeHomeApp {
             const scale = dist > 1e-6 ? guide.angular_sep_deg / dist : 0;
             const az = dx * scale;
             const alt = -dy * scale;
-            if (azNode) azNode.textContent = `${az >= 0 ? "+" : ""}${az.toFixed(2)}°`;
-            if (altNode) altNode.textContent = `${alt >= 0 ? "+" : ""}${alt.toFixed(2)}°`;
+            if (azNode) azNode.textContent = `${az >= 0 ? "+" : ""}${(az * 3600).toFixed(1)}″`;
+            if (altNode) altNode.textContent = `${alt >= 0 ? "+" : ""}${(alt * 3600).toFixed(1)}″`;
             this.lastGuideAngle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
         } else {
             if (azNode) azNode.textContent = "—";

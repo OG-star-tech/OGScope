@@ -60,6 +60,17 @@ Realtime solving, snapshot encoding and developer image analysis share one worke
 
 A normal `MATCH_FOUND` result is authoritative and is never overturned by scene classification. Only after a normal failure with independent structural evidence does OGScope remove dense or collinear candidates that overlap that evidence and retry once. At most 35% of the reserve candidate pool is removed.
 
+### Shared visual alignment target
+
+A successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation:
+
+- `target_policy: "catalog_visual_v1"`, `target_frame: "catalog_j2000"`.
+- `corrections` explicitly reports precession, nutation, aberration and refraction as `false`.
+- `angular_sep_deg` is the center-to-target angular distance in degrees; `image_offset_deg.{dx,dy}` is the signed image-plane offset in degrees, x right and y down. Roll already includes image orientation; consumers must not rotate it again.
+- Existing `frame_center`, `target`, and `delta_px` remain available for overlays.
+
+Alignment consumers must use this supplied target for motion, verification and display. Missing or incompatible targets must block motion rather than silently reconstructing a different target. This adds no user-facing target-source selector.
+
 ### 3) Stop Analysis
 
 - `POST /api/core/v1/analysis/stop`
@@ -93,6 +104,7 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
   - `info.ae_scene_mode` and `info.ae_requested_exposure_mode` diagnose autonomous AE. `starfield` means OGScope independently requested the shutter-first long-exposure curve and does not depend on an upstream work mode. A request does not prove the driver applied it.
   - Optional Picamera2 diagnostics: `info.ae_actual_exposure_mode` comes from completed-frame mode metadata; `info.ae_exposure_mode_status` is `unknown`, `awaiting_metadata`, `verified`, `unverified`, or `unsupported`. `verified` confirms only the mode acknowledgement; actual exposure/gain still come from frame metadata. `info.actual_auto_exposure` / `info.actual_auto_gain` are `null` when mode metadata is unavailable. Long selection for libcamera 0.5.2 pauses AE and resumes it after frame acknowledgement. If unconfirmed within 8 seconds, AE resumes with `exposure_mode_not_confirmed` rather than false success.
   - `info.auto_exposure_max_us` is an adjustable frame-duration ceiling capped at 3 seconds for both Picamera2 and V4L2. The Long curve extends shutter before raising gain. Long exposures reduce actual frame rate; a ceiling does not force every frame to use the longest exposure.
+  - Optional V4L2 `info.ae_policy` reports policy version, acquisition/fine-step limits and settling policy. `info.ae_phase` describes acquisition/fine tuning; `info.ae_scene_mode` is `daylight`/`starfield`. Optional `info.color_pipeline` reports color version, linear-domain WB, effective RGB gains and AWB state. Auto means real software AWB with low-light hold. Consumers must tolerate missing diagnostics on older servers and must not branch product logic on policy version.
 - `POST /api/core/v1/camera/start`
   - Returns `success=true` only when the start command succeeds and status confirms both `connected=true` and `streaming=true`
   - `applied` includes `action`, `hardware_plane_ok`, `ready`, `connected`, and `streaming`; callers should use `ready` before requesting frames

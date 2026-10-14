@@ -61,6 +61,14 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 
 常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
 
+The successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation. 成功解算在投影数据有效时返回同一极轴目标。
+
+- `target_policy=catalog_visual_v1`, `target_frame=catalog_j2000`: original catalog visual baseline; all `corrections` flags are false. 原始星库视觉基线，全部天文修正关闭。
+- `angular_sep_deg`: centre-to-target separation in degrees. 中心至目标的角距离（度）。
+- `image_offset_deg.dx/dy`: signed image error in degrees, x right / y down, already accounting for the solved image orientation. 图像误差（度），右/下为正，已包含解算画面方向。
+- Missing guide means the target is unavailable; motion consumers must not substitute a different local target. 缺少目标时不得自行换用其他目标运动。
+- Existing raw RA/Dec/Roll and exact-frame identifiers retain their meanings. 原始解算及精确帧标识语义不变。
+
 ### 2.1) Get Exact Solve Frame
 
 - `GET /api/core/v1/analysis/frame?session_id=...&frame_id=...`
@@ -103,6 +111,7 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
   - `info.ae_scene_mode` 与 `info.ae_requested_exposure_mode` 是自主 AE 诊断；`starfield` 表示 OGScope 已独立识别暗天空并请求快门优先的长曝光曲线，不依赖上位机工作模式。请求值不代表驱动已生效
   - Picamera2 可选诊断：`info.ae_actual_exposure_mode` 来自完成帧的模式回报；`info.ae_exposure_mode_status` 为 `unknown`、`awaiting_metadata`、`verified`、`unverified` 或 `unsupported`。`verified` 只证明模式已回报；实际曝光/增益仍以帧元数据为准。`info.actual_auto_exposure` / `info.actual_auto_gain` 缺少模式元数据时为 `null`。libcamera 0.5.2 的 Long 切换先暂停 AE，收到帧确认后再开启；8 秒内未确认会恢复 AE 并报告 `exposure_mode_not_confirmed`，避免假报成功
   - `info.auto_exposure_max_us` 是可调的曝光帧周期上限，Picamera2 与 V4L2 均限制为最多 3 秒；Long 曲线先延长快门再增加增益。长曝光会降低实际帧率，上限不表示每帧都会使用最长曝光
+  - V4L2 可选 `info.ae_policy` 提供 `version`、搜索/微调步幅和控制生效等待策略；`info.ae_phase` 区分搜索与微调，`info.ae_scene_mode` 为 `daylight`/`starfield`。`info.color_pipeline` 提供颜色处理版本、线性域白平衡、实际 RGB 增益及 AWB 状态。`auto` 表示真实软件 AWB；低照度保持增益。旧服务缺失这些字段时，上层应继续按原契约工作，不依赖具体版本号分叉业务。
 - `POST /api/core/v1/camera/start`
   - 仅当相机启动命令成功且状态确认 `connected=true`、`streaming=true` 时返回 `success=true`
   - `applied` 包含 `action`、`hardware_plane_ok`、`ready`、`connected`、`streaming`；调用方应以 `ready` 判断是否可立即取帧
