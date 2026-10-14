@@ -197,6 +197,16 @@ IMX327 板端、1280×720 native、180°旋转、关闭时域降噪，持续消�
 重置和实际遮挡，不能相互替代，也不能推广为所有场景保证。3s 上限处的
 `limited_dark` 表示照度不足，不是已成功收敛。
 
+第二次真实遮挡记录补到了短曝光阶段：从首个样本的 3.2ms / 1× 到 3s / 15.849×
+约 3.9s；移开后从检测到亮场到稳定约 7.5s，AWB 增益保持稳定。首个样本已经
+开始调节，因此 3.9s 是记录覆盖的曝光爬升区间，不是从物理遮挡瞬间计时，也不
+代表真实夜空一定能在该时间完成收敛。
+
+A second physical cover test captured the ramp from 3.2ms / 1× to 3s / 15.849× in
+~3.9s, followed by ~7.5s from detected bright scene to convergence after uncovering.
+WB held steady. The first recorded sample was already adjusting, so the ramp timing
+does not start at the physical cover instant and is not a night-sky convergence guarantee.
+
 当前软件颜色处理仍限制吞吐：预览目标 8fps，实际约 3.7–3.8fps，RSS 约 219000KiB、
 swap 为 0；早前同板旧颜色路径约 4.6fps、196000KiB。颜色正确性修复有开销，帧率与
 内存仍需优化，不能以配置的 8fps 作为验收结果。本板 RAW 已为 1280×720，离线
