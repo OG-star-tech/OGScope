@@ -675,9 +675,9 @@ class V4L2RawCamera:
         # level, but keep the array itself for in-place reuse.
         self._nr_accumulator_valid = False
         self._nr_last_frame_mono = None
-        # 回读是控件确认，不是帧元数据；丢弃排队帧，并覆盖旧积分和新积分时长。
-        # Readback confirms controls, not frame metadata: discard a queued frame and cover old/new integrations.
-        self._control_discard_remaining = 1
+        # 回读是控件确认，不是帧元数据；丢弃两帧排队数据，并覆盖旧积分和新积分时长。
+        # Readback confirms controls, not frame metadata: discard two queued frames and cover old/new integrations.
+        self._control_discard_remaining = 2
         self._controls_ready_at = (
             time.monotonic()
             + (previous_duration_us + self._frame_duration_us) / 1_000_000
@@ -1476,8 +1476,8 @@ class V4L2RawCamera:
                 "max_step_stops": self._ae.limits.max_step_stops,
                 "fast_step_stops": self._ae.limits.fast_step_stops,
                 "probe_exposure_us": self._ae.limits.probe_exposure_us,
-                "settle_frames": 1,
-                "settle_policy": "queued_frame_plus_old_and_new_frame_duration",
+                "settle_frames": 2,
+                "settle_policy": "two_queued_frames_plus_old_and_new_frame_duration",
                 "filter_reset_on_control_change": True,
             },
             "auto_exposure_max_us": self.auto_exposure_max_us,

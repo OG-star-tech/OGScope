@@ -124,7 +124,7 @@ calibration. Telemetry exposes each value and source so the fallback remains ide
 - 大面积过曝时立即撤掉增益、把快门缩至最多 100ms，再重新测光。
 - 接近目标后恢复快门优先的低噪声分配，并使用细步进与滞回。最大自动曝光仍是 3s，模拟增益仍受硬件与配置上限约束。
 - 按单位曝光信号选择 `daylight` / `starfield`；日间中位数/高光目标为 0.12/0.8，星空沿用配置目标。允许少量高光，避免一盏路灯压黑背景。
-- V4L2 控件回读不包含帧元数据。每次写入后丢弃一个排队帧，并等待旧帧周期加新帧周期；未通过这个保守门限的帧不参与曝光或 AWB。不能简单按预览帧率减少等待。
+- V4L2 控件回读不包含帧元数据。每次写入后丢弃两帧排队数据，并等待旧帧周期加新帧周期；未通过这个保守门限的帧不参与曝光或 AWB。不能简单按预览帧率减少等待。
 - `ae_state` 保留兼容值；新增 `ae_phase`、`ae_scene_mode` 和带版本的 `ae_policy`。达到限制不等于成功收敛。
 
 `adaptive-raw-v2` separates acquisition from steady capture. Dark acquisition uses up to
@@ -134,7 +134,7 @@ to shutter-first low-noise allocation, smaller steps and hysteresis, within the 
 3-second/hardware gain limits. Signal per exposure distinguishes daylight from starfield;
 small clipped highlights must not black out the background.
 
-Control readback is **not per-frame metadata**. The driver discards one queued frame and
+Control readback is **not per-frame metadata**. The driver discards two queued frames and
 waits the previous plus next frame duration before re-metering. This conservative gate
 also protects AWB. Recorded traces include `frame_ready` for faithful replay. Status keeps
 existing `ae_state` values and adds policy version, scene mode and acquisition phase.
