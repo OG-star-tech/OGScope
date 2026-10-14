@@ -144,6 +144,10 @@ existing `ae_state` values and adds policy version, scene mode and acquisition p
 `linear-raw-awb-v1` 的顺序是：黑电平 → 线性 RAW 白平衡 → 16 位去马赛克 → gamma → 8 位 RGB888。
 不再对 Bayer 先做 gamma，也不在线性处理后重复施加白平衡。整数 RAW 使用缓存查找表，默认增强直接复用缓冲，避免整幅 float RGB 临时数组。
 
+`native` / `crop` 只对中央预览区域及八像素邻域做颜色转换，避免处理最终被裁掉的像素。
+对称偶数边界保持 Bayer 相位、图像中心和 FOV；测光、AWB 与可选 RAW 降噪仍使用原始全帧。
+`supersample` 保留全幅。回归测试逐像素比较优化前后输出，包括奇偶尺寸、四种 Bayer、旋转、锐化及小数 RAW。
+
 - `auto` 真正执行软件 AWB；采样四种 Bayer 排列，使用较亮有效样本的中位颜色比值。
 - 严重过曝、欠曝、旧帧和低照度时保持现有增益；夜空不会靠稀疏星点或噪声追逐颜色。
 - `manual` 使用指定线性 R/B 增益；`night` 使用固定线性 1.1/0.9。两者不运行 AWB。
@@ -155,6 +159,11 @@ WB uses robust ratios from a small Bayer grid; clipped, dark and stale frames ho
 Manual/night remain explicit fixed modes. This is gray-world AWB, **not** a calibrated
 color matrix; single-color scenes remain a limitation. `color_pipeline` reports effective
 mode/gains and algorithm version. Old gamma-domain manual gains may need re-tuning.
+
+Native/crop color conversion uses the centered preview region plus an eight-pixel halo.
+Symmetric even bounds preserve Bayer phase, image center and FOV; AE, AWB and optional
+RAW denoising still use the full frame. Supersampling keeps the full sensor. Pixel-exact
+regressions cover odd/even dimensions, all Bayer patterns, rotation, sharpening and fractional RAW.
 
 ## 打包、升级和回退 / Packaging, upgrade and rollback
 
