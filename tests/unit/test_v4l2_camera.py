@@ -159,10 +159,10 @@ def test_camera_manager_passes_v4l2_board_configuration(monkeypatch, tmp_path) -
 
 
 @pytest.mark.unit
-def test_v4l2_maps_default_auto_white_balance_to_night() -> None:
+def test_v4l2_preserves_real_auto_white_balance() -> None:
     camera = V4L2RawCamera({"white_balance_mode": "auto"})
 
-    assert camera.white_balance_mode == "night"
+    assert camera.white_balance_mode == "auto"
 
 
 @pytest.mark.unit
@@ -402,7 +402,7 @@ def test_dark_raw_frame_advances_software_ae(monkeypatch) -> None:
 
     assert frame is not None
     assert frame.shape == (120, 160, 3)
-    assert camera.exposure_us == 40_000
+    assert camera.exposure_us == 100_000
     assert camera.get_camera_info()["ae_state"] == "adjusting"
     assert [name for name, _value in writes] == [
         "vertical_blanking",
@@ -439,7 +439,7 @@ def test_camera_trace_records_observation_decision_and_readback(
     assert camera._trace.session_dir is not None
     events = load_trace_events(camera._trace.session_dir)
     assert events[0]["observed"]["exposure_us"] == 10_000
-    assert events[0]["decision"]["exposure_us"] == 40_000
+    assert events[0]["decision"]["exposure_us"] == 100_000
     assert events[0]["applied"]["actual_exposure_us"] == 20_000
     assert events[0]["applied"]["readback_verified"] is True
     assert events[0]["raw_sample"].startswith("raw/frame-")
@@ -625,7 +625,12 @@ def test_debayer_preserves_asymmetric_red_and_blue_channels(
 ) -> None:
     """四种真实 CFA 均须输出正确 RGB 通道 / All four physical CFA patterns must produce the correct RGB channels."""
     camera = V4L2RawCamera(
-        {"v4l2_bayer_pattern": pattern, "v4l2_bit_depth": 10, "v4l2_gamma": 1.0}
+        {
+            "v4l2_bayer_pattern": pattern,
+            "v4l2_bit_depth": 10,
+            "v4l2_gamma": 1.0,
+            "white_balance_mode": "manual",
+        }
     )
     raw = np.full((8, 8), 256, dtype=np.uint16)
     raw[red_position[0] :: 2, red_position[1] :: 2] = 1023
@@ -667,6 +672,7 @@ def test_software_ae_reaches_sensor_minimum_without_repeated_control_writes(
 ) -> None:
     """强亮场可从 1ms 降到一行曝光，最低点不重复写控件 / Bright scenes reach one sensor line from 1ms without repeated writes at the limit."""
     camera = _ready_camera()
+    monkeypatch.setattr(camera, "_control_frame_ready", lambda: True)
     camera._line_duration_us = 22.222222
     camera._ae = camera._create_auto_exposure()
     writes: dict[str, int] = {}
@@ -1041,62 +1047,47 @@ def test_black_level_fallback_uses_measured_dark_frame_value_not_zero(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("bit_depth", "index_dtype"), [(10, np.uint16), (16, np.uint32)]
-)
-def test_gamma_lut_index_preserves_full_supported_raw_range(
-    bit_depth: int,
-    index_dtype: type,
-) -> None:
-    """过采样索引不可在高位深溢出 / Oversampled indices must not wrap at high bit depth."""
-    camera = V4L2RawCamera({"v4l2_bit_depth": bit_depth})
-    full_scale = (1 << bit_depth) - 1
-    output = camera._debayer(np.full((4, 4), full_scale, dtype=np.uint16))
-
-    assert np.all(output == 255)
-    assert camera._lut_index_buffer is not None
-    assert camera._lut_index_buffer.dtype == index_dtype
+@pytest.mark.parametrize("bit_depth", [10, 12, 16])
+def test_linear_pipeline_preserves_full_supported_raw_range(bit_depth) -> None:
+    """各位深均保留黑白端点，不溢出索引 / Preserve black/white endpoints at all depths."""
+    camera = V4L2RawCamera(
+        {"v4l2_bit_depth": bit_depth, "white_balance_mode": "manual"}
+    )
+    for code, expected in [(0, 0), ((1 << bit_depth) - 1, 255)]:
+        output = camera._debayer(np.full((8, 8), code, dtype=np.uint16))
+        assert np.all(output == expected)
 
 
 @pytest.mark.unit
-def test_tone_lut_matches_float_reference_for_night_white_balance() -> None:
-    """The LUT path replaces a float32 pipeline, so it must reproduce the
-    same values - WB gains, contrast and brightness are pointwise, so
-    folding them into a LUT is exact up to rounding."""
+def test_white_balance_is_linear_before_gamma_and_not_applied_twice() -> None:
+    """线性增益必须在 gamma 前生效，后处理不重复增益 / Apply gains before gamma, exactly once."""
     camera = V4L2RawCamera(
         {
-            "v4l2_active_width": 160,
-            "v4l2_active_height": 120,
+            "v4l2_bit_depth": 12,
+            "white_balance_mode": "manual",
+            "white_balance_gain_r": 2.0,
+            "white_balance_gain_b": 0.5,
             "width": 160,
             "height": 120,
             "rotation": 0,
-            "white_balance_mode": "night",
         }
     )
-    image = (
-        np.arange(120 * 160 * 3, dtype=np.int64).reshape(120, 160, 3) % 256
-    ).astype(np.uint8)
-
-    output = camera._apply_postprocessing(image)
-
-    gains = np.asarray((1.1, 1.0, 0.9), dtype=np.float32)
-    expected = np.clip(np.rint(image.astype(np.float32) * gains), 0, 255).astype(
-        np.uint8
-    )
-    assert np.array_equal(output, expected)
+    raw = np.full((120, 160), 512, dtype=np.uint16)
+    rgb = camera._debayer(raw)
+    expected = np.rint((np.array([1024, 512, 256]) / 4095) ** (1 / 2.2) * 255)
+    assert np.max(np.abs(rgb[4, 4].astype(float) - expected)) <= 1
+    assert np.array_equal(camera._apply_postprocessing(rgb), rgb)
 
 
 @pytest.mark.unit
-def test_tone_lut_rebuilds_when_white_balance_changes() -> None:
-    camera = V4L2RawCamera({"white_balance_mode": "night"})
-    first = camera._tone_lut().copy()
-
-    camera.white_balance_mode = "manual"
-    camera.white_balance_gain_r = 2.0
-    camera.white_balance_gain_b = 0.5
-    second = camera._tone_lut()
-
-    assert not np.array_equal(first, second)
+def test_linear_lut_rebuilds_when_white_balance_changes() -> None:
+    camera = V4L2RawCamera({"white_balance_mode": "manual"})
+    raw = np.full((8, 8), 128, dtype=np.uint16)
+    first = camera._debayer(raw).copy()
+    camera.set_white_balance("manual", 2.0, 0.5)
+    second = camera._debayer(raw)
+    assert np.all(second[2:-2, 2:-2, 0] > first[2:-2, 2:-2, 0])
+    assert np.all(second[2:-2, 2:-2, 2] < first[2:-2, 2:-2, 2])
 
 
 @pytest.mark.unit
@@ -1128,7 +1119,36 @@ def test_v4l2_ae_response_setting_reaches_controller_and_telemetry() -> None:
     camera = _ready_camera(v4l2_ae_max_step_stops=1.5)
     assert camera._ae.limits.max_step_stops == 1.5
     assert camera.get_camera_info()["ae_policy"] == {
+        "version": "adaptive-raw-v2",
         "max_step_stops": 1.5,
-        "settle_frames": 2,
+        "fast_step_stops": 4.0,
+        "probe_exposure_us": 100_000,
+        "settle_frames": 1,
+        "settle_policy": "queued_frame_plus_old_and_new_frame_duration",
         "filter_reset_on_control_change": True,
     }
+
+
+@pytest.mark.unit
+def test_control_settling_covers_old_long_integration_and_one_queued_frame(monkeypatch):
+    """缩短曝光仍须等旧长帧完成；耗时处理也不使排队帧变新 / Cover old integration and discard queued data."""
+    import ogscope.platform.hardware.v4l2_camera as module
+
+    clock = {"t": 10.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(exposure_us=3_000_000)
+    camera._frame_duration_us = 3_000_000
+    writes = {}
+    monkeypatch.setattr(
+        camera, "_set_control", lambda name, value: writes.update({name: value}) or True
+    )
+    monkeypatch.setattr(camera, "_read_controls", lambda *_names: writes.copy())
+    assert camera._apply_exposure_gain(10_000, 1)
+    assert camera._control_frame_ready() is False
+    clock["t"] = 12.9
+    assert camera._control_frame_ready() is False
+    clock["t"] = 13.1
+    assert camera._control_frame_ready() is True
+    camera._control_discard_remaining = 1
+    assert camera._control_frame_ready() is False
+    assert camera._control_frame_ready() is True
