@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --test tests/*.test.mjs",
     "dev:home": "vite --open /home.html",
     "dev:tools": "vite --open /system.html",
     "build": "vite build && npm run build:home",

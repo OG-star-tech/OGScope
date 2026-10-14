@@ -157,6 +157,7 @@ class CameraManager:
             "v4l2_line_duration_us": settings.camera_v4l2_line_duration_us,
             "v4l2_gain_db_per_step": settings.camera_v4l2_gain_db_per_step,
             "v4l2_auto_gain_max": settings.camera_v4l2_auto_gain_max,
+            "v4l2_ae_max_step_stops": settings.camera_v4l2_ae_max_step_stops,
             "v4l2_ae_target_background": (settings.camera_v4l2_ae_target_background),
             "v4l2_ae_target_highlight": settings.camera_v4l2_ae_target_highlight,
             "v4l2_ae_highlight_percentile": (

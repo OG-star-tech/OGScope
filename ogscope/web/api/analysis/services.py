@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import shutil
 import threading
 import time
@@ -362,87 +361,10 @@ class AnalysisService:
         return labels[:n]
 
     def _build_polar_guide(self, row: dict[str, Any]) -> dict[str, Any] | None:
-        """构建极轴引导向量 / Build polar guide vector from solve center."""
-        overlay = row.get("solve_overlay")
-        if not isinstance(overlay, dict):
-            return None
-        frame_shape = overlay.get("frame_shape")
-        if (
-            not isinstance(frame_shape, list)
-            or len(frame_shape) < 2
-            or frame_shape[0] in (None, 0)
-            or frame_shape[1] in (None, 0)
-        ):
-            return None
-        try:
-            h = float(frame_shape[0])
-            w = float(frame_shape[1])
-            ra_center = float(row.get("ra_deg"))
-            dec_center = float(row.get("dec_deg"))
-        except (TypeError, ValueError):
-            return None
-        fov_deg = row.get("fov_deg")
-        roll_deg = row.get("roll_deg")
-        if fov_deg is None:
-            return None
-        try:
-            fov = float(fov_deg)
-        except (TypeError, ValueError):
-            return None
-        roll = 0.0
-        try:
-            if roll_deg is not None:
-                roll = float(roll_deg)
-        except (TypeError, ValueError):
-            roll = 0.0
+        """Share the Core target calculation / 与 Core 共用目标计算。"""
+        from ogscope.domain.analysis.polar_guide import build_catalog_polar_guide
 
-        # 北天极近似目标：RA 与当前中心相同，Dec=+90，减少 RA wrap 影响
-        # Approximate north celestial pole target with same RA and Dec=+90.
-        target_ra = ra_center
-        target_dec = 90.0
-        d_ra = target_ra - ra_center
-        while d_ra > 180.0:
-            d_ra -= 360.0
-        while d_ra < -180.0:
-            d_ra += 360.0
-        d_dec = target_dec - dec_center
-        east_deg = d_ra * math.cos(math.radians(dec_center))
-        north_deg = d_dec
-        roll_rad = math.radians(roll)
-        # Image x right, y down; Tetra3 Roll is CCW from image up (y→0).
-        x_deg = east_deg * math.cos(roll_rad) - north_deg * math.sin(roll_rad)
-        y_deg = east_deg * math.sin(roll_rad) + north_deg * math.cos(roll_rad)
-
-        # Tetra3 FOV is horizontal; scale pixels per degree by frame width.
-        px_per_deg = (w / max(fov, 1e-6)) if fov > 0 else 1.0
-        dx_px = x_deg * px_per_deg
-        dy_px = -y_deg * px_per_deg
-        cx = w * 0.5
-        cy = h * 0.5
-        tx = cx + dx_px
-        ty = cy + dy_px
-
-        c_dec = math.radians(dec_center)
-        t_dec = math.radians(target_dec)
-        d_ra_rad = math.radians(d_ra)
-        cos_ang = math.sin(c_dec) * math.sin(t_dec) + math.cos(c_dec) * math.cos(
-            t_dec
-        ) * math.cos(d_ra_rad)
-        cos_ang = max(-1.0, min(1.0, cos_ang))
-        angular_sep_deg = math.degrees(math.acos(cos_ang))
-
-        return {
-            "target_kind": "north_celestial_pole",
-            "frame_center": {
-                "x": cx,
-                "y": cy,
-                "ra_deg": ra_center,
-                "dec_deg": dec_center,
-            },
-            "target": {"x": tx, "y": ty, "ra_deg": target_ra, "dec_deg": target_dec},
-            "delta_px": {"dx": dx_px, "dy": dy_px},
-            "angular_sep_deg": angular_sep_deg,
-        }
+        return build_catalog_polar_guide(row)
 
     def _attach_overlay_ext(
         self,

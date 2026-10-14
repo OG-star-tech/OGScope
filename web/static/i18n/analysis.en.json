@@ -578,5 +578,7 @@
   "sys.sensors.mag.calModeLocked": "Locked (saved heading)",
   "sys.sensors.mag.calSamplesPrefix": "Recorded samples:",
   "sys.sensors.mag.calRecordingHint": "Tip: keep level and rotate slowly; save after 10+ samples.",
-  "sys.sensors.mag.calLockedHint": "Locked heading params:"
+  "sys.sensors.mag.calLockedHint": "Locked heading params:",
+  "lab.target.error": "Target error (arcsec)",
+  "lab.target.original": "Original target · corrections off"
 }

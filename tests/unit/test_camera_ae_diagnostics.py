@@ -96,7 +96,7 @@ def test_trace_replay_and_raw_verification(tmp_path) -> None:
         highlight_percentile=99.8,
     )
 
-    assert decisions[0].exposure_us == 20_000
+    assert decisions[0].exposure_us == 100_000
     assert verified[0]["stats"]["background"] == pytest.approx(16 / 959, rel=0.02)
 
 
