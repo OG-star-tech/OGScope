@@ -94,6 +94,7 @@ class V4L2RawCamera:
         self._isp = None
         self._isp_mode = str(config.get("v4l2_processing", "software"))
         self._isp_error: str | None = None
+        self.requires_service_restart = False
         self._hardware_flips = (False, False)
         self._original_sensor_flips: dict[str, int] | None = None
         self._transform_error: str | None = None
@@ -550,7 +551,7 @@ class V4L2RawCamera:
         """ISP 显式启用，auto 失败回退，required 失败停止 / Opt-in ISP: auto falls back, required fails closed."""
         if self._isp_mode == "software":
             return
-        from ogscope.platform.hardware.bcm2835_isp import Bcm2835Isp
+        from ogscope.platform.hardware.bcm2835_isp import Bcm2835Isp, IspCleanupError
 
         try:
             self._isp = Bcm2835Isp(
@@ -572,7 +573,9 @@ class V4L2RawCamera:
             self._isp_error = None
         except Exception as exc:
             self._isp_error = str(exc)
-            if self._isp_mode == "bcm2835_isp":
+            if isinstance(exc, IspCleanupError):
+                self.requires_service_restart = True
+            if self._isp_mode == "bcm2835_isp" or self.requires_service_restart:
                 raise
             logger.warning(
                 "ISP 不可用，回退 CPU / ISP unavailable, falling back to CPU: %s", exc
@@ -993,7 +996,7 @@ class V4L2RawCamera:
     def close(self) -> bool:
         """释放 V4L2 视频节点 / Release the V4L2 video node."""
         self._trace.close()
-        released = self.stop_capture()
+        released = self.stop_capture() and not self.requires_service_restart
         if self._isp is not None:
             isp = self._isp
             self._isp = None
@@ -1398,6 +1401,8 @@ class V4L2RawCamera:
         """抓取一帧并推进软件 AE / Capture one frame and advance software AE."""
         if not self.is_initialized or not self.is_capturing or self._capture is None:
             return None
+        if self.requires_service_restart:
+            return None
         try:
             capture = self._capture
             ok, frame = capture.read()
@@ -1421,9 +1426,12 @@ class V4L2RawCamera:
                     try:
                         isp.close()
                     except (OSError, BufferError) as cleanup_error:
+                        self.requires_service_restart = True
+                        self._isp_error = f"{exc}; cleanup failed: {cleanup_error}"
                         logger.warning(
                             "ISP 清理失败 / ISP cleanup failed: %s", cleanup_error
                         )
+                        raise
                     if self._isp_mode == "bcm2835_isp":
                         raise
                     logger.warning(
@@ -1636,7 +1644,21 @@ class V4L2RawCamera:
             "backend": self.backend_name,
             "image_processing": {
                 "requested": self._isp_mode,
-                "effective": "bcm2835_isp" if self._isp is not None else "software",
+                "effective": (
+                    "bcm2835_isp"
+                    if self._isp is not None
+                    else (
+                        "unavailable"
+                        if self.requires_service_restart
+                        or (self._isp_mode == "bcm2835_isp" and self._isp_error)
+                        else "software"
+                    )
+                ),
+                "fallback_active": self._isp_mode == "auto"
+                and self._isp is None
+                and not self.requires_service_restart
+                and self._isp_error is not None,
+                "restart_required": self.requires_service_restart,
                 "error": self._isp_error,
                 "frames_processed": self._isp.frames if self._isp else 0,
                 "last_process_ms": (

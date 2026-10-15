@@ -21,6 +21,7 @@
 - [星空解算数据](development/plate-solve-data.md)（段内中英）
 - [服务稳定性与内存](development/ogscope-service-hardening.md)（段内中英）
 - [V4L2 RAW 相机与夜空软件 AE](development/v4l2-auto-exposure.md)（段内中英）
+- [相机三种部署方案与验收](development/camera-deployment-profiles.md)（段内中英）
 - [相机硬件 ISP、旋转与编码实验](development/camera-hardware-acceleration.md)（段内中英）
 - [硬件清单 BOM](hardware/bom.md) | [English](hardware/bom_EN.md)
 

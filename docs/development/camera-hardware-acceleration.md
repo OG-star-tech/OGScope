@@ -1,5 +1,7 @@
 # 相机硬件加速实验 / Camera Hardware Acceleration Experiment
 
+部署选择、升级保留策略及配置优先级见[相机部署与验收](camera-deployment-profiles.md)。以下为硬件实现与测量记录。 / See [deployment and acceptance](camera-deployment-profiles.md) for profiles, upgrade preservation and configuration precedence. Below are implementation and measurement records.
+
 本实现保留两个相机后端及既有 RGB888、视场、精确解算帧契约。ISP、传感器硬件变换和采集编码重叠均为显式实验配置，默认关闭。软件处理仍可独立使用。
 
 Both backends preserve RGB888, effective FOV and exact solve-frame contracts. ISP processing, sensor transforms and capture/encode overlap are explicit experiments disabled by default. The software path remains independently usable.

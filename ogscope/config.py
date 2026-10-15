@@ -90,7 +90,7 @@ class Settings(BaseSettings):
 
     # 相机配置 / Camera configuration
     camera_type: str = Field(
-        default="imx327_mipi",
+        default="v4l2",
         description=(
             "相机后端：imx327_mipi（Picamera2/libcamera）或 v4l2 / "
             "Camera backend: imx327_mipi or v4l2"
@@ -845,10 +845,14 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_camera_type(cls, value: object) -> str:
         """规范化可选相机后端并兼容旧别名 / Normalize backends and legacy aliases."""
-        text = str(value or "imx327_mipi").strip().lower()
+        text = str(value or "v4l2").strip().lower()
+        if text in {"picamera2", "libcamera"}:
+            return "imx327_mipi"
         if text in {"v4l2", "v4l2_raw", "linuxpy_v4l2", "v4l2_linuxpy"}:
             return "v4l2"
-        return text
+        if text == "imx327_mipi":
+            return text
+        raise ValueError("Unsupported camera backend / 不支持的相机后端")
 
     @field_validator("camera_v4l2_bayer_pattern", mode="before")
     @classmethod

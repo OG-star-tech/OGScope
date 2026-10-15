@@ -1698,6 +1698,11 @@ class IMX327MIPICamera(CameraInterface):
             return {
                 "driver": self.driver_name,
                 "backend": self.backend_name,
+                "image_processing": {
+                    "requested": "libcamera",
+                    "effective": "libcamera_isp",
+                    "error": None,
+                },
                 "hardware_transform": {
                     "requested": bool(self.config.get("hardware_transform", False)),
                     "horizontal_flip": self._hardware_flips[0],
@@ -2103,5 +2108,5 @@ class CameraFactory:
 # 兼容性函数，用于平滑迁移 / Compatibility function for smooth migration
 def create_camera(config: dict[str, Any]) -> Optional[CameraInterface]:
     """创建相机的便捷函数 / Convenience functions for creating cameras"""
-    camera_type = config.get("type", "imx327_mipi")
+    camera_type = config.get("type", "v4l2")
     return CameraFactory.create_camera(camera_type, config)

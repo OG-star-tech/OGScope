@@ -97,6 +97,7 @@ Alignment consumers must use this supplied target for motion, verification and d
 ### 5) Camera Runtime & Preview (MJPEG / single-frame)
 
 - `GET /api/core/v1/camera/status` — connection, stream state, runtime overrides, and optional `ambient_hint`
+  - Optional `configured_backend` reports the final process/runtime selection for diagnosis. `info.image_processing` describes both backends: Picamera2 reports `libcamera_isp`, V4L2 reports `software` or `bcm2835_isp`; required-ISP failure reports `unavailable`, and auto fallback reports `fallback_active=true`.
   - `ambient_hint` is advisory ambient-light telemetry for upstream display/interaction policy. Typical fields: `available`, `dark_score` (0.0 bright to 1.0 dark), `lux`, `exposure_us`, `digital_gain`
   - Optional `info.optics` describes product optics. `lens` carries nominal 16mm F1.4, 5MP optical rating, M12, and IR-cut properties; `full_sensor_fov_deg` describes the 1920×1080 optical field, while `effective_fov_deg` is the product-calibrated field for the active capture mode. Upstream solving and sky search should prefer `effective_fov_deg`, with a local fallback for older servers.
   - Optional `info.driver` / `info.backend` and `info.capabilities` describe backend capabilities. V4L2 RAW uses OGScope software AE while preserving the same RGB888, frame-identity, and solve contracts. Failed hardware-control readback may leave `info.actual_exposure_us` / `info.actual_analogue_gain` as `null`.
