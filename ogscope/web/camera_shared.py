@@ -72,6 +72,7 @@ class CameraManager:
             getattr(settings, "preview_encoder", "auto"),
             hardware_device=getattr(settings, "preview_hardware_encoder_device", ""),
         )
+        self._preview_encoder_requested = getattr(settings, "preview_encoder", "auto")
         self._preview_pipeline_enabled = bool(
             getattr(settings, "preview_pipeline_enabled", False)
         )
@@ -242,6 +243,10 @@ class CameraManager:
         camera = create_camera(config)
         if camera and camera.initialize():
             return camera
+        if camera and getattr(camera, "requires_service_restart", False):
+            self._mark_restart_required(
+                "ISP 资源未能安全关闭，需重启服务 / ISP cleanup failed; service restart required"
+            )
         return None
 
     def _encode_preview_jpeg_sync(
@@ -871,12 +876,14 @@ class CameraManager:
 
     async def status(self) -> dict[str, Any]:
         cam = self._camera
+        configured_backend = self._build_base_config()["type"]
         if cam is None:
             return {
                 "connected": False,
                 "streaming": False,
                 "error": self._health_error or "相机未初始化 / Camera not initialized",
                 "restart_required": bool(self._restart_required),
+                "configured_backend": configured_backend,
                 "runtime_overrides": self._runtime_overrides,
             }
         initialized = bool(getattr(cam, "is_initialized", False))
@@ -907,6 +914,7 @@ class CameraManager:
                 "streaming": False,
                 "error": reason,
                 "restart_required": bool(self._restart_required),
+                "configured_backend": configured_backend,
                 "runtime_overrides": self._runtime_overrides,
             }
         info = await asyncio.to_thread(cam.get_camera_info)
@@ -915,6 +923,7 @@ class CameraManager:
             "streaming": capturing and (has_successful_capture or within_grace),
             "restart_required": False,
             "info": info,
+            "configured_backend": configured_backend,
             "runtime_overrides": self._runtime_overrides,
         }
 
@@ -1199,6 +1208,7 @@ class CameraManager:
             ),
             "jpeg_variant_cached_bytes": variant_bytes,
             "preview_encoder": self._last_jpeg_encoder,
+            "preview_encoder_requested": self._preview_encoder_requested,
             "preview_pipeline_enabled": self._preview_pipeline_enabled,
             "hardware_encoder_error": getattr(self._preview_encoder, "error", None),
             "jpeg_encode_failures": int(self._jpeg_encode_failures),

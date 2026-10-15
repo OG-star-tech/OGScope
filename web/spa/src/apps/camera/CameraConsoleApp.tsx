@@ -83,6 +83,7 @@ type CameraInfo = {
   };
   driver?: string;
   backend?: string;
+  image_processing?: { requested?: string; effective?: string; error?: string | null; fallback_active?: boolean };
   rotation?: number;
   flip_horizontal?: boolean;
   flip_vertical?: boolean;
@@ -98,6 +99,7 @@ type CameraStatus = {
   streaming?: boolean;
   recording?: boolean;
   camera_ready?: boolean;
+  configured_backend?: string;
   info?: CameraInfo;
   runtime_overrides?: Record<string, unknown>;
 };
@@ -116,6 +118,8 @@ type StreamMetrics = {
   jpeg_average_encode_ms?: number;
   jpeg_cached_bytes?: number;
   preview_encoder?: string;
+  preview_encoder_requested?: string;
+  hardware_encoder_error?: string | null;
   jpeg_encode_failures?: number;
   jpeg_source_format?: string;
   camera_driver?: string;
@@ -2048,6 +2052,21 @@ export function CameraConsoleApp() {
               <div className="rounded border border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-left">
                 <span className="text-on-surface-variant">{t("cam.stats.driver")}: </span>
                 <span className="font-mono">{String(status?.info?.driver ?? streamMetrics?.camera_driver ?? "—")}</span>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {`${locale === "zh" ? "配置后端" : "Configured backend"}: ${status?.configured_backend ?? "—"}`}
+                </p>
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {`${locale === "zh" ? "色彩处理（配置 → 实际）" : "Color processing (requested → effective)"}: ${status?.info?.image_processing?.requested ?? "—"} → ${status?.info?.image_processing?.effective ?? "—"}`}
+                </p>
+                {status?.info?.image_processing?.error && <p className="mt-0.5 break-all text-[10px] leading-tight text-error" role="status">
+                  {`${locale === "zh" ? "ISP 状态" : "ISP status"}: ${status.info.image_processing.error}`}
+                </p>}
+                <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
+                  {`${locale === "zh" ? "编码（配置 → 实际）" : "Encoding (requested → effective)"}: ${streamMetrics?.preview_encoder_requested ?? "—"} → ${streamMetrics?.preview_encoder ?? "—"}`}
+                </p>
+                {streamMetrics?.hardware_encoder_error && <p className="mt-0.5 break-all text-[10px] leading-tight text-error" role="status">
+                  {`${locale === "zh" ? "编码回退" : "Encoder fallback"}: ${streamMetrics.hardware_encoder_error}`}
+                </p>}
                 <p className="mt-0.5 text-[10px] leading-tight text-on-surface-variant/90">
                   {`${status?.info?.backend ?? streamMetrics?.camera_backend ?? "—"} · lores ${status?.info?.lores_available || streamMetrics?.lores_available ? "on" : "off"}`}
                 </p>

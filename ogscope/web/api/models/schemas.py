@@ -555,6 +555,7 @@ class CoreCameraStatusResponse(BaseModel):
     connected: bool
     streaming: bool
     recording: bool
+    configured_backend: Optional[str] = None
     info: dict[str, Any] = Field(default_factory=dict)
     ambient_hint: dict[str, Any] = Field(default_factory=dict)
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
@@ -590,6 +591,7 @@ class CoreStreamStatusResponse(BaseModel):
     jpeg_variant_cached_bytes: int = 0
     jpeg_cached_bytes: int = 0
     preview_encoder: str = ""
+    preview_encoder_requested: str = ""
     preview_pipeline_enabled: bool = False
     hardware_encoder_error: Optional[str] = None
     jpeg_encode_failures: int = 0

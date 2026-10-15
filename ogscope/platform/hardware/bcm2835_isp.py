@@ -84,6 +84,10 @@ def set_controls(fd: int, settings: dict[int, int | bytes]) -> None:
     ioctl(fd, 72, _Controls(count=len(settings), controls=controls))
 
 
+class IspCleanupError(RuntimeError):
+    """ISP 资源状态不明，禁止回退后继续使用硬件 / Unknown ISP resource state requires recovery."""
+
+
 class Bcm2835Isp:
     """显式选择的 ISP：单帧输入、独立 RGB 输出 / Opt-in ISP with one-frame input and owned RGB output."""
 
@@ -137,7 +141,12 @@ class Bcm2835Isp:
                 self.output.queue(i)
             self.output.start()
         except Exception:
-            self.close()
+            try:
+                self.close()
+            except (OSError, BufferError) as cleanup_error:
+                raise IspCleanupError(
+                    "ISP cleanup failed; restart service / ISP 清理失败，需重启服务"
+                ) from cleanup_error
             raise
 
     def _configure_signal(

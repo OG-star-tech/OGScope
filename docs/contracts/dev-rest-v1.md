@@ -29,6 +29,7 @@
     - `throttle_reason`：运行时降速原因，空值表示未主动降速
     - `process_rss_kb` / `process_swap_kb` / `cma_free_kb`：低内存板排查指标
     - `preview_encoder` / `jpeg_source_format`：当前预览编码器与源格式
+    - 流状态中的 `preview_encoder_requested` / `hardware_encoder_error`：请求的编码器与硬件回退原因；相机状态中的 `configured_backend`、`info.image_processing.requested/effective/error`：实际选定后端与处理策略，供相机页对照显示
     - `camera_driver` / `camera_backend`：相机驱动与后端
     - `lores_enabled` / `lores_available` / `lores_width` / `lores_height` / `lores_format`：低分辨率支路状态
     - V4L2 RAW 后端额外提供 `capabilities.software_auto_exposure`、`ae_state`、`luminance_stats`、`signal_levels`、`control_readback`、`capture_format` 与 `media_pipeline`；回读失败时 `actual_exposure_us` / `actual_analogue_gain` 为 `null`，不得用请求值冒充实测值
