@@ -281,12 +281,14 @@ class DebugCameraService:
                 "streaming": False,
                 "recording": is_recording,
                 "error": status.get("error") or "相机未初始化",
+                "configured_backend": status.get("configured_backend"),
             }
         return {
             "connected": bool(status.get("connected")),
             "streaming": bool(status.get("streaming")),
             "recording": is_recording,
             "info": status.get("info", {}),
+            "configured_backend": status.get("configured_backend"),
             "runtime_overrides": status.get("runtime_overrides", {}),
         }
 
