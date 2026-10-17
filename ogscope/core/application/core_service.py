@@ -104,6 +104,7 @@ class CoreContractService:
             "connected": bool(status.get("connected", False)),
             "streaming": streaming,
             "recording": bool(status.get("recording", False)),
+            "configured_backend": status.get("configured_backend"),
             "info": info,
             "ambient_hint": CoreContractService._build_ambient_hint(
                 info,

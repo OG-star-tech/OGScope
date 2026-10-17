@@ -97,14 +97,15 @@ def _ready_camera(**extra: object) -> V4L2RawCamera:
 
 
 @pytest.mark.unit
-def test_picamera2_remains_the_product_default(tmp_path) -> None:
+def test_cpu_v4l2_is_the_new_install_default(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "data",
         upload_dir=tmp_path / "uploads",
         analysis_dir=tmp_path / "analysis",
     )
 
-    assert settings.camera_type == "imx327_mipi"
+    assert settings.camera_type == "v4l2"
+    assert settings.camera_v4l2_processing == "software"
 
 
 @pytest.mark.unit

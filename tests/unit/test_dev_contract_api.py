@@ -58,3 +58,34 @@ def test_dev_hardware_plane_metrics_include_profile(client) -> None:
 def test_legacy_debug_path_not_exposed(client) -> None:
     resp = client.get("/api/debug/camera/status")
     assert resp.status_code in {404, 405}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("accelerated", [False, True])
+def test_stream_status_keeps_acceleration_diagnostics(client, monkeypatch, accelerated):
+    """HTTP 响应不可丢失加速诊断，兼容旧指标 / Preserve acceleration diagnostics over HTTP and accept legacy metrics."""
+    from ogscope.web.api.debug import routes
+
+    async def status():
+        data = {
+            "success": True,
+            "max_clients": 2,
+            "active_clients": 1,
+            "frame_fetch_timeout_ms": 20000,
+            "target_preview_fps": 8,
+        }
+        if accelerated:
+            data.update(
+                preview_pipeline_enabled=True,
+                hardware_encoder_error="codec unavailable",
+            )
+        return data
+
+    monkeypatch.setattr(routes.core_contract_service, "get_stream_status", status)
+    response = client.get("/api/dev/debug/camera/stream/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview_pipeline_enabled"] is accelerated
+    assert body["hardware_encoder_error"] == (
+        "codec unavailable" if accelerated else None
+    )

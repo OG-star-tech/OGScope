@@ -21,6 +21,8 @@ English | [中文](README.md)
 - [Plate-solve data](development/plate-solve-data.md) (inline bilingual sections)
 - [Service stability / memory](development/ogscope-service-hardening.md) (inline bilingual sections)
 - [V4L2 RAW camera and night-sky software AE](development/v4l2-auto-exposure.md) (inline bilingual sections)
+- [Camera deployment profiles and acceptance](development/camera-deployment-profiles.md) (inline bilingual sections)
+- [Camera hardware ISP, transforms and encoding experiment](development/camera-hardware-acceleration.md) (inline bilingual sections)
 - [Hardware BOM](hardware/bom_EN.md) | [中文](hardware/bom.md)
 
 ### C API and quality

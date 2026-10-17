@@ -98,6 +98,9 @@ class IMX327MIPICamera(CameraInterface):
         self._lores_available = False
         self._last_lores_stats: dict[str, Any] = {}
         self._pending_capture_job = None
+        self._hardware_flips = (False, False)
+        self._pending_hardware_flips = (False, False)
+        self._transform_error: str | None = None
         self.tuning_file = (
             Path(str(config["tuning_file"])).expanduser()
             if config.get("tuning_file")
@@ -530,6 +533,26 @@ class IMX327MIPICamera(CameraInterface):
             "size": (self.capture_width, self.capture_height),
             "format": self.PICAMERA_MAIN_FORMAT,
         }
+        extra = {}
+        self._pending_hardware_flips = (False, False)
+        if self.config.get("hardware_transform", False):
+            from ogscope.domain.camera.geometry import hardware_flips
+
+            desired = hardware_flips(
+                self.rotation, self.flip_horizontal, self.flip_vertical
+            )
+            try:
+                from libcamera import Transform
+
+                if desired is not None and callable(
+                    getattr(self.camera, "camera_configuration", None)
+                ):
+                    extra["transform"] = Transform(hflip=desired[0], vflip=desired[1])
+                    self._pending_hardware_flips = desired
+                else:
+                    self._transform_error = "hardware supports only 0/180 degrees"
+            except ImportError:
+                self._transform_error = "libcamera.Transform unavailable"
         if self.lores_enabled:
             try:
                 cfg = self.camera.create_video_configuration(
@@ -539,6 +562,7 @@ class IMX327MIPICamera(CameraInterface):
                         "format": self.lores_format,
                     },
                     buffer_count=self.PREVIEW_BUFFER_COUNT,
+                    **extra,
                 )
                 self._lores_available = True
                 return cfg
@@ -548,9 +572,45 @@ class IMX327MIPICamera(CameraInterface):
                     "lores 流不可用，回退主流配置 / Lores unavailable, fallback: %s", e
                 )
         self._lores_available = False
-        return self.camera.create_video_configuration(
-            main=main,
-            buffer_count=self.PREVIEW_BUFFER_COUNT,
+        try:
+            return self.camera.create_video_configuration(
+                main=main,
+                buffer_count=self.PREVIEW_BUFFER_COUNT,
+                **extra,
+            )
+        except TypeError:
+            if not extra:
+                raise
+            self._pending_hardware_flips = (False, False)
+            self._transform_error = "transform argument unsupported; using software"
+            return self.camera.create_video_configuration(
+                main=main,
+                buffer_count=self.PREVIEW_BUFFER_COUNT,
+            )
+
+    def _confirm_hardware_transform(self) -> None:
+        """只认配置回读，避免重复旋转 / Trust configured transform readback, avoiding double rotation."""
+        if not self.config.get("hardware_transform", False):
+            self._hardware_flips = (False, False)
+            return
+        getter = getattr(self.camera, "camera_configuration", None)
+        actual = getter().get("transform") if callable(getter) else None
+        if (
+            actual is None
+            or not hasattr(actual, "hflip")
+            or not hasattr(actual, "vflip")
+        ):
+            if not any(self._pending_hardware_flips):
+                self._hardware_flips = (False, False)
+                return
+            raise RuntimeError(
+                "Cannot verify configured hardware transform / 无法确认硬件方向"
+            )
+        self._hardware_flips = (bool(actual.hflip), bool(actual.vflip))
+        self._transform_error = (
+            None
+            if self._hardware_flips == self._pending_hardware_flips
+            else "requested transform adjusted by libcamera"
         )
 
     @staticmethod
@@ -1073,6 +1133,7 @@ class IMX327MIPICamera(CameraInterface):
             camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
+            self._confirm_hardware_transform()
 
             # 设置相机控制参数 / Set camera control parameters
             # 构建控制参数，兼容部分固件未提供 DigitalGain 的情况 / Build control parameters, compatible with some firmwares that do not provide DigitalGain
@@ -1268,11 +1329,15 @@ class IMX327MIPICamera(CameraInterface):
             except Exception as e:
                 logger.warning(f"输出重采样失败（忽略，使用原图）: {e}")
 
-            # 应用旋转 / Apply rotation
-            if self.rotation != 0:
-                image = self.apply_rotation(image, self.rotation)
+            from ogscope.domain.camera.geometry import apply_geometry
 
-            image = self._apply_flip(image)
+            image = apply_geometry(
+                image,
+                self.rotation,
+                self.flip_horizontal,
+                self.flip_vertical,
+                self._hardware_flips,
+            )
 
             # 应用颜色模式转换 / Apply color mode conversion
             if self.color_mode == "mono" and len(image.shape) == 3:
@@ -1299,14 +1364,9 @@ class IMX327MIPICamera(CameraInterface):
     def apply_rotation(self, image: np.ndarray, rotation: int) -> np.ndarray:
         """应用图像旋转 / Apply image rotation"""
         try:
-            if rotation == 90:
-                return np.rot90(image, 1)
-            elif rotation == 180:
-                return np.rot90(image, 2)
-            elif rotation == 270:
-                return np.rot90(image, 3)
-            else:
-                return image
+            from ogscope.domain.camera.geometry import apply_geometry
+
+            return apply_geometry(image, rotation, False, False)
         except Exception as e:
             logger.error(f"图像旋转失败: {e}")
             return image
@@ -1384,6 +1444,7 @@ class IMX327MIPICamera(CameraInterface):
                 try:
                     video_config = self._create_video_configuration()
                     self.camera.configure(video_config)
+                    self._confirm_hardware_transform()
                 except Exception:
                     still_cfg = self.camera.create_still_configuration(
                         main={
@@ -1392,6 +1453,7 @@ class IMX327MIPICamera(CameraInterface):
                         }
                     )
                     self.camera.configure(still_cfg)
+                    self._hardware_flips = (False, False)
             try:
                 self._apply_frame_duration_controls()
             except Exception:
@@ -1588,6 +1650,7 @@ class IMX327MIPICamera(CameraInterface):
             try:
                 video_config = self._create_video_configuration()
                 self.camera.configure(video_config)
+                self._confirm_hardware_transform()
             except Exception:
                 still_cfg = self.camera.create_still_configuration(
                     main={
@@ -1596,6 +1659,7 @@ class IMX327MIPICamera(CameraInterface):
                     }
                 )
                 self.camera.configure(still_cfg)
+                self._hardware_flips = (False, False)
 
             try:
                 self._apply_frame_duration_controls()
@@ -1634,6 +1698,17 @@ class IMX327MIPICamera(CameraInterface):
             return {
                 "driver": self.driver_name,
                 "backend": self.backend_name,
+                "image_processing": {
+                    "requested": "libcamera",
+                    "effective": "libcamera_isp",
+                    "error": None,
+                },
+                "hardware_transform": {
+                    "requested": bool(self.config.get("hardware_transform", False)),
+                    "horizontal_flip": self._hardware_flips[0],
+                    "vertical_flip": self._hardware_flips[1],
+                    "error": self._transform_error,
+                },
                 "capabilities": capabilities,
                 "sensor": camera_properties.get("Model", "Unknown"),
                 "optics": optics,
@@ -1988,6 +2063,7 @@ class IMX327MIPICamera(CameraInterface):
             camera_config = self._create_video_configuration()
 
             self.camera.configure(camera_config)
+            self._confirm_hardware_transform()
             try:
                 self._apply_white_balance_controls()
                 self._apply_noise_reduction_controls()
@@ -2032,5 +2108,5 @@ class CameraFactory:
 # 兼容性函数，用于平滑迁移 / Compatibility function for smooth migration
 def create_camera(config: dict[str, Any]) -> Optional[CameraInterface]:
     """创建相机的便捷函数 / Convenience functions for creating cameras"""
-    camera_type = config.get("type", "imx327_mipi")
+    camera_type = config.get("type", "v4l2")
     return CameraFactory.create_camera(camera_type, config)
