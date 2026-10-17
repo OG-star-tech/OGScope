@@ -119,7 +119,8 @@ sudo apt install -y \
     build-essential \
     network-manager \
     avahi-daemon \
-    i2c-tools
+    i2c-tools \
+    v4l-utils
 _apt_pause
 
 # I²C：用户组 + 固件 dtparam（i2c-tools 已随上表安装）/ I2C group + boot dtparam (i2c-tools installed above)
@@ -274,6 +275,7 @@ fi
 
 OGSCOPE_ENV_DIR="/etc/ogscope"
 OGSCOPE_ENV_FILE="${OGSCOPE_ENV_DIR}/ogscope.env"
+ogscope_pin_legacy_camera_backend "${OGSCOPE_ENV_FILE}"
 echo "📝 写入主配置文件 / Writing primary config: ${OGSCOPE_ENV_FILE}"
 sudo install -d -m 755 "${OGSCOPE_ENV_DIR}"
 if [ ! -f "${OGSCOPE_ENV_FILE}" ]; then
@@ -284,6 +286,8 @@ OGSCOPE_PORT=8000
 OGSCOPE_RELOAD=false
 OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE_VALUE}
 OGSCOPE_LOG_LEVEL=${OGSCOPE_LOG_LEVEL_VALUE}
+OGSCOPE_CAMERA_TYPE=${OGSCOPE_CAMERA_TYPE:-v4l2}
+OGSCOPE_CAMERA_V4L2_PROCESSING=${OGSCOPE_CAMERA_V4L2_PROCESSING:-software}
 EOF
     sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
     sudo chmod 640 "${OGSCOPE_ENV_FILE}"

@@ -2,12 +2,12 @@
 
 ## 产品边界 / Product boundary
 
-- 默认相机后端保持 `imx327_mipi`，使用 Picamera2/libcamera 的 ISP 与 AEC/AGC。
-- `v4l2` 是显式选择的 RAW 后端，不得在缺少曝光和模拟增益控件时启动。
+- 新安装默认 `v4l2` + CPU；已有 Picamera2 部署显式保留 `imx327_mipi`，使用 libcamera 的 ISP 与 AEC/AGC。参见[三种部署方案](camera-deployment-profiles.md)。
+- `v4l2` 不得在缺少曝光和模拟增益控件时启动；ISP 是独立选择的处理方式。
 - `auto_exposure=true` 在 V4L2 下表示 OGScope 软件闭环，不代表内核或 OpenCV 提供 AE。
 
-- The default backend remains `imx327_mipi`, using Picamera2/libcamera ISP and AEC/AGC.
-- `v4l2` is an explicit RAW backend and must fail initialization without exposure and analogue-gain controls.
+- New installations default to `v4l2` + CPU. Existing Picamera2 installations explicitly retain `imx327_mipi` and libcamera ISP/AEC/AGC. See [deployment profiles](camera-deployment-profiles.md).
+- V4L2 must fail initialization without exposure and analogue-gain controls; ISP processing is selected independently.
 - With V4L2, `auto_exposure=true` means the OGScope software loop, not kernel or OpenCV AE.
 
 显式启用：

@@ -121,6 +121,7 @@ fi
 
 echo "📦 I²C 主机依赖（与 install.sh 对齐）/ I2C host setup (aligned with install.sh)..."
 sudo apt update -qq
+sudo apt install -y v4l-utils
 ogscope_install_camera_stack_if_needed
 ogscope_i2c_host_setup_full 1
 
@@ -131,6 +132,7 @@ ogscope_ensure_systemd_primary_envfile "${SERVICE_PATH}"
 
 OGSCOPE_ENV_DIR="/etc/ogscope"
 OGSCOPE_ENV_FILE="${OGSCOPE_ENV_DIR}/ogscope.env"
+ogscope_pin_legacy_camera_backend "${OGSCOPE_ENV_FILE}"
 if [ ! -f "${OGSCOPE_ENV_FILE}" ]; then
     echo "📝 初始化主配置 / Initializing primary config: ${OGSCOPE_ENV_FILE}"
     sudo install -d -m 755 "${OGSCOPE_ENV_DIR}"
@@ -146,6 +148,8 @@ OGSCOPE_PORT=8000
 OGSCOPE_RELOAD=false
 OGSCOPE_DEVELOPMENT_MODE=${OGSCOPE_DEVELOPMENT_MODE:-0}
 OGSCOPE_LOG_LEVEL=${_update_log_level}
+OGSCOPE_CAMERA_TYPE=${OGSCOPE_CAMERA_TYPE:-v4l2}
+OGSCOPE_CAMERA_V4L2_PROCESSING=${OGSCOPE_CAMERA_V4L2_PROCESSING:-software}
 EOF
     sudo chown "root:${USER}" "${OGSCOPE_ENV_FILE}" 2>/dev/null || true
     sudo chmod 640 "${OGSCOPE_ENV_FILE}"
