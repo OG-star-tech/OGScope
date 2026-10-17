@@ -16,6 +16,16 @@ CPU 模式仍要求可工作的 RAW 驱动、格式及曝光/增益控件；不�
 
 CPU mode still requires working RAW capture, formats and exposure/gain controls; it is not a universal USB-camera adapter. Direct ISP currently supports BCM2835 only. See [hardware acceleration requirements](camera-hardware-acceleration.md).
 
+## 交付清单 / Distribution contents
+
+三份 `deploy/camera/*.env` 模板同时进入 wheel 和源码包。BSP 从源码构建时也必须保留它们，放在可查阅的配置示例目录；不要自动把模板整份覆盖设备持久配置。`imx327.json` 随 Python 包交付；V4L2 不读取 Picamera2 的 tuning。静态相机控制台需要与后端一起构建／交付。
+
+The wheel and source distribution include all three camera templates. BSP builds must install accessible examples too, without overwriting device configuration. The Python package retains imx327.json; V4L2 does not use Picamera2 tuning. Build and ship the matching camera console with the backend.
+
+本次为室内验收的临时测试版：硬件 JPEG 不作为依赖，使用 TurboJPEG/OpenCV。保留既有开发板已验证的明确配置，新安装默认兼容模式。真实星空精度与主相机长曝光验收单列，不把历史测速当成新组合版本的验收结果。
+
+This temporary preview uses software JPEG and preserves explicit verified board choices; only new installations default to compatibility mode. Real-sky geometry and main-camera tracking remain separate acceptance gates. Historical performance numbers are not acceptance of a newly integrated build.
+
 ## 配置与升级 / Configuration and upgrades
 
 1. 选择一份模板，将相机相关键合并到现有持久配置，保留路径、网络、星库、硬件平面与服务配置。模板中的尺寸/帧率是新安装参考值；升级时保留现有值，除非明确要修改。
