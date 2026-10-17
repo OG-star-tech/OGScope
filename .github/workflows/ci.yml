@@ -38,6 +38,26 @@ jobs:
     - name: 安装依赖
       run: poetry install --no-interaction --no-root
 
+    - name: 验证配置模板与 tuning 随包交付 / Verify packaged camera configuration
+      run: |
+        poetry build --format wheel
+        poetry run python - <<'PY'
+        from pathlib import Path
+        from zipfile import ZipFile
+
+        expected = {
+            "deploy/camera/compatibility.env",
+            "deploy/camera/isp.env",
+            "deploy/camera/picamera2.env",
+            "ogscope/platform/hardware/tuning/imx327.json",
+            "ogscope/platform/hardware/bcm2835_isp.py",
+            "ogscope/domain/camera/white_balance.py",
+        }
+        with ZipFile(next(Path("dist").glob("*.whl"))) as archive:
+            missing = expected - set(archive.namelist())
+        assert not missing, f"Missing delivery files / 缺少交付文件: {sorted(missing)}"
+        PY
+
     - name: 设置 Node.js
       uses: actions/setup-node@v4
       with:
