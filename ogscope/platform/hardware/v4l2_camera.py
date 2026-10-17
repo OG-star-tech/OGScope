@@ -25,6 +25,7 @@ from ogscope.domain.camera.auto_exposure import (
     measure_luminance,
 )
 from ogscope.domain.camera.driver import CameraCapabilities
+from ogscope.domain.camera.geometry import apply_geometry, hardware_flips
 from ogscope.domain.camera.white_balance import (
     BAYER_CHANNELS,
     COLOR_PIPELINE_VERSION,
@@ -90,6 +91,13 @@ class V4L2RawCamera:
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
+        self._isp = None
+        self._isp_mode = str(config.get("v4l2_processing", "software"))
+        self._isp_error: str | None = None
+        self.requires_service_restart = False
+        self._hardware_flips = (False, False)
+        self._original_sensor_flips: dict[str, int] | None = None
+        self._transform_error: str | None = None
         self.driver_name = "v4l2-imx327-software-ae"
         self.backend_name = "opencv/v4l2-raw"
         self.output_pixel_format = "RGB888"
@@ -460,6 +468,8 @@ class V4L2RawCamera:
             fields = {
                 key: int(value) for key, value in self._VALUE_RE.findall(match.group(2))
             }
+            if "(bool)" in line:
+                fields.update(min=0, max=1)
             if "min" not in fields or "max" not in fields:
                 continue
             ranges[match.group(1)] = V4L2ControlRange(
@@ -479,6 +489,97 @@ class V4L2RawCamera:
             )
             return False
         return True
+
+    def _configure_hardware_transform(self) -> None:
+        """核对传感器翻转和 Bayer 顺序，失败则恢复 / Verify sensor flips and Bayer order, restoring on failure."""
+        names = ("horizontal_flip", "vertical_flip")
+        if not all(name in self._control_ranges for name in names):
+            self._transform_error = "sensor flip controls unavailable"
+            return
+        original = self._read_controls(*names)
+        if not all(name in original for name in names):
+            self._transform_error = "sensor flip readback unavailable"
+            return
+        self._original_sensor_flips = original
+        desired = hardware_flips(
+            self.rotation, self.flip_horizontal, self.flip_vertical
+        )
+        if not self.config.get("hardware_transform", False) or desired is None:
+            desired = (False, False)
+        target = dict(zip(names, map(int, desired)))
+        try:
+            result = self._run_v4l2(
+                "--set-ctrl=" + ",".join(f"{k}={v}" for k, v in target.items())
+            )
+            if result.returncode or self._read_controls(*names) != target:
+                raise OSError("sensor flip readback mismatch")
+            if any(desired):
+                result = subprocess.run(
+                    [
+                        "media-ctl",
+                        "-d",
+                        self.media_device,
+                        "--get-v4l2",
+                        f'"{self.sensor_entity}":{self.sensor_pad}',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False,
+                )
+                # 仅使用明确保持 Bayer 格式的传感器；不能凭旋转角度猜颜色相位。
+                # Only accept a verified unchanged Bayer format, never guess color phase from rotation.
+                if (
+                    result.returncode
+                    or f"fmt:{self.media_bus_format}/" not in result.stdout
+                ):
+                    raise OSError("sensor flip changes/unverifies Bayer format")
+            self._hardware_flips = desired
+            self._transform_error = None
+        except Exception as exc:
+            self._transform_error = str(exc)
+            reset = self._run_v4l2("--set-ctrl=horizontal_flip=0,vertical_flip=0")
+            if reset.returncode or self._read_controls(*names) != dict.fromkeys(
+                names, 0
+            ):
+                raise OSError(
+                    "Cannot safely restore software geometry / 无法恢复软件方向"
+                ) from exc
+            self._hardware_flips = (False, False)
+
+    def _initialize_isp(self) -> None:
+        """ISP 显式启用，auto 失败回退，required 失败停止 / Opt-in ISP: auto falls back, required fails closed."""
+        if self._isp_mode == "software":
+            return
+        from ogscope.platform.hardware.bcm2835_isp import Bcm2835Isp, IspCleanupError
+
+        try:
+            self._isp = Bcm2835Isp(
+                self.active_width,
+                self.active_height,
+                pattern=self.bayer_pattern,
+                bit_depth=self.bit_depth,
+                black=self.black_level,
+                white=self.white_level,
+                gamma=self.gamma,
+                input_device=str(
+                    self.config.get("v4l2_isp_input_device", "/dev/video13")
+                ),
+                output_device=str(
+                    self.config.get("v4l2_isp_output_device", "/dev/video14")
+                ),
+                timeout=float(self.config.get("v4l2_isp_timeout_sec", 2)),
+            )
+            self._isp_error = None
+        except Exception as exc:
+            self._isp_error = str(exc)
+            if isinstance(exc, IspCleanupError):
+                self.requires_service_restart = True
+            if self._isp_mode == "bcm2835_isp" or self.requires_service_restart:
+                raise
+            logger.warning(
+                "ISP 不可用，回退 CPU / ISP unavailable, falling back to CPU: %s", exc
+            )
 
     def _read_controls(self, *names: str) -> dict[str, int]:
         """一次读取多个整数控件 / Read multiple integer controls in one call."""
@@ -760,6 +861,7 @@ class V4L2RawCamera:
                 return False
             if not self._discover_control_ranges():
                 return False
+            self._configure_hardware_transform()
             self._resolve_line_duration()
             self._resolve_signal_levels()
             self._gamma_lut = self._build_gamma_lut()
@@ -767,10 +869,11 @@ class V4L2RawCamera:
             self._ae = self._create_auto_exposure()
             self._ae.set_enabled(enabled)
             if not self._apply_exposure_gain(self.exposure_us, self.analogue_gain):
-                return False
+                raise OSError("Exposure setup failed / 曝光初始化失败")
             self._capture = self._create_capture()
             if self._capture is None:
-                return False
+                raise OSError("RAW capture setup failed / RAW 抓帧初始化失败")
+            self._initialize_isp()
             self._trace.start(
                 {
                     "driver": self.driver_name,
@@ -893,7 +996,39 @@ class V4L2RawCamera:
     def close(self) -> bool:
         """释放 V4L2 视频节点 / Release the V4L2 video node."""
         self._trace.close()
-        released = self.stop_capture()
+        released = self.stop_capture() and not self.requires_service_restart
+        if self._isp is not None:
+            isp = self._isp
+            self._isp = None
+            try:
+                isp.close()
+            except (OSError, BufferError) as exc:
+                # ISP 清理失败也必须恢复传感器并关闭软件工作线程。
+                # Restore sensor controls and close software workers even if ISP cleanup fails.
+                released = False
+                logger.warning("ISP 关闭失败 / ISP close failed: %s", exc)
+        if self._original_sensor_flips is not None:
+            try:
+                restored = self._run_v4l2(
+                    "--set-ctrl="
+                    + ",".join(
+                        f"{k}={v}" for k, v in self._original_sensor_flips.items()
+                    )
+                )
+                if (
+                    restored.returncode
+                    or self._read_controls(*self._original_sensor_flips)
+                    != self._original_sensor_flips
+                ):
+                    released = False
+                    logger.warning(
+                        "传感器翻转恢复未通过回读 / Sensor flip restoration did not pass readback"
+                    )
+            except (OSError, subprocess.TimeoutExpired):
+                released = False
+                logger.warning("恢复传感器翻转失败 / Failed to restore sensor flips")
+            self._original_sensor_flips = None
+        self._hardware_flips = (False, False)
         self.is_initialized = False
         if self._gamma_pool is not None:
             self._gamma_pool.shutdown(wait=True)
@@ -1161,22 +1296,13 @@ class V4L2RawCamera:
             rgb8 = cv2.resize(
                 rgb8, (self.width, self.height), interpolation=cv2.INTER_AREA
             )
-        if self.rotation in {90, 180, 270}:
-            # 保持原来的逆时针角度，用 OpenCV 避免负步长 RGB 的逐像素复制。
-            # Preserve counter-clockwise angles without the slow negative-stride RGB copy.
-            rotations = {
-                90: cv2.ROTATE_90_COUNTERCLOCKWISE,
-                180: cv2.ROTATE_180,
-                270: cv2.ROTATE_90_CLOCKWISE,
-            }
-            rgb8 = cv2.rotate(rgb8, rotations[self.rotation])
-        if self.flip_horizontal and self.flip_vertical:
-            rgb8 = cv2.flip(rgb8, -1)
-        elif self.flip_horizontal:
-            rgb8 = cv2.flip(rgb8, 1)
-        elif self.flip_vertical:
-            rgb8 = cv2.flip(rgb8, 0)
-        return np.ascontiguousarray(rgb8)
+        return apply_geometry(
+            rgb8,
+            self.rotation,
+            self.flip_horizontal,
+            self.flip_vertical,
+            self._hardware_flips,
+        )
 
     def _apply_temporal_nr(self, raw: np.ndarray) -> np.ndarray:
         """在线性 RAW 域做时域指数滑动平均降噪 / Temporal exponential-moving-
@@ -1275,6 +1401,8 @@ class V4L2RawCamera:
         """抓取一帧并推进软件 AE / Capture one frame and advance software AE."""
         if not self.is_initialized or not self.is_capturing or self._capture is None:
             return None
+        if self.requires_service_restart:
+            return None
         try:
             capture = self._capture
             ok, frame = capture.read()
@@ -1288,7 +1416,33 @@ class V4L2RawCamera:
             # AE behaviour unchanged.
             self._observe_auto_exposure(raw)
             denoised = self._apply_temporal_nr(raw)
-            return self._apply_postprocessing(self._debayer(denoised))
+            if self._isp is not None:
+                try:
+                    rgb = self._isp.process(denoised, self._white_balance_gains())
+                except Exception as exc:
+                    self._isp_error = str(exc)
+                    isp = self._isp
+                    self._isp = None
+                    try:
+                        isp.close()
+                    except (OSError, BufferError) as cleanup_error:
+                        self.requires_service_restart = True
+                        self._isp_error = f"{exc}; cleanup failed: {cleanup_error}"
+                        logger.warning(
+                            "ISP 清理失败 / ISP cleanup failed: %s", cleanup_error
+                        )
+                        raise
+                    if self._isp_mode == "bcm2835_isp":
+                        raise
+                    logger.warning(
+                        "ISP 运行失败，回退 CPU / ISP failed; CPU fallback: %s", exc
+                    )
+                    rgb = self._debayer(denoised)
+            else:
+                if self._isp_mode == "bcm2835_isp" and self._isp_error:
+                    return None
+                rgb = self._debayer(denoised)
+            return self._apply_postprocessing(rgb)
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
@@ -1488,6 +1642,35 @@ class V4L2RawCamera:
         return {
             "driver": self.driver_name,
             "backend": self.backend_name,
+            "image_processing": {
+                "requested": self._isp_mode,
+                "effective": (
+                    "bcm2835_isp"
+                    if self._isp is not None
+                    else (
+                        "unavailable"
+                        if self.requires_service_restart
+                        or (self._isp_mode == "bcm2835_isp" and self._isp_error)
+                        else "software"
+                    )
+                ),
+                "fallback_active": self._isp_mode == "auto"
+                and self._isp is None
+                and not self.requires_service_restart
+                and self._isp_error is not None,
+                "restart_required": self.requires_service_restart,
+                "error": self._isp_error,
+                "frames_processed": self._isp.frames if self._isp else 0,
+                "last_process_ms": (
+                    round(self._isp.last_process_ms, 2) if self._isp else None
+                ),
+            },
+            "hardware_transform": {
+                "requested": bool(self.config.get("hardware_transform", False)),
+                "horizontal_flip": self._hardware_flips[0],
+                "vertical_flip": self._hardware_flips[1],
+                "error": self._transform_error,
+            },
             "sensor": "IMX327",
             "optics": optics,
             "capabilities": {

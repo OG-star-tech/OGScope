@@ -22,6 +22,31 @@ ogscope_camera_apt_install_if_available() {
     return 2
 }
 
+ogscope_pin_legacy_camera_backend() {
+    # 老安装未写后端时曾默认 Picamera2；升级前固定选择，避免新默认值切换驱动。
+    # Legacy installs without a backend used Picamera2; pin it before the new default applies.
+    local env_path="$1"
+    if [ ! -f "${env_path}" ] || grep -Eq '^[[:space:]]*(export[[:space:]]+)?OGSCOPE_CAMERA_TYPE[[:space:]]*=' "${env_path}"; then
+        return 0
+    fi
+    local backend="${OGSCOPE_CAMERA_TYPE:-}" camera_pid=""
+    # 优先保留明确的安装选择或运行进程的选择，兼容 systemd drop-in。
+    # Preserve explicit installer/process selection, including systemd drop-ins.
+    if [ -z "${backend}" ] && command -v systemctl >/dev/null 2>&1; then
+        camera_pid="$(systemctl show ogscope.service -p MainPID --value 2>/dev/null)" || camera_pid=""
+        if [[ "${camera_pid}" =~ ^[1-9][0-9]*$ ]]; then
+            backend="$(sudo python3 -c 'import pathlib, sys; data=pathlib.Path("/proc/"+sys.argv[1]+"/environ").read_bytes().split(b"\0"); print(next((v.split(b"=",1)[1].decode() for v in data if v.startswith(b"OGSCOPE_CAMERA_TYPE=")), ""))' "${camera_pid}" 2>/dev/null)" || backend=""
+        fi
+    fi
+    backend="$(printf '%s' "${backend:-imx327_mipi}" | tr '[:upper:]' '[:lower:]')"
+    case "${backend}" in
+        v4l2|v4l2_raw|linuxpy_v4l2|v4l2_linuxpy) backend="v4l2" ;;
+        imx327_mipi|picamera2|libcamera) backend="imx327_mipi" ;;
+        *) echo "Unknown camera backend; pin it explicitly / 后端未知，请先明确配置" >&2; return 1 ;;
+    esac
+    printf '\n# 保留旧部署后端 / Preserve legacy deployment backend\nOGSCOPE_CAMERA_TYPE=%s\n' "${backend}" | sudo tee -a "${env_path}" >/dev/null
+}
+
 # 补齐树莓派 CSI 相机运行栈；增量更新也调用，避免只重装时才修复。
 # Repair Raspberry Pi CSI camera runtime; board-update calls this too, not only reinstall.
 ogscope_install_camera_stack_if_needed() {
