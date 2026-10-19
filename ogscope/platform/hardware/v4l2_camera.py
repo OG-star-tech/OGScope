@@ -160,6 +160,13 @@ class V4L2RawCamera:
         self._gamma_pool: ThreadPoolExecutor | None = None
         self._control_discard_remaining = 0
         self._controls_ready_at = 0.0
+        # 最近一次结算时刻：此前开始曝光的帧不再交出 / The last settle: a frame
+        # whose exposure began before it is never handed out.
+        self._fresh_after_mono = 0.0
+        # 结算后是否已出队过一帧新帧；队列先进先出，之后的帧只会更新 / Whether a
+        # frame newer than the settle was dequeued since; the queue is FIFO, so
+        # every later frame is newer still.
+        self._fresh_frame_seen = True
         self.white_balance_gain_r = float(config.get("white_balance_gain_r", 1.0))
         self.white_balance_gain_b = float(config.get("white_balance_gain_b", 1.0))
         self.night_mode = bool(config.get("night_mode", True))
@@ -917,6 +924,9 @@ class V4L2RawCamera:
             return False
         if self._capture is None:
             self._capture = self._create_capture()
+            # 新开的流只有此后曝光的帧 / A newly opened stream only holds
+            # frames exposed from now on.
+            self._fresh_frame_seen = True
         if self._capture is None:
             return False
         self.is_capturing = True
@@ -957,7 +967,12 @@ class V4L2RawCamera:
         frame_duration_s = max(
             1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
         )
-        self._nr_fresh_epoch_deadline_mono = time.monotonic() + frame_duration_s
+        now = time.monotonic()
+        self._nr_fresh_epoch_deadline_mono = now + frame_duration_s
+        # 队列里结算前排进去的帧也不能再交出，见 _read_fresh / Frames queued
+        # before the settle must not be handed out either, see _read_fresh.
+        self._fresh_after_mono = now
+        self._fresh_frame_seen = False
         return True
 
     def is_within_fresh_capture_epoch(self) -> bool:
@@ -1405,7 +1420,10 @@ class V4L2RawCamera:
             return None
         try:
             capture = self._capture
-            ok, frame = capture.read()
+            if self._fresh_frame_seen:
+                ok, frame = capture.read()
+            else:
+                ok, frame = self._read_fresh(capture)
             if not ok or frame is None:
                 return None
             if not self.is_capturing:
@@ -1446,6 +1464,94 @@ class V4L2RawCamera:
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
+
+    def _read_fresh(self, capture: Any) -> tuple[bool, Any]:
+        """跳过结算前开始曝光的排队帧 / Skip queued frames whose exposure began
+        before the last settle.
+
+        没人读取时相机仍在采集，驱动把空闲缓冲填满后就停下：结算后的第一次读取
+        拿到的是移动前或移动中排进队列的帧，出队时刻却像刚拍的。所以只 grab
+        （出队、不解码），由 V4L2 缓冲区时间戳（帧起始，CLOCK_MONOTONIC）减去
+        曝光得到曝光起点；没有时间戳时，等出来的帧按刚完成估算，立即返回的帧
+        当作排队的旧帧。第一帧新帧之后的帧不再检查（先进先出）。
+        The camera keeps streaming while nobody reads, and the driver stops
+        once the free buffers are full: the first read after a settle returns
+        frames queued before or during the move, which look freshly taken when
+        dequeued. So only grab (dequeue without decoding) and take each frame's
+        exposure start from its V4L2 buffer timestamp (frame start,
+        CLOCK_MONOTONIC) minus the exposure; without one, a frame the grab
+        waited for counts as just completed, and one returned at once as an old
+        queued frame. Frames after the first fresh one need no check (FIFO).
+        """
+        period_s = max(
+            1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
+        )
+        exposure_s = max(0.0, float(self.exposure_us) / 1_000_000.0)
+        deadline = (
+            time.monotonic()
+            + float(self.config.get("capture_timeout_sec", 8.0))
+            + 3.0 * (period_s + exposure_s)
+        )
+        dropped = 0
+        while self.is_capturing:
+            asked = time.monotonic()
+            if not capture.grab():
+                return False, None
+            done = time.monotonic()
+            started = self._exposure_start_mono(
+                capture, done, done - asked, period_s, exposure_s
+            )
+            if started is not None and started >= self._fresh_after_mono:
+                self._fresh_frame_seen = True
+                if dropped:
+                    logger.debug(
+                        "丢弃 %d 帧结算前的排队帧 / Dropped %d frame(s) queued "
+                        "before the settle",
+                        dropped,
+                        dropped,
+                    )
+                return capture.retrieve()
+            dropped += 1
+            if done >= deadline:
+                logger.warning(
+                    "结算后 %.1fs 内没有新帧 / No frame newer than the settle "
+                    "within %.1fs (%d dropped)",
+                    done - self._fresh_after_mono,
+                    done - self._fresh_after_mono,
+                    dropped,
+                )
+                return False, None
+        return False, None
+
+    @staticmethod
+    def _exposure_start_mono(
+        capture: Any,
+        done: float,
+        waited_s: float,
+        period_s: float,
+        exposure_s: float,
+    ) -> float | None:
+        """估算刚出队帧的曝光起点 / Estimate when a dequeued frame began exposing.
+
+        返回 None 表示无从判断（当作旧帧）/ None means unknown (treat as old).
+        """
+        import cv2
+
+        try:
+            stamp_s = float(capture.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
+        except Exception:  # noqa: BLE001 - timestamp is optional / 时间戳可缺省
+            stamp_s = 0.0
+        # 帧起始时间戳须在出队之前且是近期的；OpenCV 在首帧前返回 0
+        # A frame-start stamp must precede the dequeue and be recent; OpenCV
+        # returns 0 before the first frame.
+        if 0.0 < stamp_s <= done + 0.01 and done - stamp_s < 3600.0:
+            return stamp_s - exposure_s
+        if waited_s >= min(0.05, period_s / 4.0):
+            # 等出来的帧刚完成：读出约一个帧周期，曝光在那之前
+            # A frame waited for has just completed: its readout took about
+            # a frame period, its exposure came before that.
+            return done - period_s - exposure_s
+        return None
 
     def get_video_frame(self) -> np.ndarray | None:
         """读取视频帧 / Read a video frame."""
