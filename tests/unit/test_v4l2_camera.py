@@ -1288,3 +1288,125 @@ def test_gamma_worker_error_finishes_before_next_frame():
     rgb = np.full((129, 131, 3), 32768, dtype=np.uint16)
     np.testing.assert_array_equal(camera._apply_gamma_lut(rgb), camera._gamma_lut[rgb])
     camera.close()
+
+
+class _QueuedCapture:
+    """V4L2 队列替身：每帧带帧起始时间戳与出队等待 / V4L2 queue double: each
+    frame has a frame-start stamp (or None) and how long its dequeue waits."""
+
+    def __init__(self, clock: dict[str, float], frames):
+        self.clock = clock
+        self.frames = list(frames)
+        self.current = None
+        self.retrieved: list[str] = []
+        self.released = False
+
+    def grab(self):
+        if not self.frames:
+            return False
+        self.current = self.frames.pop(0)
+        self.clock["t"] += self.current[2]
+        return True
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_POS_MSEC and self.current and self.current[1]:
+            return self.current[1] * 1000.0
+        return 0.0
+
+    def retrieve(self):
+        self.retrieved.append(self.current[0])
+        return True, np.full((120, 160), 100, dtype=np.uint16)
+
+    def read(self):
+        if not self.grab():
+            return False, None
+        return self.retrieve()
+
+    def release(self):
+        self.released = True
+
+
+def _settled_camera(monkeypatch, frames):
+    """10s 时结算的相机：曝光 50ms，帧周期 100ms / A camera that settled at
+    t=10s, with a 50ms exposure and a 100ms frame period."""
+    import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
+
+    clock = {"t": 10.0}
+    monkeypatch.setattr(v4l2_camera_module.time, "monotonic", lambda: clock["t"])
+    camera = _ready_camera(auto_exposure=False, exposure_us=50_000)
+    camera._frame_duration_us = 100_000
+    camera._capture = _QueuedCapture(clock, frames)
+    camera.begin_fresh_capture_epoch()
+    return camera, clock
+
+
+@pytest.mark.unit
+def test_frames_queued_before_a_settle_are_dropped(monkeypatch) -> None:
+    """Regression for "the first solve after a move shows the sky before it":
+    the camera streams on while no analysis runs, and the frames left in the
+    V4L2 queue come out of the first read after a settle looking fresh. Their
+    buffer timestamps (frame start) say when they were exposed: only a frame
+    whose exposure began after the settle is handed out."""
+    camera, _clock = _settled_camera(
+        monkeypatch,
+        [
+            ("before the move", 8.0, 0.0),
+            ("during the move", 9.2, 0.0),
+            ("exposing at the settle", 10.03, 0.0),  # began at 9.98
+            ("after the settle", 10.13, 0.13),  # began at 10.08
+            ("next", 10.23, 0.0),
+        ],
+    )
+
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved == ["after the settle"]
+    # Later frames come after a fresh one in the FIFO: no check, no wait.
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved == ["after the settle", "next"]
+
+
+@pytest.mark.unit
+def test_without_timestamps_a_waited_for_frame_counts_from_its_completion(
+    monkeypatch,
+) -> None:
+    """No usable buffer timestamp (0, or another clock): a frame the grab
+    returned at once was queued, so it is old; a frame it waited for has just
+    completed, so it began exposing a frame period plus an exposure ago."""
+    camera, _clock = _settled_camera(
+        monkeypatch,
+        [
+            ("queued", None, 0.0),
+            ("realtime stamp", 1.79e9, 0.0),  # not CLOCK_MONOTONIC: ignored
+            ("in flight", None, 0.06),  # done 10.06, began by 9.91
+            ("after the settle", None, 0.1),  # done 10.16, began by 10.01
+        ],
+    )
+
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved == ["after the settle"]
+
+
+@pytest.mark.unit
+def test_a_retry_without_a_new_settle_takes_the_queued_frame(monkeypatch) -> None:
+    """同姿态重试不等新帧 / A retry at an unchanged pose takes what is queued:
+    without a settle since the last fresh frame, every queued frame is newer
+    than the settle."""
+    camera, clock = _settled_camera(monkeypatch, [("after the settle", 10.1, 0.1)])
+    camera.capture_image()
+    clock["t"] = 30.0
+    camera._capture.frames = [("queued while idle", 12.0, 0.0)]
+
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved[-1] == "queued while idle"
+
+
+@pytest.mark.unit
+def test_a_stream_opened_after_the_settle_needs_no_check(monkeypatch) -> None:
+    camera, clock = _settled_camera(monkeypatch, [])
+    camera.stop_capture()
+    reopened = _QueuedCapture(clock, [("first of the new stream", None, 0.0)])
+    monkeypatch.setattr(camera, "_create_capture", lambda: reopened)
+
+    assert camera.start_capture() is True
+    assert camera.capture_image() is not None
+    assert reopened.retrieved == ["first of the new stream"]
