@@ -2094,6 +2094,10 @@ class CameraFactory:
         """创建相机实例 / Create camera instance"""
         if camera_type == "imx327_mipi":
             return IMX327MIPICamera(config)
+        if camera_type == "virtual_sky":
+            from ogscope.platform.hardware.virtual_sky_camera import VirtualSkyCamera
+
+            return VirtualSkyCamera(config)
         if camera_type in {"v4l2", "v4l2_raw", "linuxpy_v4l2", "v4l2_linuxpy"}:
             # RAW 后端显式使用 OGScope 软件 AE，绝不把固定曝光伪装为自动曝光。
             # The RAW backend uses OGScope software AE and never presents fixed exposure as auto.

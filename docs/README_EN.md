@@ -43,6 +43,7 @@ English | [中文](README.md)
 
 ### E Tools and contributing
 
+- [Virtual sky camera: indoor image and algorithm development](development/virtual-sky-camera.md) (inline bilingual sections)
 - [Script authoring and invocation standard](development/SCRIPT_STANDARDS_EN.md) | [中文](development/SCRIPT_STANDARDS.md)
 - [Debug console](DEBUG_CONSOLE_EN.md) | [中文](DEBUG_CONSOLE.md)
 - [Contributing](../CONTRIBUTING_EN.md) | [中文](../CONTRIBUTING.md)

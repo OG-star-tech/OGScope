@@ -46,6 +46,7 @@
   - `result: object | null`
     - `observation_time_utc`：可选，当前图像曝光中点 UTC；天文坐标换算应优先使用该时刻
     - `capture_completed_at_utc`、`capture_exposure_us`：可选抓帧诊断字段
+    - `capture_source="virtual_sky"`、`virtual_frame`：仅显式虚拟相机启用时出现的可选来源元数据，包含流/帧/请求身份、场景与配置版本；`observation_time_utc` 与图像绑定，主机生成时间单独记录。详见[虚拟天空相机](../development/virtual-sky-camera.md)。这些字段不表示真实相机或机械精度已验收。
     - `centroid_quality`：可选提星与遮挡回退诊断；`strategy`、`normal_status`、`fallback_attempted`、`fallback_status` 描述实际采用的路径
       - `scene` 仅在常规解算失败后分析；`has_structural_evidence` 只表示发现大亮区或长结构边缘，星点密度本身不构成遮挡证据
       - `metrics.filter_limited=true` 表示过滤达到保守上限，剩余候选已放行；调用方不得把该开发诊断转换为用户错误

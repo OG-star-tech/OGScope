@@ -60,6 +60,8 @@ _CATALOG_SECTIONS: tuple[
         "ogscope",
         (
             "camera_type",
+            "camera_virtual_sky_url",
+            "camera_virtual_sky_timeout_sec",
             "camera_width",
             "camera_height",
             "camera_fps",

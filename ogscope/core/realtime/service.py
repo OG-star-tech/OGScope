@@ -276,6 +276,14 @@ class RealtimeSolveService:
                     await asyncio.sleep(remaining)
                 cam = manager.get_camera_instance()
                 if not cam or not getattr(cam, "is_capturing", False):
+                    if get_settings().camera_type == "virtual_sky":
+                        # 网络源恢复后重新连接；绝不切换到物理驱动 / Reconnect a recovered network source without physical fallback.
+                        try:
+                            await manager.ensure_started()
+                        except Exception as exc:  # noqa: BLE001
+                            self.state.last_error = str(exc)
+                            await asyncio.sleep(1)
+                        continue
                     await asyncio.sleep(0.1)
                     continue
                 # 必须与共享预览走同一套读锁 + 线程卸载，禁止在事件循环线程里直接 capture_array
@@ -301,6 +309,20 @@ class RealtimeSolveService:
                 ):  # noqa: BLE001 - timing remains optional / 时间遥测可降级
                     camera_info = {}
                 capture_time = self._capture_time_payload(frame_ts, camera_info)
+                metadata = getattr(frame, "capture_metadata", {})
+                if metadata.get("capture_source") == "virtual_sky":
+                    # 使用与像素绑定的时刻与来源，避免预览抢帧导致串帧 / Use pixel-bound provenance, never mutable driver status.
+                    capture_time.update(
+                        {
+                            key: metadata[key]
+                            for key in (
+                                "observation_time_utc",
+                                "capture_source",
+                                "virtual_frame",
+                            )
+                            if key in metadata
+                        }
+                    )
 
                 use_fullsolve = (
                     self.state.frame_count % self._fullsolve_interval == 0

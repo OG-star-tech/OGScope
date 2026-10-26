@@ -5,6 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+import numpy as np
+
+
+class CapturedArray(np.ndarray):
+    """随像素保留采集元数据，复制时不串帧 / Keep capture metadata with pixels across copies."""
+
+    def __new__(cls, data, metadata=None):
+        obj = np.asarray(data).view(cls)
+        obj.capture_metadata = dict(metadata or {})
+        obj.capture_sequence = None
+        obj.capture_completed_ts = None
+        return obj
+
+    def __array_finalize__(self, source):
+        self.capture_metadata = getattr(source, "capture_metadata", {})
+        self.capture_sequence = getattr(source, "capture_sequence", None)
+        self.capture_completed_ts = getattr(source, "capture_completed_ts", None)
+
 
 @dataclass(slots=True)
 class FrameBuffer:
