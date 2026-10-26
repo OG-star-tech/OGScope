@@ -43,6 +43,7 @@
 
 ### E 工具与贡献
 
+- [虚拟天空相机：室内图像与算法开发](development/virtual-sky-camera.md)（段内中英）
 - [脚本编写与调用规范](development/SCRIPT_STANDARDS.md) | [English](development/SCRIPT_STANDARDS_EN.md)
 - [调试控制台](DEBUG_CONSOLE.md) | [English](DEBUG_CONSOLE_EN.md)
 - [贡献指南](../CONTRIBUTING.md) | [English](../CONTRIBUTING_EN.md)

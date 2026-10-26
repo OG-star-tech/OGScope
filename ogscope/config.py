@@ -92,9 +92,19 @@ class Settings(BaseSettings):
     camera_type: str = Field(
         default="v4l2",
         description=(
-            "相机后端：imx327_mipi（Picamera2/libcamera）或 v4l2 / "
-            "Camera backend: imx327_mipi or v4l2"
+            "相机后端：imx327_mipi、v4l2 或显式 virtual_sky / "
+            "Camera backend: imx327_mipi, v4l2 or explicit virtual_sky"
         ),
+    )
+    camera_virtual_sky_url: str = Field(
+        default="",
+        description="虚拟天空服务地址，必须显式配置 / Explicit virtual-sky service URL",
+    )
+    camera_virtual_sky_timeout_sec: float = Field(
+        default=3.0,
+        ge=0.2,
+        le=10,
+        description="虚拟帧网络超时 / Virtual-frame network timeout",
     )
     camera_width: int = Field(
         default=1280, description="图像宽度 / Default capture width"
@@ -850,7 +860,7 @@ class Settings(BaseSettings):
             return "imx327_mipi"
         if text in {"v4l2", "v4l2_raw", "linuxpy_v4l2", "v4l2_linuxpy"}:
             return "v4l2"
-        if text == "imx327_mipi":
+        if text in {"imx327_mipi", "virtual_sky"}:
             return text
         raise ValueError("Unsupported camera backend / 不支持的相机后端")
 

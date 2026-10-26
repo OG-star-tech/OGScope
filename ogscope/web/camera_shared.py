@@ -15,6 +15,7 @@ from threading import Lock
 from typing import Any, Callable
 
 from ogscope.config import get_settings
+from ogscope.domain.camera.driver import CapturedArray, FrameBuffer
 from ogscope.domain.camera.encoding import (
     EncodedImage,
     OpenCVEncoder,
@@ -133,6 +134,8 @@ class CameraManager:
             # Picamera2/libcamera 是默认产品路径；V4L2 RAW 必须显式启用。
             # Picamera2/libcamera remains the default; V4L2 RAW requires opt-in.
             "type": settings.camera_type,
+            "virtual_sky_url": settings.camera_virtual_sky_url,
+            "virtual_sky_timeout_sec": settings.camera_virtual_sky_timeout_sec,
             "device": settings.camera_device,
             "v4l2_sensor_subdev": settings.camera_v4l2_sensor_subdev,
             "v4l2_media_device": settings.camera_v4l2_media_device,
@@ -285,6 +288,10 @@ class CameraManager:
             read_started = time.perf_counter()
             try:
                 frame = self._camera.get_video_frame()
+                if isinstance(frame, FrameBuffer):
+                    packet = frame
+                    frame = CapturedArray(packet.data, packet.metadata)
+                    frame.capture_completed_ts = packet.timestamp or time.time()
             finally:
                 with self._frame_lock:
                     self._camera_read_ms.append(
@@ -293,6 +300,8 @@ class CameraManager:
             if frame is not None:
                 now = time.monotonic()
                 self._capture_sequence += 1
+                if isinstance(frame, CapturedArray):
+                    frame.capture_sequence = self._capture_sequence
                 self._last_capture_success_mono = now
                 self._has_successful_capture = True
                 self._capture_timestamps.append(now)
@@ -762,7 +771,7 @@ class CameraManager:
     def _read_preview_frame_sync(self):
         """在读帧完成时刻取时间，不使用晚到的编码时间 / Timestamp read completion, never delayed encoding completion."""
         frame = self._read_frame_sync()
-        return frame, time.time()
+        return frame, getattr(frame, "capture_completed_ts", None) or time.time()
 
     async def _grabber_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -918,6 +927,17 @@ class CameraManager:
                 "runtime_overrides": self._runtime_overrides,
             }
         info = await asyncio.to_thread(cam.get_camera_info)
+        if info.get("backend") == "virtual_sky" and info.get("source_error"):
+            # 不能把仍持有驱动对象当作网络源健康 / A retained driver does not imply a healthy network source.
+            return {
+                "connected": False,
+                "streaming": False,
+                "error": info["source_error"],
+                "restart_required": False,
+                "info": info,
+                "configured_backend": configured_backend,
+                "runtime_overrides": self._runtime_overrides,
+            }
         return {
             "connected": initialized and capturing,
             "streaming": capturing and (has_successful_capture or within_grace),
@@ -961,7 +981,8 @@ class CameraManager:
                 if self._latest_raw is not None:
                     return (
                         self._latest_raw.copy(),
-                        self._capture_sequence,
+                        getattr(self._latest_raw, "capture_sequence", None)
+                        or self._capture_sequence,
                         self._latest_ts,
                     )
             # 无常驻 raw 时同步抓一帧，供解算使用 / Sync-grab without retaining raw.
@@ -971,8 +992,8 @@ class CameraManager:
             if frame is None:
                 raise RuntimeError("无可用视频帧 / No frame available")
             with self._frame_lock:
-                fid = self._capture_sequence
-                ts = time.time()
+                fid = getattr(frame, "capture_sequence", None) or self._capture_sequence
+                ts = getattr(frame, "capture_completed_ts", None) or time.time()
             return frame, fid, ts
         finally:
             self._analysis_consumers = max(0, self._analysis_consumers - 1)

@@ -4,6 +4,8 @@
 
 Full documentation index (groups A–E): [Documentation index](../README_EN.md) | [中文](../README.md).
 
+**Indoor virtual development**: [Virtual sky camera](virtual-sky-camera.md) explains how generated network images replace physical capture while the real device runs extraction, plate solving and Core integration tests.
+
 This document explains how OGScope is actually run on development boards
 (primarily **Raspberry Pi Zero 2W**), including dependency requirements, service startup,
 and the team-standard debug workflow.
