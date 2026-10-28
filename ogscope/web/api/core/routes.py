@@ -14,9 +14,11 @@ from ogscope.web.api.models.schemas import (
     CoreAnalysisControlResponse,
     CoreAnalysisResultResponse,
     CoreCameraControlResponse,
+    CoreCameraLeaseRequest,
     CoreCameraStatusResponse,
     CoreCameraTuneRequest,
     CoreStartAnalysisRequest,
+    CoreStopAnalysisRequest,
     CoreSystemStatusResponse,
     CoreVideoDetailResponse,
     CoreVideoListResponse,
@@ -42,6 +44,7 @@ async def core_start_analysis(
             fov_max_error=body.fov_max_error,
             solve_timeout_ms=body.solve_timeout_ms,
             solve_context=body.solve_context,
+            owner_token=body.owner_token,
         )
         return CoreAnalysisControlResponse(**data)
     except Exception as exc:  # noqa: BLE001
@@ -52,10 +55,14 @@ async def core_start_analysis(
     "/core/v1/analysis/result",
     response_model=CoreAnalysisResultResponse,
 )
-async def core_get_analysis_result() -> CoreAnalysisResultResponse:
+async def core_get_analysis_result(
+    owner_token: str | None = Query(default=None, min_length=1, max_length=128)
+) -> CoreAnalysisResultResponse:
     """获取分析结果（Core 标准契约）/ Get analysis result (Core contract)."""
     try:
-        data = await core_contract_service.get_analysis_result()
+        data = await core_contract_service.get_analysis_result(
+            **({"owner_token": owner_token} if owner_token is not None else {})
+        )
         return CoreAnalysisResultResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -95,10 +102,15 @@ async def core_get_analysis_frame(
     "/core/v1/analysis/stop",
     response_model=CoreAnalysisControlResponse,
 )
-async def core_stop_analysis() -> CoreAnalysisControlResponse:
+async def core_stop_analysis(
+    body: CoreStopAnalysisRequest | None = None,
+) -> CoreAnalysisControlResponse:
     """结束分析（Core 标准契约）/ Stop analysis (Core contract)."""
     try:
-        data = await core_contract_service.stop_analysis()
+        data = await core_contract_service.stop_analysis(
+            session_id=body.session_id if body else None,
+            owner_token=body.owner_token if body else None,
+        )
         return CoreAnalysisControlResponse(**data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -151,6 +163,12 @@ async def core_camera_preview_stream(
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/core/v1/camera/lease")
+async def core_camera_lease(body: CoreCameraLeaseRequest) -> dict:
+    """Acquire, renew or release a bounded task lease / 获取、续期或释放有界任务占用。"""
+    return core_contract_service.camera_operation_lease(**body.model_dump())
 
 
 @router.post("/core/v1/camera/start", response_model=CoreCameraControlResponse)

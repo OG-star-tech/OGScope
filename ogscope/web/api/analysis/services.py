@@ -1332,12 +1332,19 @@ class AnalysisService:
         frame_id = None
         frame_ts = None
         elapsed_ms = 0.0
+        camera_owner = None
+        camera_preparation = None
         try:
             if body.source == "camera":
+                from ogscope.domain.camera.readiness import wait_capture_ready
                 from ogscope.web.camera_shared import get_camera_manager
 
+                manager = get_camera_manager()
+                await manager.acquire_analysis_consumer()
+                camera_owner = manager
+                camera_preparation = await wait_capture_ready(manager)
                 t_decode = time.perf_counter()
-                frame, frame_id, frame_ts = await get_camera_manager().get_raw_frame()
+                frame, frame_id, frame_ts = await manager.get_raw_frame()
                 t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
             else:
                 if not body.input_name:
@@ -1445,6 +1452,7 @@ class AnalysisService:
                 "frame_id": frame_id,
                 "frame_ts": frame_ts,
                 "gate_status": "SOLVED",
+                "camera_preparation": camera_preparation,
                 "gate_reason": (
                     "slow request"
                     if elapsed_ms >= float(settings.star_analysis_slow_threshold_ms)
@@ -1480,7 +1488,11 @@ class AnalysisService:
                 ),
             }
         finally:
-            await self._leave_realtime_gate(gate_source_key)
+            try:
+                if camera_owner is not None:
+                    await camera_owner.release_analysis_consumer()
+            finally:
+                await self._leave_realtime_gate(gate_source_key)
 
     def lab_public_settings(self) -> dict[str, Any]:
         """分析台默认参数（供前端）/ Public defaults for analysis UI."""
