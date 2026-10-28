@@ -8,7 +8,8 @@ import asyncio
 import json
 import threading
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,6 +35,8 @@ class RealtimeState:
     last_error: str = ""
     session_id: str = ""
     started_mono: float = 0.0
+    phase: str = "stopped"
+    camera_preparation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,11 @@ class RealtimeSolveService:
         )
         self.state = RealtimeState()
         self._task: asyncio.Task[None] | None = None
+        self._control_lock = asyncio.Lock()
+        self._owner_token: str | None = None
+        self._owner_seen_mono = 0.0
+        self._ownership_timeout_s = 60.0
+        self._ownership_watchdog: asyncio.Task[None] | None = None
         self._has_fullsolve = False
         self._hint_ra = settings.solver_hint_ra_deg
         self._hint_dec = settings.solver_hint_dec_deg
@@ -118,6 +126,49 @@ class RealtimeSolveService:
         }
 
     async def start(
+        self, *, owner_token: str | None = None, **options: Any
+    ) -> dict[str, Any]:
+        """Acquire one analysis without replacing another caller / 获取分析，禁止替换其他调用者。"""
+        async with self._control_lock:
+            if self.state.running and self._owner_token != owner_token:
+                return {
+                    "success": False,
+                    "session_id": self.state.session_id,
+                    "error_code": "ANALYSIS_BUSY",
+                    "message": "Analysis is in use / 分析正在被其他任务使用",
+                }
+            if not self.state.running and self._task is not None:
+                # Finish the old camera release before publishing a new session.
+                # 旧任务释放相机后才能发布新会话。
+                await self._stop_locked()
+            try:
+                result = await self._start_locked(**options)
+            except BaseException:
+                # A failed start must not leave a permanently busy phantom task.
+                # 启动失败不能遗留永久忙碌的幽灵任务。
+                await self._stop_locked()
+                self._owner_token = None
+                raise
+            if result.get("success"):
+                self._owner_token = owner_token
+                self._owner_seen_mono = time.monotonic()
+                if owner_token and (
+                    self._ownership_watchdog is None or self._ownership_watchdog.done()
+                ):
+                    self._ownership_watchdog = asyncio.create_task(
+                        self._expire_owner(self.state.session_id, owner_token)
+                    )
+            return result
+
+    async def _expire_owner(self, session_id: str, owner_token: str) -> None:
+        """Recover capture after a crashed/disconnected caller / 调用者崩溃或失联后回收相机。"""
+        while self.state.running and self.state.session_id == session_id:
+            await asyncio.sleep(min(5.0, self._ownership_timeout_s / 3))
+            if time.monotonic() - self._owner_seen_mono >= self._ownership_timeout_s:
+                await self.stop(session_id=session_id, owner_token=owner_token)
+                return
+
+    async def _start_locked(
         self,
         hint_ra_deg: float | None = None,
         hint_dec_deg: float | None = None,
@@ -144,8 +195,9 @@ class RealtimeSolveService:
         self._solve_context = solve_context
         self.state = RealtimeState(
             running=True,
-            session_id=str(session_id or ""),
+            session_id=str(session_id or uuid.uuid4().hex),
             started_mono=time.monotonic(),
+            phase="waking_camera",
         )
         with self._snapshot_lock:
             # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
@@ -214,16 +266,52 @@ class RealtimeSolveService:
             "message": "实时解算已启动 / Realtime solver started",
         }
 
-    async def stop(self) -> dict[str, Any]:
+    async def stop(
+        self,
+        *,
+        session_id: str | None = None,
+        owner_token: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Stop only the requested session; force is internal shutdown only / 只停指定会话，强制仅供内部退出。"""
+        async with self._control_lock:
+            wrong_session = (
+                session_id is not None and session_id != self.state.session_id
+            )
+            wrong_owner = self._owner_token is not None and (
+                owner_token != self._owner_token or session_id != self.state.session_id
+            )
+            if not force and (wrong_session or wrong_owner):
+                return {
+                    "success": False,
+                    "session_id": self.state.session_id,
+                    "error_code": "ANALYSIS_NOT_OWNED",
+                    "message": "Analysis belongs to another session / 分析属于其他会话",
+                }
+            result = await self._stop_locked()
+            self._owner_token = None
+            return {**result, "session_id": self.state.session_id}
+
+    async def _stop_locked(self) -> dict[str, Any]:
         """停止实时解算 / Stop realtime solving"""
+        watchdog, self._ownership_watchdog = self._ownership_watchdog, None
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
         was_running = self.state.running
         self.state.running = False
+        self.state.phase = "stopped"
         if self._task and not self._task.done():
             self._task.cancel()
             try:
-                await self._task
+                await asyncio.shield(self._task)
             except asyncio.CancelledError:
-                pass
+                if not self._task.done():
+                    # Request cancellation must not interrupt camera release.
+                    # HTTP请求取消不能打断相机释放。
+                    try:
+                        await asyncio.shield(self._task)
+                    except asyncio.CancelledError:
+                        pass
         self._task = None
         if was_running:
             self._log_event(
@@ -235,15 +323,24 @@ class RealtimeSolveService:
             )
         return {"success": True, "message": "实时解算已停止 / Realtime solver stopped"}
 
-    async def get_status(self) -> dict[str, Any]:
+    async def get_status(self, *, owner_token: str | None = None) -> dict[str, Any]:
         """读取实时状态 / Read realtime status"""
+        if (
+            owner_token is not None
+            and owner_token == self._owner_token
+            and self.state.running
+        ):
+            self._owner_seen_mono = time.monotonic()
         return {
+            "ownership_supported": True,
             "running": self.state.running,
             "frame_count": self.state.frame_count,
             "fullsolve_count": self.state.fullsolve_count,
             "last_result": self.state.last_result,
             "last_error": self.state.last_error,
             "session_id": self.state.session_id,
+            "phase": self.state.phase,
+            "camera_preparation": dict(self.state.camera_preparation),
         }
 
     async def _loop(self, initial_frame_id: int = -1) -> None:
@@ -256,17 +353,45 @@ class RealtimeSolveService:
         except Exception as exc:  # noqa: BLE001 - report startup failure / 报告启动失败
             self.state.last_error = str(exc)
             self.state.running = False
+            self.state.phase = "failed"
             self._log_event("camera_start_failed", error=str(exc))
             return
         try:
+            await self._prepare_camera(manager)
             await self._run_loop(manager, initial_frame_id)
+        except asyncio.CancelledError:
+            raise
+        except (
+            Exception
+        ) as exc:  # Preparation failures are not solve misses / 准备失败不是星图不匹配。
+            self.state.last_error = str(exc)
+            self.state.phase = "failed"
+            self.state.running = False
+            self._log_event("camera_preparation_failed", error=str(exc))
         finally:
             await manager.release_analysis_consumer()
+
+    async def _prepare_camera(self, manager: Any) -> None:
+        """Wait before spending any solver attempts / 等待就绪后才消耗解算次数。"""
+        from ogscope.domain.camera.readiness import wait_capture_ready
+
+        def progress(value: dict[str, Any]) -> None:
+            self.state.camera_preparation = value
+            self.state.phase = "analyzing" if value.get("ready") else "preparing_camera"
+
+        await wait_capture_ready(
+            manager,
+            on_progress=progress,
+            should_continue=lambda: self.state.running,
+            monotonic=time.monotonic,
+        )
+        self.state.phase = "analyzing"
 
     async def _run_loop(self, manager: Any, initial_frame_id: int = -1) -> None:
         """后台循环 / Background loop"""
         last_started_mono = 0.0
         last_frame_id = initial_frame_id
+        frame_wait_started = time.monotonic()
         while self.state.running:
             try:
                 remaining = self._analysis_interval_sec - (
@@ -274,6 +399,13 @@ class RealtimeSolveService:
                 )
                 if remaining > 0:
                     await asyncio.sleep(remaining)
+                if time.monotonic() - frame_wait_started > 30:
+                    self.state.last_result = None
+                    with self._snapshot_lock:
+                        self._snapshot = None
+                    raise RuntimeError(
+                        "CAMERA_NOT_READY: no fresh frame for 30s / 30秒内没有新相机帧"
+                    )
                 cam = manager.get_camera_instance()
                 if not cam or not getattr(cam, "is_capturing", False):
                     await asyncio.sleep(0.1)
@@ -292,7 +424,18 @@ class RealtimeSolveService:
                     await asyncio.sleep(0.05)
                     continue
                 last_frame_id = frame_id
+                frame_wait_started = time.monotonic()
                 last_started_mono = time.monotonic()
+                tracker = getattr(manager, "analysis_readiness", None)
+                if tracker is not None and not tracker.snapshot().get("ready"):
+                    # A changed scene must not reuse an older successful result.
+                    # 场景变化后，准备曝光期间不能把旧成功结果当作当前结果。
+                    self.state.last_result = None
+                    with self._snapshot_lock:
+                        self._snapshot = None
+                    await self._prepare_camera(manager)
+                    frame_wait_started = time.monotonic()
+                    continue
                 self.state.frame_count += 1
                 try:
                     camera_info = cam.get_camera_info()
@@ -363,11 +506,16 @@ class RealtimeSolveService:
                     # ``solve_from_bgr_frame`` 是生产解算权威图像管线；这里只保留哨兵。
                     # StarExtractor 仍用于焦点指标和轻量星点计数。
                     self._has_fullsolve = True
+                # Solver runtime is not missing-frame time / 解算运行时间不计入缺帧时限。
+                frame_wait_started = time.monotonic()
             except Exception as exc:  # noqa: BLE001
                 changed = str(exc) != self.state.last_error
                 self.state.last_error = str(exc)
                 if changed:
                     self._log_event("loop_error", error=str(exc), level="warning")
+                if str(exc).startswith("CAMERA_NOT_READY"):
+                    self.state.phase, self.state.running = "failed", False
+                    return
                 await asyncio.sleep(0.1)
 
     def _log_event(self, event: str, *, level: str = "info", **fields: Any) -> None:

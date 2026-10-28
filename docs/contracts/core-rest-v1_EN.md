@@ -149,3 +149,47 @@ Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, deb
 - `4xx`: invalid parameters or contract validation failure.
 - `5xx`: internal failure or underlying capability unavailable.
 - Contract version is fixed at `/v1/`. Add fields as optional extensions without breaking existing consumers.
+
+## Capture preparation and task ownership (additive)
+
+- `analysis/start` adds `camera_preparation_supported: true`. `analysis/result` adds `phase` (`waking_camera`, `preparing_camera`, `analyzing`, `failed`, `stopped`) and `camera_preparation` (ready, reason, stable_frames, frame_sequence, last_frame_age_s, elapsed_ms, timeout_seconds). Existing `state` is unchanged.
+- Successful startup confirms capture only. Preparation takes up to 30 seconds, proceeds immediately when ready and does not increment `fullsolve_count`. Failure reports `CAMERA_NOT_READY` and releases analysis ownership. No fresh frame for 30 seconds also terminates. Restart clears old readiness evidence.
+- V4L2 uses AE state/readback; Picamera2 uses stable exposure×gain across distinct frames. A reported dark limit, manual exposure or a fresh virtual frame can proceed. Without telemetry, three fresh frames permit a declared `metadata_unavailable` fallback, not verified exposure convergence. Readiness does not require stars or a brightness threshold.
+- `camera/status.lifecycle` includes phase (sleeping/active/warm_idle), consumer counts, idle timeout and analysis_readiness. Status reads do not wake capture.
+- `POST /api/core/v1/camera/lease`: omit lease_id to acquire, supply it to renew, set release=true to release. TTL is 10–120 seconds, default 60; at most 8 leases. Returns success, lease_id, ttl_seconds. Expired renewals return success=false/error=camera_lease_expired; repeated release is idempotent. Unknown request keys are rejected with 422.
+- A lease neither opens the camera nor occupies a preview slot. It prevents idle shutdown; lost owners expire before the existing idle policy releases hardware. Lease counts do not replace Core access controls.
+- camera/stop returns success=false/busy while analysis, a task lease or recording owns capture. The hardware plane cannot bypass this guard. End the owning task first; task release must preserve another consumer's preview.
+- Lab camera single-frame solving shares readiness and ownership. File solving is unchanged. Preparation is reported separately from solver timeout.
+- Callers must separate preparation from solve/retry budgets. Old clients can ignore the fields; old servers cannot provide the new guarantee.
+
+
+### 分析会话所有权与失联恢复 / Analysis ownership and disconnected clients
+
+`analysis/start`接受可选`owner_token`（调用方生成，1–128字符）；控制响应增加
+`ownership_supported=true`与可选`error_code`。不同调用方不能接管正在运行的会话：
+返回`success=false, error_code=ANALYSIS_BUSY`，保留原会话、参数和结果。
+
+`analysis/stop`接受`session_id`和`owner_token`。受保护会话需要两者同时匹配；
+无条件停止、旧会话清理或其他调用方的停止返回`ANALYSIS_NOT_OWNED`。
+停止请求完成资源清理后才允许启动下一会话。内部进程退出可强制清理，API不提供强制接管。
+
+调用方正常轮询`GET analysis/result?owner_token=...`即可续期，建议间隔不超过15秒。
+只有匹配的调用方续期有效，旁观者读取不续期；约60秒未续期则自动停止并释放相机。
+准备曝光阶段也要续期。关闭页面、进程崩溃或开始响应丢失不会永久占用分析。
+
+旧客户端可继续启动、停止无主会话，但不能停止受保护会话；新集成应使用本契约。
+开发者实时分析与Core共享同一个协调器。结果的`session_id`始终来自实际分析，
+即使会话由开发者入口创建也不返回另一份旧Core身份。
+
+The optional caller-generated `owner_token` protects one analysis. A different
+caller receives `success=false` / `ANALYSIS_BUSY`; parameters and frames remain
+unchanged. Protected cleanup requires both `session_id` and `owner_token`, with
+`ANALYSIS_NOT_OWNED` on mismatch. Old cleanup cannot stop a new task. Cleanup
+finishes before another start acquires the resource. Only internal shutdown can
+force cleanup; the API has no force-takeover operation.
+
+Poll `GET analysis/result?owner_token=...` at most 15 seconds apart, including
+camera preparation, to renew the roughly 60-second ownership timeout. Other
+readers never renew it. A disconnected/crashed caller releases capture on expiry.
+Legacy unowned sessions remain compatible but cannot control protected sessions.
+Core and developer realtime routes share this coordinator and actual session ID.

@@ -10,6 +10,37 @@ import pytest
 
 
 @pytest.mark.unit
+def test_core_camera_lease_round_trip_and_validation(client, monkeypatch):
+    """Expose bounded ownership through Core only / 通过 Core 提供有界占用。"""
+    from ogscope.core.application import core_service
+
+    received = []
+
+    def lease(**payload):
+        received.append(payload)
+        return {
+            "success": True,
+            "lease_id": "owner",
+            "ttl_seconds": payload["ttl_seconds"],
+        }
+
+    monkeypatch.setattr(
+        core_service.core_contract_service, "camera_operation_lease", lease
+    )
+    assert (
+        client.post("/api/core/v1/camera/lease", json={}).json()["lease_id"] == "owner"
+    )
+    client.post(
+        "/api/core/v1/camera/lease", json={"lease_id": "owner", "release": True}
+    )
+    assert received[-1]["release"] is True
+    assert (
+        client.post("/api/core/v1/camera/lease", json={"ttl_seconds": 999}).status_code
+        == 422
+    )
+
+
+@pytest.mark.unit
 def test_core_system_status(client) -> None:
     """系统状态接口返回稳定字段 / System status endpoint returns stable fields."""
     resp = client.get("/api/core/v1/system/status")
@@ -335,7 +366,7 @@ def test_core_analysis_lifecycle(client, monkeypatch) -> None:
             "last_error": "",
         }
 
-    async def _fake_stop():
+    async def _fake_stop(**_kwargs):
         return {"success": True, "message": "stopped"}
 
     monkeypatch.setattr(core_service.realtime_solve_service, "start", _fake_start)

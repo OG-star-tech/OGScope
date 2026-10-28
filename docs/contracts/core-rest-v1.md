@@ -158,3 +158,47 @@ The successful solve includes `result.overlay_ext.polar_guide` when projection m
 - `4xx`：请求参数非法、契约字段校验失败。
 - `5xx`：内部运行异常或底层能力不可用。
 - 契约版本路径固定为 `/v1/`。新增字段以可选形式扩展，不破坏既有消费者。
+
+## 相机准备与任务占用（增量契约）
+
+- `analysis/start` 增加 `camera_preparation_supported: true`。`analysis/result` 增加 `phase`（`waking_camera`、`preparing_camera`、`analyzing`、`failed`、`stopped`）与 `camera_preparation`（ready、reason、stable_frames、frame_sequence、last_frame_age_s、elapsed_ms、timeout_seconds）。原 `state` 字段不变。
+- 相机启动成功只代表已出图。曝光准备最多 30 秒，就绪立即继续，不消耗 `fullsolve_count`；失败报告 `CAMERA_NOT_READY` 并释放分析占用。持续无新帧 30 秒也终止。相机重启后不继承之前的就绪证据。
+- V4L2 使用 AE 状态及有效曝光读回；Picamera2 使用连续新帧的曝光×增益稳定性。明确暗场上限、手动曝光、虚拟新帧可放行；无元数据时三张新帧后以 `metadata_unavailable` 降级，不能宣称曝光收敛。不以星图成功或亮度达标阻塞暗场。
+- `camera/status.lifecycle` 包含 phase（sleeping/active/warm_idle）、各类 consumer 计数、空闲时限与 analysis_readiness。状态读取不会唤醒相机。
+- `POST /api/core/v1/camera/lease`：空 `lease_id` 获取；携带 `lease_id` 续期；`release=true` 释放。`ttl_seconds` 范围 10–120，默认 60；最多 8 个占用，返回 `success`、`lease_id`、`ttl_seconds`。过期续期返回 `success=false,error=camera_lease_expired`；重复释放幂等。未知请求键返回 422。
+- 租约不启动相机、不占用预览流名额，仅阻止空闲关闭；客户端失联后到期回收，再按原空闲策略释放硬件。当前计数不是认证授权机制，沿用 Core 的访问边界。
+- `camera/stop` 在分析、任务租约或录像占用时返回 `success=false` 与 busy 提示，禁止通过硬件平面绕过。先结束自己的任务，再关闭；释放任务不能关闭别人正在使用的预览。
+- 分析台相机单帧分析复用相同准备与占用；文件分析不变。准备耗时可见，但不计入单帧 solver timeout。
+- 上层应将相机准备与解算/重试时限分开。旧客户端可忽略新增字段；旧服务缺少能力时，上层只能保留旧行为，不能宣称新门禁生效。
+
+
+### 分析会话所有权与失联恢复 / Analysis ownership and disconnected clients
+
+`analysis/start`接受可选`owner_token`（调用方生成，1–128字符）；控制响应增加
+`ownership_supported=true`与可选`error_code`。不同调用方不能接管正在运行的会话：
+返回`success=false, error_code=ANALYSIS_BUSY`，保留原会话、参数和结果。
+
+`analysis/stop`接受`session_id`和`owner_token`。受保护会话需要两者同时匹配；
+无条件停止、旧会话清理或其他调用方的停止返回`ANALYSIS_NOT_OWNED`。
+停止请求完成资源清理后才允许启动下一会话。内部进程退出可强制清理，API不提供强制接管。
+
+调用方正常轮询`GET analysis/result?owner_token=...`即可续期，建议间隔不超过15秒。
+只有匹配的调用方续期有效，旁观者读取不续期；约60秒未续期则自动停止并释放相机。
+准备曝光阶段也要续期。关闭页面、进程崩溃或开始响应丢失不会永久占用分析。
+
+旧客户端可继续启动、停止无主会话，但不能停止受保护会话；新集成应使用本契约。
+开发者实时分析与Core共享同一个协调器。结果的`session_id`始终来自实际分析，
+即使会话由开发者入口创建也不返回另一份旧Core身份。
+
+The optional caller-generated `owner_token` protects one analysis. A different
+caller receives `success=false` / `ANALYSIS_BUSY`; parameters and frames remain
+unchanged. Protected cleanup requires both `session_id` and `owner_token`, with
+`ANALYSIS_NOT_OWNED` on mismatch. Old cleanup cannot stop a new task. Cleanup
+finishes before another start acquires the resource. Only internal shutdown can
+force cleanup; the API has no force-takeover operation.
+
+Poll `GET analysis/result?owner_token=...` at most 15 seconds apart, including
+camera preparation, to renew the roughly 60-second ownership timeout. Other
+readers never renew it. A disconnected/crashed caller releases capture on expiry.
+Legacy unowned sessions remain compatible but cannot control protected sessions.
+Core and developer realtime routes share this coordinator and actual session ID.

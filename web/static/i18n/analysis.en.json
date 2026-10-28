@@ -1,4 +1,5 @@
 {
+  "lab.cameraPrepareAndSolve": "Preparing camera and analyzing; star solving starts after exposure is ready.",
   "app.title": "OGScope Plate Solve Console",
   "nav.lab": "Lab",
   "nav.labImage": "Image solve",

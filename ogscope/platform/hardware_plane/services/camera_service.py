@@ -79,7 +79,10 @@ class CameraPlaneService:
             await self.start()
             return {"accepted": True}
         if action == "stop":
-            await self.stop()
+            try:
+                await self.stop()
+            except RuntimeError as exc:
+                return {"accepted": False, "message": str(exc)}
             return {"accepted": True}
         if action == "publish_latest_preview":
             return await self.publish_latest_preview()
