@@ -229,12 +229,11 @@ Measured on this exact device, same capture workload, same board:
 
 **~4x lower process RSS, ~5x lower CMA usage**, on the same hardware, same
 capture resolution. This is the single largest lever found during the
-broader OGScope/ZenitAPA memory investigation this session - see
-`docs/zenit-align-mini-overview.md` in the BSP repo for the OOM this
-originated from. Measurement methodology: `/proc/<pid>/status` (`VmRSS`),
+broader camera and external-controller memory investigation during this
+session. Measurement methodology: `/proc/<pid>/status` (`VmRSS`),
 `/proc/meminfo` (`CmaFree`), and `/proc/<pid>/fd` listing, immediately before
 vs. during each backend's active capture, on an otherwise-idle device with
-only `zenitapa.service` also running.
+only the external mount-controller service also running.
 
 ## Still open before this becomes the default
 

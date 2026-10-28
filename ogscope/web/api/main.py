@@ -5,7 +5,6 @@ OGScope Web API 主路由 / OGScope web API router.
 
 from fastapi import APIRouter
 
-from ogscope.web.api.alignment.routes import router as alignment_router
 from ogscope.web.api.analysis.routes import router as analysis_router
 from ogscope.web.api.camera.routes import router as camera_router
 from ogscope.web.api.core.routes import router as core_contract_router
@@ -22,7 +21,6 @@ def create_api_router(
     """按角色构造 API 路由 / Build API router based on runtime role."""
     router = APIRouter()
     router.include_router(camera_router, tags=["Camera - 相机"])
-    router.include_router(alignment_router, tags=["Alignment - 极轴校准"])
     if include_network:
         router.include_router(network_router, tags=["Network - 网络"])
     router.include_router(core_contract_router, tags=["Core - 标准契约"])

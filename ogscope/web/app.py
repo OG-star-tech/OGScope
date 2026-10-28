@@ -383,7 +383,6 @@ async def api_root():
     """API根路径 / API root path"""
     endpoints = {
         "camera": "/api/camera/",
-        "alignment": "/api/alignment/",
         "system": "/api/dev/system/",
         "hardware_plane": "/api/dev/system/hardware-plane/status",
         "system_legacy": "/api/system/",

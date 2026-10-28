@@ -181,9 +181,9 @@ async def core_camera_reset_temporal_history() -> CoreCameraControlResponse:
     """底座移动结算后重置跨帧降噪历史（Core 标准契约）/ Reset cross-frame
     temporal history after a mount move settles (Core contract).
 
-    调用方（如 ZenitAPA）在确认底座已经稳定后调用；OGScope 本身没有底座
+    上层调用方在确认底座已经稳定后调用；OGScope 本身没有底座
     状态，无法自己判断该何时重置。
-    The caller (e.g. ZenitAPA) invokes this once it has confirmed the mount
+    The external consumer invokes this once it has confirmed the mount
     has settled; OGScope has no mount state of its own and cannot decide
     this timing on its own.
     """
