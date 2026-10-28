@@ -1,4 +1,5 @@
 {
+  "lab.cameraPrepareAndSolve": "准备相机并分析中；曝光就绪后才开始星图解析。",
   "app.title": "OGScope 星空解算控制台",
   "nav.lab": "解算台",
   "nav.labImage": "图片解算",

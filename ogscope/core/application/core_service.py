@@ -190,9 +190,12 @@ class CoreContractService:
         fov_max_error: float | None = None,
         solve_timeout_ms: int | None = None,
         solve_context: Any | None = None,
+        owner_token: str | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
-        was_running = self._session.running
+        was_running = self._session.running and bool(
+            (await realtime_solve_service.get_status()).get("running")
+        )
         next_session_id = self._session.session_id if was_running else uuid.uuid4().hex
         result = await realtime_solve_service.start(
             hint_ra_deg=hint_ra_deg,
@@ -202,23 +205,35 @@ class CoreContractService:
             solve_timeout_ms=solve_timeout_ms,
             solve_context=solve_context,
             session_id=next_session_id,
+            owner_token=owner_token,
         )
         success = bool(result.get("success", True))
-        self._session.running = success
+        self._session.running = success or was_running
         if success and not was_running:
             # A unique id lets upstream consumers reject results from an older run.
             # 唯一会话 ID 让上层能够拒绝旧一轮分析留下的结果。
             self._session.session_id = str(result.get("session_id") or next_session_id)
         return {
             "success": success,
-            "session_id": self._session.session_id,
-            "state": "running",
+            "session_id": str(result.get("session_id") or self._session.session_id),
+            "state": (
+                "running"
+                if success or was_running or result.get("error_code") == "ANALYSIS_BUSY"
+                else "stopped"
+            ),
+            "error_code": result.get("error_code"),
+            "ownership_supported": True,
             "message": result.get("message", ""),
+            "camera_preparation_supported": True,
         }
 
-    async def get_analysis_result(self) -> dict[str, Any]:
+    async def get_analysis_result(
+        self, *, owner_token: str | None = None
+    ) -> dict[str, Any]:
         """获取分析结果 / Get analysis result."""
-        status = await realtime_solve_service.get_status()
+        status = await realtime_solve_service.get_status(
+            **({"owner_token": owner_token} if owner_token is not None else {})
+        )
         running = bool(status.get("running", False))
         last_result = status.get("last_result")
         if isinstance(last_result, dict):
@@ -230,12 +245,15 @@ class CoreContractService:
             state = "completed"
         return {
             "success": True,
-            "session_id": self._session.session_id,
+            "session_id": str(status.get("session_id") or self._session.session_id),
             "state": state,
+            "ownership_supported": True,
             "result": last_result,
             "last_error": status.get("last_error", ""),
             "frame_count": int(status.get("frame_count", 0)),
             "fullsolve_count": int(status.get("fullsolve_count", 0)),
+            "phase": status.get("phase"),
+            "camera_preparation": status.get("camera_preparation", {}),
         }
 
     def get_analysis_frame_snapshot(self, *, session_id: str, frame_id: int) -> Any:
@@ -247,14 +265,26 @@ class CoreContractService:
             raise ValueError("solve frame snapshot no longer matches this result")
         return snapshot
 
-    async def stop_analysis(self) -> dict[str, Any]:
+    async def stop_analysis(
+        self, *, session_id: str | None = None, owner_token: str | None = None
+    ) -> dict[str, Any]:
         """结束实时分析 / Stop realtime analysis."""
-        result = await realtime_solve_service.stop()
-        self._session.running = False
+        result = await realtime_solve_service.stop(
+            session_id=session_id, owner_token=owner_token
+        )
+        if result.get("success"):
+            self._session.running = False
         return {
             "success": bool(result.get("success", True)),
-            "session_id": self._session.session_id,
-            "state": "stopped",
+            "session_id": str(result.get("session_id") or self._session.session_id),
+            "state": (
+                "stopped"
+                if result.get("success")
+                or not (await realtime_solve_service.get_status()).get("running")
+                else "running"
+            ),
+            "error_code": result.get("error_code"),
+            "ownership_supported": True,
             "message": result.get("message", ""),
         }
 
@@ -335,6 +365,9 @@ class CoreContractService:
         )
         status = await camera_domain_service.get_status()
         normalized = self._normalize_camera_status(status)
+        from ogscope.web.camera_shared import get_camera_manager
+
+        normalized["lifecycle"] = get_camera_manager().lifecycle_status()
         if hp_camera:
             normalized["connected"] = bool(
                 hp_camera.get("connected", normalized["connected"])
@@ -380,6 +413,13 @@ class CoreContractService:
         # 先让相机域完成有界清理，避免硬件平面短 RPC 预算提前取消释放流程。
         # Let the camera domain finish bounded cleanup before the short plane RPC can cancel it.
         result = await camera_domain_service.stop()
+        if result.get("success") is False:
+            return {
+                "success": False,
+                "message": result.get("message", "Camera is in use / 相机正在使用"),
+                "info": {},
+                "applied": {"action": "stop", "busy": True},
+            }
         hp_result = await hardware_client.device_command("camera", "stop")
         return {
             "success": bool(result.get("success", True)),
@@ -390,6 +430,12 @@ class CoreContractService:
                 "hardware_plane_ok": bool(hp_result.get("success", False)),
             },
         }
+
+    def camera_operation_lease(self, **payload: Any) -> dict[str, Any]:
+        """Reserve camera lifetime across task steps / 跨任务步骤保留相机生命周期。"""
+        from ogscope.web.camera_shared import get_camera_manager
+
+        return get_camera_manager().update_operation_lease(**payload)
 
     async def reset_camera_temporal_history(self) -> dict[str, Any]:
         """通知相机丢弃跨帧降噪历史（移动结算后调用）/ Tell the camera to

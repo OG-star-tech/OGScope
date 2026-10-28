@@ -1,5 +1,9 @@
 (function () {
   const state = {
+    // HTTP device pages cannot use secure-context-only randomUUID. / 设备HTTP页面不能使用要求安全上下文的randomUUID。
+    realtimeOwner: [...crypto.getRandomValues(new Uint8Array(16))].map((v) => v.toString(16).padStart(2, "0")).join(""),
+    realtimeSession: null,
+    realtimePollTimer: null,
     uploadedFileName: null,
     uploadedFileSignature: null,
     uploadList: [],
@@ -503,22 +507,36 @@
 
   async function onRealtimeStart() {
     const params = readSolverQueryParams();
+    params.set("owner_token", state.realtimeOwner);
     const data = await request(
-      `/api/debug/analysis/realtime/start?${params.toString()}`,
+      `/api/dev/debug/analysis/realtime/start?${params.toString()}`,
       { method: "POST" }
     );
+    if (data.success) {
+      state.realtimeSession = data.session_id;
+      clearInterval(state.realtimePollTimer);
+      state.realtimePollTimer = setInterval(() => onRealtimeStatus().catch((error) => setOutput("realtime-output", String(error))), 5000);
+    }
     setOutput("realtime-output", data);
   }
 
   async function onRealtimeStop() {
-    const data = await request("/api/debug/analysis/realtime/stop", {
-      method: "POST",
-    });
+    if (!state.realtimeSession) return;
+    const params = new URLSearchParams({session_id: state.realtimeSession, owner_token: state.realtimeOwner});
+    const data = await request(`/api/dev/debug/analysis/realtime/stop?${params}`, {method: "POST"});
+    if (data.success) {
+      state.realtimeSession = null;
+      clearInterval(state.realtimePollTimer);
+    }
     setOutput("realtime-output", data);
   }
 
   async function onRealtimeStatus() {
-    const data = await request("/api/debug/analysis/realtime/status");
+    const data = await request(`/api/dev/debug/analysis/realtime/status?owner_token=${encodeURIComponent(state.realtimeOwner)}`);
+    if (!data.running || (state.realtimeSession && data.session_id !== state.realtimeSession)) {
+      state.realtimeSession = null;
+      clearInterval(state.realtimePollTimer);
+    }
     setOutput("realtime-output", data);
   }
 

@@ -49,7 +49,11 @@ async def test_debug_camera_analysis_converts_rgb_and_preserves_snapshot(
     )
     rgb = _rgb_frame()
     original = rgb.copy()
-    manager = SimpleNamespace(get_raw_frame=AsyncMock(return_value=(rgb, 7, 12.5)))
+    manager = SimpleNamespace(
+        get_raw_frame=AsyncMock(return_value=(rgb, 7, 12.5)),
+        acquire_analysis_consumer=AsyncMock(),
+        release_analysis_consumer=AsyncMock(),
+    )
     monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
     snapshot = MagicMock(return_value={"available": True, "frame_id": 7})
     monkeypatch.setattr(
@@ -71,6 +75,8 @@ async def test_debug_camera_analysis_converts_rgb_and_preserves_snapshot(
     assert snapshot.call_args.args[1] == 7
     assert result["frame_id"] == 7
     assert result["frame_ts"] == 12.5
+    manager.acquire_analysis_consumer.assert_awaited_once()
+    manager.release_analysis_consumer.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -110,3 +116,31 @@ async def test_video_file_analysis_keeps_decoded_bgr(monkeypatch, color_solver):
     assert result["gate_status"] == "SOLVED"
     assert color_solver.call_args.args[0] is bgr
     capture.release.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_lab_preparation_failure_never_calls_solver_and_releases_gate(
+    monkeypatch, color_solver
+):
+    """No sky failure is produced before capture is ready / 相机就绪前不能生成星图失败。"""
+    from ogscope.core.realtime import realtime_solve_service
+
+    monkeypatch.setattr(realtime_solve_service.state, "running", False)
+    monkeypatch.setattr(
+        "ogscope.web.api.debug.services.is_recording_active", lambda: False
+    )
+    manager = SimpleNamespace(
+        acquire_analysis_consumer=AsyncMock(), release_analysis_consumer=AsyncMock()
+    )
+    monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
+    monkeypatch.setattr(
+        "ogscope.domain.camera.readiness.wait_capture_ready",
+        AsyncMock(side_effect=RuntimeError("CAMERA_NOT_READY")),
+    )
+    with pytest.raises(RuntimeError, match="CAMERA_NOT_READY"):
+        await analysis_service.solve_video_frame(
+            AnalysisSolveVideoFrameRequest(source="camera")
+        )
+    color_solver.assert_not_called()
+    manager.release_analysis_consumer.assert_awaited_once()
+    analysis_service._leave_realtime_gate.assert_awaited_once_with("camera")

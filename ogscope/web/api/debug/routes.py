@@ -518,6 +518,7 @@ async def start_realtime_solving(
     fov_estimate: float | None = Query(default=None),
     fov_max_error: float | None = Query(default=None),
     solve_timeout_ms: int | None = Query(default=None),
+    owner_token: str | None = Query(default=None, min_length=1, max_length=128),
 ):
     """启动实时解算 / Start realtime solving"""
     try:
@@ -527,25 +528,35 @@ async def start_realtime_solving(
             fov_estimate=fov_estimate,
             fov_max_error=fov_max_error,
             solve_timeout_ms=solve_timeout_ms,
+            owner_token=owner_token,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/debug/analysis/realtime/stop")
-async def stop_realtime_solving():
+async def stop_realtime_solving(
+    session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    owner_token: str | None = Query(default=None, min_length=1, max_length=128),
+):
     """停止实时解算 / Stop realtime solving"""
     try:
-        return await realtime_solve_service.stop()
+        return await realtime_solve_service.stop(
+            session_id=session_id, owner_token=owner_token
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/debug/analysis/realtime/status")
-async def get_realtime_solving_status():
+async def get_realtime_solving_status(
+    owner_token: str | None = Query(default=None, min_length=1, max_length=128)
+):
     """获取实时解算状态 / Get realtime solving status"""
     try:
-        return await realtime_solve_service.get_status()
+        return await realtime_solve_service.get_status(
+            **({"owner_token": owner_token} if owner_token is not None else {})
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

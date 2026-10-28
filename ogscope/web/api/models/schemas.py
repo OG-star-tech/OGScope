@@ -470,6 +470,15 @@ class CoreStartAnalysisRequest(BaseModel):
     fov_max_error: Optional[float] = None
     solve_timeout_ms: Optional[int] = Field(default=None, ge=200, le=120000)
     solve_context: Optional[SolveContextPayload] = None
+    owner_token: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
+class CoreStopAnalysisRequest(BaseModel):
+    """Conditional cleanup of a single analysis / 单个分析会话的条件清理。"""
+
+    model_config = ConfigDict(extra="forbid")
+    session_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    owner_token: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class CoreAnalysisControlResponse(BaseModel):
@@ -479,6 +488,9 @@ class CoreAnalysisControlResponse(BaseModel):
     session_id: str
     state: Literal["running", "stopped"]
     message: str = ""
+    camera_preparation_supported: bool = False
+    ownership_supported: bool = False
+    error_code: Optional[str] = None
 
 
 class CoreAnalysisResultResponse(BaseModel):
@@ -491,6 +503,9 @@ class CoreAnalysisResultResponse(BaseModel):
     last_error: str = ""
     frame_count: int = 0
     fullsolve_count: int = 0
+    phase: Optional[str] = None
+    camera_preparation: dict[str, Any] = Field(default_factory=dict)
+    ownership_supported: bool = False
 
 
 class CoreSystemStatusResponse(BaseModel):
@@ -548,6 +563,15 @@ class CoreCameraControlResponse(BaseModel):
     applied: dict[str, Any] = Field(default_factory=dict)
 
 
+class CoreCameraLeaseRequest(BaseModel):
+    """Expiring task ownership / 自动到期的任务占用。"""
+
+    model_config = ConfigDict(extra="forbid")
+    lease_id: Optional[str] = Field(default=None, max_length=64)
+    release: bool = False
+    ttl_seconds: float = Field(default=60, ge=10, le=120)
+
+
 class CoreCameraStatusResponse(BaseModel):
     """Core 相机状态响应 / Core camera status response."""
 
@@ -556,6 +580,7 @@ class CoreCameraStatusResponse(BaseModel):
     streaming: bool
     recording: bool
     configured_backend: Optional[str] = None
+    lifecycle: dict[str, Any] = Field(default_factory=dict)
     info: dict[str, Any] = Field(default_factory=dict)
     ambient_hint: dict[str, Any] = Field(default_factory=dict)
     runtime_overrides: dict[str, Any] = Field(default_factory=dict)
