@@ -118,7 +118,7 @@ The current system has neither an encoder node nor a discoverable `bcm2835-codec
 
 ### 独立预览链路实测 / Isolated preview-pipeline measurements
 
-同一块板，1280×720、180°输出、预览目标 30 fps、JPEG 质量 75、TurboJPEG；使用相同短手动曝光和固定白平衡，关闭降噪。每组独立进程预热 4 秒后采样 15 秒，运行本分支相机管理器的采集与 JPEG 链路；正式 OGScope/external client 服务保持运行但产品相机已停止。此处统计 JPEG 发布吞吐，不含浏览器网络传输或并发星空解算。
+同一块板，1280×720、180°输出、预览目标 30 fps、JPEG 质量 75、TurboJPEG；使用相同短手动曝光和固定白平衡，关闭降噪。每组独立进程预热 4 秒后采样 15 秒，运行本分支相机管理器的采集与 JPEG 链路；正式 OGScope 与上层控制服务保持运行但产品相机已停止。此处统计 JPEG 发布吞吐，不含浏览器网络传输或并发星空解算。
 
 Same board, 1280×720, 180° output, target 30 fps, JPEG quality 75 and TurboJPEG; identical short manual exposure/fixed WB, denoise off. Separate processes warm for four seconds and sample for fifteen, running this branch's camera-manager capture/JPEG path while product services remain running with their camera stopped. These are JPEG-publish rates, excluding browser transport and concurrent solving.
 

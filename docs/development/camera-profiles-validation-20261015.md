@@ -15,9 +15,9 @@ ISP 严格场景同时调用实时分析；室内得到 `TOO_FEW`/`NO_MATCH`，�
 
 Required ISP ran with concurrent real-time analysis; indoor `TOO_FEW`/`NO_MATCH` does not establish a successful sky solve. The star database was warmed. No new OOM/kernel fault occurred; minimum available system memory in the ISP case was approximately 70.7 MiB. Low free CMA in some cases still requires longer and 1080p stress acceptance.
 
-临时 systemd 配置使设备持久选择在构建默认值之后加载，实测 Picamera2 与 V4L2 均可正确选择。测试结束删除临时覆盖，恢复原部署；持久相机配置哈希保持一致，external client 进程未重启，ALT/AZ 位置未变化，根目录保持只读。
+临时 systemd 配置使设备持久选择在构建默认值之后加载，实测 Picamera2 与 V4L2 均可正确选择。测试结束删除临时覆盖，恢复原部署；持久相机配置哈希保持一致，上层控制进程未重启，ALT/AZ 位置未变化，根目录保持只读。
 
-A temporary systemd override loaded profile selection after build defaults and demonstrated both backends. It was removed after testing. Original deployment and persistent camera configuration were restored; external client's process and ALT/AZ positions stayed unchanged, and the root remained read-only.
+A temporary systemd override loaded profile selection after build defaults and demonstrated both backends. It was removed after testing. Original deployment and persistent camera configuration were restored; the external controller process and ALT/AZ positions stayed unchanged, and the root remained read-only.
 
 板端原 unit 最后加载 `build.env`，会覆盖持久文件的驱动选择。这是仍需 BSP 按[部署说明](camera-deployment-profiles.md)修正的交付项，应用没有倒置环境变量优先级来隐藏它。镜头当前画面接近灰色且纹理较少，不能据此确认色卡、白平衡准确度或星空几何精度；色序由非对称 RGB 单元测试覆盖。
 
