@@ -2,9 +2,9 @@
 
 最新记录 / Latest record: [2026-10-15 部署与回退实测 / Deployment and fallback validation](camera-profiles-validation-20261015.md)。
 
-新安装默认 `v4l2` + `software`。保留两个采集后端：V4L2 下选择 CPU 或已适配的 ISP，Picamera2/libcamera 自行管理 ISP。不创建第三套相机接口；external client 继续只消费 Core v1。
+新安装默认 `v4l2` + `software`。保留两个采集后端：V4L2 下选择 CPU 或已适配的 ISP，Picamera2/libcamera 自行管理 ISP。不创建第三套相机接口；上层集成应用继续只消费 Core v1。
 
-New installations default to `v4l2` + `software`. Keep two capture backends: V4L2 selects CPU or an adapted ISP, while Picamera2/libcamera manages its own ISP. external client continues to consume Core v1 without backend-specific product behavior.
+New installations default to `v4l2` + `software`. Keep two capture backends: V4L2 selects CPU or an adapted ISP, while Picamera2/libcamera manages its own ISP. External consumers continue to consume Core v1 without backend-specific product behavior.
 
 | 模板 / Template | 采集 / Capture | 色彩 / Color | 用途 / Use |
 |---|---|---|---|

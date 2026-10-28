@@ -64,7 +64,7 @@ be verified.
 V4L2 后端在边界处输出与 Picamera2 路径相同的连续 `RGB888` ndarray；共享帧总线、
 JPEG 预览、精确 `session_id + frame_id` 解算帧、常规星图解算，以及最近加入的
 明暗混合结构干扰判定都继续复用同一套代码。驱动切换不改变 `/api/core/v1/*`
-业务路径，也不要求 external client 识别驱动名。
+业务路径，也不要求上层调用方识别驱动名。
 
 兼容成立依赖以下条件：
 
@@ -389,7 +389,7 @@ counterfactual exposure settings.
 10. 对比 Picamera2/libcamera 基线：星数、FWHM、解算率、收敛时间、预览延迟和 CPU。
 11. 至少覆盖无月暗夜、城市光害、薄云、月光和镜头盖五种场景，再冻结目标值。
 
-本次改造只修改 OGScope 应用与 external client 集成文档，不修改 `og-bsp`。因此内核驱动、
+本次改造只修改 OGScope 应用；联合部署文档由集成方维护，不修改 `og-bsp`。因此内核驱动、
 设备树、udev/group、媒体实体命名、`v4l-utils` 打包、OpenCV V4L2 支持，以及数据目录
 持久化/权限都属于新系统镜像必须另行满足和实机确认的前置条件。当前本地单元测试
 不构成开发板、夜空或自动机械对准验收。
