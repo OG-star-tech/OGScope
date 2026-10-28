@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from ogscope.domain.camera.encoding import (
     OpenCVEncoder,
     create_preview_encoder,
 )
+from ogscope.domain.camera.readiness import CaptureReadiness
 
 # 仅缓存少量压缩质量变体，不增加常驻 RAW / Bound compressed variants without retaining RAW.
 _STREAM_JPEG_VARIANT_LIMIT = 4
@@ -44,6 +46,9 @@ class CameraManager:
 
     def __init__(self) -> None:
         self._camera = None
+        self.analysis_readiness = CaptureReadiness()
+        self._operation_leases: dict[str, float] = {}
+        self._lease_expiry_task: asyncio.Task | None = None
         self._control_lock = asyncio.Lock()
         self._read_lock = Lock()
         # 预览和分析读帧固定在线程中，避免相机图像缓存散落到默认线程池。
@@ -56,6 +61,7 @@ class CameraManager:
         self._inflight_read_future: asyncio.Future | None = None
         self._inflight_encode_future: asyncio.Future | None = None
         self._idle_shutdown_task: asyncio.Task | None = None
+        self._idle_stop_in_progress = False
         self._frame_id = 0
         self._capture_sequence = 0
         self._latest_raw = None
@@ -296,6 +302,13 @@ class CameraManager:
                 self._last_capture_success_mono = now
                 self._has_successful_capture = True
                 self._capture_timestamps.append(now)
+                try:
+                    info = self._camera.get_camera_info()
+                except (
+                    Exception
+                ):  # Readiness can fall back to fresh frames / 就绪判断可降级为新帧证据。
+                    info = {}
+                self.analysis_readiness.observe(self._capture_sequence, info)
             return frame
 
     def _camera_is_fresh(self) -> bool:
@@ -312,12 +325,17 @@ class CameraManager:
 
     def _has_consumers(self) -> bool:
         return (
-            self._preview_consumers
+            len(self._operation_leases)
+            + self._preview_consumers
             + self._analysis_consumers
             + self._recording_consumers
         ) > 0
 
     def _cancel_idle_shutdown(self) -> None:
+        # Hardware shutdown already owns the lock; let it finish before reopening.
+        # 硬件关闭已取得锁时，让它完成后再重新开启，不能在释放资源中途取消。
+        if self._idle_stop_in_progress:
+            return
         task = self._idle_shutdown_task
         if task is not None and not task.done():
             task.cancel()
@@ -335,6 +353,7 @@ class CameraManager:
             if start_grabber:
                 async with self._control_lock:
                     await self._ensure_grabber_locked()
+            self._schedule_idle_shutdown()
             return
         async with self._control_lock:
             if self._restart_required:
@@ -345,6 +364,7 @@ class CameraManager:
             if self._camera_is_fresh():
                 if start_grabber:
                     await self._ensure_grabber_locked()
+                self._schedule_idle_shutdown()
                 return
             if self._camera is None:
                 self._health_error = None
@@ -355,6 +375,7 @@ class CameraManager:
                     self._health_error = "相机初始化失败 / Camera init failed"
                     raise RuntimeError(self._health_error)
             if not getattr(self._camera, "is_capturing", False):
+                self.analysis_readiness.reset()
                 ok = await asyncio.to_thread(self._camera.start_capture)
                 if not ok:
                     await self._invalidate_camera_locked(
@@ -384,13 +405,14 @@ class CameraManager:
             self._consecutive_grab_failures = 0
             if start_grabber:
                 await self._ensure_grabber_locked()
+        self._schedule_idle_shutdown()
 
     async def acquire_preview_consumer(self) -> None:
         """注册预览消费者并启动共享编码 / Register a preview consumer."""
         self._preview_consumers += 1
         try:
             await self.ensure_started(start_grabber=True)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self._preview_consumers = max(0, self._preview_consumers - 1)
             raise
 
@@ -424,7 +446,7 @@ class CameraManager:
         self._recording_consumers += 1
         try:
             await self.ensure_started()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self._recording_consumers = max(0, self._recording_consumers - 1)
             raise
 
@@ -432,6 +454,75 @@ class CameraManager:
         """释放录像消费者 / Release a recording consumer."""
         self._recording_consumers = max(0, self._recording_consumers - 1)
         self._schedule_idle_shutdown()
+
+    def update_operation_lease(
+        self,
+        *,
+        lease_id: str | None = None,
+        release: bool = False,
+        ttl_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Bound task ownership without opening a fake preview / 用有界任务占用替代假预览保活。"""
+        now = time.monotonic()
+        if release:
+            self._operation_leases.pop(lease_id or "", None)
+            if not self._operation_leases and self._lease_expiry_task is not None:
+                self._lease_expiry_task.cancel()
+                self._lease_expiry_task = None
+            self._schedule_idle_shutdown()
+            return {"success": True, "released": True}
+        if lease_id:
+            if self._operation_leases.get(lease_id, 0) <= now:
+                self._operation_leases.pop(lease_id, None)
+                self._schedule_idle_shutdown()
+                return {"success": False, "error": "camera_lease_expired"}
+        else:
+            if len(self._operation_leases) >= 8:
+                return {"success": False, "error": "camera_lease_limit"}
+            lease_id = uuid.uuid4().hex
+        ttl = max(10.0, min(120.0, float(ttl_seconds)))
+        self._operation_leases[lease_id] = now + ttl
+        self._cancel_idle_shutdown()
+        if self._lease_expiry_task is None or self._lease_expiry_task.done():
+            self._lease_expiry_task = asyncio.create_task(
+                self._expire_operation_leases()
+            )
+        return {"success": True, "lease_id": lease_id, "ttl_seconds": ttl}
+
+    async def _expire_operation_leases(self) -> None:
+        """A disconnected owner cannot keep hardware awake forever / 失联持有者不能永久阻止休眠。"""
+        try:
+            while self._operation_leases:
+                await asyncio.sleep(
+                    max(0.01, min(self._operation_leases.values()) - time.monotonic())
+                )
+                now = time.monotonic()
+                self._operation_leases = {
+                    key: expiry
+                    for key, expiry in self._operation_leases.items()
+                    if expiry > now
+                }
+                self._schedule_idle_shutdown()
+        finally:
+            if self._lease_expiry_task is asyncio.current_task():
+                self._lease_expiry_task = None
+
+    def lifecycle_status(self) -> dict[str, Any]:
+        """Expose ownership and readiness separately / 分别报告占用与分析就绪。"""
+        phase = (
+            "sleeping"
+            if self._camera is None
+            else "active" if self._has_consumers() else "warm_idle"
+        )
+        return {
+            "phase": phase,
+            "idle_shutdown_seconds": self._idle_shutdown_sec,
+            "preview_consumers": self._preview_consumers,
+            "analysis_consumers": self._analysis_consumers,
+            "recording_consumers": self._recording_consumers,
+            "operation_consumers": len(self._operation_leases),
+            "analysis_readiness": self.analysis_readiness.snapshot(),
+        }
 
     def _schedule_idle_shutdown(self) -> None:
         if self._has_consumers():
@@ -454,7 +545,7 @@ class CameraManager:
             if asyncio.current_task() is self._idle_shutdown_task:
                 self._idle_shutdown_task = None
 
-    async def stop(self) -> None:
+    async def stop(self, *, force: bool = False) -> None:
         """停止相机采集 / Stop camera capture."""
         current = asyncio.current_task()
         if self._idle_shutdown_task is not current:
@@ -469,6 +560,17 @@ class CameraManager:
             )
             return
         try:
+            # Recheck under the lifecycle lock: a new consumer may have arrived.
+            # 在生命周期锁内复核，避免空闲关闭与新消费者启动竞争。
+            if current is self._idle_shutdown_task and self._has_consumers():
+                return
+            if not force and (
+                self._analysis_consumers
+                or self._operation_leases
+                or self._recording_consumers
+            ):
+                raise RuntimeError("Camera is in use / 相机仍被分析、校准或录像占用")
+            self._idle_stop_in_progress = current is self._idle_shutdown_task
             if not await self._stop_grabber_locked():
                 return
             if self._camera is None:
@@ -496,6 +598,7 @@ class CameraManager:
                 return
             self._clear_camera_state_locked(health_error=None)
         finally:
+            self._idle_stop_in_progress = False
             if acquired:
                 self._control_lock.release()
 
@@ -540,6 +643,7 @@ class CameraManager:
     def _clear_camera_state_locked(self, *, health_error: str | None) -> None:
         """清除已确认释放的相机状态 / Clear camera state only after confirmed release."""
         self._camera = None
+        self.analysis_readiness.reset()
         self._restart_required = False
         self._health_error = health_error
         self._consecutive_grab_failures = 0

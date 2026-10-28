@@ -282,8 +282,10 @@ class DebugCameraService:
                 "recording": is_recording,
                 "error": status.get("error") or "相机未初始化",
                 "configured_backend": status.get("configured_backend"),
+                "lifecycle": get_camera_manager().lifecycle_status(),
             }
         return {
+            "lifecycle": get_camera_manager().lifecycle_status(),
             "connected": bool(status.get("connected")),
             "streaming": bool(status.get("streaming")),
             "recording": is_recording,
@@ -370,7 +372,24 @@ class DebugCameraService:
         _attach_manager_camera_if_needed(camera)
         if focus_session_snapshot is not None:
             await DebugCameraService.stop_focus_session()
-        await get_camera_manager().stop()
+        manager = get_camera_manager()
+        ownership = manager.lifecycle_status()
+        from ogscope.core.realtime import realtime_solve_service
+
+        if (
+            realtime_solve_service.state.running
+            or ownership["analysis_consumers"]
+            or ownership["operation_consumers"]
+            or ownership["recording_consumers"]
+        ):
+            return {
+                "success": False,
+                "message": "Camera is in use; stop its task first / 相机正在使用，请先停止分析、校准或录像任务",
+            }
+        try:
+            await manager.stop()
+        except RuntimeError as exc:
+            return {"success": False, "message": str(exc)}
         return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
 
     @staticmethod

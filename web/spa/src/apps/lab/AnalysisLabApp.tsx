@@ -621,6 +621,7 @@ export default function AnalysisLabApp() {
     if (cameraSolveInFlightRef.current) return;
     setErr(null);
     cameraSolveInFlightRef.current = true;
+    setLastGateHint(t("lab.cameraPrepareAndSolve"));
     const t0 = performance.now();
     try {
       const out = await solveVideoFrame({
@@ -717,6 +718,7 @@ export default function AnalysisLabApp() {
       setErr(String(e));
       setLastRoundTripMs(null);
     } finally {
+      setLastGateHint((current) => current === t("lab.cameraPrepareAndSolve") ? null : current);
       cameraSolveInFlightRef.current = false;
     }
   };
