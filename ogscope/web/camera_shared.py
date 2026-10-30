@@ -41,6 +41,17 @@ class SharedFrame:
     source_format: str = "RGB888"
 
 
+@dataclass(frozen=True, slots=True)
+class CapturedFrame:
+    """Pixel identity travels with its timing, before encoding / 图像与采集身份、时间绑定，早于编码。"""
+
+    frame: Any
+    sequence: int
+    timestamp: float
+    monotonic: float
+    epoch: int
+
+
 class CameraManager:
     """全局单相机控制器（控制面+数据面）/ Global single-camera controller."""
 
@@ -64,6 +75,10 @@ class CameraManager:
         self._idle_stop_in_progress = False
         self._frame_id = 0
         self._capture_sequence = 0
+        self._capture_epoch = 0
+        self._reset_pending = 0
+        self._latest_raw_capture: CapturedFrame | None = None
+        self._last_frame_duration_s = 0.0
         self._latest_raw = None
         self._latest_jpeg: bytes | None = None
         self._latest_ts = 0.0
@@ -308,6 +323,9 @@ class CameraManager:
                     Exception
                 ):  # Readiness can fall back to fresh frames / 就绪判断可降级为新帧证据。
                     info = {}
+                duration = info.get("frame_duration_us") or info.get("exposure_us") or 0
+                if isinstance(duration, (int, float)) and 0 < duration <= 60_000_000:
+                    self._last_frame_duration_s = duration / 1_000_000
                 self.analysis_readiness.observe(self._capture_sequence, info)
             return frame
 
@@ -651,6 +669,8 @@ class CameraManager:
         self._last_capture_success_mono = 0.0
         self._has_successful_capture = False
         with self._frame_lock:
+            self._capture_epoch += 1
+            self._latest_raw_capture = None
             self._latest_raw = None
             self._latest_jpeg = None
             self._stream_jpeg_variants.clear()
@@ -865,8 +885,37 @@ class CameraManager:
 
     def _read_preview_frame_sync(self):
         """在读帧完成时刻取时间，不使用晚到的编码时间 / Timestamp read completion, never delayed encoding completion."""
+        with self._frame_lock:
+            epoch = self._capture_epoch
         frame = self._read_frame_sync()
-        return frame, time.time()
+        # All reads run on the same capture executor / 所有读帧均使用同一个采集线程。
+        return CapturedFrame(
+            frame, self._capture_sequence, time.time(), time.monotonic(), epoch
+        )
+
+    async def reset_temporal_history(self, camera: Any) -> bool:
+        """Invalidate cached/in-flight frames and serialize the driver reset / 失效缓存及在途图像，串行重置驱动。"""
+        with self._frame_lock:
+            self._capture_epoch += 1
+            self._reset_pending += 1
+            self._latest_raw = None
+            self._latest_raw_capture = None
+
+        def reset() -> bool:
+            try:
+                hook = getattr(camera, "begin_fresh_capture_epoch", None)
+                return bool(hook()) if callable(hook) else False
+            finally:
+                with self._frame_lock:
+                    # Also reject reads queued ahead of the reset / 同时拒绝排在重置前的读帧。
+                    self._capture_epoch += 1
+                    self._reset_pending -= 1
+                    self._latest_raw = None
+                    self._latest_raw_capture = None
+
+        return await asyncio.shield(
+            asyncio.get_running_loop().run_in_executor(self._capture_executor, reset)
+        )
 
     async def _grabber_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -882,7 +931,8 @@ class CameraManager:
                     prefetched = None
                     self._inflight_read_future = read_future
                     try:
-                        frame, capture_completed_ts = await asyncio.shield(read_future)
+                        captured = await asyncio.shield(read_future)
+                        frame, capture_completed_ts = captured.frame, captured.timestamp
                     finally:
                         if (
                             read_future.done()
@@ -928,7 +978,18 @@ class CameraManager:
                             self._frame_id += 1
                             # 默认不保留 raw，避免与 JPEG 双份常驻；需要时设 OGSCOPE_KEEP_RAW_CACHE=1
                             # By default do not retain raw to avoid dual large buffers; set env to keep.
-                            self._latest_raw = frame if self._keep_raw_cache else None
+                            current_epoch = (
+                                captured.epoch == self._capture_epoch
+                                and not self._reset_pending
+                            )
+                            self._latest_raw = (
+                                frame
+                                if self._keep_raw_cache and current_epoch
+                                else None
+                            )
+                            self._latest_raw_capture = (
+                                captured if self._latest_raw is not None else None
+                            )
                             self._latest_jpeg = jpeg
                             self._stream_jpeg_variants.clear()
                             self._latest_ts = capture_completed_ts
@@ -1062,22 +1123,31 @@ class CameraManager:
         try:
             await self.ensure_started()
             with self._frame_lock:
-                if self._latest_raw is not None:
-                    return (
-                        self._latest_raw.copy(),
-                        self._capture_sequence,
-                        self._latest_ts,
-                    )
-            # 无常驻 raw 时同步抓一帧，供解算使用 / Sync-grab without retaining raw.
-            frame = await asyncio.get_running_loop().run_in_executor(
-                self._capture_executor, self._read_frame_sync
+                cached = self._latest_raw_capture
+                max_age = max(
+                    0.5, 2 / max(1, self._target_fps), 2 * self._last_frame_duration_s
+                )
+                if (
+                    cached is not None
+                    and not self._reset_pending
+                    and cached.epoch == self._capture_epoch
+                    and 0 <= time.monotonic() - cached.monotonic <= max_age
+                ):
+                    return cached.frame.copy(), cached.sequence, cached.timestamp
+            # Preserve identity before another preview read can advance the global counter.
+            # 在下一次预览读帧更新全局序号前保留当前图像身份。
+            captured = await asyncio.get_running_loop().run_in_executor(
+                self._capture_executor, self._read_preview_frame_sync
             )
-            if frame is None:
-                raise RuntimeError("无可用视频帧 / No frame available")
             with self._frame_lock:
-                fid = self._capture_sequence
-                ts = time.time()
-            return frame, fid, ts
+                if (
+                    captured.frame is None
+                    or self._reset_pending
+                    or captured.epoch != self._capture_epoch
+                ):
+                    raise RuntimeError("No fresh frame available / 尚无新鲜图像")
+            return captured.frame, captured.sequence, captured.timestamp
+
         finally:
             self._analysis_consumers = max(0, self._analysis_consumers - 1)
             self._schedule_idle_shutdown()
