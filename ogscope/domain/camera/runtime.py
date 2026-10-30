@@ -26,8 +26,8 @@ class SharedFrame:
 class CameraCapture(Protocol):
     """单设备生命周期、帧与占用端口 / Single-device lifetime, frame and ownership port.
 
-    保留现有公共操作，不暴露内部锁、线程或状态布尔值；拆分实现留待后续。
-    Preserve public operations without exposing locks, workers or state flags; split implementation later.
+    保留现有公共操作，内部组件协作不暴露锁、线程或状态布尔值。
+    Preserve public operations while internal components keep locks, workers and state flags private.
     """
 
     analysis_readiness: CaptureReadiness
