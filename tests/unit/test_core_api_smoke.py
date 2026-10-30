@@ -88,6 +88,7 @@ class Device:
         if path.endswith("/analysis/result"):
             return {
                 "success": True,
+                "ownership_supported": True,
                 "state": "running" if self.running else "stopped",
                 "session_id": "test-session",
                 "fullsolve_count": int(self.running),
@@ -97,6 +98,48 @@ class Device:
 
     def preview(self):
         return b"\xff\xd8\xfftest\xff\xd9"
+
+
+def test_lost_start_reply_never_adopts_an_unowned_successor_session():
+    """旧调用方不能借当前会话 ID 停止无 owner 的后继 / Never adopt an ownerless successor."""
+
+    class Successor(Device):
+        def json(self, method, path, payload=None):
+            if path.endswith("/analysis/start"):
+                self.running = True
+                self.owner = None
+                raise smoke.SmokeFailure("响应丢失 / Reply lost")
+            if path.endswith("/analysis/stop"):
+                self.calls.append((method, path, payload))
+                self.running = False
+                return {"success": True, "state": "stopped"}
+            return super().json(method, path, payload)
+
+    device = Successor()
+    report = run(device)
+    assert not report["success"]
+    assert device.running
+    assert not any(
+        path.endswith(("/analysis/stop", "/camera/stop")) for _, path, _ in device.calls
+    )
+
+
+def test_failed_analysis_cleanup_does_not_fall_through_to_camera_stop():
+    device = Device()
+    device.solver_status = "DATABASE_ERROR"
+    device.failure = ("POST", smoke.CORE + "/analysis/stop")
+    report = run(device)
+    assert report["code"] == 4
+    assert not any(path.endswith("/camera/stop") for _, path, _ in device.calls)
+
+
+def test_cleanup_verifies_release_instead_of_trusting_stop_success():
+    device = Device()
+    device.solver_status = "DATABASE_ERROR"
+    device.quarantined_stop = True
+    report = run(device)
+    cleanup = [check for check in report["checks"] if check["name"] == "camera_cleanup"]
+    assert cleanup and cleanup[0]["status"] == "failed"
 
 
 def run(device, **overrides):
@@ -151,13 +194,19 @@ def test_solver_failure_cleans_up_owned_analysis_and_lease(failure):
     assert any(payload and payload.get("release") for _, _, payload in device.calls)
 
 
-def test_lost_start_response_uses_conditional_owner_cleanup():
+def test_lost_start_response_reports_unknown_session_without_guessing_cleanup():
     device = Device()
     device.lose_start_response = True
     report = run(device)
     assert not report["success"]
-    assert not device.running
-    assert any(check["name"] == "analysis_cleanup" for check in report["checks"])
+    assert device.running
+    assert not any(
+        path.endswith(("/analysis/stop", "/camera/stop")) for _, path, _ in device.calls
+    )
+    assert any(
+        check["name"] == "analysis_cleanup" and check["status"] == "failed"
+        for check in report["checks"]
+    )
 
 
 def test_another_owner_arriving_after_preflight_is_not_stopped():
@@ -236,3 +285,76 @@ def test_transport_rejects_truncated_jpeg():
     with pytest.raises(smoke.SmokeFailure, match="JPEG"):
         client.preview()
     assert response.closed
+
+
+def test_old_service_without_ownership_support_receives_no_writes():
+    class OldService(Device):
+        def json(self, method, path, payload=None):
+            result = super().json(method, path, payload)
+            result.pop("ownership_supported", None)
+            return result
+
+    device = OldService()
+    assert run(device)["code"] == 4
+    assert all(method == "GET" for method, *_ in device.calls)
+
+
+def test_uncertain_camera_start_does_not_trigger_an_inverse_stop():
+    device = Device()
+    device.failure = ("POST", smoke.CORE + "/camera/start")
+    report = run(device)
+    assert report["code"] == 4
+    assert not any(path.endswith("/camera/stop") for _, path, _ in device.calls)
+    assert any(
+        check["name"] == "camera_cleanup" and check["status"] == "skipped"
+        for check in report["checks"]
+    )
+
+
+def test_normal_analysis_stop_failure_is_not_retried_in_finally():
+    device = Device()
+    device.failure = ("POST", smoke.CORE + "/analysis/stop")
+    assert run(device)["code"] == 4
+    assert len([call for call in device.calls if call[:2] == device.failure]) == 1
+    assert not any(path.endswith("/camera/stop") for _, path, _ in device.calls)
+
+
+def test_preview_arriving_before_cleanup_prevents_camera_stop():
+    class ArrivingPreview(Device):
+        def json(self, method, path, payload=None):
+            result = super().json(method, path, payload)
+            if path.endswith("/camera/status") and self.owner:
+                result["lifecycle"]["preview_consumers"] = 1
+            return result
+
+    device = ArrivingPreview()
+    device.solver_status = "DATABASE_ERROR"
+    report = run(device)
+    assert report["code"] == 4
+    assert not any(path.endswith("/camera/stop") for _, path, _ in device.calls)
+
+
+def test_failed_result_response_does_not_include_owner_token_in_report():
+    class FailedResult(Device):
+        def json(self, method, path, payload=None):
+            result = super().json(method, path, payload)
+            if "/analysis/result?" in path:
+                return {"success": False}
+            return result
+
+    device = FailedResult()
+    report = run(device)
+    assert report["code"] == 4
+    assert device.owner and device.owner not in str(report)
+
+
+def test_unconfirmed_lease_receipt_is_reported_without_starting_camera():
+    device = Device()
+    device.failure = ("POST", smoke.CORE + "/camera/lease")
+    report = run(device)
+    assert report["code"] == 4
+    assert not any(path.endswith("/camera/start") for _, path, _ in device.calls)
+    assert any(
+        check["name"] == "lease_cleanup" and check["status"] == "failed"
+        for check in report["checks"]
+    )

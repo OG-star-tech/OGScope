@@ -36,14 +36,18 @@ Use `imx327_mipi --profile picamera2` for Picamera2. Use `v4l2 --profile isp` fo
 
 ## 自动检查范围 / Automated Scope
 
-1. `/health`、Core 系统版本、预期后端、无消费者与无运行分析。进程健康不等于相机健康；初始 Core health 单独记录。/ Check process health, Core version, expected backend and observed idle ownership. Record Core health separately.
+1. `/health`、Core 系统版本、预期后端、无消费者与无运行分析；要求分析接口明确报告 `ownership_supported=true`，否则不执行写操作。进程健康不等于相机健康；初始 Core health 单独记录。/ Check process health, Core version, expected backend and observed idle ownership. Require explicit analysis ownership support before any write. Record Core health separately.
 2. 获取 120 秒相机租约，启动相机，验证 `applied.ready`；读取并立即关闭一路 MJPEG，检查一张 JPEG 的完整起止标记。该步骤不评价画质或星图精度。/ Acquire a bounded lease, require confirmed start, read a JPEG marker-complete MJPEG frame and close the stream. This does not assess image quality or solve accuracy.
 3. 使用随机 owner 启动分析，续期租约与会话，等待一次完整解算结果。允许 `MATCH_FOUND`、`NO_MATCH`、`TOO_FEW`、`TIMEOUT`，暗场没有星图不等于链路故障；数据库、提星或准备错误会失败。/ Use a random owner and renew both leases while waiting for one solve. Scene outcomes may include no match, too few stars or solve timeout; database, extraction and preparation errors fail.
-4. 按 owner 与 session 条件停止本次分析，释放租约，停止相机并检查无消费者、`streaming=false`、`phase=sleeping`；默认循环两次。仅流状态为 false 不能证明原句柄已释放。/ Conditionally stop only this analysis, release its lease, stop capture and verify sleeping phase, stopped streaming and zero consumers; repeat twice by default. Stopped streaming alone does not prove release of the original handle.
+4. 按 owner 与已确认的 session 条件停止本次分析，释放租约；再次确认无消费者与运行分析后停止相机，并回读无消费者、`streaming=false`、`phase=sleeping`；默认循环两次。仅流状态为 false 不能证明原句柄已释放。/ Conditionally stop only the acknowledged analysis session and release its lease. Recheck consumers and analysis before camera stop, then verify sleeping phase, stopped streaming and zero consumers; repeat twice by default. Stopped streaming alone does not prove release of the original handle.
 
-每次 HTTP 请求默认预算 45 秒，分析观察预算 60 秒；`--timeout`、`--wait` 可调，单次在途请求最多额外占用一个 HTTP 预算。没有自动重试启动、停止或恢复服务。失败后尽力按 owner/session 清理、释放租约；停止请求失败不会再次自动停止。清理不确定时应人工检查，不强制终止其他任务。
+每次 HTTP 请求默认预算 45 秒，分析观察预算 60 秒；`--timeout`、`--wait` 可调，单次在途请求最多额外占用一个 HTTP 预算。没有自动重试启动、分析停止、相机停止或恢复服务。失败后只按已确认的 owner/session 清理；分析清理未确认时，不继续发送相机停止。异常清理与正常结束使用同一组占用复核和停止后回读检查，HTTP 成功本身不算资源释放成功。
 
-HTTP requests default to 45 seconds and analysis observation to 60 seconds; one in-flight request can add up to an HTTP budget. Start, stop and service recovery are not automatically retried. Failure triggers conditional cleanup and lease release; a failed camera-stop request is not repeated. Inspect uncertain cleanup manually without force-stopping another task.
+HTTP requests default to 45 seconds and analysis observation to 60 seconds; one in-flight request can add up to an HTTP budget. Start, analysis stop, camera stop and service recovery are not automatically retried. Cleanup uses only acknowledged owner/session identity; unconfirmed analysis cleanup prevents camera stop. Normal completion and failure cleanup share consumer rechecks and post-stop verification: HTTP success alone does not prove resource release.
+
+启动响应丢失时，不能从当前分析结果猜测本次 session，因为它可能属于无 owner 的后继任务。分析 session 或相机启动结果未知时，报告失败并保留状态，释放已知租约，交由服务 watchdog/TTL 和人工检查处理。租约创建响应丢失时，无 ID 可释放，报告会明确要求等待 TTL 过期并检查服务。上述自动回收机制不是清理成功证据；确认前不得重试冒烟或判定可发布。
+
+A lost start response cannot be repaired by adopting the current analysis session, which may belong to an ownerless successor. Unknown analysis identity or camera startup outcome blocks the run and withholds stop commands; known leases are released, leaving service watchdog/TTL recovery and manual inspection. If lease acquisition loses its receipt, there is no known ID to release; the report requests TTL expiry and service inspection. Automatic expiry is not proof of successful cleanup. Confirm recovery before rerunning smoke or accepting a release.
 
 ## 报告与发布判断 / Report and Release Decision
 

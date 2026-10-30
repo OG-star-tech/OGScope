@@ -4,16 +4,16 @@
 
 Product camera behavior currently traverses Domain, a debug adapter and Web Debug services, while the shared manager lives under Web. The target is a neutral runtime shared by Core and Dev with existing hardware protections preserved. This phase establishes a validation baseline and fixes a new consumer reusing a camera handle during closure. Runtime relocation is not implemented; the PR is held as draft.
 
-回归复现表明：原快速路径只检查帧新鲜度，关闭持有控制锁期间仍可能提前放行分析。现在快速路径要求控制锁空闲；关闭期间到来的分析等待释放后重新建立有效采集。自动空闲关闭和显式关闭均有确定性交错测试，驱动配置与超时预算保持不变。
+回归复现表明：原快速路径只检查帧新鲜度，关闭持有控制锁期间仍可能提前放行分析。现在快速路径要求控制锁空闲；预览必须取得控制锁后重新检查句柄，覆盖锁刚释放但关闭请求仍排队的窗口。关闭等待被取消时，原生线程可能仍在工作，因此保留并隔离原句柄，拒绝新的相机获取。自动空闲关闭、显式关闭、排队预览和原生 stop/close 等待取消均有确定性交错测试，驱动配置与超时预算保持不变。
 
-The regression reproduces the former freshness-only fast path accepting analysis while closure owns the control lock. The fast path now also requires an unlocked controller; arriving analysis waits for release and re-establishes capture. Deterministic interleaving tests cover idle and explicit closure without changing driver configuration or timeout budgets.
+Regressions reproduce the former freshness-only fast path accepting analysis while closure owns the control lock. The fast path requires an unlocked controller, and preview rechecks the handle after acquiring control, including when a closer is already queued on an unlocked lock. Cancelling a close waiter does not stop native workers, so the original handle is retained and quarantined against new acquisition. Deterministic interleaving tests cover idle/explicit closure, queued preview and cancellation during native stop/close without changing driver configuration or timeout budgets.
 
 ## 现有行为基线 / Existing Behavior Baseline
 
 | 不变量 / Invariant | 当前证据 / Existing regression evidence |
 |---|---|
 | 同一进程只保留一个活动硬件所有者；启动须确认有效帧 / One hardware owner; startup confirms a frame | `test_camera_manager_health.py` |
-| 启动失败安全释放后可再次创建；停止失败或超时保留原句柄并禁止重新获取 / Retry only after safe failed-start release; preserve and quarantine an unsafe stop | `test_camera_manager_health.py` |
+| 启动失败安全释放后可再次创建；停止失败、超时或等待取消时保留原句柄并禁止重新获取 / Retry only after safe failed-start release; quarantine failed, timed-out or cancelled stops | `test_camera_manager_health.py` |
 | 空闲关闭一旦开始释放硬件，新消费者等待完成；不能取消到一半 / New consumers wait for an idle close already releasing hardware | `test_camera_manager_health.py` |
 | 生命周期、曝光准备、资源占用分开；重启不沿用旧就绪证据 / Separate lifetime, readiness and ownership; reset readiness after sleep | `test_capture_readiness.py` |
 | 曝光准备有预算，准备期间不消耗解算次数 / Bounded readiness without spending solve attempts | `test_capture_readiness.py` |
