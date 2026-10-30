@@ -2,7 +2,7 @@
 
 from threading import Lock
 
-from ogscope.domain.camera.runtime import CameraCapture, CameraRuntime
+from ogscope.domain.camera.runtime import CameraCapture, CameraControl, CameraRuntime
 
 _runtime: CameraRuntime | None = None
 _binding_lock = Lock()
@@ -25,3 +25,8 @@ def get_camera_runtime() -> CameraRuntime:
 def get_camera_capture() -> CameraCapture:
     """控制、分析、预览及生命周期共用同一采集端口 / Share capture across all runtime consumers."""
     return get_camera_runtime().capture
+
+
+def get_camera_control() -> CameraControl:
+    """兼容入口与领域共用同一控制实现 / Share controls across compatibility and domain callers."""
+    return get_camera_runtime().control

@@ -1,8 +1,8 @@
 # 相机运行边界迁移准备 / Camera Runtime Migration Preparation
 
-Core 与 Dev 现在通过中性运行端口共用一个默认实例，Core v1 已建立重构冻结基线。现有控制实现和管理器仍在 Web，由临时适配器绑定；本阶段完成接口与组合点，没有迁移硬件运行实现。关闭竞态保护继续保留，相关 PR 暂不合并，板上验收后续进行。
+Core 与 Dev 通过中性运行端口共用一个默认实例，Core v1 保持重构冻结基线。共享启停、状态、参数重配和调焦恢复现已由 `application/camera_control.py` 持有；Web Debug 的旧入口只转发这些操作。采集管理器仍位于 Web，其线程、锁、超时及关闭竞态保护未修改。相关 PR 保持 Draft，分提交记录验证结果。
 
-Core and Dev now share one default instance through neutral runtime ports, with a refactoring freeze baseline for Core v1. A temporary adapter still binds the existing Web control implementation and manager. This stage provides ports and composition, preserving close-race protections without relocating hardware runtime behavior. The PR remains draft; board acceptance is deferred.
+Core and Dev share neutral runtime ports under the frozen Core v1 contract. `application/camera_control.py` now owns shared start/stop, status, reconfiguration and focus restoration; legacy Web Debug entries forward these operations. The capture manager remains in Web with unchanged threading, locks, budgets and close-race protection. The PR stays draft, with validation recorded per commit.
 
 回归复现表明：原快速路径只检查帧新鲜度，关闭持有控制锁期间仍可能提前放行分析。现在快速路径要求控制锁空闲；预览必须取得控制锁后重新检查句柄，覆盖锁刚释放但关闭请求仍排队的窗口。关闭等待被取消时，原生线程可能仍在工作，因此保留并隔离原句柄，拒绝新的相机获取。自动空闲关闭、显式关闭、排队预览和原生 stop/close 等待取消均有确定性交错测试，驱动配置与超时预算保持不变。
 
@@ -21,15 +21,17 @@ Regressions reproduce the former freshness-only fast path accepting analysis whi
 | 不同 owner 不得更改或停止他人会话；旧清理不能写入新会话 / Ownership checks and stale-cleanup isolation | `test_analysis_session_ownership.py` |
 | JPEG 与结果按 session/frame 配对；共享预览限制缓存与连接 / Exact frame identity with bounded shared previews | `test_core_contract_api.py`, `test_shared_preview_stream_encoding.py`, `test_domain_camera_streaming.py` |
 
-这些是本地回归证据；真实设备上的驱动阻塞、CMA 与服务重启须经[发布冒烟与人工验收](core-api-smoke.md)验证。
+这些自动回归保护每次迁移。接口阶段 `e3616e7` 已完成 V4L2 三轮板上基线（含临时进程重启、跨入口占用和原服务恢复），不代表后续提交或完整发布验收；当前提交证据见 PR。原生驱动阻塞、长曝光与持续 CMA 等仍须经[发布冒烟与人工验收](core-api-smoke.md)验证。
 
-These are local regressions. Driver stalls, CMA and service restart require board smoke plus manual acceptance.
+Automated regressions protect each migration. Interface-stage commit `e3616e7` passed three V4L2 baseline cycles including a temporary-process restart, cross-entry ownership and restoration. That evidence does not validate later commits or full release acceptance; see the PR for current evidence. Native stalls, long exposures and sustained CMA use remain manual acceptance items.
 
 ## 已完成的接口与组合点 / Implemented Ports and Composition
 
 - `domain/camera/runtime.py` 定义 `CameraControl`、`CameraCapture` 和不可变的 `CameraRuntime` 绑定；共享帧值对象 `SharedFrame` 也位于这里，旧 Web 导入继续可用。端口声明不导入 Web 或具体驱动。/ Neutral ports and the shared frame value live in Domain; the old frame import remains compatible.
 - `application/camera.py` 线程安全地延迟绑定一次默认 runtime；获取接口不打开相机。Core/Dev、实时分析、预览、硬件平面和应用启停均从该组合入口取得同一采集对象。/ Composition binds one default runtime without starting hardware and shares capture across every consumer.
-- `platform/adapters/camera_runtime.py` 是默认实现的过渡绑定点，复用已有 `CameraManager` 与 Web `DebugCameraService`，不创建第二个管理器。Debug 专用拍摄、录像、配置持久化与预览 HTTP 表示仍是迁移遗留，不声称 Web 已退出实现链。/ The bridge reuses the existing manager and control implementation; debug-only behavior and legacy preview responses remain for later migration.
+- `application/camera_control.py` 实现 `CameraControl`，仅依赖注入的采集端口和分析占用查询；不导入 Web、FastAPI 或具体驱动。状态读取、启停、帧读取、参数事务和调焦恢复均可独立运行。/ Neutral controls depend only on capture and an injected analysis-busy query, without Web, FastAPI or driver imports.
+- `platform/adapters/camera_runtime.py` 只将既有 `CameraManager` 与中性控制绑定。控制端持有调焦快照/锁和录像状态，Dev 录像仍管理文件与写盘任务，并读写同一状态；没有创建第二套相机所有者。/ Composition binds the existing manager to neutral controls. Focus state/locks and recording status belong to that instance; Dev still manages recording files/tasks against the same status.
+- 预览端口返回帧值及状态码，既有 Domain 门面负责 HTTP 状态、缓存策略和身份头；Web 旧方法保持转发。Dev 专用拍摄、录像文件、预设及配置持久化仍未迁移，Domain 的这些开发能力仍经适配器加载旧服务。/ Preview ports return frame values and status codes; the existing facade preserves HTTP headers and status. Dev capture files, recording tasks, presets and persistence still use the legacy adapter.
 - `CameraDomainService(runtime=...)`、`CoreContractService(camera=..., hardware_client=...)` 和 `RealtimeSolveService(capture=...)` 支持局部测试替身。注入控制端口与采集端口必须代表同一设备；测试可并存两组独立状态，不需要替换生产单例或引入 DI 框架。/ Constructors support isolated test collaborators; injected control and capture must represent the same device.
 - `reset_temporal_history` 经注入的采集端口执行，保留 develop 的帧身份屏障；即使驱动没有降噪钩子，也会失效缓存及在途旧帧。/ Temporal reset uses the injected capture barrier and preserves upstream invalidation even for drivers without a temporal-NR hook.
 - [Core v1 冻结基线](../contracts/core-v1-freeze.md)覆盖公开 schema、两种角色、关键失败语义及跨入口占用。新端口的类型检查在 CI 中阻断失败，项目其余 MyPy 门禁保持原状。/ Schema and behavioral baselines protect compatibility; new ports have a blocking type check while the existing project-wide MyPy policy is unchanged.
@@ -38,13 +40,14 @@ These are local regressions. Driver stalls, CMA and service restart require boar
 Core / Dev / camera domain
   -> application.camera.get_camera_runtime()
      -> CameraRuntime(control, capture)
-        -> temporary adapter: existing Web control + existing CameraManager
+        -> CameraControlService(capture, analysis_running)
+        -> existing CameraManager (still in Web)
 ```
 
 ## 分阶段迁移方案 / Migration Stages
 
-1. **接口与注入点已完成。** 公开契约基线、控制/采集端口、默认组合和局部注入均已接入；仍需板上等价性验收。/ Contract baselines, ports, default composition and local injection are implemented; board equivalence remains unverified.
-2. **中性服务取得行为所有权。** 逐项迁出 Debug 服务中产品所需的生命周期和控制逻辑；Core/Domain 直接依赖中性接口，Dev 成为适配调用方。迁移中不修改线程、锁、超时、硬件参数与恢复策略；兼容转发复用同一实例。/ Move shared product behavior out of Debug incrementally, preserving threading, locks, budgets, hardware settings and recovery. Forwarders share one instance.
+1. **接口与注入点已完成。** 公开契约基线、控制/采集端口、默认组合和局部注入已接入；接口阶段的 V4L2 基线已记录。/ Contract baselines, ports, composition and injection are implemented, with the interface-stage V4L2 baseline recorded.
+2. **共享控制实现已迁出。** Core/Domain 与 Dev 调用同一中性实现，旧 Web 方法兼容转发。保留原参数事务、10 秒重配预算、帧率回读重试和调焦恢复顺序；共享预览仍复用同一帧身份。录制文件任务、预设及持久化继续留在 Dev。/ Shared controls now have a neutral owner. Legacy forwarders preserve transactions, 10-second reconfiguration budgets, FPS readback retry, focus restoration and shared frame identity. Recording files/tasks, presets and persistence remain in Dev.
 3. **迁移管理器并明确关闭。** 根据已有依赖将运行管理器移到中性位置，集中管理启动任务、租约、抓帧和编码执行器的关闭；原导入保留临时转发。原生 I/O 超时后不能凭逻辑状态宣称已释放硬件。/ Relocate the manager and centralize task/executor shutdown. Keep temporary import forwarding; timed-out native I/O does not establish hardware release.
 4. **按修改原因拆分。** 再分别拆共享帧/编码、设备生命周期、占用规则；逐项证明行为等价后移除兼容导入。曝光准备继续独立，禁止用单个枚举掩盖多个状态维度。/ Split frame/encoding, lifecycle and ownership responsibilities after behavior is protected; retain separate readiness and remove forwarding only after equivalence checks.
 
@@ -56,9 +59,9 @@ An explicit closed/opening/running/closing lifecycle with quarantined failure is
 
 - Core v1 路径、字段、忙碌/停止语义、精确帧身份与两种运行角色保持兼容；同步核对 [API 清单](../contracts/api-inventory.md)。/ Preserve Core paths, fields, busy/stop behavior, frame identity and both roles; recheck the inventory.
 - 定向生命周期/所有权测试通过，再运行完整单元测试、Black、Ruff、wheel/sdist 授权检查；涉及界面时再构建前端。/ Pass targeted tests, then unit suite, formatting, lint and distribution-license checks; build UI if touched.
-- 当前阶段禁止 Core/相机 Domain 直接导入 Web 相机管理器或 Debug 控制实现，并验证共用实例；后续实现迁移须进一步移除临时适配器对 Web 的依赖。/ This stage guards direct imports and shared identity; later migration must remove the bridge's Web dependency as well.
+- Core、相机 Domain 和 Application 不得直接导入 Web 管理器或 Debug 控制实现。测试禁止加载 Web API/FastAPI 后仍能组合控制实例并执行状态/启停，同时保护实际控制实现的 Core/Dev 占用、失败参数写入和调焦隔离。后续管理器迁移再移除组合适配器对 Web 管理器的依赖。/ Import and behavioral checks protect the neutral owner, real Core/Dev control sharing, failed overrides and isolated focus state. The remaining Web manager dependency belongs to the next stage.
 - 板上重复启停、长曝光、竞争、服务重启和持续运行验收通过后，维护者才能决定合并。不同后端的结果单独记录。/ Board acceptance precedes a merge decision; record each backend independently.
 
-本阶段不调整鉴权、CORS、Dev 默认访问策略、现有网络接口或前端框架，也不部署到设备。许可证已确定统一为 CC BY-NC-SA 4.0；第三方许可证保留原条款。
+本阶段不调整鉴权、CORS、Dev 默认访问策略、现有网络接口或前端框架，不替换设备常驻版本，临时板上验收须记录对应提交并恢复原服务。许可证已确定统一为 CC BY-NC-SA 4.0；第三方许可证保留原条款。
 
-This phase leaves authentication, CORS, Dev locality defaults, network routes and frontend frameworks unchanged and does not deploy. Project licensing is CC BY-NC-SA 4.0; third-party terms remain intact.
+This phase leaves authentication, CORS, Dev locality defaults, network routes and frontend frameworks unchanged and does not replace the installed version. Authorized temporary board checks must record the tested commit and restore the installed service. Project licensing is CC BY-NC-SA 4.0; third-party terms remain intact.

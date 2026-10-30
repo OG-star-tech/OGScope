@@ -9,7 +9,8 @@ Camera runtime migration must preserve the HTTP contract and ownership behavior 
 - `tests/fixtures/core-v1-contract.json` 固定方法、路径、参数位置、请求体必需性、字段类型/默认值/枚举/边界、必需响应键和公开响应媒体类型；忽略标题、文案和自动 operationId。/ The fixture freezes HTTP shape and schema constraints while ignoring prose and generated operation IDs.
 - `test_core_v1_schema.py` 对比实际公开 schema，并分别检查包含或裁剪 Network/Dev 路由时的 Core 一致性。测试不会自动刷新基线。/ Compare the published schema and both role-specific route sets; tests never rewrite the baseline.
 - `test_core_contract_api.py`、`test_analysis_session_ownership.py`、`test_capture_readiness.py` 保护启动就绪、忙碌拒绝、会话所有权、准备预算及精确帧身份。/ Behavioral regressions cover confirmed readiness, busy refusal, ownership, preparation budgets and exact frame identity.
-- `test_camera_runtime_binding.py` 保护 Core/Dev 共享状态、跨入口租约、独立注入实例、并发首次绑定及中性接口的独立导入；默认控制和采集仍绑定原管理器。/ Binding tests cover shared Core/Dev state, cross-entry leases, isolated injection, concurrent composition and neutral imports using the original manager.
+- `test_camera_runtime_binding.py` 保护 Core/Dev 共享状态、跨入口租约、独立注入实例、并发首次绑定及中性接口的独立导入；默认中性控制仍绑定原采集管理器。/ Binding tests exercise the actual neutral controls with shared ownership, isolated injection and the original capture manager.
+- `test_camera_control_service.py` 保护无 Web Debug/HTTP 依赖的组合与启停、调焦恢复与实例隔离、占用拒绝、重配失败不写覆盖参数、旧驱动 FPS 回读重试及预览 HTTP 兼容。/ Control tests cover independent composition, focus restoration/isolation, busy refusal, failed overrides, legacy FPS retry and preview HTTP compatibility.
 
 ## 必须保留的行为 / Required Behavior
 

@@ -12,7 +12,10 @@ import cv2
 import numpy as np
 import pytest
 
+from ogscope.application import camera as composition
+from ogscope.application.camera_control import CameraControlService
 from ogscope.domain.camera.encoding import OpenCVEncoder
+from ogscope.domain.camera.runtime import CameraRuntime
 from ogscope.web.api.debug import services as debug_services
 from ogscope.web.camera_shared import CameraManager
 
@@ -44,7 +47,14 @@ def manager(monkeypatch):
     instance.get_raw_frame = AsyncMock(side_effect=AssertionError("extra camera read"))
     instance._read_frame_sync = Mock(side_effect=AssertionError("extra camera read"))
     _publish(instance, 1)
-    monkeypatch.setattr(debug_services, "get_camera_manager", lambda: instance)
+    monkeypatch.setattr(
+        composition,
+        "_runtime",
+        CameraRuntime(
+            capture=instance,
+            control=CameraControlService(instance, analysis_running=lambda: False),
+        ),
+    )
     yield instance
     instance._jpeg_executor.shutdown(wait=True)
 

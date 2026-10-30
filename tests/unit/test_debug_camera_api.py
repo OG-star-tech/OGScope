@@ -158,8 +158,11 @@ def fake_camera_env(monkeypatch, temp_debug_dir):
         return None
 
     get_camera_manager().attach_camera_instance(camera)
-    monkeypatch.setattr(debug_services, "focus_session_snapshot", None)
-    monkeypatch.setattr(debug_services, "focus_session_state_lock", None)
+    from ogscope.application.camera import get_camera_control
+
+    control = get_camera_control()
+    monkeypatch.setattr(control, "_focus_snapshot", None)
+    monkeypatch.setattr(control, "_focus_lock", None)
     monkeypatch.setattr(debug_services, "get_camera_instance", _get_camera_instance)
     monkeypatch.setattr(
         debug_services.DebugCameraService,

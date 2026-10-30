@@ -113,17 +113,31 @@ class CameraCapture(Protocol):
 class CameraControl(Protocol):
     """Core 与 Dev 共用的控制投影 / Control projection shared by Core and Dev.
 
-    预览响应暂保留旧表示；HTTP 适配与运行实现的分离属于下一阶段。
-    Preview retains its legacy representation until the next transport/implementation migration.
+    返回帧值而非 HTTP 响应；共享控制状态由单个实现持有。
+    Return frame values rather than HTTP responses; one implementation owns shared control state.
     """
+
+    recording: bool
 
     async def get_camera_status(self) -> dict[str, Any]: ...
 
+    async def get_runtime_overrides(self) -> dict[str, Any]: ...
+
+    async def clear_runtime_overrides(self) -> dict[str, Any]: ...
+
     async def start_camera(self) -> dict[str, Any]: ...
+
+    async def ensure_camera_streaming(self) -> None: ...
 
     async def stop_camera(self) -> dict[str, Any]: ...
 
-    async def get_preview(self, since_frame_id: int | None = None) -> Any: ...
+    async def get_preview_frame(
+        self, since_frame_id: int | None = None
+    ) -> tuple[int, SharedFrame | None]: ...
+
+    async def start_focus_session(self) -> dict[str, Any]: ...
+
+    async def stop_focus_session(self) -> dict[str, Any]: ...
 
     async def get_stream_frame_bytes(
         self,

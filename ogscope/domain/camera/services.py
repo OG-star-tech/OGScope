@@ -9,6 +9,7 @@ import logging
 import time
 from typing import Any
 
+from fastapi import HTTPException
 from fastapi.responses import Response
 from starlette.requests import Request
 
@@ -103,7 +104,27 @@ class CameraDomainService:
         )
 
     async def get_preview(self, *, since_frame_id: int | None = None):
-        return await self.runtime.control.get_preview(since_frame_id=since_frame_id)
+        """保留预览的 HTTP 契约，控制端口只返回帧 / Keep preview HTTP adaptation outside control."""
+        code, frame = await self.runtime.control.get_preview_frame(since_frame_id)
+        if code == 304:
+            return Response(status_code=304)
+        if code != 200 or frame is None or frame.jpeg_frame is None:
+            raise HTTPException(
+                status_code=503,
+                detail="暂无预览帧，请稍后重试 / No preview frame yet, retry shortly",
+            )
+        return Response(
+            content=frame.jpeg_frame,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "X-Frame-Id": str(frame.frame_id),
+                "X-Frame-Ts": str(frame.timestamp),
+                "X-Frame-Width": str(frame.width),
+                "X-Frame-Height": str(frame.height),
+            },
+        )
 
     async def get_rate_limited_preview(
         self, request: Request, *, since_frame_id: int | None = None
@@ -232,13 +253,11 @@ class DebugCameraService:
 
     @staticmethod
     async def get_runtime_overrides():
-        return await _debug_services_module().DebugCameraService.get_runtime_overrides()
+        return await get_camera_runtime().control.get_runtime_overrides()
 
     @staticmethod
     async def clear_runtime_overrides():
-        return (
-            await _debug_services_module().DebugCameraService.clear_runtime_overrides()
-        )
+        return await get_camera_runtime().control.clear_runtime_overrides()
 
     @staticmethod
     async def apply_runtime_overrides_as_defaults():
@@ -266,9 +285,7 @@ class DebugCameraService:
 
     @staticmethod
     async def get_preview(*, since_frame_id: int | None = None):
-        return await get_camera_runtime().control.get_preview(
-            since_frame_id=since_frame_id
-        )
+        return await camera_domain_service.get_preview(since_frame_id=since_frame_id)
 
     @staticmethod
     async def capture_image():
@@ -300,11 +317,11 @@ class DebugCameraService:
 
     @staticmethod
     async def start_focus_session():
-        return await _debug_services_module().DebugCameraService.start_focus_session()
+        return await get_camera_runtime().control.start_focus_session()
 
     @staticmethod
     async def stop_focus_session():
-        return await _debug_services_module().DebugCameraService.stop_focus_session()
+        return await get_camera_runtime().control.stop_focus_session()
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
