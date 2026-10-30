@@ -54,8 +54,9 @@ class CameraDomainService:
         (e.g. Picamera2) no-op the hook, so `applied` comes back False.
         """
         camera = DebugCameraService.get_camera_instance()
-        hook = getattr(camera, "begin_fresh_capture_epoch", None)
-        applied = bool(hook()) if callable(hook) else False
+        from ogscope.web.camera_shared import get_camera_manager
+
+        applied = await get_camera_manager().reset_temporal_history(camera)
         return {"success": True, "applied": applied}
 
     async def set_auto_exposure_mode(self, enabled: bool):
