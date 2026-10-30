@@ -57,7 +57,6 @@ class CameraFramePipeline:
         read_lock: Any,
         readiness: CaptureReadiness,
         check_accepting_work: Callable[[], None],
-        is_closing: Callable[[], bool],
         quarantine: Callable[[str], None],
         invalidate: Callable[[str], Awaitable[None]],
     ) -> None:
@@ -66,7 +65,6 @@ class CameraFramePipeline:
         self._read_lock = read_lock
         self.analysis_readiness = readiness
         self._check_accepting_work = check_accepting_work
-        self._is_closing = is_closing
         self._mark_restart_required = quarantine
         self._invalidate = invalidate
         self._logger = logging.getLogger(__name__)
@@ -243,7 +241,8 @@ class CameraFramePipeline:
             except Exception:
                 pass
         self._inflight_encode_future = None
-        if self._is_closing() and self.resources.worker_futures:
+        # 普通停止同样不能越过取消后的启动、探测或直读工作 / Reusable stop must also drain cancelled startup, probes and direct reads.
+        if self.resources.worker_futures:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(

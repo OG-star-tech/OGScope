@@ -507,3 +507,119 @@ async def test_cancelled_recording_stop_still_releases_writer_and_ownership(
     assert released.is_set()
     assert control.recording_task is None
     assert manager.lifecycle_status()["recording_consumers"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["start", "probe"])
+async def test_cancelled_startup_quarantines_pending_native_work(
+    runtime_manager, monkeypatch, phase
+):
+    """启动或探测取消时禁止重复获取原生设备 / Fence reacquisition after cancelled native start or probe."""
+    manager, camera = runtime_manager
+    entered, release = threading.Event(), threading.Event()
+    camera.is_capturing = phase == "probe"
+    manager._frames.health.last_success_mono = 0
+
+    def blocked(*args):
+        entered.set()
+        release.wait(timeout=3)
+        camera.is_capturing = True
+        return True
+
+    monkeypatch.setattr(
+        camera if phase == "start" else manager,
+        "start_capture" if phase == "start" else "_probe_stream_health_sync",
+        blocked,
+    )
+    starting = asyncio.create_task(manager.ensure_started())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        starting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await starting
+        assert manager.get_camera_instance() is camera
+        assert (await manager.status())["restart_required"] is True
+        with pytest.raises(RuntimeError, match="cancelled"):
+            await manager.ensure_started()
+    finally:
+        release.set()
+        await asyncio.gather(starting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["start", "probe"])
+async def test_ordinary_stop_waits_for_cancelled_startup_worker(
+    runtime_manager, monkeypatch, phase
+):
+    """普通停止也须等待取消后的原生启动/探测 / Reusable stop must drain cancelled native start/probe work too."""
+    manager, camera = runtime_manager
+    entered, release = threading.Event(), threading.Event()
+    camera.is_capturing = phase == "probe"
+    manager._frames.health.last_success_mono = 0
+
+    def blocked(*args):
+        entered.set()
+        release.wait(timeout=3)
+        camera.events.append("native_finished")
+        camera.is_capturing = True
+        return True
+
+    monkeypatch.setattr(
+        camera if phase == "start" else manager,
+        "start_capture" if phase == "start" else "_probe_stream_health_sync",
+        blocked,
+    )
+    starting = asyncio.create_task(manager.ensure_started())
+    stopping = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        starting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await starting
+        stopping = asyncio.create_task(manager.stop())
+        await asyncio.sleep(0.05)
+        assert "close" not in camera.events
+        assert not stopping.done()
+        release.set()
+        await asyncio.wait_for(stopping, 1)
+        assert camera.events == ["native_finished", "stop", "close"]
+        assert manager.get_camera_instance() is None
+    finally:
+        release.set()
+        await asyncio.gather(
+            *(task for task in (starting, stopping) if task is not None),
+            return_exceptions=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_reconfiguration_does_not_resume_capture(
+    runtime_manager, monkeypatch
+):
+    """改参等待取消后不能恢复抓帧或重复获取 / Cancelled reconfiguration must not resume capture or allow reacquisition."""
+    manager, camera = runtime_manager
+    entered, release = threading.Event(), threading.Event()
+    resume = AsyncMock()
+    monkeypatch.setattr(manager._frames, "start", resume)
+
+    def blocked():
+        entered.set()
+        release.wait(timeout=3)
+        camera.events.append("reconfigured")
+
+    changing = asyncio.create_task(manager.reconfigure_camera("test", blocked))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        changing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await changing
+        resume.assert_not_awaited()
+        assert (await manager.status())["restart_required"] is True
+        with pytest.raises(RuntimeError, match="cancelled"):
+            await manager.ensure_started()
+        release.set()
+        await manager.stop()
+        assert camera.events == ["reconfigured", "stop", "close"]
+    finally:
+        release.set()
+        await asyncio.gather(changing, return_exceptions=True)
