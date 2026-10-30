@@ -122,6 +122,7 @@ Alignment consumers must use this supplied target for motion, verification and d
 - `POST /api/core/v1/camera/reset-temporal-history`
   - No request body. The upstream caller explicitly invokes this after a mount move has settled to discard cross-frame denoising history; OGScope does not infer mount motion
   - Uses the camera-control response shape. `applied.temporal_history_reset` reports whether the driver implements the reset hook; drivers without cross-frame history, such as Picamera2, return `false`
+  - Also invalidates analysis RAW cache and pre-reset in-flight frames; the driver hook runs serially on the capture worker. `applied` describes the driver hook, not application-cache invalidation. The response shape is unchanged.
   - This is an integration hook for avoiding pre-move history on V4L2. Until the upstream caller invokes it, end-to-end reset after movement is not in effect
 
 Stream diagnostics and single-frame JPEG preview (polling, `since_frame_id`, debug rate limits) remain developer-only:

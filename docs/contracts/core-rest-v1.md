@@ -129,6 +129,7 @@ The successful solve includes `result.overlay_ext.polar_guide` when projection m
 - `POST /api/core/v1/camera/reset-temporal-history`
   - 无请求体；底座移动并确认稳定后由上层显式调用，清空驱动跨帧降噪历史。OGScope 不自行判断底座是否移动
   - 响应沿用相机控制结构；`applied.temporal_history_reset` 表示驱动是否实现重置钩子。Picamera2 等无跨帧历史的驱动返回 `false`
+  - 同时失效分析 RAW 缓存和重置前的在途帧；驱动钩子在采集线程串行执行。`applied` 只描述驱动钩子，不描述应用缓存是否清除。响应结构不变。
   - 该接口是 V4L2 移动后避免旧画面混入的集成钩子；上层未调用时，不能认为端到端重置已生效
 
 流控诊断状态和单帧 JPEG 预览（轮询、`since_frame_id`、调试限频）仍仅暴露于开发路径：

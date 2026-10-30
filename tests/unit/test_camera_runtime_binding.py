@@ -224,6 +224,28 @@ def test_realtime_can_inject_capture_without_changing_shared_runtime():
     assert composition.get_camera_runtime() is shared
 
 
+@pytest.mark.asyncio
+async def test_domain_reset_invalidates_cached_identity_even_without_driver_hook():
+    """重置必须经过采集屏障，即使驱动没有降噪钩子 / Reset must invalidate capture identity even without a driver hook."""
+    from ogscope.web.camera_shared import CameraManager, CapturedFrame
+
+    capture = CameraManager()
+    cached = CapturedFrame(object(), 7, 1.0, 1.0, 0)
+    capture._latest_raw = cached.frame
+    capture._latest_raw_capture = cached
+    service = CameraDomainService(CameraRuntime(capture, FakeControl(capture)))
+    try:
+        assert await service.reset_temporal_history() == {
+            "success": True,
+            "applied": False,
+        }
+        assert capture._latest_raw is None and capture._latest_raw_capture is None
+        assert capture._capture_epoch > cached.epoch
+    finally:
+        capture._capture_executor.shutdown(wait=True)
+        capture._jpeg_executor.shutdown(wait=True)
+
+
 def test_neutral_ports_and_composition_import_without_loading_web():
     subprocess.run(
         [
