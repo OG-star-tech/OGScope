@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-import logging
 import os
 import tempfile
 import time
@@ -32,9 +31,6 @@ from ogscope.domain.shared.filesystem import (
 # 兼容旧命名，测试与遗留调用仍可能引用 / Backward-compatible alias.
 DEBUG_CAPTURES_DIR = DEV_CAPTURES_DIR
 
-# 全局变量存储相机状态（相机单例在 CameraManager）/ Global state (camera singleton lives in CameraManager).
-recording_task = None
-recording_state_lock: Optional[asyncio.Lock] = None
 # 录制会话元数据（用于停止时写入侧车） / Recording session metadata (for sidecar on stop)
 recording_stem: Optional[str] = None
 recording_t0_mono: Optional[float] = None
@@ -85,14 +81,6 @@ def _build_debug_capture_archive() -> tuple[Path, str]:
     except Exception:
         archive_path.unlink(missing_ok=True)
         raise
-
-
-def _get_recording_state_lock() -> asyncio.Lock:
-    """懒加载录制状态锁 / Lazy-init lock for recording state."""
-    global recording_state_lock
-    if recording_state_lock is None:
-        recording_state_lock = asyncio.Lock()
-    return recording_state_lock
 
 
 def is_recording_active() -> bool:
@@ -433,11 +421,11 @@ class DebugCameraService:
     @staticmethod
     async def start_recording():
         """开始录制视频 / Start recording video"""
-        global recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
         control = get_camera_control()
-        async with _get_recording_state_lock():
+        async with control.recording_state_lock:
             if control.recording:
                 raise Exception("已在录制中")
             try:
@@ -520,7 +508,7 @@ class DebugCameraService:
                     finally:
                         video_writer.release()
 
-                recording_task = asyncio.create_task(record_video())
+                control.recording_task = asyncio.create_task(record_video())
                 return {
                     "success": True,
                     "filename": f"{stem}.avi",
@@ -536,11 +524,11 @@ class DebugCameraService:
     @staticmethod
     async def stop_recording():
         """停止录制视频 / Stop recording video"""
-        global recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
         control = get_camera_control()
-        async with _get_recording_state_lock():
+        async with control.recording_state_lock:
             if not control.recording:
                 raise Exception("未在录制中")
 
@@ -551,25 +539,7 @@ class DebugCameraService:
             codec_fourcc = recording_codec_fourcc
             container = recording_container
 
-            control.recording = False
-
-            if recording_task:
-                try:
-                    # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop.
-                    await asyncio.wait_for(recording_task, timeout=2.0)
-                except asyncio.TimeoutError:
-                    recording_task.cancel()
-                    try:
-                        await asyncio.wait_for(recording_task, timeout=1.0)
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(
-                            "停止录制时等待录制任务取消异常: %s", e
-                        )
-                except asyncio.CancelledError:
-                    pass
-                recording_task = None
+            await control.finish_recording_task()
 
             if stem:
                 media_filename = media_filename or f"{stem}.avi"

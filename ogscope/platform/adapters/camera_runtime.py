@@ -11,9 +11,9 @@ def _analysis_running() -> bool:
     return bool(realtime_solve_service.state.running)
 
 
-def build_legacy_camera_runtime() -> CameraRuntime:
+def build_camera_runtime() -> CameraRuntime:
     """中性控制复用已有管理器，不加载 Web Debug / Reuse existing capture without loading Web Debug."""
-    from ogscope.web.camera_shared import get_camera_manager
+    from ogscope.application.camera_manager import get_camera_manager
 
     capture = get_camera_manager()
     return CameraRuntime(

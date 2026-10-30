@@ -146,8 +146,8 @@ class FakeCamera:
 
 @pytest.fixture
 def fake_camera_env(monkeypatch, temp_debug_dir):
+    from ogscope.application.camera_manager import get_camera_manager
     from ogscope.web.api.debug import services as debug_services
-    from ogscope.web.camera_shared import get_camera_manager
 
     camera = FakeCamera()
 

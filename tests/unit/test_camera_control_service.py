@@ -102,7 +102,7 @@ from unittest.mock import AsyncMock
 
 class RejectDebug(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path, target=None):
-        if fullname.startswith(('ogscope.web.api', 'fastapi', 'starlette')):
+        if fullname.startswith(('ogscope.web', 'fastapi', 'starlette')):
             raise AssertionError(fullname)
 
 sys.meta_path.insert(0, RejectDebug())
@@ -118,7 +118,7 @@ async def exercise():
     assert (await runtime.control.stop_camera())['success'] is True
 
 asyncio.run(exercise())
-assert not any(name.startswith('ogscope.web.api') for name in sys.modules)
+assert not any(name.startswith('ogscope.web') for name in sys.modules)
 """,
         ],
         check=True,

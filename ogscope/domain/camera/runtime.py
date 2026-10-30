@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, runtime_checkable
 
@@ -61,6 +62,12 @@ class CameraCapture(Protocol):
 
     def lifecycle_status(self) -> dict[str, Any]: ...
 
+    def start_warmup(self) -> None: ...
+
+    def begin_shutdown(self) -> None: ...
+
+    async def shutdown(self, *, timeout_sec: float = 8.0) -> None: ...
+
     async def stop(self, *, force: bool = False) -> None: ...
 
     async def pause_grabber(self) -> None: ...
@@ -93,6 +100,10 @@ class CameraCapture(Protocol):
         self, snap: SharedFrame, quality: int
     ) -> bytes | None: ...
 
+    async def encode_image(
+        self, raw_frame: Any, image_format: str = "jpeg", quality: int = 75
+    ) -> bytes | None: ...
+
     @staticmethod
     def encode_frame(
         raw_frame: Any, image_format: str = "jpeg", quality: int = 75
@@ -118,6 +129,14 @@ class CameraControl(Protocol):
     """
 
     recording: bool
+    recording_task: asyncio.Task | None
+
+    @property
+    def recording_state_lock(self) -> asyncio.Lock: ...
+
+    async def finish_recording_task(self) -> None: ...
+
+    async def shutdown(self) -> None: ...
 
     async def get_camera_status(self) -> dict[str, Any]: ...
 

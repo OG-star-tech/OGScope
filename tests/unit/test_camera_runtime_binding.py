@@ -129,7 +129,7 @@ def test_concurrent_first_access_constructs_exactly_one_runtime(monkeypatch):
         return composition.get_camera_runtime()
 
     monkeypatch.setattr(composition, "_runtime", None)
-    monkeypatch.setattr(camera_runtime, "build_legacy_camera_runtime", build)
+    monkeypatch.setattr(camera_runtime, "build_camera_runtime", build)
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: access(), range(8)))
     assert built == [runtime]
@@ -257,6 +257,7 @@ def test_core_domain_and_application_have_no_direct_camera_implementation_import
         list((root / "core").rglob("*.py"))
         + list((root / "domain/camera").glob("*.py"))
         + list((root / "application").glob("*.py"))
+        + [root / "platform/adapters/camera_runtime.py"]
     )
     violations = []
     for path in paths:

@@ -14,10 +14,10 @@ import pytest
 
 from ogscope.application import camera as composition
 from ogscope.application.camera_control import CameraControlService
+from ogscope.application.camera_manager import CameraManager
 from ogscope.domain.camera.encoding import OpenCVEncoder
 from ogscope.domain.camera.runtime import CameraRuntime
 from ogscope.web.api.debug import services as debug_services
-from ogscope.web.camera_shared import CameraManager
 
 
 def _red_jpeg() -> bytes:

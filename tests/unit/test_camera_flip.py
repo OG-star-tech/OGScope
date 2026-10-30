@@ -7,9 +7,9 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 import numpy as np
 import pytest
 
+from ogscope.application.camera_manager import CameraManager
 from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.platform.hardware.camera import IMX327MIPICamera
-from ogscope.web.camera_shared import CameraManager
 
 
 def _minimal_config(**extra: object) -> dict:

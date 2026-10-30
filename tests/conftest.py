@@ -38,7 +38,7 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
     from ogscope.application.camera import get_camera_control
 
     monkeypatch.setattr(get_camera_control(), "recording", False)
-    monkeypatch.setattr(debug_services, "recording_task", None)
+    monkeypatch.setattr(debug_services.get_camera_control(), "recording_task", None)
     monkeypatch.setattr(debug_services, "recording_stem", None)
     monkeypatch.setattr(debug_services, "recording_t0_mono", None)
     monkeypatch.setattr(debug_services, "recording_fps_value", 15.0)

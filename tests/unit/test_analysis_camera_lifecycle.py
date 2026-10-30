@@ -5,9 +5,9 @@ import asyncio
 import numpy as np
 import pytest
 
+from ogscope.application.camera_manager import CameraManager
 from ogscope.core.realtime import service as service_module
 from ogscope.core.realtime.service import RealtimeSolveService
-from ogscope.web.camera_shared import CameraManager
 
 
 class FrameCamera:

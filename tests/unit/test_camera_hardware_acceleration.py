@@ -14,13 +14,13 @@ import cv2
 import numpy as np
 import pytest
 
+from ogscope.application.camera_manager import CameraManager
 from ogscope.config import Settings
 from ogscope.domain.camera.encoding import EncodedImage, HardwarePreviewEncoder
 from ogscope.domain.camera.geometry import apply_geometry
 from ogscope.platform.hardware import bcm2835_isp, v4l2_buffers
 from ogscope.platform.hardware.camera import IMX327MIPICamera
 from ogscope.platform.hardware.v4l2_camera import V4L2ControlRange, V4L2RawCamera
-from ogscope.web.camera_shared import CameraManager
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])

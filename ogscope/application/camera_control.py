@@ -35,8 +35,45 @@ class CameraControlService:
         self.capture = capture
         self._analysis_running = analysis_running
         self.recording = False
+        self.recording_task: asyncio.Task | None = None
+        self._recording_lock = asyncio.Lock()
         self._focus_snapshot: dict[str, Any] | None = None
         self._focus_lock: asyncio.Lock | None = None
+
+    @property
+    def recording_state_lock(self) -> asyncio.Lock:
+        """录像任务和控制状态使用同一实例锁 / One instance lock protects recording task and controls."""
+        return self._recording_lock
+
+    async def finish_recording_task(self) -> None:
+        """锁内结束录像，保留原有优雅退出预算 / Finish recording under the lock with existing grace budgets."""
+        self.recording = False
+        task = self.recording_task
+        if task is None:
+            return
+        try:
+            done, _ = await asyncio.wait({task}, timeout=2.0)
+        except asyncio.CancelledError:
+            # 保留旧停止语义：请求取消仍完成录像清理 / Preserve stop semantics: finish recording cleanup after request cancellation.
+            done = set()
+        if not done:
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=1.0)
+        if not done:
+            raise RuntimeError("录像任务未退出 / Recording task did not stop")
+        self.recording_task = None
+        if not task.cancelled():
+            task.result()
+
+    async def shutdown(self) -> None:
+        """退出时释放录像任务与占用；媒体元数据仍由 Dev 管理 / Release recording on exit; Dev retains media metadata."""
+        async with self.recording_state_lock:
+            active = self.recording or self.recording_task is not None
+            try:
+                await self.finish_recording_task()
+            finally:
+                if active:
+                    await self.capture.release_recording_consumer()
 
     def get_camera_instance(self) -> Any:
         """只读取共享句柄，不启动硬件 / Read the shared handle without starting hardware."""
@@ -170,7 +207,7 @@ class CameraControlService:
             return (200 if encoded is not None else 500), encoded, snap.frame_id
 
         raw, _fid, _ts = await manager.get_raw_frame()
-        encoded = await asyncio.to_thread(manager.encode_frame, raw, image_format, q)
+        encoded = await manager.encode_image(raw, image_format, q)
         if encoded is None:
             return 500, None, snap.frame_id
         snap2 = await manager.get_cached_frame_snapshot()
