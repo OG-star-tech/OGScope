@@ -167,6 +167,7 @@ class V4L2RawCamera:
         # frame newer than the settle was dequeued since; the queue is FIFO, so
         # every later frame is newer still.
         self._fresh_frame_seen = True
+        self._last_capture_completed_mono: float | None = None
         self.white_balance_gain_r = float(config.get("white_balance_gain_r", 1.0))
         self.white_balance_gain_b = float(config.get("white_balance_gain_b", 1.0))
         self.night_mode = bool(config.get("night_mode", True))
@@ -922,6 +923,8 @@ class V4L2RawCamera:
         """开始抓帧 / Start capture."""
         if not self.is_initialized:
             return False
+        if self.is_capturing and self._capture is not None:
+            return True
         if self._capture is None:
             self._capture = self._create_capture()
             # 新开的流只有此后曝光的帧 / A newly opened stream only holds
@@ -930,6 +933,7 @@ class V4L2RawCamera:
         if self._capture is None:
             return False
         self.is_capturing = True
+        self._last_capture_completed_mono = None
         # 每次开始抓帧都是新的一段序列，之前累积的帧可能是很久以前的场景
         # / Each capture start is a fresh sequence - a stale accumulator from
         # a previous run could hold a since-changed scene.
@@ -976,22 +980,11 @@ class V4L2RawCamera:
         return True
 
     def is_within_fresh_capture_epoch(self) -> bool:
-        """当前是否仍处于"下一帧可能不安全"的窗口内 / Whether we're still
-        inside the window where the next frame might not be safe yet.
-
-        窗口过后，当前缓存的那一帧本身已经能保证是在上次 settle 之后才开
-        始曝光的——调用方（比如一次同姿态内的重试）不需要再等一帧全新的，
-        直接用当前缓存的即可，这样重试才不会一直付一次完整曝光的等待成
-        本。仅在真正刚发生过 begin_fresh_capture_epoch 之后的短暂窗口内才
-        返回 True。
-        Once this window has passed, the currently cached frame is already
-        guaranteed to have started exposing after the last settle - a
-        caller retrying at an unchanged pose doesn't need to wait for
-        another brand-new one, it can just use what's cached right now.
-        Only returns True for the brief window right after
-        begin_fresh_capture_epoch was actually called.
-        """
-        return time.monotonic() < self._nr_fresh_epoch_deadline_mono
+        """Elapsed time alone cannot certify a queued frame / 仅时间经过不能证明排队图像已更新。"""
+        return (
+            not self._fresh_frame_seen
+            or time.monotonic() < self._nr_fresh_epoch_deadline_mono
+        )
 
     def stop_capture(self) -> bool:
         """停止抓帧并释放节点以解除阻塞读取 / Stop capture and release the node to unblock reads."""
@@ -1420,6 +1413,18 @@ class V4L2RawCamera:
             return None
         try:
             capture = self._capture
+            period_s = max(
+                1e-3, float(self._frame_duration_us or self.exposure_us) / 1_000_000.0
+            )
+            last_capture = self._last_capture_completed_mono
+            if (
+                self._fresh_frame_seen
+                and last_capture is not None
+                and time.monotonic() - last_capture > max(0.5, 2 * period_s)
+            ):
+                # A warm open stream can queue old sky frames while reads pause.
+                # 保温流暂停读取时仍会积压旧星空帧；恢复时重新检查曝光新鲜度。
+                self.begin_fresh_capture_epoch()
             if self._fresh_frame_seen:
                 ok, frame = capture.read()
             else:
@@ -1460,7 +1465,9 @@ class V4L2RawCamera:
                 if self._isp_mode == "bcm2835_isp" and self._isp_error:
                     return None
                 rgb = self._debayer(denoised)
-            return self._apply_postprocessing(rgb)
+            result = self._apply_postprocessing(rgb)
+            self._last_capture_completed_mono = time.monotonic()
+            return result
         except Exception as exc:  # noqa: BLE001
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
