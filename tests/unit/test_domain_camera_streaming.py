@@ -106,6 +106,10 @@ async def test_build_camera_mjpeg_stream_evicts_the_old_session_when_limit_reach
 
     await first_body.aclose()
     await second_resp.body_iterator.aclose()
+    # 未迭代的生成器不执行 finally；模拟 ASGI 的响应后台清理。
+    # An unstarted generator skips finally; run the ASGI response cleanup too.
+    await second_resp.background()
+    assert limiter.active_clients == 0
 
 
 @pytest.mark.unit

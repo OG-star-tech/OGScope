@@ -5,11 +5,99 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
 
 from ogscope.web.camera_shared import CameraManager
+
+
+@pytest.mark.asyncio
+async def test_preview_rechecks_camera_after_queued_close_takes_control(monkeypatch):
+    """锁已释放但关闭仍在排队时，预览必须重查句柄 / Recheck after a queued closer wins the lock."""
+    queued = asyncio.Event()
+
+    class ObservedLock(asyncio.Lock):
+        async def acquire(self):
+            if self.locked():
+                queued.set()
+            return await super().acquire()
+
+    manager = CameraManager()
+    manager._control_lock = ObservedLock()
+    first, second = _FrameCamera(), _FrameCamera()
+    first.camera = _CloseProbe()
+    manager.attach_camera_instance(first)
+    monkeypatch.setattr(manager, "_create_camera_sync", lambda: second)
+    monkeypatch.setattr(manager, "_ensure_grabber_locked", AsyncMock())
+    try:
+        await manager.ensure_started()
+        await manager._control_lock.acquire()
+        closing = asyncio.create_task(manager.stop())
+        await asyncio.wait_for(queued.wait(), 1)
+        manager._control_lock.release()
+        # 不让出事件循环，复现 unlocked 但已有锁等待者的窗口。
+        # Keep the event-loop turn: the lock is unlocked but already has a waiter.
+        await manager.acquire_preview_consumer()
+        await closing
+        assert first.camera.closed
+        assert manager.get_camera_instance() is second
+        assert (await manager.status())["streaming"] is True
+    finally:
+        await manager.release_preview_consumer()
+        await manager.stop(force=True)
+        manager._capture_executor.shutdown(wait=True)
+        manager._jpeg_executor.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["stop", "close"])
+async def test_cancelled_close_quarantines_handle_until_native_worker_finishes(
+    monkeypatch, operation
+):
+    """取消等待不等于取消原生关闭 / Cancelling the waiter cannot cancel native closure."""
+    manager = CameraManager()
+    camera = _FrameCamera()
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def blocked():
+        entered.set()
+        try:
+            release.wait(timeout=3)
+            camera.is_capturing = False
+            return True
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(
+        camera,
+        "stop_capture" if operation == "stop" else "close",
+        blocked,
+        raising=False,
+    )
+    manager.attach_camera_instance(camera)
+    try:
+        await manager.ensure_started()
+        closing = asyncio.create_task(manager.stop())
+        assert await asyncio.to_thread(entered.wait, 1)
+        arriving = asyncio.create_task(manager.acquire_analysis_consumer())
+        await asyncio.sleep(0)
+        assert not arriving.done()
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert manager.get_camera_instance() is camera
+        assert (await manager.status())["restart_required"] is True
+        with pytest.raises(RuntimeError, match="restart required|重启服务"):
+            await arriving
+        assert manager.lifecycle_status()["analysis_consumers"] == 0
+    finally:
+        release.set()
+        await asyncio.to_thread(finished.wait, 1)
+        await manager.stop(force=True)
+        manager._capture_executor.shutdown(wait=True)
+        manager._jpeg_executor.shutdown(wait=True)
 
 
 class _NoFrameCamera:

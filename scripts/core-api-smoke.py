@@ -150,8 +150,11 @@ def run_smoke(
     owner = uuid.uuid4().hex
     session = None
     analysis_pending = False
+    analysis_stop_attempted = False
     lease = None
+    lease_acquire_pending = False
     camera_touched = False
+    camera_start_pending = False
     stop_attempted = False
 
     def record(name, detail=None):
@@ -161,24 +164,49 @@ def run_smoke(
         result = client.json(method, CORE + path, payload)
         require(
             result.get("success") is True,
-            f"Core 操作失败 / Core operation failed: {path}",
+            f"Core 操作失败 / Core operation failed: {urlsplit(path).path}",
         )
         return result
 
     def stop_analysis():
-        nonlocal analysis_pending, session
-        if not session:
-            current = call(
-                "GET", "/analysis/result?" + urlencode({"owner_token": owner})
-            )
-            session = current.get("session_id")
+        nonlocal analysis_pending, session, analysis_stop_attempted
+        # 当前结果可能属于无 owner 的后继；不能用查询结果补认所有权。
+        # Current results may belong to an ownerless successor; never infer ownership from them.
         require(bool(session), "无法确认待清理会话 / Cannot identify cleanup session")
+        require(
+            not analysis_stop_attempted,
+            "停止结果未确认，不自动重试 / Stop unconfirmed; no automatic retry",
+        )
         payload = {"owner_token": owner}
         payload["session_id"] = session
+        analysis_stop_attempted = True
         stopped = call("POST", "/analysis/stop", payload)
         require(stopped.get("state") == "stopped", "分析未停止 / Analysis did not stop")
         analysis_pending = False
         session = None
+
+    def stop_camera():
+        nonlocal stop_attempted, camera_touched
+        # 维护窗口内仍复核新消费者；API 不提供原子独占停机。
+        # Recheck consumers even in maintenance; the API has no atomic exclusive stop.
+        camera = call("GET", "/camera/status")
+        analysis = call("GET", "/analysis/result")
+        require(
+            camera.get("recording") is False
+            and all(camera.get("lifecycle", {}).get(key) == 0 for key in CONSUMERS)
+            and analysis.get("state") in {"stopped", "completed"},
+            "清理前出现消费者或占用不明 / Consumers arrived or ownership is unknown",
+        )
+        stop_attempted = True
+        call("POST", "/camera/stop")
+        stopped = call("GET", "/camera/status")
+        require(
+            stopped.get("streaming") is False
+            and stopped.get("lifecycle", {}).get("phase") == "sleeping"
+            and all(stopped.get("lifecycle", {}).get(key) == 0 for key in CONSUMERS),
+            "相机停止或资源释放未确认 / Camera stop or resource release unconfirmed",
+        )
+        camera_touched = False
 
     try:
         health = client.json("GET", "/health")
@@ -190,6 +218,10 @@ def run_smoke(
         require(bool(system.get("version")), "缺少服务版本 / Missing service version")
         camera = call("GET", "/camera/status")
         analysis = call("GET", "/analysis/result")
+        require(
+            analysis.get("ownership_supported") is True,
+            "服务未确认支持会话所有权 / Service does not confirm session ownership support",
+        )
         report["deployment"].update(
             version=system.get("version"),
             role=directory.get("role"),
@@ -218,13 +250,22 @@ def run_smoke(
         else:
             for cycle in range(1, cycles + 1):
                 stop_attempted = False
+                analysis_stop_attempted = False
+                lease_acquire_pending = True
                 lease = call("POST", "/camera/lease", {"ttl_seconds": 120})["lease_id"]
-                camera_touched = True
+                require(
+                    isinstance(lease, str) and bool(lease),
+                    "缺少有效租约 ID / Missing valid lease ID",
+                )
+                lease_acquire_pending = False
+                camera_start_pending = True
                 started = call("POST", "/camera/start")
                 require(
                     started.get("applied", {}).get("ready") is True,
                     "相机启动未确认就绪 / Camera start is not confirmed ready",
                 )
+                camera_start_pending = False
+                camera_touched = True
                 report["deployment"]["observed_camera"] = {
                     key: value
                     for key, value in started.get("info", {}).items()
@@ -308,18 +349,7 @@ def run_smoke(
                 stop_analysis()
                 call("POST", "/camera/lease", {"lease_id": lease, "release": True})
                 lease = None
-                stop_attempted = True
-                call("POST", "/camera/stop")
-                stopped = call("GET", "/camera/status")
-                require(
-                    stopped.get("streaming") is False
-                    and stopped.get("lifecycle", {}).get("phase") == "sleeping"
-                    and all(
-                        stopped.get("lifecycle", {}).get(key) == 0 for key in CONSUMERS
-                    ),
-                    "相机停止或资源释放未确认 / Camera stop or resource release unconfirmed",
-                )
-                camera_touched = False
+                stop_camera()
                 record(f"cycle_{cycle}_stop")
             final = call("GET", "/system/status")
             record(
@@ -339,21 +369,8 @@ def run_smoke(
         detail = str(exc) if isinstance(exc, SmokeFailure) else type(exc).__name__
         report["checks"].append({"name": "run", "status": "failed", "detail": detail})
     finally:
-        cleanup = []
-        if analysis_pending:
-            cleanup.append(("analysis_cleanup", stop_analysis))
-        if lease:
-            cleanup.append(
-                (
-                    "lease_cleanup",
-                    lambda: call(
-                        "POST", "/camera/lease", {"lease_id": lease, "release": True}
-                    ),
-                )
-            )
-        if camera_touched and not stop_attempted:
-            cleanup.append(("camera_cleanup", lambda: call("POST", "/camera/stop")))
-        for name, action in cleanup:
+
+        def cleanup(name, action):
             try:
                 action()
                 record(name)
@@ -365,6 +382,35 @@ def run_smoke(
                         "detail": "清理未确认，人工检查服务 / Cleanup unconfirmed; inspect service",
                     }
                 )
+                report.update(success=False, code=4, release_decision="blocked")
+
+        if analysis_pending:
+            cleanup("analysis_cleanup", stop_analysis)
+        if lease_acquire_pending:
+            report["checks"].append(
+                {
+                    "name": "lease_cleanup",
+                    "status": "failed",
+                    "detail": "租约 ID 未确认，等待 TTL 过期并人工检查 / Lease ID unconfirmed; wait for TTL expiry and inspect",
+                }
+            )
+        elif lease:
+            cleanup(
+                "lease_cleanup",
+                lambda: call(
+                    "POST", "/camera/lease", {"lease_id": lease, "release": True}
+                ),
+            )
+        if camera_start_pending or (camera_touched and analysis_pending):
+            report["checks"].append(
+                {
+                    "name": "camera_cleanup",
+                    "status": "skipped",
+                    "detail": "启动或分析清理结果不明，不发送相机停止 / Startup or analysis cleanup unconfirmed; camera stop withheld",
+                }
+            )
+        elif camera_touched and not stop_attempted:
+            cleanup("camera_cleanup", stop_camera)
         report["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
     return report
 

@@ -349,12 +349,13 @@ class CameraManager:
                 self._health_error
                 or "相机需要重启服务后恢复 / Camera service restart required"
             )
-        # 关闭或重配置可能仍持有新鲜帧，必须先等控制转换完成。
-        # Closing/reconfiguration may retain fresh frames; wait for the control transition.
-        if self._camera_is_fresh() and not self._control_lock.locked():
-            if start_grabber:
-                async with self._control_lock:
-                    await self._ensure_grabber_locked()
+        # 快速返回不能等待锁；锁显示空闲时仍可能有更早排队的关闭请求。
+        # The fast return must not await a lock: an unlocked lock can have a queued closer.
+        if (
+            not start_grabber
+            and self._camera_is_fresh()
+            and not self._control_lock.locked()
+        ):
             self._schedule_idle_shutdown()
             return
         async with self._control_lock:
@@ -599,6 +600,14 @@ class CameraManager:
                 )
                 return
             self._clear_camera_state_locked(health_error=None)
+        except asyncio.CancelledError:
+            # 取消协程不会终止原生工作线程；释放控制锁前隔离仍持有的句柄。
+            # Cancelling a coroutine cannot stop native workers; quarantine before unlocking.
+            self._mark_restart_required(
+                "相机关闭等待被取消，需要重启服务 / "
+                "Camera close wait cancelled; service restart required"
+            )
+            raise
         finally:
             self._idle_stop_in_progress = False
             if acquired:
