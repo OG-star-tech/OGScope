@@ -425,7 +425,7 @@ acceptance gates.
 ## BSP 打包与配置验收 / BSP packaging and configuration acceptance
 
 打包时必须一起更新 OGScope Python 包（含 `domain/camera/auto_exposure.py`、
-`platform/hardware/v4l2_camera.py`、`web/camera_shared.py`、`config.py`），不要只复制前端。
+`platform/hardware/v4l2_camera.py`、`application/camera_manager.py`、兼容转发 `web/camera_shared.py`、`config.py`），不要只复制前端。
 RPi 后端还必须包含 `platform/hardware/tuning/imx327.json`；V4L2 软件 AE 不读取这个
 libcamera tuning 文件，复制该 JSON 不能替代软件 AE 更新。
 

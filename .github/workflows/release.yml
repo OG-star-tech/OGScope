@@ -23,7 +23,9 @@ jobs:
       uses: snok/install-poetry@v1
 
     - name: 构建包
-      run: poetry build
+      run: |
+        poetry build
+        python scripts/check-distribution-license.py
 
     - name: 创建 GitHub Release
       uses: softprops/action-gh-release@v2

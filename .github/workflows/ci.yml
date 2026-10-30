@@ -38,15 +38,27 @@ jobs:
     - name: 安装依赖
       run: poetry install --no-interaction --no-root
 
-    - name: 验证配置模板与 tuning 随包交付 / Verify packaged camera configuration
+    - name: 验证许可证与配置随包交付 / Verify packaged license and camera configuration
       run: |
-        poetry build --format wheel
+        poetry build
+        python scripts/check-distribution-license.py
         poetry run python - <<'PY'
         from pathlib import Path
         from zipfile import ZipFile
 
         expected = {
             "deploy/camera/compatibility.env",
+            "ogscope/application/camera_manager.py",
+            "ogscope/application/camera_frames.py",
+            "ogscope/application/camera_resources.py",
+            "ogscope/domain/camera/ownership.py",
+            "ogscope/domain/camera/media.py",
+            "ogscope/platform/adapters/camera_config.py",
+            "ogscope/web/camera_http.py",
+            "ogscope/web/camera_streaming.py",
+            "ogscope/application/camera_control.py",
+            "ogscope/domain/camera/runtime.py",
+            "ogscope/web/camera_shared.py",
             "deploy/camera/isp.env",
             "deploy/camera/picamera2.env",
             "ogscope/platform/hardware/tuning/imx327.json",
@@ -73,10 +85,10 @@ jobs:
         npm run build
 
     - name: 代码格式检查 (Black)
-      run: poetry run black --check ogscope tests
+      run: poetry run black --check ogscope tests scripts/core-api-smoke.py scripts/check-distribution-license.py
 
     - name: 代码规范检查 (Ruff)
-      run: poetry run ruff check ogscope tests
+      run: poetry run ruff check ogscope tests scripts/core-api-smoke.py scripts/check-distribution-license.py
 
     - name: 类型检查 (MyPy)
       run: poetry run mypy ogscope
@@ -110,7 +122,10 @@ jobs:
       run: poetry install --no-interaction
 
     - name: 运行 Ruff
-      run: poetry run ruff check ogscope tests
+      run: poetry run ruff check ogscope tests scripts/core-api-smoke.py scripts/check-distribution-license.py
 
     - name: 运行 Black
-      run: poetry run black --check ogscope tests
+      run: poetry run black --check ogscope tests scripts/core-api-smoke.py scripts/check-distribution-license.py
+
+    - name: 校验中性相机运行端口 / Check neutral camera runtime ports
+      run: poetry run mypy ogscope/application/camera.py ogscope/application/camera_control.py ogscope/application/camera_manager.py ogscope/application/camera_frames.py ogscope/application/camera_resources.py ogscope/domain/camera/runtime.py ogscope/domain/camera/ownership.py ogscope/domain/camera/services.py ogscope/domain/camera/media.py ogscope/platform/adapters/camera_runtime.py ogscope/platform/adapters/camera_config.py ogscope/platform/hardware_plane/services/camera_service.py --follow-imports=silent --ignore-missing-imports

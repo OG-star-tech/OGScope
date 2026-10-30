@@ -12,23 +12,24 @@ from starlette.background import BackgroundTask
 from ogscope.config import get_settings
 from ogscope.core.application import core_contract_service
 from ogscope.core.realtime import realtime_solve_service
-from ogscope.domain.camera.services import (
-    DebugCameraService,
-    DebugFileService,
-    DebugPresetService,
-    camera_domain_service,
-)
-from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
+from ogscope.domain.camera.services import camera_domain_service
 from ogscope.domain.shared.filesystem import DEV_CAPTURES_DIR, ensure_safe_basename
 from ogscope.domain.system.services import read_systemd_logs
 from ogscope.web.api.debug.magnetometer_service import MagnetometerDebugService
 from ogscope.web.api.debug.mpu6050_service import MPU6050DebugService
+from ogscope.web.api.debug.services import (
+    DebugCameraService,
+    DebugFileService,
+    DebugPresetService,
+)
 from ogscope.web.api.models.schemas import (
     CameraMirrorBody,
     CameraPreset,
     CameraSettings,
     CoreStreamStatusResponse,
 )
+from ogscope.web.camera_http import camera_http_service
+from ogscope.web.camera_streaming import build_camera_mjpeg_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -161,7 +162,7 @@ async def get_debug_camera_preview(
 ):
     """获取调试相机预览 / Get debug camera preview"""
     try:
-        return await camera_domain_service.get_rate_limited_preview(
+        return await camera_http_service.get_rate_limited_preview(
             request, since_frame_id=since_frame_id
         )
     except HTTPException:
@@ -272,7 +273,7 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
 @router.post("/debug/camera/preview-fps")
 async def set_camera_preview_fps(fps: int = Query(..., ge=1, le=30)):
     """独立设置共享预览帧率 / Set shared preview FPS independently."""
-    from ogscope.web.camera_shared import get_camera_manager
+    from ogscope.application.camera import get_camera_capture as get_camera_manager
 
     applied = get_camera_manager().set_preview_fps(fps)
     return {"success": True, "preview_target_fps": applied}

@@ -127,7 +127,7 @@ class OGScopeHomeApp {
 
     async bootstrapSettings() {
         try {
-            const settingsResp = await this.fetchJson("/api/analysis/settings", { timeoutMs: 2500 });
+            const settingsResp = await this.fetchJson("/api/dev/analysis/settings", { timeoutMs: 2500 });
             const fps = Number(settingsResp.star_analysis_target_fps ?? 2 / 3);
             const baseMs = Math.round(1000 / Math.min(Math.max(fps, 0.2), 5));
             this.intervalMinMs = Number(settingsResp.star_analysis_min_interval_ms ?? 500);
@@ -174,7 +174,7 @@ class OGScopeHomeApp {
                 const next = !Boolean(this.cameraStatus?.info?.auto_exposure);
                 try {
                     await this.fetchJson(
-                        `/api/debug/camera/auto-exposure?enabled=${next ? "true" : "false"}`,
+                        `/api/dev/debug/camera/auto-exposure?enabled=${next ? "true" : "false"}`,
                         { method: "POST", timeoutMs: 2500 },
                     );
                     await this.refreshCameraStatus();
@@ -188,7 +188,7 @@ class OGScopeHomeApp {
                 const next = !Boolean(this.cameraStatus?.info?.night_mode);
                 try {
                     await this.fetchJson(
-                        `/api/debug/camera/night-mode?enabled=${next ? "true" : "false"}`,
+                        `/api/dev/debug/camera/night-mode?enabled=${next ? "true" : "false"}`,
                         { method: "POST", timeoutMs: 2500 },
                     );
                     await this.refreshCameraStatus();
@@ -276,7 +276,7 @@ class OGScopeHomeApp {
 
     async startCameraStream() {
         try {
-            await this.fetchJson("/api/debug/camera/start", { method: "POST", timeoutMs: 4000 });
+            await this.fetchJson("/api/dev/debug/camera/start", { method: "POST", timeoutMs: 4000 });
         } catch (e) {
             console.warn("[OGScope] 启动相机失败，尝试继续拉流:", e);
         }
@@ -310,8 +310,8 @@ class OGScopeHomeApp {
         this.lastTelemetryAt = now;
         try {
             const [sys, cam] = await Promise.all([
-                this.fetchJson("/api/system/info", { timeoutMs: 2000 }),
-                this.fetchJson("/api/debug/camera/status", { timeoutMs: 2000 }),
+                this.fetchJson("/api/dev/system/info", { timeoutMs: 2000 }),
+                this.fetchJson("/api/dev/debug/camera/status", { timeoutMs: 2000 }),
             ]);
             this.cameraStatus = cam;
             this.syncModeButtons();
@@ -380,7 +380,7 @@ class OGScopeHomeApp {
                 solve_timeout_ms: this.solverTimeoutMs,
                 ...this.solveParams,
             };
-            const out = await this.fetchJson("/api/analysis/solve/frame", {
+            const out = await this.fetchJson("/api/dev/analysis/solve/frame", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
@@ -712,7 +712,7 @@ class OGScopeHomeApp {
 
     async refreshCameraStatus() {
         try {
-            this.cameraStatus = await this.fetchJson("/api/debug/camera/status", { timeoutMs: 2000 });
+            this.cameraStatus = await this.fetchJson("/api/dev/debug/camera/status", { timeoutMs: 2000 });
             this.syncModeButtons();
         } catch {
             this.cameraStatus = null;

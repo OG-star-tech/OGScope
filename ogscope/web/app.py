@@ -66,24 +66,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     )
     phase_p0_started = asyncio.get_running_loop().time()
 
-    # 真实硬件下后台预热相机：不阻塞 Uvicorn 就绪；首次请求仍可在锁内完成初始化
-    # Background warm-up on real hardware: do not block server readiness; first request can still init under lock.
-    async def _warm_camera() -> None:
-        try:
-            from ogscope.utils.environment import should_use_simulation_mode
-
-            if not should_use_simulation_mode():
-                from ogscope.web.camera_shared import get_camera_manager
-
-                await get_camera_manager().ensure_started()
-                logger.info(
-                    "相机已启动并进入共享预览缓存 / Camera streaming (shared preview cache)"
-                )
-        except Exception as e:
-            logger.warning(
-                f"启动时相机预热失败，将在首次请求时重试 / Camera warm-up failed, retry on demand: {e}"
-            )
-
     async def _warm_solver() -> None:
         try:
             from ogscope.algorithms.plate_solve.solver import warmup_tetra3
@@ -95,60 +77,71 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 f"启动时解算器预热失败，将在首次解算时重试 / Solver warm-up failed, retry on first solve: {e}"
             )
 
-    await start_hardware_plane(settings)
-    daemon = get_hardware_plane_daemon()
-    daemon.begin_phase("P0", "api gateway ready")
-    asyncio.create_task(_warm_camera())
-    # 解算器预热改为启动阶段阻塞完成，避免首个解算请求与后台预热竞态导致“第一次明显变慢”
-    # Warm the solver synchronously during startup to avoid first-request cold-start race.
-    await _warm_solver()
-    daemon.begin_phase("P2", "sensor and hmi services ready")
-    if settings.hardware_plane_camera_autostart:
-        try:
-            await daemon.handle_call(
-                "device.command",
-                {"target": "camera", "action": "start", "payload": {}},
-            )
-            daemon.begin_phase("P3", "camera service auto-started")
-        except Exception as e:
-            logger.warning(
-                "相机自动启动失败，将按需延迟启动 / Camera auto-start failed, fallback to lazy start: {}",
-                e,
-            )
-    phase_elapsed_ms = int(
-        (asyncio.get_running_loop().time() - phase_p0_started) * 1000
-    )
-    logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
-
-    yield
-
-    # 关闭时执行 / Execute on shutdown
-    logger.info("清理资源...")
-    shutdown_started = asyncio.get_running_loop().time()
     try:
+        await start_hardware_plane(settings)
+        daemon = get_hardware_plane_daemon()
+        daemon.begin_phase("P0", "api gateway ready")
         from ogscope.utils.environment import should_use_simulation_mode
 
         if not should_use_simulation_mode():
-            # Process shutdown can release every owner; UI stop cannot / 进程退出可释放全部占用，界面关闭不能。
-            from ogscope.core.realtime import realtime_solve_service
-            from ogscope.web.camera_shared import get_camera_manager
+            from ogscope.application.camera import get_camera_capture
 
-            await realtime_solve_service.stop(force=True)
-            await asyncio.wait_for(get_camera_manager().stop(force=True), timeout=8.0)
-    except Exception as e:
-        logger.warning(f"关闭相机失败 / Failed to stop camera on shutdown: {e}")
-    try:
-        await asyncio.wait_for(stop_hardware_plane(), timeout=6.0)
-    except Exception as e:
-        logger.warning(
-            "硬件平面停止超时或异常 / Hardware plane stop timeout or error: {}", e
+            get_camera_capture().start_warmup()
+        # 解算器预热改为启动阶段阻塞完成，避免首个解算请求与后台预热竞态导致“第一次明显变慢”
+        # Warm the solver synchronously during startup to avoid first-request cold-start race.
+        await _warm_solver()
+        daemon.begin_phase("P2", "sensor and hmi services ready")
+        if settings.hardware_plane_camera_autostart:
+            try:
+                await daemon.handle_call(
+                    "device.command",
+                    {"target": "camera", "action": "start", "payload": {}},
+                )
+                daemon.begin_phase("P3", "camera service auto-started")
+            except Exception as e:
+                logger.warning(
+                    "相机自动启动失败，将按需延迟启动 / Camera auto-start failed, fallback to lazy start: {}",
+                    e,
+                )
+        phase_elapsed_ms = int(
+            (asyncio.get_running_loop().time() - phase_p0_started) * 1000
         )
-    shutdown_elapsed_ms = int(
-        (asyncio.get_running_loop().time() - shutdown_started) * 1000
-    )
-    logger.info(
-        "退出阶段完成 / Shutdown cleanup finished in {} ms", shutdown_elapsed_ms
-    )
+        logger.info("启动阶段完成 / Startup phases ready in {} ms", phase_elapsed_ms)
+
+        yield
+
+    finally:
+
+        async def cleanup() -> None:
+            logger.info("清理资源...")
+            shutdown_started = asyncio.get_running_loop().time()
+            try:
+                from ogscope.application.camera import shutdown_camera_runtime
+
+                await shutdown_camera_runtime()
+            except Exception as e:
+                logger.warning(f"关闭相机失败 / Failed to stop camera on shutdown: {e}")
+            try:
+                await asyncio.wait_for(stop_hardware_plane(), timeout=6.0)
+            except Exception as e:
+                logger.warning(
+                    "硬件平面停止超时或异常 / Hardware plane stop timeout or error: {}",
+                    e,
+                )
+            shutdown_elapsed_ms = int(
+                (asyncio.get_running_loop().time() - shutdown_started) * 1000
+            )
+            logger.info(
+                "退出阶段完成 / Shutdown cleanup finished in {} ms", shutdown_elapsed_ms
+            )
+
+        cleanup_task = asyncio.create_task(cleanup())
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            # 生命周期等待者取消时仍收回硬件平面 / Finish hardware-plane cleanup even if the lifespan waiter is cancelled.
+            await asyncio.shield(cleanup_task)
+            raise
 
 
 # API 文档分组标签 / API documentation group tags
@@ -388,7 +381,6 @@ async def api_root():
         "camera": "/api/camera/",
         "system": "/api/dev/system/",
         "hardware_plane": "/api/dev/system/hardware-plane/status",
-        "system_legacy": "/api/system/",
         "analysis": "/api/dev/analysis/",
         "debug": "/api/dev/debug/",
         "core": "/api/core/v1/",

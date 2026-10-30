@@ -10,14 +10,16 @@ This document defines the **minimal stable REST surface** for callers integratin
 
 - OGScope exposes a stable REST contract only; implementation details for a specific integrator are not guaranteed.
 - New fields must remain backward compatible; do not remove stable fields.
-- Errors use HTTP status codes plus `detail` text.
+- Validation/runtime errors use HTTP errors and `detail`; business busy/ownership refusal may use HTTP 200, so callers must check `success`, `error_code` or `applied.busy`.
+
+The current 14 paths and 18 schemas have a [refactoring freeze baseline](core-v1-freeze.md). Internal migration must preserve request defaults, validation limits, response fields and failure semantics. Additive extensions require explicit review of baseline changes.
 
 ## Endpoints
 
 ### 1) Start Analysis
 
 - `POST /api/core/v1/analysis/start`
-- Request body (optional):
+- A request body is required; `{}` is valid and all fields below are optional:
   - `hint_ra_deg`
   - `hint_dec_deg`
   - `fov_estimate`

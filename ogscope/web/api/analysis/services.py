@@ -1336,8 +1336,10 @@ class AnalysisService:
         camera_preparation = None
         try:
             if body.source == "camera":
+                from ogscope.application.camera import (
+                    get_camera_capture as get_camera_manager,
+                )
                 from ogscope.domain.camera.readiness import wait_capture_ready
-                from ogscope.web.camera_shared import get_camera_manager
 
                 manager = get_camera_manager()
                 await manager.acquire_analysis_consumer()

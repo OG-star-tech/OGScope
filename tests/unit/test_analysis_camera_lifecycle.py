@@ -5,9 +5,9 @@ import asyncio
 import numpy as np
 import pytest
 
+from ogscope.application.camera_manager import CameraManager
 from ogscope.core.realtime import service as service_module
 from ogscope.core.realtime.service import RealtimeSolveService
-from ogscope.web.camera_shared import CameraManager
 
 
 class FrameCamera:
@@ -55,10 +55,10 @@ async def test_analysis_reopens_idle_camera_and_holds_it_until_cancellation(
     manager._schedule_idle_shutdown()
     await asyncio.sleep(0.04)
     assert camera.is_capturing
-    assert manager._analysis_consumers == 1
+    assert manager._ownership.counts["analysis"] == 1
     await service.stop()
     await asyncio.sleep(0.04)
-    assert manager._analysis_consumers == 0
+    assert manager._ownership.counts["analysis"] == 0
     assert not camera.is_capturing
     assert manager.get_camera_instance() is None
 
@@ -79,7 +79,7 @@ async def test_camera_start_failure_ends_analysis_with_an_error(monkeypatch):
     await service._task
     assert service.state.running is False
     assert service.state.last_error == "camera offline"
-    assert manager._analysis_consumers == 0
+    assert manager._ownership.counts["analysis"] == 0
 
 
 @pytest.mark.asyncio
@@ -99,4 +99,4 @@ async def test_cancelling_during_camera_start_does_not_leak_a_consumer(monkeypat
     await service.start()
     await asyncio.wait_for(entered.wait(), timeout=1)
     await service.stop()
-    assert manager._analysis_consumers == 0
+    assert manager._ownership.counts["analysis"] == 0

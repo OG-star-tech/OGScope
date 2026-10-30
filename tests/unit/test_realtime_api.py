@@ -215,8 +215,8 @@ def test_start_never_calls_the_slow_synchronous_frame_grab(monkeypatch) -> None:
 @pytest.mark.unit
 def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve):
     """测试实时解算启停接口 / Test realtime solver start and stop endpoints."""
+    from ogscope.application.camera_manager import CameraManager, get_camera_manager
     from ogscope.web.api.debug import routes as debug_routes
-    from ogscope.web.camera_shared import CameraManager, get_camera_manager
 
     fake_camera = _FakeCamera()
     get_camera_manager().attach_camera_instance(fake_camera)

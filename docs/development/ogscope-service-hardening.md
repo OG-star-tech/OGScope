@@ -26,6 +26,46 @@ sudo journalctl -k -b | grep -i -E 'oom|killed process|Out of memory'
 sudo dmesg -T | grep -i -E 'oom|killed process'
 ```
 
+## CMA 低余量的判读 / Interpreting low CMA free memory
+
+不能仅凭 `/proc/meminfo` 的 `CmaFree` 很低判定相机泄漏或即将分配失败。
+CMA 区域也可供可迁移页使用；立即空闲的页数与 CMA 分配位图中的可用容量不是同一指标。
+必须把余量、实际分配结果和采集进度一起看。
+/ Low `CmaFree` alone does not establish a camera leak or imminent allocation failure.
+Movable pages can occupy the CMA region, so immediately free pages and capacity available
+in the CMA allocation bitmap measure different things. Correlate both with allocation
+results and capture progress.
+
+| 证据 / Evidence | 判断用途 / Interpretation |
+| --- | --- |
+| `CmaFree`、`MemAvailable`、RSS + swap、页回收与换页计数 / Memory and reclaim counters | 观察压力与长期趋势；RSS 单独增长也可能只是换入 / Track pressure and trends; RSS growth alone may reflect swap-in |
+| CMA `available_pages` 或 `cma_alloc_start.available_count` / CMA bitmap availability | 区分专用连续缓冲占用与普通可迁移页；容量不保证任意大小请求都成功 / Distinguish CMA reservations from movable-page use; capacity does not guarantee every request size |
+| `cma_alloc_finish.errorno`、分配耗时、同一 PFN 和页数的释放 / Allocation outcome, latency and matched releases | 确认真实失败、延迟或未释放分配；`busy_retry` 本身不是最终失败 / Identify failures, latency and unreleased allocations; a busy retry is not a final failure |
+| 预览及分析帧进度、编码错误、FD/线程、启停后占用 / Progress, encode errors, descriptors, threads and post-stop ownership | 判断压力是否实际影响服务，以及停止后能否恢复 / Establish service impact and recovery after stop |
+
+内核可能未提供 `/sys/kernel/mm/cma` 或 CMA debugfs。此时可在维护窗口使用独立
+tracefs instance 记录 `events/cma`，保存跟踪丢失计数；结束后禁用事件、关闭读取句柄并删除
+该实例，保持全局跟踪配置不变。有丢失事件时，不能凭分配/释放计数断言无泄漏。
+/ If CMA sysfs/debugfs statistics are unavailable, use a dedicated tracefs instance during
+maintenance and record its loss counters. Disable its events, close readers and remove
+the instance afterward without changing global tracing. Missing events invalidate a
+leak-free conclusion based on allocation/release counts.
+
+需要验证低余量下的真实分配时，可在受控测试中从 `default_cma_region` DMA heap
+申请一块有限大小的连续缓冲并立即关闭返回的 fd。记录申请前余量、大小、耗时和结果，
+为探针设置独立进程超时并限制并发。它只能证明该时刻、该大小的请求，不能替代相机
+反复启停和长时负载测试，也不能证明更大分辨率或其他后端的余量。
+/ A bounded allocation from the `default_cma_region` DMA heap, immediately released by
+closing its fd, can test real allocation under low free memory. Record prior free memory,
+size, latency and outcome; bound the probe process and concurrency. This proves only that
+request at that moment, not larger resolutions, other backends or long-term stability.
+
+参考 / References: [CMA statistics](https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-kernel-mm-cma),
+[CMA and movable pages](https://docs.kernel.org/mm/physical_memory.html),
+[CMA allocation implementation](https://github.com/torvalds/linux/blob/master/mm/cma.c),
+[trace instances](https://docs.kernel.org/trace/ftrace.html#instances),
+[DMA buffer heaps](https://docs.kernel.org/userspace-api/dma-buf-heaps.html).
+
 ## 与预览相关的环境变量 / Preview-related environment variables
 
 | 变量 / Variable | 含义 / Meaning |

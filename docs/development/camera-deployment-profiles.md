@@ -80,6 +80,8 @@ Orientation and encoding are independent. Templates retain software orientation 
 
 ## 最小验收 / Minimum acceptance
 
+使用 [Core 发布冒烟流程](core-api-smoke.md) 记录 API 链路检查，以下人工项目仍需分别完成。/ Use the Core release smoke workflow for API-path receipts; complete the manual items below separately.
+
 1. 三份模板能选择预期后端；旧显式选择升级后不变；非法配置拒绝启动。/ Each template selects the intended backend; explicit legacy selection survives; invalid selection is rejected.
 2. ISP 严格模式持续输出有效帧；缺失节点与模拟运行失败符合回退策略，状态不伪报硬件成功。/ Required ISP delivers real frames; missing nodes and simulated runtime failures follow policy without false hardware success.
 3. 同场景检查 RGB 色序、180°方向、实际尺寸/FOV、3 秒曝光上限、明暗切换，以及共享解算帧身份。/ Compare RGB order, orientation, size/FOV, the 3-second ceiling, light/dark transitions and shared solve-frame identity.
@@ -91,9 +93,9 @@ An open V4L2 stream can retain queued images while analysis and preview stop rea
 
 分析及预览停止读取时，仍打开的V4L2流可能积压旧图像，恢复读取后不能将其当成当前观测。读取中断超过两个帧周期（最短0.5秒）时，RAW驱动复用已有的曝光新鲜度门槛，并清除跨帧历史，再交付图像；连续抓帧和短暂重试不重新等待，流及图像处理配置保持不变。
 
-Ship `ogscope/platform/hardware/v4l2_camera.py`, `ogscope/web/camera_shared.py` and `ogscope/domain/camera/services.py` together and restart OGScope while camera jobs are idle. No new environment key, BSP dependency or controller firmware is required. Preserve the previous application source for rollback. UTC remains estimated from read completion and exposure duration; this change does not introduce hardware exposure timestamps. Acceptance compares stationary star motion across capture, warm idle and resume, as well as stop/restart and short retry behavior.
+Ship `ogscope/platform/hardware/v4l2_camera.py`, `ogscope/application/camera_manager.py`, the compatibility `ogscope/web/camera_shared.py` and `ogscope/domain/camera/services.py` together and restart OGScope while camera jobs are idle. No new environment key, BSP dependency or controller firmware is required. Preserve the previous application source for rollback. UTC remains estimated from read completion and exposure duration; this change does not introduce hardware exposure timestamps. Acceptance compares stationary star motion across capture, warm idle and resume, as well as stop/restart and short retry behavior.
 
-部署须同时包含本次修改的`ogscope/platform/hardware/v4l2_camera.py`、`ogscope/web/camera_shared.py`和`ogscope/domain/camera/services.py`，在相机任务空闲时重启OGScope，并保留旧程序以便回退；无需新增环境配置、BSP依赖或控制器固件。UTC仍由读取完成时刻和曝光时间估算，本修改没有引入硬件曝光时间戳。验收应比较静止底座上连续采集、保温空闲及恢复时的星点运动，同时检查停止重启和短暂重试。
+部署须同时包含本次修改的`ogscope/platform/hardware/v4l2_camera.py`、`ogscope/application/camera_manager.py`、兼容转发`ogscope/web/camera_shared.py`和`ogscope/domain/camera/services.py`，在相机任务空闲时重启OGScope，并保留旧程序以便回退；无需新增环境配置、BSP依赖或控制器固件。UTC仍由读取完成时刻和曝光时间估算，本修改没有引入硬件曝光时间戳。验收应比较静止底座上连续采集、保温空闲及恢复时的星点运动，同时检查停止重启和短暂重试。
 
 
 The shared RAW cache now keeps the sequence and read-completion timestamp of its own pixels, rather than the current global capture counter. A later preview prefetch cannot relabel an older image. Cache reuse expires after two observed frame periods / target preview periods, with a 0.5 s floor; an expired cache causes a real read. Explicit history reset invalidates cached and in-flight reads and serializes the driver hook with the same capture worker. Late JPEG completion cannot reintroduce a pre-reset RAW frame. No extra retained image is added when `OGSCOPE_KEEP_RAW_CACHE=0`.

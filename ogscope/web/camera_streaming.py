@@ -14,13 +14,13 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.requests import Request
 
+from ogscope.application.camera import get_camera_capture as get_camera_manager
 from ogscope.config import get_settings
 from ogscope.domain.camera.services import camera_domain_service
 from ogscope.domain.camera.stream_limiter import (
     MjpegStreamLease,
     get_mjpeg_stream_limiter,
 )
-from ogscope.web.camera_shared import get_camera_manager
 from ogscope.web.mjpeg_stream_helpers import mjpeg_sleep_or_disconnect
 
 _cleanup_tasks: set[asyncio.Task[Any]] = set()
