@@ -44,10 +44,11 @@ ogscope/
 │   └── shared/
 ├── core/
 │   └── application/core_service.py # core/v1 orchestration
+├── application/camera.py         # 相机实例组合 / Camera runtime composition
 └── platform/adapters/            # 边界适配 / Boundary adapters
 ```
 
-The product camera path still reaches Web implementations through debug adapters, and the shared manager remains in `web/camera_shared.py`. The layering rules below constrain migration; they do not mean reverse dependencies have already been removed. See the [API inventory](contracts/api-inventory.md) and [proposed camera runtime migration](development/camera-runtime-migration.md).
+Public camera ports live in `domain/camera/runtime.py`, with one shared Core/Dev instance bound by `application/camera.py`. The temporary adapter still uses Web control behavior and the manager in `web/camera_shared.py`; the implementation's reverse dependency is not eliminated yet. See the [API inventory](contracts/api-inventory.md), [Core v1 freeze](contracts/core-v1-freeze.md) and [implemented boundaries and remaining migration](development/camera-runtime-migration.md).
 
 ## 2) Design rules (mandatory)
 

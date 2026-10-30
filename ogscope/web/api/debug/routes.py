@@ -272,7 +272,7 @@ async def set_camera_fps(fps: int = Query(..., gt=0)):
 @router.post("/debug/camera/preview-fps")
 async def set_camera_preview_fps(fps: int = Query(..., ge=1, le=30)):
     """独立设置共享预览帧率 / Set shared preview FPS independently."""
-    from ogscope.web.camera_shared import get_camera_manager
+    from ogscope.application.camera import get_camera_capture as get_camera_manager
 
     applied = get_camera_manager().set_preview_fps(fps)
     return {"success": True, "preview_target_fps": applied}

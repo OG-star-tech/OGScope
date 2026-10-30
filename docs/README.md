@@ -30,6 +30,7 @@
 - [API 分层、FastAPI 入口与目录约定](API_ARCHITECTURE.md) | [English](API_ARCHITECTURE_EN.md)
 - [系统架构（双语单文件）](architecture/OGSCOPE_SYSTEM_ARCHITECTURE_BILINGUAL.md)
 - [Core REST v1](contracts/core-rest-v1.md) | [English](contracts/core-rest-v1_EN.md)
+- [Core v1 重构冻结基线](contracts/core-v1-freeze.md)（段内中英）
 - [Dev REST v1](contracts/dev-rest-v1.md) | [English](contracts/dev-rest-v1_EN.md)
 - [核心契约兼容矩阵](contracts/core-compatibility-matrix.md)（段内中英）
 - [API 调用方与兼容边界清单](contracts/api-inventory.md)（段内中英）

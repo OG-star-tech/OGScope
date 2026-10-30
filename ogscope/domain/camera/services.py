@@ -12,8 +12,10 @@ from typing import Any
 from fastapi.responses import Response
 from starlette.requests import Request
 
+from ogscope.application.camera import get_camera_runtime
 from ogscope.config import get_settings
 from ogscope.domain.camera.focus import focus_metric_analyzer
+from ogscope.domain.camera.runtime import CameraRuntime
 from ogscope.domain.camera.stream_limiter import get_mjpeg_stream_limiter
 from ogscope.platform.adapters.debug_services import get_debug_services_module
 
@@ -29,14 +31,22 @@ def _debug_preview_min_interval_sec() -> float:
 class CameraDomainService:
     """中性相机域能力门面 / Neutral camera domain facade."""
 
+    def __init__(self, runtime: CameraRuntime | None = None) -> None:
+        self._runtime = runtime
+
+    @property
+    def runtime(self) -> CameraRuntime:
+        """局部实例可注入，默认绑定全局组合 / Inject locally or use the shared composition."""
+        return self._runtime if self._runtime is not None else get_camera_runtime()
+
     async def get_status(self) -> dict[str, Any]:
-        return await DebugCameraService.get_camera_status()
+        return await self.runtime.control.get_camera_status()
 
     async def start(self) -> dict[str, Any]:
-        return await DebugCameraService.start_camera()
+        return await self.runtime.control.start_camera()
 
     async def stop(self) -> dict[str, Any]:
-        return await DebugCameraService.stop_camera()
+        return await self.runtime.control.stop_camera()
 
     async def reset_temporal_history(self) -> dict[str, Any]:
         """通知驱动丢弃跨帧降噪历史 / Tell the driver to discard cross-frame
@@ -53,47 +63,47 @@ class CameraDomainService:
         both solve frames and the live preview. Drivers with no such state
         (e.g. Picamera2) no-op the hook, so `applied` comes back False.
         """
-        camera = DebugCameraService.get_camera_instance()
+        camera = self.runtime.capture.get_camera_instance()
         hook = getattr(camera, "begin_fresh_capture_epoch", None)
         applied = bool(hook()) if callable(hook) else False
         return {"success": True, "applied": applied}
 
     async def set_auto_exposure_mode(self, enabled: bool):
-        return await DebugCameraService.set_auto_exposure_mode(enabled)
+        return await self.runtime.control.set_auto_exposure_mode(enabled)
 
     async def update_settings(self, settings: dict[str, Any]):
-        return await DebugCameraService.update_settings(settings)
+        return await self.runtime.control.update_settings(settings)
 
     async def set_fps(self, fps: int):
-        return await DebugCameraService.set_fps(fps)
+        return await self.runtime.control.set_fps(fps)
 
     async def set_size(self, width: int, height: int):
-        return await DebugCameraService.set_size(width, height)
+        return await self.runtime.control.set_size(width, height)
 
     async def set_rotation(self, rotation: int):
-        return await DebugCameraService.set_rotation(rotation)
+        return await self.runtime.control.set_rotation(rotation)
 
     async def set_mirror(self, flip_horizontal: bool, flip_vertical: bool):
-        return await DebugCameraService.set_mirror(flip_horizontal, flip_vertical)
+        return await self.runtime.control.set_mirror(flip_horizontal, flip_vertical)
 
     async def set_sampling_mode(self, mode: str):
-        return await DebugCameraService.set_sampling_mode(mode)
+        return await self.runtime.control.set_sampling_mode(mode)
 
     async def set_color_mode(self, mode: str):
-        return await DebugCameraService.set_color_mode(mode)
+        return await self.runtime.control.set_color_mode(mode)
 
     async def set_white_balance(self, mode: str, gain_r: float, gain_b: float):
-        return await DebugCameraService.set_white_balance(mode, gain_r, gain_b)
+        return await self.runtime.control.set_white_balance(mode, gain_r, gain_b)
 
     async def get_stream_frame_bytes(
         self, image_format: str, quality: int, *, since_frame_id: int
     ):
-        return await DebugCameraService.get_stream_frame_bytes(
+        return await self.runtime.control.get_stream_frame_bytes(
             image_format, quality, since_frame_id=since_frame_id
         )
 
     async def get_preview(self, *, since_frame_id: int | None = None):
-        return await DebugCameraService.get_preview(since_frame_id=since_frame_id)
+        return await self.runtime.control.get_preview(since_frame_id=since_frame_id)
 
     async def get_rate_limited_preview(
         self, request: Request, *, since_frame_id: int | None = None
@@ -114,9 +124,7 @@ class CameraDomainService:
         target_y: float | None = None,
     ) -> dict[str, Any]:
         """读取原始帧并测量星点焦点质量 / Measure star focus quality on a raw frame."""
-        from ogscope.web.camera_shared import get_camera_manager
-
-        frame, frame_id, timestamp = await get_camera_manager().get_raw_frame()
+        frame, frame_id, timestamp = await self.runtime.capture.get_raw_frame()
         return await asyncio.to_thread(
             focus_metric_analyzer.analyze,
             frame,
@@ -143,9 +151,7 @@ class CameraDomainService:
                 "simulation_config": simulation_config,
             }
         try:
-            from ogscope.web.camera_shared import get_camera_manager
-
-            status = await get_camera_manager().status()
+            status = await self.runtime.capture.status()
             info = status.get("info", {}) if isinstance(status, dict) else {}
             width = int(info.get("output_width") or info.get("width") or 1920)
             height = int(info.get("output_height") or info.get("height") or 1080)
@@ -177,12 +183,14 @@ class FileDomainService:
 class StreamStateDomainService:
     """流状态门面 / Stream state facade."""
 
+    def __init__(self, runtime: CameraRuntime | None = None) -> None:
+        self._runtime = runtime
+
     async def get_stream_status(self) -> dict[str, Any]:
         limiter = get_mjpeg_stream_limiter()
         settings = get_settings()
-        from ogscope.web.camera_shared import get_camera_manager
-
-        metrics = await get_camera_manager().stream_metrics()
+        runtime = self._runtime if self._runtime is not None else get_camera_runtime()
+        metrics = await runtime.capture.stream_metrics()
         limiter_metrics = await limiter.snapshot()
         configured_stall_timeout_ms = int(settings.stream_mjpeg_client_stall_timeout_ms)
         effective_stall_timeout_ms = (
@@ -216,11 +224,11 @@ def _debug_services_module():
 class DebugCameraService:
     @staticmethod
     def get_camera_instance():
-        return _debug_services_module().DebugCameraService.get_camera_instance()
+        return get_camera_runtime().capture.get_camera_instance()
 
     @staticmethod
     async def get_camera_status():
-        return await _debug_services_module().DebugCameraService.get_camera_status()
+        return await get_camera_runtime().control.get_camera_status()
 
     @staticmethod
     async def get_runtime_overrides():
@@ -240,25 +248,25 @@ class DebugCameraService:
 
     @staticmethod
     async def start_camera():
-        return await _debug_services_module().DebugCameraService.start_camera()
+        return await get_camera_runtime().control.start_camera()
 
     @staticmethod
     async def stop_camera():
-        return await _debug_services_module().DebugCameraService.stop_camera()
+        return await get_camera_runtime().control.stop_camera()
 
     @staticmethod
     async def set_rotation(rotation: int):
-        return await _debug_services_module().DebugCameraService.set_rotation(rotation)
+        return await get_camera_runtime().control.set_rotation(rotation)
 
     @staticmethod
     async def set_mirror(flip_horizontal: bool, flip_vertical: bool):
-        return await _debug_services_module().DebugCameraService.set_mirror(
+        return await get_camera_runtime().control.set_mirror(
             flip_horizontal, flip_vertical
         )
 
     @staticmethod
     async def get_preview(*, since_frame_id: int | None = None):
-        return await _debug_services_module().DebugCameraService.get_preview(
+        return await get_camera_runtime().control.get_preview(
             since_frame_id=since_frame_id
         )
 
@@ -276,21 +284,19 @@ class DebugCameraService:
 
     @staticmethod
     async def set_size(width: int, height: int):
-        return await _debug_services_module().DebugCameraService.set_size(width, height)
+        return await get_camera_runtime().control.set_size(width, height)
 
     @staticmethod
     async def set_sampling_mode(mode: str):
-        return await _debug_services_module().DebugCameraService.set_sampling_mode(mode)
+        return await get_camera_runtime().control.set_sampling_mode(mode)
 
     @staticmethod
     async def set_fps(fps: int):
-        return await _debug_services_module().DebugCameraService.set_fps(fps)
+        return await get_camera_runtime().control.set_fps(fps)
 
     @staticmethod
     async def update_settings(settings: dict[str, Any]):
-        return await _debug_services_module().DebugCameraService.update_settings(
-            settings
-        )
+        return await get_camera_runtime().control.update_settings(settings)
 
     @staticmethod
     async def start_focus_session():
@@ -302,9 +308,7 @@ class DebugCameraService:
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
-        return await _debug_services_module().DebugCameraService.set_auto_exposure_mode(
-            enabled
-        )
+        return await get_camera_runtime().control.set_auto_exposure_mode(enabled)
 
     @staticmethod
     async def reset_camera():
@@ -338,13 +342,11 @@ class DebugCameraService:
 
     @staticmethod
     async def set_color_mode(color_mode: str):
-        return await _debug_services_module().DebugCameraService.set_color_mode(
-            color_mode
-        )
+        return await get_camera_runtime().control.set_color_mode(color_mode)
 
     @staticmethod
     async def set_white_balance(mode: str, gain_r: float, gain_b: float):
-        return await _debug_services_module().DebugCameraService.set_white_balance(
+        return await get_camera_runtime().control.set_white_balance(
             mode, gain_r, gain_b
         )
 
@@ -352,7 +354,7 @@ class DebugCameraService:
     async def get_stream_frame_bytes(
         image_format: str, quality: int, *, since_frame_id: int
     ):
-        return await _debug_services_module().DebugCameraService.get_stream_frame_bytes(
+        return await get_camera_runtime().control.get_stream_frame_bytes(
             image_format,
             quality,
             since_frame_id=since_frame_id,

@@ -20,19 +20,19 @@ class CameraPlaneService:
         self._last_frame_id = 0
 
     async def start(self) -> None:
-        from ogscope.web.camera_shared import get_camera_manager
+        from ogscope.application.camera import get_camera_capture as get_camera_manager
 
         await get_camera_manager().ensure_started()
         self._running = True
 
     async def stop(self) -> None:
-        from ogscope.web.camera_shared import get_camera_manager
+        from ogscope.application.camera import get_camera_capture as get_camera_manager
 
         await get_camera_manager().stop()
         self._running = False
 
     async def status(self) -> dict[str, Any]:
-        from ogscope.web.camera_shared import get_camera_manager
+        from ogscope.application.camera import get_camera_capture as get_camera_manager
 
         camera_status = await get_camera_manager().status()
         return {
@@ -44,7 +44,7 @@ class CameraPlaneService:
         }
 
     async def publish_latest_preview(self) -> dict[str, Any]:
-        from ogscope.web.camera_shared import get_camera_manager
+        from ogscope.application.camera import get_camera_capture as get_camera_manager
 
         manager = get_camera_manager()
         await manager.ensure_started()

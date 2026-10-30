@@ -293,7 +293,9 @@ async def test_hardware_plane_cannot_close_capture_owned_by_a_task(monkeypatch):
     manager = CameraManager()
     manager._idle_shutdown_sec = 0
     lease = manager.update_operation_lease()
-    monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
+    monkeypatch.setattr(
+        "ogscope.application.camera.get_camera_capture", lambda: manager
+    )
     result = await CameraPlaneService().command("stop")
     assert result["accepted"] is False
     manager.update_operation_lease(lease_id=lease["lease_id"], release=True)

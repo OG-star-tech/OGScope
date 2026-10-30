@@ -14,6 +14,8 @@ from ogscope.config import get_settings
 from ogscope.core.capabilities import capability_map
 from ogscope.core.realtime import realtime_solve_service
 from ogscope.domain.camera.services import (
+    CameraDomainService,
+    StreamStateDomainService,
     camera_domain_service,
     file_domain_service,
     stream_state_domain_service,
@@ -37,8 +39,25 @@ class CoreAnalysisSession:
 class CoreContractService:
     """OGScope 对上层调用方的稳定契约服务 / Stable OGScope contract for upstream callers."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, *, camera: CameraDomainService | None = None, hardware_client: Any = None
+    ) -> None:
         self._session = CoreAnalysisSession()
+        self._camera = camera if camera is not None else camera_domain_service
+        self._streams = (
+            StreamStateDomainService(camera.runtime)
+            if camera is not None
+            else stream_state_domain_service
+        )
+        self._hardware_client = hardware_client
+
+    def _hardware_plane(self):
+        """测试可注入同一设备的平面替身 / Allow a matching device-plane substitute in tests."""
+        return (
+            self._hardware_client
+            if self._hardware_client is not None
+            else get_hardware_plane_client()
+        )
 
     @staticmethod
     def _optional_float(value: Any) -> float | None:
@@ -292,7 +311,7 @@ class CoreContractService:
         """系统状态与能力 / System status and capability map."""
         profile = describe_hardware_plane_profile()
         network_in_health_scope = self._network_health_in_scope(profile)
-        hardware_client = get_hardware_plane_client()
+        hardware_client = self._hardware_plane()
         hw_status_resp = await hardware_client.status_get()
         hw_status_data = (
             hw_status_resp.get("data", {}) if hw_status_resp.get("success") else {}
@@ -302,7 +321,7 @@ class CoreContractService:
             if isinstance(hw_status_data, dict)
             else {}
         )
-        raw_camera_status = await camera_domain_service.get_status()
+        raw_camera_status = await self._camera.get_status()
         camera_status = self._normalize_camera_status(raw_camera_status)
         if camera_service_status:
             camera_status["connected"] = bool(
@@ -356,18 +375,16 @@ class CoreContractService:
 
     async def get_camera_status(self) -> dict[str, Any]:
         """获取 Core 相机状态 / Get core camera status."""
-        hardware_client = get_hardware_plane_client()
+        hardware_client = self._hardware_plane()
         hp_status = await hardware_client.status_get()
         hp_camera = (
             hp_status.get("data", {}).get("services", {}).get("camera", {})
             if hp_status.get("success")
             else {}
         )
-        status = await camera_domain_service.get_status()
+        status = await self._camera.get_status()
         normalized = self._normalize_camera_status(status)
-        from ogscope.web.camera_shared import get_camera_manager
-
-        normalized["lifecycle"] = get_camera_manager().lifecycle_status()
+        normalized["lifecycle"] = self._camera.runtime.capture.lifecycle_status()
         if hp_camera:
             normalized["connected"] = bool(
                 hp_camera.get("connected", normalized["connected"])
@@ -382,10 +399,10 @@ class CoreContractService:
 
     async def start_camera(self) -> dict[str, Any]:
         """启动 Core 相机 / Start core camera."""
-        hardware_client = get_hardware_plane_client()
+        hardware_client = self._hardware_plane()
         # 冷启动可能超过硬件平面通用 RPC 预算；先完成真实相机启动，再同步平面状态。
         # Cold start can exceed the generic plane RPC budget; start hardware first, then sync plane state.
-        result = await camera_domain_service.start()
+        result = await self._camera.start()
         hp_result = await hardware_client.device_command("camera", "start")
         status = await self.get_camera_status()
         ready = bool(status.get("connected")) and bool(status.get("streaming"))
@@ -409,10 +426,10 @@ class CoreContractService:
 
     async def stop_camera(self) -> dict[str, Any]:
         """停止 Core 相机 / Stop core camera."""
-        hardware_client = get_hardware_plane_client()
+        hardware_client = self._hardware_plane()
         # 先让相机域完成有界清理，避免硬件平面短 RPC 预算提前取消释放流程。
         # Let the camera domain finish bounded cleanup before the short plane RPC can cancel it.
-        result = await camera_domain_service.stop()
+        result = await self._camera.stop()
         if result.get("success") is False:
             return {
                 "success": False,
@@ -433,15 +450,13 @@ class CoreContractService:
 
     def camera_operation_lease(self, **payload: Any) -> dict[str, Any]:
         """Reserve camera lifetime across task steps / 跨任务步骤保留相机生命周期。"""
-        from ogscope.web.camera_shared import get_camera_manager
-
-        return get_camera_manager().update_operation_lease(**payload)
+        return self._camera.runtime.capture.update_operation_lease(**payload)
 
     async def reset_camera_temporal_history(self) -> dict[str, Any]:
         """通知相机丢弃跨帧降噪历史（移动结算后调用）/ Tell the camera to
         discard cross-frame temporal history (call this after a move
         settles)."""
-        result = await camera_domain_service.reset_temporal_history()
+        result = await self._camera.reset_temporal_history()
         return {
             "success": bool(result.get("success", True)),
             "message": "",
@@ -457,7 +472,7 @@ class CoreContractService:
         restore_auto_after_exposure = bool(auto_exposure) and exposure_us is not None
 
         if auto_exposure is not None and not restore_auto_after_exposure:
-            await camera_domain_service.set_auto_exposure_mode(bool(auto_exposure))
+            await self._camera.set_auto_exposure_mode(bool(auto_exposure))
             applied["auto_exposure"] = bool(auto_exposure)
 
         if exposure_us is not None:
@@ -466,11 +481,11 @@ class CoreContractService:
                 # 先在手动模式写入可恢复基线，再重新开启 AE。
                 # Write the restorable manual baseline before re-enabling AE.
                 exposure_settings["autoExposure"] = False
-            await camera_domain_service.update_settings(exposure_settings)
+            await self._camera.update_settings(exposure_settings)
             applied["exposure_us"] = int(exposure_us)
 
         if restore_auto_after_exposure:
-            await camera_domain_service.set_auto_exposure_mode(True)
+            await self._camera.set_auto_exposure_mode(True)
             applied["auto_exposure"] = True
 
         if payload.get("analogue_gain") is not None:
@@ -478,27 +493,25 @@ class CoreContractService:
             if payload.get("digital_gain") is not None:
                 settings["digitalGain"] = float(payload["digital_gain"])
                 applied["digital_gain"] = float(payload["digital_gain"])
-            await camera_domain_service.update_settings(settings)
+            await self._camera.update_settings(settings)
             applied["analogue_gain"] = float(payload["analogue_gain"])
         elif payload.get("digital_gain") is not None:
-            await camera_domain_service.update_settings(
+            await self._camera.update_settings(
                 {"digitalGain": float(payload["digital_gain"])}
             )
             applied["digital_gain"] = float(payload["digital_gain"])
 
         if payload.get("fps") is not None:
-            await camera_domain_service.set_fps(int(payload["fps"]))
+            await self._camera.set_fps(int(payload["fps"]))
             applied["fps"] = int(payload["fps"])
 
         if payload.get("width") is not None and payload.get("height") is not None:
-            await camera_domain_service.set_size(
-                int(payload["width"]), int(payload["height"])
-            )
+            await self._camera.set_size(int(payload["width"]), int(payload["height"]))
             applied["width"] = int(payload["width"])
             applied["height"] = int(payload["height"])
 
         if payload.get("rotation") is not None:
-            await camera_domain_service.set_rotation(int(payload["rotation"]))
+            await self._camera.set_rotation(int(payload["rotation"]))
             applied["rotation"] = int(payload["rotation"])
 
         if (
@@ -507,20 +520,20 @@ class CoreContractService:
         ):
             fh = bool(payload.get("flip_horizontal", False))
             fv = bool(payload.get("flip_vertical", False))
-            await camera_domain_service.set_mirror(fh, fv)
+            await self._camera.set_mirror(fh, fv)
             applied["flip_horizontal"] = fh
             applied["flip_vertical"] = fv
 
         if payload.get("sampling_mode") is not None:
-            await camera_domain_service.set_sampling_mode(str(payload["sampling_mode"]))
+            await self._camera.set_sampling_mode(str(payload["sampling_mode"]))
             applied["sampling_mode"] = str(payload["sampling_mode"])
 
         if payload.get("color_mode") is not None:
-            await camera_domain_service.set_color_mode(str(payload["color_mode"]))
+            await self._camera.set_color_mode(str(payload["color_mode"]))
             applied["color_mode"] = str(payload["color_mode"])
 
         if payload.get("white_balance_mode") is not None:
-            await camera_domain_service.set_white_balance(
+            await self._camera.set_white_balance(
                 str(payload["white_balance_mode"]),
                 float(payload.get("white_balance_gain_r", 1.0)),
                 float(payload.get("white_balance_gain_b", 1.0)),
@@ -532,7 +545,7 @@ class CoreContractService:
                 applied["white_balance_gain_b"] = float(payload["white_balance_gain_b"])
 
         info = {}
-        camera_status = await camera_domain_service.get_status()
+        camera_status = await self._camera.get_status()
         if isinstance(camera_status, dict):
             info = camera_status.get("info", {}) or {}
 
@@ -545,7 +558,7 @@ class CoreContractService:
 
     async def get_stream_status(self) -> dict[str, Any]:
         """获取流控状态 / Get stream limiter status."""
-        stream = await stream_state_domain_service.get_stream_status()
+        stream = await self._streams.get_stream_status()
         return {
             "success": True,
             **stream,

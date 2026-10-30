@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
+from ogscope.application.camera import get_camera_capture as get_camera_manager
 from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
 from ogscope.domain.shared.filesystem import (
     DEV_CAPTURES_DIR,
@@ -23,7 +24,6 @@ from ogscope.domain.shared.filesystem import (
     dev_captures_storage_info,
     ensure_safe_basename,
 )
-from ogscope.web.camera_shared import get_camera_manager
 
 # 兼容旧命名，测试与遗留调用仍可能引用 / Backward-compatible alias.
 DEBUG_CAPTURES_DIR = DEV_CAPTURES_DIR
