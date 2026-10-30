@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ogscope.application import camera as composition
+from ogscope.application.camera_control import CameraControlService
 from ogscope.core.application.core_service import CoreContractService
 from ogscope.domain.camera.runtime import CameraCapture, CameraControl, CameraRuntime
 from ogscope.domain.camera.services import CameraDomainService
@@ -25,6 +26,9 @@ class FakeCapture:
         self.leases = set()
         self.starts = 0
         self.stops = 0
+
+    def get_camera_instance(self):
+        return None
 
     async def ensure_started(self):
         self.streaming = True
@@ -65,27 +69,6 @@ class FakeCapture:
         }
 
 
-class FakeControl:
-    """行为替身与采集端口绑定 / Bind control behavior to its capture substitute."""
-
-    def __init__(self, capture):
-        self.capture = capture
-
-    async def get_camera_status(self):
-        return await self.capture.status()
-
-    async def start_camera(self):
-        await self.capture.ensure_started()
-        return {"success": True}
-
-    async def stop_camera(self):
-        try:
-            await self.capture.stop()
-        except RuntimeError as exc:
-            return {"success": False, "message": str(exc)}
-        return {"success": True}
-
-
 class FakePlane:
     """只记录平面同步，不调用任何设备 / Record plane synchronization without devices."""
 
@@ -102,7 +85,10 @@ class FakePlane:
 
 def make_runtime():
     capture = FakeCapture()
-    return CameraRuntime(capture=capture, control=FakeControl(capture))
+    return CameraRuntime(
+        capture=capture,
+        control=CameraControlService(capture, analysis_running=lambda: False),
+    )
 
 
 def test_default_runtime_binds_existing_manager_for_every_consumer():
@@ -115,7 +101,9 @@ def test_default_runtime_binds_existing_manager_for_every_consumer():
 
     runtime = composition.get_camera_runtime()
     assert runtime is camera_domain_service.runtime
-    assert runtime.control is services.DebugCameraService
+    assert isinstance(runtime.control, CameraControlService)
+    assert runtime.control is services.get_camera_control()
+    assert runtime.control.capture is runtime.capture
     assert isinstance(runtime.capture, CameraCapture)
     assert isinstance(runtime.control, CameraControl)
     assert runtime.capture is camera_shared.get_camera_manager()
@@ -233,7 +221,11 @@ async def test_domain_reset_invalidates_cached_identity_even_without_driver_hook
     cached = CapturedFrame(object(), 7, 1.0, 1.0, 0)
     capture._latest_raw = cached.frame
     capture._latest_raw_capture = cached
-    service = CameraDomainService(CameraRuntime(capture, FakeControl(capture)))
+    service = CameraDomainService(
+        CameraRuntime(
+            capture, CameraControlService(capture, analysis_running=lambda: False)
+        )
+    )
     try:
         assert await service.reset_temporal_history() == {
             "success": True,
@@ -259,10 +251,12 @@ def test_neutral_ports_and_composition_import_without_loading_web():
     )
 
 
-def test_core_and_camera_domain_have_no_direct_camera_implementation_imports():
+def test_core_domain_and_application_have_no_direct_camera_implementation_imports():
     root = Path(__file__).resolve().parents[2] / "ogscope"
-    paths = list((root / "core").rglob("*.py")) + list(
-        (root / "domain/camera").glob("*.py")
+    paths = (
+        list((root / "core").rglob("*.py"))
+        + list((root / "domain/camera").glob("*.py"))
+        + list((root / "application").glob("*.py"))
     )
     violations = []
     for path in paths:

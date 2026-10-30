@@ -35,7 +35,9 @@ def temp_debug_dir(monkeypatch, tmp_path: Path):
         monkeypatch.setattr(
             domain_shared_pkg.filesystem, "DEV_CAPTURES_DIR", debug_root
         )
-    monkeypatch.setattr(debug_services, "is_recording", False)
+    from ogscope.application.camera import get_camera_control
+
+    monkeypatch.setattr(get_camera_control(), "recording", False)
     monkeypatch.setattr(debug_services, "recording_task", None)
     monkeypatch.setattr(debug_services, "recording_stem", None)
     monkeypatch.setattr(debug_services, "recording_t0_mono", None)

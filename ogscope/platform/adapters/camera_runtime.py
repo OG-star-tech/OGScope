@@ -1,11 +1,22 @@
-"""迁移期间的旧实现适配 / Bridge the existing implementation during migration."""
+"""将现有采集管理器绑定到中性控制 / Bind existing capture to neutral controls."""
 
+from ogscope.application.camera_control import CameraControlService
 from ogscope.domain.camera.runtime import CameraRuntime
 
 
+def _analysis_running() -> bool:
+    """保留分析启动窗口内的停机保护 / Preserve stop protection during analysis startup."""
+    from ogscope.core.realtime import realtime_solve_service
+
+    return bool(realtime_solve_service.state.running)
+
+
 def build_legacy_camera_runtime() -> CameraRuntime:
-    """仅绑定已有实例，不创建第二个管理器 / Bind the existing instance without another manager."""
-    from ogscope.web.api.debug.services import DebugCameraService
+    """中性控制复用已有管理器，不加载 Web Debug / Reuse existing capture without loading Web Debug."""
     from ogscope.web.camera_shared import get_camera_manager
 
-    return CameraRuntime(capture=get_camera_manager(), control=DebugCameraService)
+    capture = get_camera_manager()
+    return CameraRuntime(
+        capture=capture,
+        control=CameraControlService(capture, analysis_running=_analysis_running),
+    )
