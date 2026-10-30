@@ -1,77 +1,77 @@
-# 相机运行边界迁移准备 / Camera Runtime Migration Preparation
+# 相机运行层与验收边界 / Camera Runtime and Acceptance Boundaries
 
-Core 与 Dev 通过中性运行端口共用一个默认实例，Core v1 保持重构冻结基线。共享启停、状态、参数重配和调焦恢复现已由 `application/camera_control.py` 持有；Web Debug 的旧入口只转发这些操作。采集管理器现位于 `application/camera_manager.py`，旧 Web 导入仅转发同一个实例；普通停机仍可重启，新增终止关闭统一收回后台任务和执行器。相关 PR 保持 Draft，分提交记录验证结果。
+Core、Dev、分析与预览共用同一个相机运行实例。设备生命周期、占用规则、帧与编码、任务与执行器已有明确所有者；相机 Domain 不再导入 HTTP 或绕经 Web Debug 读取产品数据。Core v1 冻结基线保持不变，相关 PR 继续 Draft，合并由维护者另行决定。
 
-Core and Dev share neutral runtime ports under the frozen Core v1 contract. `application/camera_control.py` now owns shared start/stop, status, reconfiguration and focus restoration; legacy Web Debug entries forward these operations. The capture manager now lives in `application/camera_manager.py`; the old Web import forwards the same instance. Ordinary stop remains reusable, while terminal shutdown drains owned tasks and executors. The PR stays draft, with validation recorded per commit.
+Core, Dev, analysis and preview share one camera runtime. Device lifetime, ownership, frames/encoding and task/executor resources have explicit owners. Camera Domain no longer imports HTTP or delegates product reads through Web Debug. Core v1 remains frozen; the PR stays draft pending a maintainer's decision.
 
-回归复现表明：原快速路径只检查帧新鲜度，关闭持有控制锁期间仍可能提前放行分析。现在快速路径要求控制锁空闲；预览必须取得控制锁后重新检查句柄，覆盖锁刚释放但关闭请求仍排队的窗口。关闭等待被取消时，原生线程可能仍在工作，因此保留并隔离原句柄，拒绝新的相机获取。自动空闲关闭、显式关闭、排队预览和原生 stop/close 等待取消均有确定性交错测试，驱动配置与超时预算保持不变。
+## 职责与依赖 / Responsibilities and Dependencies
 
-Regressions reproduce the former freshness-only fast path accepting analysis while closure owns the control lock. The fast path requires an unlocked controller, and preview rechecks the handle after acquiring control, including when a closer is already queued on an unlocked lock. Cancelling a close waiter does not stop native workers, so the original handle is retained and quarantined against new acquisition. Deterministic interleaving tests cover idle/explicit closure, queued preview and cancellation during native stop/close without changing driver configuration or timeout budgets.
+| 所有者 / Owner | 职责 / Responsibility | 约束 / Constraint |
+|---|---|---|
+| `application/camera.py` | 绑定一个 runtime，协调分析、录像和采集终止 / Bind one runtime and coordinate terminal consumer/capture shutdown | 未使用的 runtime 不在退出时初始化硬件 / No hardware initialization for an unused runtime at exit |
+| `application/camera_manager.py` | 唯一设备句柄、生命周期锁、启停/重配/故障隔离、空闲关闭 / Sole device handle, lifetime lock, start/stop/reconfiguration/quarantine and idle close | 只有它能决定释放设备，流水线异常经回调取得生命周期锁 / Only the coordinator releases hardware; pipeline faults acquire its lifetime lock |
+| `domain/camera/ownership.py` | 预览/分析/录像计数、限额租约、续期/到期/释放 / Consumer counts and bounded lease acquire/renew/expire/release | 占用不等于设备或曝光状态；普通 stop 尊重分析、录像和操作占用 / Ownership is separate from device/readiness state and protects ordinary stop |
+| `application/camera_frames.py` | 唯一共享帧身份、缓存、时域屏障、抓帧流水线、JPEG 质量变体及编码指标 / Shared identity/cache, epoch barrier, capture pipeline, JPEG variants and metrics | 编码结果与原采集身份绑定，不因质量变体额外抓 RAW；保留有界缓存 / Bind encodes to capture identity, never capture extra RAW for variants, bound caches |
+| `application/camera_resources.py` | 后台任务、原生工作完成回执、抓帧及编码线程池 / Background tasks, native completion receipts and both worker pools | 请求取消不取消原生完成证据，已运行线程不能靠 cancel 强制结束 / Request cancellation preserves receipts; running native threads cannot be forcibly cancelled |
+| `platform/adapters/camera_config.py` | 配置到后端参数的映射 / Settings-to-backend mapping | 保留默认值、运行覆盖顺序和驱动配置 / Preserve defaults, override precedence and driver configuration |
+| `domain/camera/media.py` | Core/Dev 共用的只读目录和侧车元数据 / Shared read-only media catalog and sidecar metadata | 目录可注入；文件创建、删除和预设持久化继续由 Dev 负责 / Injectable directory; Dev retains file mutations and preset persistence |
+| `web/camera_http.py`, `web/camera_streaming.py` | HTTP 状态/头、预览节流、MJPEG 响应及连接收尾 / HTTP status/headers, throttling, MJPEG response and connection cleanup | HTTP 消费者释放运行层占用，不持有第二个相机 / HTTP consumers release runtime ownership; no second camera |
 
-## 现有行为基线 / Existing Behavior Baseline
+`CameraControlService` 继续持有共享参数事务、调焦快照和录像任务/锁。`CaptureReadiness` 独立回答曝光是否可供分析；不得用一个设备状态枚举掩盖占用、曝光和关闭隔离的差别。帧与编码保留为同一流水线组件，因为帧身份、质量变体与缓存淘汰必须一致。
 
-| 不变量 / Invariant | 当前证据 / Existing regression evidence |
-|---|---|
-| 同一进程只保留一个活动硬件所有者；启动须确认有效帧 / One hardware owner; startup confirms a frame | `test_camera_manager_health.py` |
-| 启动失败安全释放后可再次创建；停止失败、超时或等待取消时保留原句柄并禁止重新获取 / Retry only after safe failed-start release; quarantine failed, timed-out or cancelled stops | `test_camera_manager_health.py` |
-| 空闲关闭一旦开始释放硬件，新消费者等待完成；不能取消到一半 / New consumers wait for an idle close already releasing hardware | `test_camera_manager_health.py` |
-| 生命周期、曝光准备、资源占用分开；重启不沿用旧就绪证据 / Separate lifetime, readiness and ownership; reset readiness after sleep | `test_capture_readiness.py` |
-| 曝光准备有预算，准备期间不消耗解算次数 / Bounded readiness without spending solve attempts | `test_capture_readiness.py` |
-| 分析、录像、任务占用阻止普通停止；硬件平面不能绕过 / Analysis, recording and task leases guard ordinary stop, including hardware-plane calls | `test_capture_readiness.py` |
-| 不同 owner 不得更改或停止他人会话；旧清理不能写入新会话 / Ownership checks and stale-cleanup isolation | `test_analysis_session_ownership.py` |
-| JPEG 与结果按 session/frame 配对；共享预览限制缓存与连接 / Exact frame identity with bounded shared previews | `test_core_contract_api.py`, `test_shared_preview_stream_encoding.py`, `test_domain_camera_streaming.py` |
-
-这些自动回归保护每次迁移。接口阶段 `e3616e7` 已完成 V4L2 三轮板上基线（含临时进程重启、跨入口占用和原服务恢复），不代表后续提交或完整发布验收；当前提交证据见 PR。原生驱动阻塞、长曝光与持续 CMA 等仍须经[发布冒烟与人工验收](core-api-smoke.md)验证。
-
-Automated regressions protect each migration. Interface-stage commit `e3616e7` passed three V4L2 baseline cycles including a temporary-process restart, cross-entry ownership and restoration. That evidence does not validate later commits or full release acceptance; see the PR for current evidence. Native stalls, long exposures and sustained CMA use remain manual acceptance items.
-
-## 已完成的接口与组合点 / Implemented Ports and Composition
-
-- `domain/camera/runtime.py` 定义 `CameraControl`、`CameraCapture` 和不可变的 `CameraRuntime` 绑定；共享帧值对象 `SharedFrame` 也位于这里，旧 Web 导入继续可用。端口声明不导入 Web 或具体驱动。/ Neutral ports and the shared frame value live in Domain; the old frame import remains compatible.
-- `application/camera.py` 线程安全地延迟绑定一次默认 runtime；获取接口不打开相机。Core/Dev、实时分析、预览、硬件平面和应用启停均从该组合入口取得同一采集对象。/ Composition binds one default runtime without starting hardware and shares capture across every consumer.
-- `application/camera_control.py` 实现 `CameraControl`，仅依赖注入的采集端口和分析占用查询；不导入 Web、FastAPI 或具体驱动。状态读取、启停、帧读取、参数事务和调焦恢复均可独立运行。/ Neutral controls depend only on capture and an injected analysis-busy query, without Web, FastAPI or driver imports.
-- `platform/adapters/camera_runtime.py` 只将既有 `CameraManager` 与中性控制绑定。控制端持有调焦快照/锁和录像状态，录像任务和锁也由控制端持有，Dev 仍管理文件及侧车元数据；没有创建第二套相机所有者。/ Composition binds the existing manager to neutral controls. Focus state/locks and recording status belong to that instance; controls also own the recording task and lock, while Dev manages files and sidecar metadata.
-- 预览端口返回帧值及状态码，既有 Domain 门面负责 HTTP 状态、缓存策略和身份头；Web 旧方法保持转发。Dev 专用拍摄、录像文件、预设及配置持久化仍未迁移，Domain 的这些开发能力仍经适配器加载旧服务。/ Preview ports return frame values and status codes; the existing facade preserves HTTP headers and status. Dev capture files, recording metadata, presets and persistence still use the legacy adapter.
-- `CameraDomainService(runtime=...)`、`CoreContractService(camera=..., hardware_client=...)` 和 `RealtimeSolveService(capture=...)` 支持局部测试替身。注入控制端口与采集端口必须代表同一设备；测试可并存两组独立状态，不需要替换生产单例或引入 DI 框架。/ Constructors support isolated test collaborators; injected control and capture must represent the same device.
-- `reset_temporal_history` 经注入的采集端口执行，保留 develop 的帧身份屏障；即使驱动没有降噪钩子，也会失效缓存及在途旧帧。/ Temporal reset uses the injected capture barrier and preserves upstream invalidation even for drivers without a temporal-NR hook.
-- [Core v1 冻结基线](../contracts/core-v1-freeze.md)覆盖公开 schema、两种角色、关键失败语义及跨入口占用。新端口的类型检查在 CI 中阻断失败，项目其余 MyPy 门禁保持原状。/ Schema and behavioral baselines protect compatibility; new ports have a blocking type check while the existing project-wide MyPy policy is unchanged.
+Shared controls retain parameter transactions, focus state and the recording task/lock. CaptureReadiness independently governs analysis readiness. Device state must not collapse ownership, exposure and quarantine into one enum. Frames and encoding stay in one pipeline because identity, variants and cache eviction must agree.
 
 ```text
-Core / Dev / camera domain
-  -> application.camera.get_camera_runtime()
+Core / Dev routes
+  -> CameraDomainService / CameraControlService
      -> CameraRuntime(control, capture)
-        -> CameraControlService(capture, analysis_running)
-        -> CameraManager (application.camera_manager)
+        -> CameraManager: device handle and lifetime lock
+           -> CameraOwnership: consumers and operation leases
+           -> CameraFramePipeline: frames, readiness evidence and encodes
+           -> CameraResources: tracked tasks and native workers
+
+HTTP preview / MJPEG -> Web adapters -> neutral runtime
+Core / Dev media reads -> CameraMediaCatalog
 ```
 
-## 分阶段迁移方案 / Migration Stages
+旧 `web/camera_shared.py` 保留类、帧类型和单例的兼容转发。内部 `domain.camera.streaming` 与反向 Debug 适配器已移除，仓库内调用方统一使用 Web HTTP 实现；外部 REST 路径未删除。局部 runtime、媒体目录及底层设备回调均可注入，不引入第二套生产单例或 DI 框架。
 
-1. **接口与注入点已完成。** 公开契约基线、控制/采集端口、默认组合和局部注入已接入；接口阶段的 V4L2 基线已记录。/ Contract baselines, ports, composition and injection are implemented, with the interface-stage V4L2 baseline recorded.
-2. **共享控制实现已迁出。** Core/Domain 与 Dev 调用同一中性实现，旧 Web 方法兼容转发。保留原参数事务、10 秒重配预算、帧率回读重试和调焦恢复顺序；共享预览仍复用同一帧身份。录制文件任务、预设及持久化继续留在 Dev。/ Shared controls now have a neutral owner. Legacy forwarders preserve transactions, 10-second reconfiguration budgets, FPS readback retry, focus restoration and shared frame identity. Recording files/tasks, presets and persistence remain in Dev.
-3. **管理器迁移与终止关闭已实现。** Application 持有管理器及共享生命周期入口，集中管理预热、空闲/租约计时器、抓帧、录像和编码关闭；原导入保留转发。原生 I/O 超时后保留句柄并隔离，不能宣称已释放硬件。/ Application now owns the manager and shared lifecycle entry, draining warm-up, idle/lease timers, capture, recording and encoding. Legacy imports forward; native timeouts retain and quarantine the handle without claiming release.
-4. **按修改原因拆分。** 再分别拆共享帧/编码、设备生命周期、占用规则；逐项证明行为等价后移除兼容导入。曝光准备继续独立，禁止用单个枚举掩盖多个状态维度。/ Split frame/encoding, lifecycle and ownership responsibilities after behavior is protected; retain separate readiness and remove forwarding only after equivalence checks.
+The old Web camera module still forwards class/frame/singleton identity. Internal Domain streaming and the reverse Debug adapter are removed; in-repo callers use the Web HTTP implementation. No REST route is removed. Local runtimes, media directories and device callbacks support injection without a second production singleton or DI framework.
 
-目标生命周期转换可以显式记录为 closed → opening → running → closing → closed，以及故障隔离分支；这是待设计模型，不是当前已实现的状态机。`sleeping/active/warm_idle` 继续表达占用与热驻留；`CaptureReadiness` 继续回答是否可开始分析。
+## 生命周期不变量 / Lifetime Invariants
 
-An explicit closed/opening/running/closing lifecycle with quarantined failure is a proposed model, not current implementation. Existing sleeping/active/warm_idle describe ownership and warm retention; CaptureReadiness independently governs analysis readiness.
+- 同一进程只有一个活动设备所有者。启动在生命周期锁内确认有效帧；新消费者不能穿过已经开始的空闲关闭。/ One active device owner; startup verifies frames under the lifetime lock and new consumers wait for an active idle close.
+- 普通 `stop()` 保留占用检查、驱动顺序和既有预算，完成后可以重新启动；不销毁线程池。/ Ordinary stop preserves ownership checks, driver ordering and budgets, permits restart and keeps worker pools reusable.
+- `begin_shutdown()` 拒绝新工作、撤销操作租约并取消计时器。已经开始原生释放的空闲任务须先完成。/ Terminal fencing rejects acquisition, revokes leases and cancels timers; an idle task already releasing native resources must finish.
+- 进程退出顺序为分析、录像、采集。前一阶段失败仍继续后续清理；`CameraManager.shutdown()` 默认预算 8 秒。调用方取消不打断共享终止任务，重复关闭等待同一结果。/ Exit stops analysis, recording and capture with independent bounds; manager shutdown defaults to eight seconds. Caller cancellation does not interrupt shared terminal cleanup, and repeated callers observe one result.
+- 先排空抓帧、RAW 直读、时域重置、预览/变体/非 JPEG 编码，再关闭编码器和设备，最后封闭线程池。/ Drain capture, direct RAW reads, temporal reset and all encodes before closing encoder/device resources and sealing pools.
+- 原生停止/关闭失败、超时或取消等待后保留并隔离原句柄，不以逻辑状态宣称硬件已经释放。`shutdown(wait=False)` 不会终止已运行原生线程。/ Failed, timed-out or cancelled native closure retains and quarantines the handle; logical state and nonblocking executor shutdown do not establish release.
+- 正式日志 `camera_runtime_shutdown released=... pending_workers=... pending_tasks=...` 是关闭回执。`released=False` 要求人工检查或重启服务；不能发布为正常释放。/ Product logs report release and outstanding work; an incomplete receipt requires manual recovery, not a successful-release claim.
+- 启动中途失败也走清理路径；录像 writer 最终释放。普通 Dev 停录继续写侧车，进程终止不新增侧车持久化行为。/ Startup failures clean up and recording writers finalize. Normal Dev stop writes sidecars; terminal shutdown adds no persistence behavior.
 
-## 普通停机与进程退出 / Reusable Stop and Process Exit
+## 回归与板上验收 / Regression and Board Acceptance
 
-- `stop()` 保留原普通停机/占用检查、驱动顺序和预算，后续仍可重新启动；它不会销毁线程池。`begin_shutdown()` 先关闭获取入口，撤销操作租约并取消计时器；已经开始原生释放的空闲任务等待完成。/ Ordinary stop preserves ownership checks, driver ordering and budgets and allows reuse. Terminal fencing rejects new acquisition, clears leases and cancels timers while joining an idle closure already releasing native resources.
-- `shutdown_camera_runtime()` 顺序终止实时分析、录像及采集端。每阶段都有预算，前一阶段失败仍继续清理。调用方取消不会中断共享关闭任务；重复关闭等待同一结果。未创建 runtime 的退出不会初始化硬件。/ The shared exit coordinator stops analysis, recording and capture with independent bounds, continues after errors, survives caller cancellation and reuses one shutdown result. Exiting an unused runtime does not construct hardware.
-- `CameraManager.shutdown()` 默认总预算 8 秒，跟踪预热、后台抓帧、JPEG 变体、RAW 直读、时间域重置和非 JPEG 编码；原生工作的完成回执不随请求取消。先排空工作，再关闭编码器和相机，最后封闭两个专用线程池。/ The manager has an eight-second terminal budget. It tracks warm-up, preview, JPEG variants, direct RAW reads, temporal reset and non-JPEG encodes independently of request cancellation, drains work before native closure, then seals both pools.
-- 超时或失败保留原句柄、重启要求及未完成工作；拒绝再次获取，也不在事件循环中等待卡住的原生线程。`shutdown(wait=False)` 只禁止新提交，不能终止已运行的原生线程；`camera_runtime_shutdown released=False` 明确表示未确认释放。/ Failures quarantine the original handle and reject reacquisition. Nonblocking executor shutdown cannot terminate running native work; `released=False` explicitly reports unconfirmed release.
-- 应用启动中途失败也进入同一清理路径；录像任务最终释放 writer。Dev 的正常停止仍负责录像侧车，进程终止不会新增侧车持久化行为。Core v1 的路径、字段和帧身份不变。/ Startup failures use the same cleanup path and recording finalizers release the writer. Dev's ordinary stop still writes sidecars; process exit adds no sidecar persistence behavior. Core v1 paths, fields and frame identity stay unchanged.
+公开契约保留 14 条 Core v1 路径与 18 个 schema；冻结 fixture 不随内部拆分重录。状态码、owner/session、忙碌拒绝、精确帧 404/409、standalone/subordinate 注册规则保持一致。
 
-确定性测试见 `test_camera_runtime_shutdown.py`，覆盖取消等待、原生读/编码仍在执行、迟到预热句柄、空闲关闭交错、重复关闭、失败隔离及应用启动异常。/ Deterministic regressions cover cancelled waiters, active native reads/encodes, late warm-up handles, idle-close interleaving, repeated closure, quarantine and startup failure.
+The reviewed fixture keeps 14 Core v1 paths and 18 schemas. Internal refactoring does not regenerate it or change status codes, ownership, busy refusal, exact-frame errors or role-specific registration.
 
-## 每一步的验收条件 / Acceptance at Each Stage
+| 保护内容 / Protection | 测试 / Tests |
+|---|---|
+| 控制锁交错、关闭取消、失败隔离 / Lock interleaving, cancellation, quarantine | `test_camera_manager_health.py`, `test_camera_runtime_shutdown.py` |
+| 抓帧身份、时域屏障、预取与编码缓存 / Capture identity, epochs, prefetch and encoding caches | `test_raw_frame_freshness.py`, `test_shared_preview_stream_encoding.py` |
+| 租约限额、过期不释放其他消费者、媒体读一致 / Lease bounds, independent consumers and shared media reads | `test_camera_runtime_components.py`, `test_capture_readiness.py` |
+| 禁止 Web/HTTP 导入后的默认组合与领域服务 / Neutral composition and Domain without Web/HTTP imports | `test_camera_runtime_binding.py`, `test_camera_control_service.py` |
+| MJPEG 断连、淘汰、清理与共享实例 / MJPEG disconnect, eviction, cleanup and shared runtime | `test_domain_camera_streaming.py`, `test_mjpeg_stream_limiter.py` |
+| Core 契约与分析归属 / Core contract and analysis ownership | `test_core_v1_schema.py`, `test_core_contract_api.py`, `test_analysis_session_ownership.py` |
 
-- Core v1 路径、字段、忙碌/停止语义、精确帧身份与两种运行角色保持兼容；同步核对 [API 清单](../contracts/api-inventory.md)。/ Preserve Core paths, fields, busy/stop behavior, frame identity and both roles; recheck the inventory.
-- 定向生命周期/所有权测试通过，再运行完整单元测试、Black、Ruff、wheel/sdist 授权检查；涉及界面时再构建前端。/ Pass targeted tests, then unit suite, formatting, lint and distribution-license checks; build UI if touched.
-- Core、相机 Domain 和 Application 不得直接导入 Web 管理器或 Debug 控制实现。测试禁止加载 Web API/FastAPI 后仍能组合控制实例并执行状态/启停，同时保护实际控制实现的 Core/Dev 占用、失败参数写入和调焦隔离。默认组合在禁止所有 Web/FastAPI 导入时仍可运行。/ Import and behavioral checks protect the neutral owner, real Core/Dev control sharing, failed overrides and isolated focus state. Default composition also runs with all Web/FastAPI imports forbidden.
-- 板上重复启停、长曝光、竞争、服务重启和持续运行验收通过后，维护者才能决定合并。不同后端的结果单独记录。/ Board acceptance precedes a merge decision; record each backend independently.
+本地先做定向回归，再运行完整单元/集成测试、Black、Ruff、相机运行模块的阻断式 MyPy 和 wheel/sdist 检查。内部组件可以分提交审阅；集中板上验收必须对应最终提交、归档哈希及实际导入路径，结果记录在 PR。
 
-本阶段不调整鉴权、CORS、Dev 默认访问策略、现有网络接口或前端框架，不替换设备常驻版本，临时板上验收须记录对应提交并恢复原服务。许可证已确定统一为 CC BY-NC-SA 4.0；第三方许可证保留原条款。
+Run targeted regressions, then full unit/integration suites, formatting, lint, focused blocking typing and distribution checks. Reviewable commits may separate internals, but board acceptance must identify the final commit, archive hash and actual import path; record results in the PR.
 
-This phase leaves authentication, CORS, Dev locality defaults, network routes and frontend frameworks unchanged and does not replace the installed version. Authorized temporary board checks must record the tested commit and restore the installed service. Project licensing is CC BY-NC-SA 4.0; third-party terms remain intact.
+现有设备的集中验收包括反复启停、长曝光下停止/恢复、多客户端预览/分析/录像竞争、断连、租约到期、带占用退出和有界持续负载。临时配置与媒体目录必须与常驻服务隔离，监督进程最终恢复原服务，独立复核健康、配置哈希、消费者归零和相机休眠。
+
+On the available device, exercise repeated restart, long-exposure stop/recovery, preview/analysis/recording contention, disconnect, lease expiry, active-consumer exit and a bounded load run. Isolate temporary configuration/media and independently verify restoration, settings, health, zero consumers and idle release.
+
+有限时长的 V4L2 验收不证明通宵稳定性、Picamera2 或真实星空精度；受控单元测试也不等于真实原生驱动故障恢复。硬件或场景不足的项目单列，参见[发布冒烟与人工验收](core-api-smoke.md)。安全、前端和驱动算法不属于本阶段修改范围，项目授权保持 CC BY-NC-SA 4.0，第三方条款保留。
+
+Bounded V4L2 acceptance does not establish overnight stability, Picamera2 behavior or real-sky accuracy; controlled unit stalls are not hardware fault recovery. List unavailable hardware/scene checks separately in the release checklist. Security, frontend and driver algorithms are outside this milestone; licensing remains CC BY-NC-SA 4.0 with third-party terms intact.

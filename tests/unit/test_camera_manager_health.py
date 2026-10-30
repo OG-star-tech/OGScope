@@ -30,7 +30,7 @@ async def test_preview_rechecks_camera_after_queued_close_takes_control(monkeypa
     first.camera = _CloseProbe()
     manager.attach_camera_instance(first)
     monkeypatch.setattr(manager, "_create_camera_sync", lambda: second)
-    monkeypatch.setattr(manager, "_ensure_grabber_locked", AsyncMock())
+    monkeypatch.setattr(manager._frames, "start", AsyncMock())
     try:
         await manager.ensure_started()
         await manager._control_lock.acquire()
@@ -47,8 +47,8 @@ async def test_preview_rechecks_camera_after_queued_close_takes_control(monkeypa
     finally:
         await manager.release_preview_consumer()
         await manager.stop(force=True)
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)
 
 
 @pytest.mark.asyncio
@@ -96,8 +96,8 @@ async def test_cancelled_close_quarantines_handle_until_native_worker_finishes(
         release.set()
         await asyncio.to_thread(finished.wait, 1)
         await manager.stop(force=True)
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)
 
 
 class _NoFrameCamera:
@@ -230,7 +230,7 @@ async def test_status_uses_successful_raw_probe_without_jpeg_grabber() -> None:
     manager.attach_camera_instance(camera)
 
     await manager.ensure_started()
-    assert manager._frame_id == 0
+    assert manager._frames._frame_id == 0
 
     status = await manager.status()
     assert status["connected"] is True
@@ -248,7 +248,7 @@ async def test_stale_camera_reprobe_restores_status_without_jpeg_grabber() -> No
     manager.attach_camera_instance(camera)
 
     await manager.ensure_started()
-    manager._last_capture_success_mono -= 2.0
+    manager._frames.health.last_success_mono -= 2.0
 
     idle_status = await manager.status()
     assert idle_status["connected"] is True
@@ -292,14 +292,14 @@ async def test_preview_consumer_stops_grabber_on_last_release() -> None:
 
     metrics = await manager.stream_metrics()
     assert metrics["preview_consumers"] == 0
-    assert manager._grabber_task is None
+    assert manager._frames._grabber_task is None
     await manager.stop()
 
 
 def test_preview_fps_is_independent_runtime_setting() -> None:
     manager = CameraManager()
     assert manager.set_preview_fps(12) == 12
-    assert manager._target_fps == 12
+    assert manager._frames._target_fps == 12
 
 
 def test_lifecycle_stop_budget_outlives_long_exposure_capture() -> None:
@@ -367,7 +367,7 @@ async def test_reconfigure_timeout_marks_restart_required_and_stops_grabber() ->
         )
 
     assert manager._restart_required is True
-    assert manager._grabber_task is None
+    assert manager._frames._grabber_task is None
     await asyncio.sleep(0.1)
 
 
@@ -390,8 +390,8 @@ async def test_failed_start_closes_old_handle_before_a_successful_retry(monkeypa
         assert (await manager.status())["streaming"] is True
     finally:
         await manager.stop(force=True)
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)
 
 
 @pytest.mark.asyncio
@@ -435,5 +435,5 @@ async def test_new_analysis_waits_for_inflight_close(monkeypatch, idle):
             await asyncio.gather(consumer, return_exceptions=True)
         await manager.release_analysis_consumer()
         await manager.stop(force=True)
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)

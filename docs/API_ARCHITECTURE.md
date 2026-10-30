@@ -48,7 +48,7 @@ ogscope/
 └── platform/adapters/            # 边界适配 / Boundary adapters
 ```
 
-相机公共端口定义在 `domain/camera/runtime.py`，由 `application/camera.py` 统一绑定，Core/Dev 共用同一实例。共享控制由 `application/camera_control.py` 实现，Web Debug 旧入口只转发；管理器和终止关闭由 Application 持有，`web/camera_shared.py` 只转发旧导入。录像任务/锁由共享控制持有，Dev 继续管理文件、侧车和持久化。现行入口见 [API 清单](contracts/api-inventory.md)，冻结规则见 [Core v1 基线](contracts/core-v1-freeze.md)，已完成边界与后续步骤见[相机运行迁移准备](development/camera-runtime-migration.md)。
+相机公共端口定义在 `domain/camera/runtime.py`，由 `application/camera.py` 统一绑定，Core/Dev 共用同一实例。共享控制由 `application/camera_control.py` 实现，Web Debug 旧入口只转发；管理器协调独立的占用、帧流水线与资源组件，`web/camera_shared.py` 只转发旧导入。相机 Domain 不再引用 HTTP 或 Web Debug；Web 持有预览/MJPEG 适配，Core 与 Dev 共用中性媒体目录读取。Dev 继续管理文件写入、侧车和预设持久化。现行入口见 [API 清单](contracts/api-inventory.md)，冻结规则见 [Core v1 基线](contracts/core-v1-freeze.md)，已完成边界与后续步骤见[相机运行层与验收边界](development/camera-runtime-migration.md)。
 
 ## 2) 设计原则（必须遵守）
 

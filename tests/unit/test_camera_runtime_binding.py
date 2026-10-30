@@ -93,10 +93,10 @@ def make_runtime():
 
 def test_default_runtime_binds_existing_manager_for_every_consumer():
     from ogscope.core.realtime import realtime_solve_service
-    from ogscope.domain.camera import streaming
     from ogscope.domain.camera.runtime import SharedFrame
     from ogscope.domain.camera.services import camera_domain_service
     from ogscope.web import camera_shared
+    from ogscope.web import camera_streaming as streaming
     from ogscope.web.api.debug import services
 
     runtime = composition.get_camera_runtime()
@@ -219,8 +219,8 @@ async def test_domain_reset_invalidates_cached_identity_even_without_driver_hook
 
     capture = CameraManager()
     cached = CapturedFrame(object(), 7, 1.0, 1.0, 0)
-    capture._latest_raw = cached.frame
-    capture._latest_raw_capture = cached
+    capture._frames._latest_raw = cached.frame
+    capture._frames._latest_raw_capture = cached
     service = CameraDomainService(
         CameraRuntime(
             capture, CameraControlService(capture, analysis_running=lambda: False)
@@ -231,11 +231,14 @@ async def test_domain_reset_invalidates_cached_identity_even_without_driver_hook
             "success": True,
             "applied": False,
         }
-        assert capture._latest_raw is None and capture._latest_raw_capture is None
-        assert capture._capture_epoch > cached.epoch
+        assert (
+            capture._frames._latest_raw is None
+            and capture._frames._latest_raw_capture is None
+        )
+        assert capture._frames._capture_epoch > cached.epoch
     finally:
-        capture._capture_executor.shutdown(wait=True)
-        capture._jpeg_executor.shutdown(wait=True)
+        capture._resources.capture_executor.shutdown(wait=True)
+        capture._resources.jpeg_executor.shutdown(wait=True)
 
 
 def test_neutral_ports_and_composition_import_without_loading_web():
@@ -272,8 +275,8 @@ def test_core_domain_and_application_have_no_direct_camera_implementation_import
                 )
             )
             if any(
-                module
-                in {"ogscope.web.camera_shared", "ogscope.web.api.debug.services"}
+                module.startswith(("ogscope.web", "fastapi", "starlette"))
+                or module == "ogscope.platform.adapters.debug_services"
                 for module in modules
             ):
                 violations.append(str(path.relative_to(root)))

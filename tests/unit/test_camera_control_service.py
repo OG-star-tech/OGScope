@@ -107,7 +107,11 @@ class RejectDebug(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, RejectDebug())
 from ogscope.application.camera import get_camera_runtime
+from ogscope.domain.camera.services import CameraDomainService, FileDomainService
 runtime = get_camera_runtime()
+domain = CameraDomainService(runtime)
+assert domain.runtime is runtime
+assert FileDomainService() is not None
 assert runtime.control.capture is runtime.capture
 runtime.capture.ensure_started = AsyncMock()
 runtime.capture.stop = AsyncMock()
@@ -257,7 +261,13 @@ async def test_preview_frame_http_contract_and_legacy_entry_match(monkeypatch, c
     runtime = CameraRuntime(capture=control.capture, control=control)
     monkeypatch.setattr(composition, "_runtime", runtime)
     domain = CameraDomainService(runtime)
-    for caller in (domain.get_preview, DebugCameraService.get_preview):
+    from ogscope.web.camera_http import CameraHttpService
+
+    assert (await domain.get_preview(since_frame_id=6))[0] == code
+    for caller in (
+        CameraHttpService(domain).get_preview,
+        DebugCameraService.get_preview,
+    ):
         if code == 503:
             with pytest.raises(HTTPException) as error:
                 await caller(since_frame_id=6)

@@ -93,14 +93,14 @@ async def test_preview_and_analysis_capture_reuse_one_worker(monkeypatch):
 
     manager = CameraManager()
     manager._camera = Camera()
-    manager._keep_raw_cache = False
+    manager._frames._keep_raw_cache = False
     manager._idle_shutdown_sec = 0
 
     async def already_started(*args, **kwargs):
         return None
 
     monkeypatch.setattr(manager, "ensure_started", already_started)
-    preview = asyncio.create_task(manager._grabber_loop())
+    preview = asyncio.create_task(manager._frames._grabber_loop())
     try:
         while not entered.is_set():
             await asyncio.sleep(0.001)
@@ -117,5 +117,5 @@ async def test_preview_and_analysis_capture_reuse_one_worker(monkeypatch):
         preview.cancel()
         with pytest.raises(asyncio.CancelledError):
             await preview
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)

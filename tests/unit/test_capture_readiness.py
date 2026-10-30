@@ -92,11 +92,11 @@ async def test_task_lease_prevents_idle_sleep_and_release_does_not_stop_preview(
     manager._schedule_idle_shutdown()
     await asyncio.sleep(0.02)
     assert not stopped
-    manager._preview_consumers = 1
+    manager._ownership.counts["preview"] = 1
     manager.update_operation_lease(lease_id=lease["lease_id"], release=True)
     await asyncio.sleep(0.02)
     assert not stopped
-    manager._preview_consumers = 0
+    manager._ownership.counts["preview"] = 0
     manager._schedule_idle_shutdown()
     await asyncio.sleep(0.02)
     assert stopped == [True]
@@ -108,7 +108,7 @@ async def test_lost_owner_expires_and_cannot_be_silently_renewed():
     manager._idle_shutdown_sec = 0
     acquired = manager.update_operation_lease(ttl_seconds=10)
     token = acquired["lease_id"]
-    manager._operation_leases[token] = time.monotonic() - 1
+    manager._ownership._operation_leases[token] = time.monotonic() - 1
     assert manager.update_operation_lease(lease_id=token)["success"] is False
     await asyncio.sleep(0.02)
     assert manager.lifecycle_status()["operation_consumers"] == 0
@@ -166,7 +166,7 @@ async def test_cold_analysis_waits_without_spending_solve_attempts(monkeypatch):
     await asyncio.wait_for(entered.wait(), 1)
     await solver.stop()
     await asyncio.sleep(0.02)
-    assert manager._analysis_consumers == 0
+    assert manager._ownership.counts["analysis"] == 0
 
 
 @pytest.mark.asyncio
@@ -212,7 +212,7 @@ async def test_cancelling_during_exposure_preparation_releases_owner(monkeypatch
     await asyncio.wait_for(entered.wait(), 1)
     await service.stop()
     await asyncio.sleep(0.01)
-    assert manager._analysis_consumers == 0
+    assert manager._ownership.counts["analysis"] == 0
     assert service.state.fullsolve_count == 0
     assert service.state.phase == "stopped"
 
