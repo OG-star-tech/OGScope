@@ -915,6 +915,7 @@ def test_exposure_change_discards_temporal_nr_history(monkeypatch) -> None:
 @pytest.mark.unit
 def test_start_capture_discards_temporal_nr_history() -> None:
     camera = _ready_camera(v4l2_temporal_nr_alpha=0.5)
+    camera.is_capturing = False
     camera._capture = _FakeCapture(np.full((120, 160), 500, dtype=np.uint16))
     camera._apply_temporal_nr(np.full((120, 160), 42, dtype=np.uint16))
 
@@ -999,13 +1000,7 @@ def test_fresh_capture_epoch_rejects_a_seed_still_mid_exposure_at_reset(
 
 @pytest.mark.unit
 def test_is_within_fresh_capture_epoch_reports_the_same_window(monkeypatch) -> None:
-    """is_within_fresh_capture_epoch 与失效窗口保持一致 / Must track the same
-    window _apply_temporal_nr uses to decide whether to trust a seed.
-
-    A caller retrying at an unchanged pose (no real settle since the last
-    attempt) checks this before deciding whether to wait for a brand-new
-    frame - it must report False once the window has actually passed, or
-    every retry keeps paying a full exposure's wait for nothing."""
+    """Freshness needs a new image as well as elapsed exposure / 新鲜度同时需要新图像与曝光等待。"""
     import ogscope.platform.hardware.v4l2_camera as v4l2_camera_module
 
     clock = {"t": 0.0}
@@ -1021,7 +1016,9 @@ def test_is_within_fresh_capture_epoch_reports_the_same_window(monkeypatch) -> N
     assert camera.is_within_fresh_capture_epoch() is True  # still mid-exposure
 
     clock["t"] = 0.010
-    assert camera.is_within_fresh_capture_epoch() is False  # exposure has elapsed
+    assert camera.is_within_fresh_capture_epoch() is True
+    camera._fresh_frame_seen = True
+    assert camera.is_within_fresh_capture_epoch() is False
 
 
 @pytest.mark.unit
@@ -1387,17 +1384,37 @@ def test_without_timestamps_a_waited_for_frame_counts_from_its_completion(
 
 
 @pytest.mark.unit
-def test_a_retry_without_a_new_settle_takes_the_queued_frame(monkeypatch) -> None:
-    """同姿态重试不等新帧 / A retry at an unchanged pose takes what is queued:
-    without a settle since the last fresh frame, every queued frame is newer
-    than the settle."""
+def test_a_short_retry_without_a_new_settle_does_not_rearm(monkeypatch) -> None:
+    """短暂原位重试不重新等待完整曝光 / A short stationary retry does not rearm exposure waiting."""
+    camera, clock = _settled_camera(monkeypatch, [("after the settle", 10.1, 0.1)])
+    camera.capture_image()
+    clock["t"] = 10.2
+    camera._capture.frames = [("recent queued frame", 10.18, 0.0)]
+
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved[-1] == "recent queued frame"
+    assert camera._fresh_after_mono == 10.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("timestamps", [True, False])
+def test_warm_idle_resume_drops_queued_sky_frames(monkeypatch, timestamps) -> None:
+    """空闲后丢弃旧帧，连续读取不会反复重置 / Drop old frames after idle without repeatedly resetting continuous capture."""
     camera, clock = _settled_camera(monkeypatch, [("after the settle", 10.1, 0.1)])
     camera.capture_image()
     clock["t"] = 30.0
-    camera._capture.frames = [("queued while idle", 12.0, 0.0)]
+    camera._capture.frames = [
+        ("queued while idle", 12.0 if timestamps else None, 0.0),
+        ("fresh after resume", 30.2 if timestamps else None, 0.2),
+        ("next continuous frame", 30.3 if timestamps else None, 0.1),
+    ]
 
     assert camera.capture_image() is not None
-    assert camera._capture.retrieved[-1] == "queued while idle"
+    assert camera._capture.retrieved[-1] == "fresh after resume"
+    assert camera._fresh_after_mono == 30.0
+    assert camera.capture_image() is not None
+    assert camera._capture.retrieved[-1] == "next continuous frame"
+    assert camera._fresh_after_mono == 30.0
 
 
 @pytest.mark.unit
@@ -1410,3 +1427,16 @@ def test_a_stream_opened_after_the_settle_needs_no_check(monkeypatch) -> None:
     assert camera.start_capture() is True
     assert camera.capture_image() is not None
     assert reopened.retrieved == ["first of the new stream"]
+
+
+@pytest.mark.unit
+def test_repeated_start_preserves_idle_freshness_tracking():
+    """Idempotent start must not hide a warm idle interval / 重复启动不得掩盖温空闲间隔。"""
+    camera = _ready_camera()
+    camera.is_initialized = camera.is_capturing = True
+    camera._capture = object()
+    camera._last_capture_completed_mono = 12.0
+    camera._fresh_frame_seen = False
+    assert camera.start_capture()
+    assert camera._last_capture_completed_mono == 12.0
+    assert camera.is_within_fresh_capture_epoch()
