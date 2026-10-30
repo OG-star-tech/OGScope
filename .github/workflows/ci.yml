@@ -48,6 +48,10 @@ jobs:
 
         expected = {
             "deploy/camera/compatibility.env",
+            "ogscope/application/camera_manager.py",
+            "ogscope/application/camera_control.py",
+            "ogscope/domain/camera/runtime.py",
+            "ogscope/web/camera_shared.py",
             "deploy/camera/isp.env",
             "deploy/camera/picamera2.env",
             "ogscope/platform/hardware/tuning/imx327.json",
@@ -117,4 +121,4 @@ jobs:
       run: poetry run black --check ogscope tests scripts/core-api-smoke.py scripts/check-distribution-license.py
 
     - name: 校验中性相机运行端口 / Check neutral camera runtime ports
-      run: poetry run mypy ogscope/application/camera.py ogscope/application/camera_control.py ogscope/domain/camera/runtime.py ogscope/platform/adapters/camera_runtime.py --follow-imports=silent --ignore-missing-imports
+      run: poetry run mypy ogscope/application/camera.py ogscope/application/camera_control.py ogscope/application/camera_manager.py ogscope/domain/camera/runtime.py ogscope/platform/adapters/camera_runtime.py --follow-imports=silent --ignore-missing-imports

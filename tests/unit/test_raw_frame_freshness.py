@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pytest
 
-from ogscope.web.camera_shared import CameraManager, CapturedFrame
+from ogscope.application.camera_manager import CameraManager, CapturedFrame
 
 
 @pytest.fixture

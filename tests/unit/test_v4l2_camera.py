@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import ogscope.config as config_module
+from ogscope.application.camera_manager import CameraManager
 from ogscope.config import Settings
 from ogscope.domain.camera.ae_diagnostics import load_trace_events
 from ogscope.platform.hardware.camera import CameraFactory
@@ -16,7 +17,6 @@ from ogscope.platform.hardware.v4l2_camera import (
     V4L2ControlRange,
     V4L2RawCamera,
 )
-from ogscope.web.camera_shared import CameraManager
 
 
 class _FakeCapture:

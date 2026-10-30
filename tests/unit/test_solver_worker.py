@@ -74,7 +74,7 @@ def test_diagnostic_and_realtime_entry_points_share_one_executor():
 @pytest.mark.asyncio
 async def test_preview_and_analysis_capture_reuse_one_worker(monkeypatch):
     """预览与分析读帧复用线程并保留读锁 / Preview and analysis reads reuse a thread and the read lock."""
-    from ogscope.web.camera_shared import CameraManager
+    from ogscope.application.camera_manager import CameraManager
 
     entered = threading.Event()
     release = threading.Event()

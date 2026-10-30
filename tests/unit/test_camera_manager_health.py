@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pytest
 
-from ogscope.web.camera_shared import CameraManager
+from ogscope.application.camera_manager import CameraManager
 
 
 @pytest.mark.asyncio
@@ -194,8 +194,12 @@ async def test_startup_allows_long_mode_transition_before_first_analysis_frame(
 ) -> None:
     """3 秒模式切换不能被旧 2 秒探测预算误杀 / A 3s transition must outlive the old 2s startup probe."""
     clock = [0.0]
-    monkeypatch.setattr("ogscope.web.camera_shared.time.time", lambda: clock[0])
-    monkeypatch.setattr("ogscope.web.camera_shared.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "ogscope.application.camera_manager.time.time", lambda: clock[0]
+    )
+    monkeypatch.setattr(
+        "ogscope.application.camera_manager.time.sleep", lambda _seconds: None
+    )
 
     class LongCamera(_FrameCamera):
         capture_timeout_sec = 8.0

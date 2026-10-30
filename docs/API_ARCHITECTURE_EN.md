@@ -48,7 +48,7 @@ ogscope/
 └── platform/adapters/            # 边界适配 / Boundary adapters
 ```
 
-Public camera ports live in `domain/camera/runtime.py`, with one shared Core/Dev instance bound by `application/camera.py`. Shared controls live in `application/camera_control.py`, with legacy Web Debug forwarding. The composition adapter still reuses the manager in `web/camera_shared.py`; Dev files, recording tasks and persistence remain for later migration. See the [API inventory](contracts/api-inventory.md), [Core v1 freeze](contracts/core-v1-freeze.md) and [implemented boundaries and remaining migration](development/camera-runtime-migration.md).
+Public camera ports live in `domain/camera/runtime.py`, with one shared Core/Dev instance bound by `application/camera.py`. Shared controls live in `application/camera_control.py`, with legacy Web Debug forwarding. Application owns the manager and terminal cleanup; `web/camera_shared.py` forwards legacy imports. Shared controls own the recording task and lock; Dev retains files, sidecars and persistence. See the [API inventory](contracts/api-inventory.md), [Core v1 freeze](contracts/core-v1-freeze.md) and [implemented boundaries and remaining migration](development/camera-runtime-migration.md).
 
 ## 2) Design rules (mandatory)
 

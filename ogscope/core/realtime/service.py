@@ -305,6 +305,8 @@ class RealtimeSolveService:
         watchdog, self._ownership_watchdog = self._ownership_watchdog, None
         if watchdog is not None and watchdog is not asyncio.current_task():
             watchdog.cancel()
+            # 取消监护任务后确认退出，避免留下锁等待者 / Join the cancelled watchdog so no lock waiter remains.
+            await asyncio.gather(watchdog, return_exceptions=True)
         was_running = self.state.running
         self.state.running = False
         self.state.phase = "stopped"

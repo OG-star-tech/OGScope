@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from ogscope.application.camera_manager import CameraManager
 from ogscope.core.realtime import service as realtime
 from ogscope.core.realtime.service import RealtimeSolveService
 from ogscope.domain.camera.readiness import CaptureReadiness
-from ogscope.web.camera_shared import CameraManager
 
 
 def test_ae_search_and_queued_frames_never_count_as_ready():
