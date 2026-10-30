@@ -303,7 +303,11 @@ class RealtimeSolveService:
     async def _stop_locked(self) -> dict[str, Any]:
         """停止实时解算 / Stop realtime solving"""
         watchdog, self._ownership_watchdog = self._ownership_watchdog, None
-        if watchdog is not None and watchdog is not asyncio.current_task():
+        if (
+            watchdog is not None
+            and watchdog is not asyncio.current_task()
+            and not watchdog.done()
+        ):
             watchdog.cancel()
             # 取消监护任务后确认退出，避免留下锁等待者 / Join the cancelled watchdog so no lock waiter remains.
             await asyncio.gather(watchdog, return_exceptions=True)
