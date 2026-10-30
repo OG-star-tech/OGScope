@@ -11,7 +11,7 @@ OGScope 是一个基于 Raspberry Pi Zero 2W 的电子极轴镜系统，用于�
 ## 技术栈
 
 - **硬件**: Raspberry Pi Zero 2W, IMX327 相机, 2.4寸 SPI LCD
-- **语言**: Python 3.9+
+- **语言**: Python 3.10+
 - **包管理**: Poetry
 - **Web 框架**: FastAPI + Uvicorn
 - **日志**: Loguru
@@ -98,7 +98,7 @@ ogscope/
 ### 开发环境配置
 
 - **本地项目路径**: [用户自定义]
-- **Python 版本**: 3.9+
+- **Python 版本**: 3.10+
 - **包管理器**: Poetry
 - **虚拟环境**: Poetry 管理
 

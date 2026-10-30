@@ -6,6 +6,10 @@ Thank you for your interest in OGScope. We welcome contributions of all kinds.
 
 ## How to contribute
 
+### License
+
+Original project material uses [CC BY-NC-SA 4.0](LICENSE), identified as `CC-BY-NC-SA-4.0` in package metadata. Contributions and redistribution must follow attribution, noncommercial and share-alike terms; contact the maintainers about commercial use. Bundled third-party code retains its own licenses.
+
 ### Reporting bugs
 
 1. Search [Issues](https://github.com/OG-star-tech/OGScope/issues) for duplicates.

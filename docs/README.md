@@ -32,6 +32,9 @@
 - [Core REST v1](contracts/core-rest-v1.md) | [English](contracts/core-rest-v1_EN.md)
 - [Dev REST v1](contracts/dev-rest-v1.md) | [English](contracts/dev-rest-v1_EN.md)
 - [核心契约兼容矩阵](contracts/core-compatibility-matrix.md)（段内中英）
+- [API 调用方与兼容边界清单](contracts/api-inventory.md)（段内中英）
+- [相机运行迁移准备与行为基线](development/camera-runtime-migration.md)（段内中英）
+- [Core 相机发布冒烟与人工验收](development/core-api-smoke.md)（段内中英）
 - [提交前架构自检](development/ARCHITECTURE_QUICK_CHECKLIST.md) | [English](development/ARCHITECTURE_QUICK_CHECKLIST_EN.md)
 - [测试指南](development/testing-guide.md) | [English](development/testing-guide_EN.md)
 
