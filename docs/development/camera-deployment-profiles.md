@@ -87,3 +87,21 @@ Orientation and encoding are independent. Templates retain software orientation 
 3. 同场景检查 RGB 色序、180°方向、实际尺寸/FOV、3 秒曝光上限、明暗切换，以及共享解算帧身份。/ Compare RGB order, orientation, size/FOV, the 3-second ceiling, light/dark transitions and shared solve-frame identity.
 4. 长预览加并发解算，检查 CPU、PSS、swap、CMA、OOM、过期帧、停止/重启和配置持久化；不能只看进程 PSS。/ Sustain preview with concurrent solving; inspect CPU, PSS, swap, CMA, OOM, stale frames, stop/restart and persistence, not process PSS alone.
 5. 保存原配置、源码版本、静态资源和传感器翻转；回退后独立检查服务健康、画面和最终配置。夜空精度验收单独记录。/ Save config, application/static versions and sensor flips; independently verify health, frames and effective config after rollback. Record sky-accuracy acceptance separately.
+## V4L2 warm-idle freshness / V4L2 保温空闲后的帧新鲜度
+
+An open V4L2 stream can retain queued images while analysis and preview stop reading. These images must not be accepted as current observations when reading resumes. After a read gap exceeding two frame periods (with a 0.5-second minimum), the RAW driver reuses its existing exposure-freshness gate and resets temporal history before returning a frame. Continuous capture and short retries do not rearm that gate. The stream and image-processing profile stay unchanged.
+
+分析及预览停止读取时，仍打开的V4L2流可能积压旧图像，恢复读取后不能将其当成当前观测。读取中断超过两个帧周期（最短0.5秒）时，RAW驱动复用已有的曝光新鲜度门槛，并清除跨帧历史，再交付图像；连续抓帧和短暂重试不重新等待，流及图像处理配置保持不变。
+
+Ship `ogscope/platform/hardware/v4l2_camera.py`, `ogscope/web/camera_shared.py` and `ogscope/domain/camera/services.py` together and restart OGScope while camera jobs are idle. No new environment key, BSP dependency or controller firmware is required. Preserve the previous application source for rollback. UTC remains estimated from read completion and exposure duration; this change does not introduce hardware exposure timestamps. Acceptance compares stationary star motion across capture, warm idle and resume, as well as stop/restart and short retry behavior.
+
+部署须同时包含本次修改的`ogscope/platform/hardware/v4l2_camera.py`、`ogscope/web/camera_shared.py`和`ogscope/domain/camera/services.py`，在相机任务空闲时重启OGScope，并保留旧程序以便回退；无需新增环境配置、BSP依赖或控制器固件。UTC仍由读取完成时刻和曝光时间估算，本修改没有引入硬件曝光时间戳。验收应比较静止底座上连续采集、保温空闲及恢复时的星点运动，同时检查停止重启和短暂重试。
+
+
+The shared RAW cache now keeps the sequence and read-completion timestamp of its own pixels, rather than the current global capture counter. A later preview prefetch cannot relabel an older image. Cache reuse expires after two observed frame periods / target preview periods, with a 0.5 s floor; an expired cache causes a real read. Explicit history reset invalidates cached and in-flight reads and serializes the driver hook with the same capture worker. Late JPEG completion cannot reintroduce a pre-reset RAW frame. No extra retained image is added when `OGSCOPE_KEEP_RAW_CACHE=0`.
+
+共享 RAW 缓存保存图像自身的序号和读完时间，后续预读不能用全局新序号给旧图像重新贴标签。缓存复用最多两个实测帧周期/目标预览周期，最短 0.5 秒；超时后实际读帧。显式历史重置同时使缓存与在途读帧失效，并在同一采集线程执行驱动钩子；晚到的 JPEG 编码不能把旧 RAW 塞回分析缓存。关闭 RAW 缓存时不新增常驻图像。
+
+Repeated start calls preserve warm-idle tracking. The V4L2 freshness window stays active until a fresh image has actually been dequeued, not merely until wall time passes. Verify both RAW-cache settings, preview prefetch during reset, long exposures, warm idle/resume and quick stationary retries on the board. Cache identity and timing are locally tested; the expanded cache/reset path still requires board acceptance. Read completion remains an estimate, not a sensor exposure-start timestamp.
+
+重复启动保留温空闲追踪；V4L2 必须真正取到新图像才结束新鲜度等待，不能只靠时间经过。实机需覆盖 RAW 缓存开/关、预读期间重置、长曝光、保温恢复和原地快速重试。缓存身份与时序已有本地测试，扩展的缓存/重置路径仍需实机验收；读取完成时间仍不等于传感器曝光起始时间。

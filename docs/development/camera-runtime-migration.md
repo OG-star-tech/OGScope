@@ -31,6 +31,7 @@ These are local regressions. Driver stalls, CMA and service restart require boar
 - `application/camera.py` 线程安全地延迟绑定一次默认 runtime；获取接口不打开相机。Core/Dev、实时分析、预览、硬件平面和应用启停均从该组合入口取得同一采集对象。/ Composition binds one default runtime without starting hardware and shares capture across every consumer.
 - `platform/adapters/camera_runtime.py` 是默认实现的过渡绑定点，复用已有 `CameraManager` 与 Web `DebugCameraService`，不创建第二个管理器。Debug 专用拍摄、录像、配置持久化与预览 HTTP 表示仍是迁移遗留，不声称 Web 已退出实现链。/ The bridge reuses the existing manager and control implementation; debug-only behavior and legacy preview responses remain for later migration.
 - `CameraDomainService(runtime=...)`、`CoreContractService(camera=..., hardware_client=...)` 和 `RealtimeSolveService(capture=...)` 支持局部测试替身。注入控制端口与采集端口必须代表同一设备；测试可并存两组独立状态，不需要替换生产单例或引入 DI 框架。/ Constructors support isolated test collaborators; injected control and capture must represent the same device.
+- `reset_temporal_history` 经注入的采集端口执行，保留 develop 的帧身份屏障；即使驱动没有降噪钩子，也会失效缓存及在途旧帧。/ Temporal reset uses the injected capture barrier and preserves upstream invalidation even for drivers without a temporal-NR hook.
 - [Core v1 冻结基线](../contracts/core-v1-freeze.md)覆盖公开 schema、两种角色、关键失败语义及跨入口占用。新端口的类型检查在 CI 中阻断失败，项目其余 MyPy 门禁保持原状。/ Schema and behavioral baselines protect compatibility; new ports have a blocking type check while the existing project-wide MyPy policy is unchanged.
 
 ```text
