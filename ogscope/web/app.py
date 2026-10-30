@@ -388,7 +388,6 @@ async def api_root():
         "camera": "/api/camera/",
         "system": "/api/dev/system/",
         "hardware_plane": "/api/dev/system/hardware-plane/status",
-        "system_legacy": "/api/system/",
         "analysis": "/api/dev/analysis/",
         "debug": "/api/dev/debug/",
         "core": "/api/core/v1/",

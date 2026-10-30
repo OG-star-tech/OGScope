@@ -35,7 +35,7 @@ ogscope/
 │       ├── system/routes.py      # 开发系统：/api/dev/system/*
 │       ├── network/routes.py     # 网络域接口
 │       ├── camera/routes.py      # 相机基础接口
-│       └── ...                   # alignment/models 等
+│       └── models/               # 请求与响应模型 / Request and response models
 ├── domain/
 │   ├── camera/
 │   ├── analysis/
@@ -44,8 +44,10 @@ ogscope/
 │   └── shared/
 ├── core/
 │   └── application/core_service.py # core/v1 契约编排
-└── adapters/                     # 边界适配（懒加载/兼容桥接）
+└── platform/adapters/            # 边界适配 / Boundary adapters
 ```
+
+当前相机产品链路仍通过 Debug 适配器调用 Web 实现，共享管理器仍在 `web/camera_shared.py`。下文分层原则是迁移约束，不能据此声称反向依赖已经消除。现行入口见 [API 清单](contracts/api-inventory.md)，待实施步骤见[相机运行迁移准备](development/camera-runtime-migration.md)。
 
 ## 2) 设计原则（必须遵守）
 
