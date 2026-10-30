@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import numpy as np
@@ -276,3 +277,71 @@ async def test_reconfigure_timeout_marks_restart_required_and_stops_grabber() ->
     assert manager._restart_required is True
     assert manager._grabber_task is None
     await asyncio.sleep(0.1)
+
+
+@pytest.mark.asyncio
+async def test_failed_start_closes_old_handle_before_a_successful_retry(monkeypatch):
+    """已安全关闭的启动失败允许重新创建 / Retry a failed start only after safe release."""
+    manager = CameraManager()
+    first, second = _FrameCamera(), _FrameCamera()
+    first.camera = _CloseProbe()
+    monkeypatch.setattr(first, "start_capture", lambda: False)
+    cameras = iter([first, second])
+    monkeypatch.setattr(manager, "_create_camera_sync", lambda: next(cameras))
+    try:
+        with pytest.raises(RuntimeError, match="启动失败|start failed"):
+            await manager.ensure_started()
+        assert first.camera.closed
+        assert manager.get_camera_instance() is None
+        await manager.ensure_started()
+        assert manager.get_camera_instance() is second
+        assert (await manager.status())["streaming"] is True
+    finally:
+        await manager.stop(force=True)
+        manager._capture_executor.shutdown(wait=True)
+        manager._jpeg_executor.shutdown(wait=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idle", [True, False])
+async def test_new_analysis_waits_for_inflight_close(monkeypatch, idle):
+    """新消费者不能中断正在释放的硬件 / New consumers must let hardware release finish."""
+    manager = CameraManager()
+    first, second = _FrameCamera(), _FrameCamera()
+    first.camera = _CloseProbe()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_stop():
+        entered.set()
+        release.wait(timeout=2)
+        first.is_capturing = False
+        return True
+
+    monkeypatch.setattr(first, "stop_capture", slow_stop)
+    monkeypatch.setattr(manager, "_create_camera_sync", lambda: second)
+    manager.attach_camera_instance(first)
+    manager._idle_shutdown_sec = 0 if idle else 60
+    consumer = None
+    try:
+        await manager.ensure_started()
+        closing = (
+            manager._idle_shutdown_task if idle else asyncio.create_task(manager.stop())
+        )
+        assert await asyncio.to_thread(entered.wait, 1)
+        consumer = asyncio.create_task(manager.acquire_analysis_consumer())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(consumer, 2)
+        await asyncio.wait_for(closing, 2)
+        assert first.camera.closed
+        assert manager.get_camera_instance() is second
+        assert manager.lifecycle_status()["analysis_consumers"] == 1
+        assert (await manager.status())["streaming"] is True
+    finally:
+        release.set()
+        if consumer:
+            await asyncio.gather(consumer, return_exceptions=True)
+        await manager.release_analysis_consumer()
+        await manager.stop(force=True)
+        manager._capture_executor.shutdown(wait=True)
+        manager._jpeg_executor.shutdown(wait=True)

@@ -349,7 +349,9 @@ class CameraManager:
                 self._health_error
                 or "相机需要重启服务后恢复 / Camera service restart required"
             )
-        if self._camera_is_fresh():
+        # 关闭或重配置可能仍持有新鲜帧，必须先等控制转换完成。
+        # Closing/reconfiguration may retain fresh frames; wait for the control transition.
+        if self._camera_is_fresh() and not self._control_lock.locked():
             if start_grabber:
                 async with self._control_lock:
                     await self._ensure_grabber_locked()
