@@ -55,6 +55,8 @@ poetry run ruff check tests ogscope
 
 ### 4.3 Board validation (when hardware-related)
 
+Follow the [Core release smoke workflow](core-api-smoke.md) in an exclusive maintenance window and retain JSON receipts. Service restart requires separate authorization; save independent smoke reports before and after restart. Automated success does not replace long-exposure, contention, sustained-resource or real-sky acceptance.
+
 ```bash
 sudo systemctl restart ogscope
 sudo systemctl status ogscope

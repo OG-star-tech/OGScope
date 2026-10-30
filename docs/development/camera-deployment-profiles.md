@@ -80,6 +80,8 @@ Orientation and encoding are independent. Templates retain software orientation 
 
 ## 最小验收 / Minimum acceptance
 
+使用 [Core 发布冒烟流程](core-api-smoke.md) 记录 API 链路检查，以下人工项目仍需分别完成。/ Use the Core release smoke workflow for API-path receipts; complete the manual items below separately.
+
 1. 三份模板能选择预期后端；旧显式选择升级后不变；非法配置拒绝启动。/ Each template selects the intended backend; explicit legacy selection survives; invalid selection is rejected.
 2. ISP 严格模式持续输出有效帧；缺失节点与模拟运行失败符合回退策略，状态不伪报硬件成功。/ Required ISP delivers real frames; missing nodes and simulated runtime failures follow policy without false hardware success.
 3. 同场景检查 RGB 色序、180°方向、实际尺寸/FOV、3 秒曝光上限、明暗切换，以及共享解算帧身份。/ Compare RGB order, orientation, size/FOV, the 3-second ceiling, light/dark transitions and shared solve-frame identity.

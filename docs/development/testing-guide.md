@@ -60,6 +60,8 @@ poetry run ruff check tests ogscope
 
 ### 4.3 开发板验证（涉及硬件改动时）
 
+先遵循 [Core 发布冒烟流程](core-api-smoke.md)，在独占维护窗口检查 Core 相机链路并保留 JSON 报告。服务重启需独立授权；重启前后分别执行冒烟并保存记录。自动通过不代替长曝光、竞争、持续运行和真实星空验收。
+
 ```bash
 sudo systemctl restart ogscope
 sudo systemctl status ogscope
