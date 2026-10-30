@@ -35,7 +35,7 @@ ogscope/
 │       ├── system/routes.py      # Dev system: /api/dev/system/*
 │       ├── network/routes.py     # Network APIs
 │       ├── camera/routes.py      # Camera base APIs
-│       └── ...                   # alignment, models, etc.
+│       └── models/               # 请求与响应模型 / Request and response models
 ├── domain/
 │   ├── camera/
 │   ├── analysis/
@@ -44,8 +44,10 @@ ogscope/
 │   └── shared/
 ├── core/
 │   └── application/core_service.py # core/v1 orchestration
-└── adapters/                     # Boundary adapters (lazy / compat)
+└── platform/adapters/            # 边界适配 / Boundary adapters
 ```
+
+The product camera path still reaches Web implementations through debug adapters, and the shared manager remains in `web/camera_shared.py`. The layering rules below constrain migration; they do not mean reverse dependencies have already been removed. See the [API inventory](contracts/api-inventory.md) and [proposed camera runtime migration](development/camera-runtime-migration.md).
 
 ## 2) Design rules (mandatory)
 
