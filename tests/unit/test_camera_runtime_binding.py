@@ -91,6 +91,32 @@ def make_runtime():
     )
 
 
+@pytest.mark.asyncio
+async def test_hardware_plane_and_core_share_recording_state(monkeypatch):
+    """硬件平面不能用采集端口缺省值覆盖真实录像状态 / The plane must not overwrite recording with a capture-only default."""
+    from ogscope.platform.hardware_plane.services.camera_service import (
+        CameraPlaneService,
+    )
+
+    runtime = make_runtime()
+    runtime.capture.streaming = True
+    monkeypatch.setattr(composition, "_runtime", runtime)
+    plane = CameraPlaneService()
+
+    async def plane_status():
+        return {"success": True, "data": {"services": {"camera": await plane.status()}}}
+
+    domain = CameraDomainService(runtime)
+    core = CoreContractService(
+        camera=domain, hardware_client=SimpleNamespace(status_get=plane_status)
+    )
+    for recording in (True, False):
+        runtime.control.recording = recording
+        assert (await domain.get_status())["recording"] is recording
+        assert (await plane.status())["recording"] is recording
+        assert (await core.get_camera_status())["recording"] is recording
+
+
 def test_default_runtime_binds_existing_manager_for_every_consumer():
     from ogscope.core.realtime import realtime_solve_service
     from ogscope.domain.camera.runtime import SharedFrame
@@ -260,7 +286,10 @@ def test_core_domain_and_application_have_no_direct_camera_implementation_import
         list((root / "core").rglob("*.py"))
         + list((root / "domain/camera").glob("*.py"))
         + list((root / "application").glob("*.py"))
-        + [root / "platform/adapters/camera_runtime.py"]
+        + [
+            root / "platform/adapters/camera_runtime.py",
+            root / "platform/hardware_plane/services/camera_service.py",
+        ]
     )
     violations = []
     for path in paths:

@@ -32,9 +32,10 @@ class CameraPlaneService:
         self._running = False
 
     async def status(self) -> dict[str, Any]:
-        from ogscope.application.camera import get_camera_capture as get_camera_manager
+        from ogscope.application.camera import get_camera_control
 
-        camera_status = await get_camera_manager().status()
+        # 录像状态属于共享控制层，采集端口不持有它 / Shared controls own recording state; the capture port does not.
+        camera_status = await get_camera_control().get_camera_status()
         return {
             "running": self._running,
             "connected": bool(camera_status.get("connected", False)),
