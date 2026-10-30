@@ -19,9 +19,10 @@ from loguru import logger
 from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.plate_solve.worker import run_solver_job
+from ogscope.application.camera import get_camera_capture as get_camera_manager
 from ogscope.config import effective_solver_max_stars, get_settings
 from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
-from ogscope.web.camera_shared import get_camera_manager
+from ogscope.domain.camera.runtime import CameraCapture
 
 
 @dataclass(slots=True)
@@ -56,7 +57,8 @@ class SolveFrameSnapshot:
 class RealtimeSolveService:
     """实时解算器：周期性 Tetra3 全量解算 / Realtime solver with periodic Tetra3"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, capture: CameraCapture | None = None) -> None:
+        self._capture = capture
         settings = get_settings()
         self._max_stars = effective_solver_max_stars(settings)
         self.solver = PlateSolver(
@@ -90,6 +92,10 @@ class RealtimeSolveService:
             float(settings.star_analysis_min_interval_ms) / 1000.0,
             1.0 / max(0.01, float(settings.star_analysis_target_fps)),
         )
+
+    def _camera_capture(self) -> CameraCapture:
+        """每个服务固定其注入端口；默认使用共享实例 / Resolve the injected or shared capture port."""
+        return self._capture if self._capture is not None else get_camera_manager()
 
     @staticmethod
     def _capture_time_payload(
@@ -237,7 +243,7 @@ class RealtimeSolveService:
         # another - measured to stretch this call past 8-10 seconds on real
         # hardware. get_current_capture_sequence() reads the same counter
         # without touching the camera at all.
-        camera = get_camera_manager().get_camera_instance()
+        camera = self._camera_capture().get_camera_instance()
         still_within_fresh_epoch = getattr(
             camera, "is_within_fresh_capture_epoch", None
         )
@@ -250,7 +256,9 @@ class RealtimeSolveService:
         baseline_frame_id = -1
         if needs_fresh_frame:
             try:
-                baseline_frame_id = get_camera_manager().get_current_capture_sequence()
+                baseline_frame_id = (
+                    self._camera_capture().get_current_capture_sequence()
+                )
             except Exception:  # noqa: BLE001 - baseline is best-effort
                 baseline_frame_id = -1
         self._task = asyncio.create_task(self._loop(baseline_frame_id))
@@ -345,7 +353,7 @@ class RealtimeSolveService:
 
     async def _loop(self, initial_frame_id: int = -1) -> None:
         """分析全程持有相机，包括等帧与解算 / Hold capture through frame waits and solving."""
-        manager = get_camera_manager()
+        manager = self._camera_capture()
         try:
             await manager.acquire_analysis_consumer()
         except asyncio.CancelledError:

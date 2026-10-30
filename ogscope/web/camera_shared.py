@@ -11,7 +11,6 @@ import time
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable
 
@@ -22,23 +21,11 @@ from ogscope.domain.camera.encoding import (
     create_preview_encoder,
 )
 from ogscope.domain.camera.readiness import CaptureReadiness
+from ogscope.domain.camera.runtime import SharedFrame
 
 # 仅缓存少量压缩质量变体，不增加常驻 RAW / Bound compressed variants without retaining RAW.
 _STREAM_JPEG_VARIANT_LIMIT = 4
 _STREAM_JPEG_VARIANT_BYTE_LIMIT = 1024 * 1024
-
-
-@dataclass(slots=True)
-class SharedFrame:
-    """共享帧快照 / Shared frame snapshot."""
-
-    frame_id: int
-    timestamp: float
-    raw_frame: Any | None
-    jpeg_frame: bytes | None
-    width: int
-    height: int
-    source_format: str = "RGB888"
 
 
 class CameraManager:

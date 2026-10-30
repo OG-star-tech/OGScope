@@ -44,10 +44,11 @@ ogscope/
 │   └── shared/
 ├── core/
 │   └── application/core_service.py # core/v1 契约编排
+├── application/camera.py         # 相机实例组合 / Camera runtime composition
 └── platform/adapters/            # 边界适配 / Boundary adapters
 ```
 
-当前相机产品链路仍通过 Debug 适配器调用 Web 实现，共享管理器仍在 `web/camera_shared.py`。下文分层原则是迁移约束，不能据此声称反向依赖已经消除。现行入口见 [API 清单](contracts/api-inventory.md)，待实施步骤见[相机运行迁移准备](development/camera-runtime-migration.md)。
+相机公共端口定义在 `domain/camera/runtime.py`，由 `application/camera.py` 统一绑定，Core/Dev 共用同一实例。临时适配器仍调用 Web 控制实现和 `web/camera_shared.py` 中的管理器；具体实现的反向依赖尚未消除。现行入口见 [API 清单](contracts/api-inventory.md)，冻结规则见 [Core v1 基线](contracts/core-v1-freeze.md)，已完成边界与后续步骤见[相机运行迁移准备](development/camera-runtime-migration.md)。
 
 ## 2) 设计原则（必须遵守）
 

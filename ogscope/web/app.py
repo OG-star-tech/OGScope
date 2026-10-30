@@ -73,7 +73,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
             from ogscope.utils.environment import should_use_simulation_mode
 
             if not should_use_simulation_mode():
-                from ogscope.web.camera_shared import get_camera_manager
+                from ogscope.application.camera import (
+                    get_camera_capture as get_camera_manager,
+                )
 
                 await get_camera_manager().ensure_started()
                 logger.info(
@@ -130,8 +132,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
         if not should_use_simulation_mode():
             # Process shutdown can release every owner; UI stop cannot / 进程退出可释放全部占用，界面关闭不能。
+            from ogscope.application.camera import (
+                get_camera_capture as get_camera_manager,
+            )
             from ogscope.core.realtime import realtime_solve_service
-            from ogscope.web.camera_shared import get_camera_manager
 
             await realtime_solve_service.stop(force=True)
             await asyncio.wait_for(get_camera_manager().stop(force=True), timeout=8.0)
