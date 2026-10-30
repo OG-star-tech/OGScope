@@ -1,138 +1,82 @@
-"""
-统一相机管理与共享帧总线 / Unified camera manager and shared frame bus.
-"""
+"""单设备生命周期与组件协调 / Single-device lifecycle and component coordination."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
-import uuid
-from collections import deque
-from collections.abc import Coroutine
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable
 
 from loguru import logger as event_logger
 
-from ogscope.config import get_settings
-from ogscope.domain.camera.encoding import (
-    EncodedImage,
-    OpenCVEncoder,
-    create_preview_encoder,
+from ogscope.application.camera_frames import (
+    CameraFramePipeline,
 )
+from ogscope.application.camera_frames import (
+    CapturedFrame as CapturedFrame,
+)
+from ogscope.application.camera_resources import CameraResources
+from ogscope.config import get_settings
+from ogscope.domain.camera.ownership import CameraOwnership
 from ogscope.domain.camera.readiness import CaptureReadiness
 from ogscope.domain.camera.runtime import SharedFrame
-
-# 仅缓存少量压缩质量变体，不增加常驻 RAW / Bound compressed variants without retaining RAW.
-_STREAM_JPEG_VARIANT_LIMIT = 4
-_STREAM_JPEG_VARIANT_BYTE_LIMIT = 1024 * 1024
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedFrame:
-    """Pixel identity travels with its timing, before encoding / 图像与采集身份、时间绑定，早于编码。"""
-
-    frame: Any
-    sequence: int
-    timestamp: float
-    monotonic: float
-    epoch: int
+from ogscope.platform.adapters.camera_config import build_camera_config
 
 
 class CameraManager:
-    """全局单相机控制器（控制面+数据面）/ Global single-camera controller."""
+    """唯一设备所有者；串行协调启停、占用和帧流水线 / Sole device owner serializing lifetime, ownership and frames."""
 
     def __init__(self) -> None:
+        settings = get_settings()
         self._camera: Any = None
         self.analysis_readiness = CaptureReadiness()
-        self._operation_leases: dict[str, float] = {}
-        self._lease_expiry_task: asyncio.Task | None = None
         self._control_lock = asyncio.Lock()
         self._read_lock = Lock()
-        # 预览和分析读帧固定在线程中，避免相机图像缓存散落到默认线程池。
-        # Pin preview and analysis reads to one worker instead of scattering native image caches.
-        self._capture_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="camera-capture"
-        )
-        self._frame_lock = Lock()
-        self._grabber_task: asyncio.Task | None = None
-        self._inflight_read_future: asyncio.Future | None = None
-        self._inflight_encode_future: asyncio.Future | None = None
         self._idle_shutdown_task: asyncio.Task | None = None
         self._idle_stop_in_progress = False
-        self._frame_id = 0
-        self._capture_sequence = 0
-        self._capture_epoch = 0
-        self._reset_pending = 0
-        self._latest_raw_capture: CapturedFrame | None = None
-        self._last_frame_duration_s = 0.0
-        self._latest_raw = None
-        self._latest_jpeg: bytes | None = None
-        self._latest_ts = 0.0
-        self._latest_w = 0
-        self._latest_h = 0
-        self._stream_jpeg_variants: dict[tuple[int, int], bytes] = {}
-        self._stream_jpeg_tasks: dict[tuple[int, int], asyncio.Task] = {}
         self._runtime_overrides: dict[str, Any] = {}
-        settings = get_settings()
-        self._jpeg_quality = int(settings.preview_jpeg_quality)
-        self._preview_encoder = create_preview_encoder(
-            getattr(settings, "preview_encoder", "auto"),
-            hardware_device=getattr(settings, "preview_hardware_encoder_device", ""),
-        )
-        self._preview_encoder_requested = getattr(settings, "preview_encoder", "auto")
-        self._preview_pipeline_enabled = bool(
-            getattr(settings, "preview_pipeline_enabled", False)
-        )
-        self._last_jpeg_encoder = getattr(self._preview_encoder, "name", "opencv")
-        self._last_jpeg_source_format = "RGB888"
-        self._jpeg_encode_failures = 0
-        self._target_fps = max(1, int(settings.shared_preview_fps))
         self._probe_timeout_sec = max(0.5, float(settings.camera_probe_timeout_sec))
         self._capture_timeout_sec = max(0.5, float(settings.camera_capture_timeout_sec))
-        self._grabber_drain_timeout_sec = self._capture_timeout_sec + 1.0
-        # 停止预算必须覆盖仍在收敛的最长抓帧，否则一次正常的 1 秒 AE 首帧超时
-        # 会把 libcamera 留在不可回收状态。 / Stop must outlive an in-flight
-        # long-AE convergence frame or a recoverable startup becomes unrecoverable.
+        # 停止预算覆盖最长在途曝光，避免正常收敛帧超时导致无法回收。
+        # Stop must outlive an in-flight long-AE convergence frame to permit native cleanup.
         self._stop_timeout_sec = max(4.0, self._capture_timeout_sec + 2.0)
         self._close_timeout_sec = 2.5
         self._stale_timeout_sec = max(
             0.5, float(settings.camera_frame_stale_timeout_sec)
         )
         self._idle_shutdown_sec = max(0.0, float(settings.camera_idle_shutdown_sec))
-        self._max_grab_failures = max(1, int(settings.camera_grab_failures_offline))
         self._health_error: str | None = None
         self._restart_required = False
-        self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
-        self._last_capture_success_mono = 0.0
-        self._has_successful_capture = False
-        self._preview_consumers = 0
-        self._analysis_consumers = 0
-        self._recording_consumers = 0
-        self._capture_timestamps: deque[float] = deque(maxlen=120)
-        self._jpeg_timestamps: deque[float] = deque(maxlen=120)
-        self._jpeg_encode_ms: deque[float] = deque(maxlen=60)
-        self._camera_read_ms: deque[float] = deque(maxlen=60)
-        self._jpeg_variant_encode_ms: deque[float] = deque(maxlen=60)
-        self._jpeg_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="ogscope-jpeg"
-        )
-        # 是否常驻 raw 帧缓存；默认关闭以降低内存占用（分析路径可同步抓帧）
-        # Whether to retain raw frame cache; default off to reduce RAM (analysis can sync-grab).
-        self._keep_raw_cache = bool(settings.keep_raw_cache)
         self._logger = logging.getLogger(__name__)
-        self._background_tasks: set[asyncio.Task] = set()
-        self._worker_futures: set[asyncio.Future] = set()
         self._warmup_task: asyncio.Task | None = None
         self._shutdown_task: asyncio.Task | None = None
         self._shutting_down = False
         self._shutdown_complete = False
-        self._executors_closed = False
+        self._resources = CameraResources()
+        self._ownership = CameraOwnership(
+            spawn=self._resources.spawn,
+            check_accepting_work=self._check_accepting_work,
+            on_active=self._cancel_idle_shutdown,
+            on_inactive=self._schedule_idle_shutdown,
+        )
+        self._frames = CameraFramePipeline(
+            settings=settings,
+            resources=self._resources,
+            get_camera=self.get_camera_instance,
+            read_lock=self._read_lock,
+            readiness=self.analysis_readiness,
+            check_accepting_work=self._check_accepting_work,
+            is_closing=lambda: self._shutting_down,
+            quarantine=self._mark_restart_required,
+            invalidate=self._invalidate_from_pipeline,
+        )
+
+    async def _invalidate_from_pipeline(self, reason: str) -> None:
+        """流水线不能直接释放设备，必须取得生命周期锁 / Pipeline failures acquire the lifetime lock before releasing hardware."""
+        async with self._control_lock:
+            await self._invalidate_camera_locked(reason)
 
     def _check_accepting_work(self) -> None:
         """终止关闭后拒绝新工作，普通 stop 仍可重启 / Reject work after terminal shutdown, not reusable stop."""
@@ -140,45 +84,6 @@ class CameraManager:
             raise RuntimeError(
                 "相机运行服务正在关闭，需要重启服务 / Camera runtime is shutting down; service restart required"
             )
-
-    def _spawn_background(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task:
-        """保留任务直到真正结束，包括已取消的计时器 / Retain tasks until completion, including cancelled timers."""
-        task = asyncio.create_task(coroutine)
-        self._background_tasks.add(task)
-
-        def finished(done: asyncio.Task) -> None:
-            self._background_tasks.discard(done)
-            if not done.cancelled() and done.exception() is not None:
-                self._logger.warning(
-                    "相机后台任务失败 / Camera background task failed: %s",
-                    done.exception(),
-                )
-
-        task.add_done_callback(finished)
-        return task
-
-    def _submit_worker(
-        self, executor: ThreadPoolExecutor | None, fn: Callable, *args: Any
-    ) -> asyncio.Future:
-        """跟踪原生工作，调用方取消不能取消这份完成证据 / Track native completion independently of caller cancellation."""
-        if self._executors_closed:
-            raise RuntimeError("相机工作线程已关闭 / Camera workers are closed")
-        future = asyncio.get_running_loop().run_in_executor(executor, fn, *args)
-        self._worker_futures.add(future)
-
-        def finished(done: asyncio.Future) -> None:
-            self._worker_futures.discard(done)
-            if not done.cancelled():
-                done.exception()
-
-        future.add_done_callback(finished)
-        return future
-
-    async def _run_worker(
-        self, executor: ThreadPoolExecutor | None, fn: Callable, *args: Any
-    ) -> Any:
-        """屏蔽等待者取消，保留原生完成回执 / Shield the worker's completion receipt from waiter cancellation."""
-        return await asyncio.shield(self._submit_worker(executor, fn, *args))
 
     def start_warmup(self) -> None:
         """统一持有启动预热任务，不阻塞服务就绪 / Own background warm-up without delaying service readiness."""
@@ -195,14 +100,12 @@ class CameraManager:
                     "相机预热未完成 / Camera warm-up incomplete: %s", exc
                 )
 
-        self._warmup_task = self._spawn_background(warm())
+        self._warmup_task = self._resources.spawn(warm())
 
     def begin_shutdown(self) -> None:
         """先关闭入口，再由 shutdown 有界回收 / Fence acquisition before bounded shutdown."""
         self._shutting_down = True
-        self._operation_leases.clear()
-        if self._lease_expiry_task is not None:
-            self._lease_expiry_task.cancel()
+        self._ownership.begin_shutdown()
         self._cancel_idle_shutdown()
 
     async def shutdown(self, *, timeout_sec: float = 8.0) -> None:
@@ -236,19 +139,23 @@ class CameraManager:
             raise RuntimeError(
                 self._health_error or "相机释放未确认 / Camera release unconfirmed"
             )
-        if self._background_tasks:
+        if self._resources.background_tasks:
             await asyncio.gather(
-                *(asyncio.shield(task) for task in tuple(self._background_tasks)),
+                *(
+                    asyncio.shield(task)
+                    for task in tuple(self._resources.background_tasks)
+                ),
                 return_exceptions=True,
             )
-        if self._worker_futures:
+        if self._resources.worker_futures:
             await asyncio.gather(
-                *(asyncio.shield(future) for future in tuple(self._worker_futures)),
+                *(
+                    asyncio.shield(future)
+                    for future in tuple(self._resources.worker_futures)
+                ),
                 return_exceptions=True,
             )
-        self._preview_consumers = self._analysis_consumers = (
-            self._recording_consumers
-        ) = 0
+        self._ownership.clear_after_shutdown()
 
     async def _shutdown_impl(self, timeout_sec: float) -> None:
         """成功才确认释放；超时保留句柄并封闭执行器 / Confirm release only on success; quarantine timeouts and seal pools."""
@@ -265,144 +172,30 @@ class CameraManager:
                 raise
             raise RuntimeError(self._health_error) from exc
         finally:
-            pending = {task for task in self._background_tasks if not task.done()}
+            pending = {
+                task for task in self._resources.background_tasks if not task.done()
+            }
             for task in pending:
                 task.cancel()
             if pending:
                 await asyncio.wait(pending, timeout=0.1)
             # 不在事件循环 join 卡住的原生线程；wait=False 不表示它已释放。
             # Never join a stuck native worker on the event loop; wait=False does not establish release.
-            self._executors_closed = True
-            self._capture_executor.shutdown(wait=False, cancel_futures=True)
-            self._jpeg_executor.shutdown(wait=False, cancel_futures=True)
+            self._resources.close_executors()
             # 退出回执使用产品日志通道，默认非开发模式也必须可见 / Emit receipts through product logging, including non-development mode.
             event_logger.info(
                 "camera_runtime_shutdown released={} pending_workers={} pending_tasks={}",
                 self._shutdown_complete,
-                sum(not future.done() for future in self._worker_futures),
-                sum(not task.done() for task in self._background_tasks),
+                sum(not future.done() for future in self._resources.worker_futures),
+                sum(not task.done() for task in self._resources.background_tasks),
             )
-
-    @property
-    def preview_jpeg_quality(self) -> int:
-        """共享抓帧 JPEG 质量（与缓存一致）/ Shared grabber JPEG quality (matches cache)."""
-        return int(self._jpeg_quality)
-
-    @property
-    def preview_target_fps(self) -> int:
-        """共享预览目标帧率 / Shared preview target FPS."""
-        return int(self._target_fps)
 
     def _build_base_config(self) -> dict[str, Any]:
         from ogscope.config import get_settings
 
-        settings = get_settings()
-        base = {
-            # Picamera2/libcamera 是默认产品路径；V4L2 RAW 必须显式启用。
-            # Picamera2/libcamera remains the default; V4L2 RAW requires opt-in.
-            "type": settings.camera_type,
-            "device": settings.camera_device,
-            "v4l2_sensor_subdev": settings.camera_v4l2_sensor_subdev,
-            "v4l2_media_device": settings.camera_v4l2_media_device,
-            "v4l2_configure_media_pipeline": (
-                settings.camera_v4l2_configure_media_pipeline
-            ),
-            "v4l2_sensor_entity": settings.camera_v4l2_sensor_entity,
-            "v4l2_receiver_entity": settings.camera_v4l2_receiver_entity,
-            "v4l2_sensor_pad": settings.camera_v4l2_sensor_pad,
-            "v4l2_receiver_sink_pad": settings.camera_v4l2_receiver_sink_pad,
-            "v4l2_receiver_source_pad": settings.camera_v4l2_receiver_source_pad,
-            "v4l2_media_bus_format": settings.camera_v4l2_media_bus_format,
-            "v4l2_pixel_format": settings.camera_v4l2_pixel_format,
-            "v4l2_bit_depth": settings.camera_v4l2_bit_depth,
-            "v4l2_black_level": settings.camera_v4l2_black_level,
-            "v4l2_white_level": settings.camera_v4l2_white_level,
-            "v4l2_bayer_pattern": settings.camera_v4l2_bayer_pattern,
-            "v4l2_gamma": settings.camera_v4l2_gamma,
-            "v4l2_temporal_nr_alpha": getattr(
-                settings, "camera_v4l2_temporal_nr_alpha", 1.0
-            ),
-            "v4l2_temporal_nr_seconds": settings.camera_v4l2_temporal_nr_seconds,
-            "v4l2_temporal_nr_max_frames": (
-                settings.camera_v4l2_temporal_nr_max_frames
-            ),
-            "v4l2_active_width": settings.camera_v4l2_active_width,
-            "v4l2_active_height": settings.camera_v4l2_active_height,
-            "v4l2_line_duration_us": settings.camera_v4l2_line_duration_us,
-            "v4l2_gain_db_per_step": settings.camera_v4l2_gain_db_per_step,
-            "v4l2_auto_gain_max": settings.camera_v4l2_auto_gain_max,
-            "v4l2_ae_max_step_stops": settings.camera_v4l2_ae_max_step_stops,
-            "v4l2_ae_target_background": (settings.camera_v4l2_ae_target_background),
-            "v4l2_ae_target_highlight": settings.camera_v4l2_ae_target_highlight,
-            "v4l2_ae_highlight_percentile": (
-                settings.camera_v4l2_ae_highlight_percentile
-            ),
-            "v4l2_ae_trace_enabled": settings.camera_v4l2_ae_trace_enabled,
-            "v4l2_ae_trace_dir": str(
-                settings.camera_v4l2_ae_trace_dir
-                or (settings.data_dir / "camera-ae-traces")
-            ),
-            "v4l2_ae_trace_max_events": settings.camera_v4l2_ae_trace_max_events,
-            "v4l2_ae_trace_raw_sample_interval": (
-                settings.camera_v4l2_ae_trace_raw_sample_interval
-            ),
-            "v4l2_ae_trace_max_raw_samples": (
-                settings.camera_v4l2_ae_trace_max_raw_samples
-            ),
-            "v4l2_ae_trace_raw_max_side": (settings.camera_v4l2_ae_trace_raw_max_side),
-            "width": settings.camera_width,
-            "height": settings.camera_height,
-            "fps": max(1, int(getattr(settings, "camera_fps", 5) or 5)),
-            "exposure_us": settings.camera_exposure,
-            "analogue_gain": settings.camera_gain,
-            "auto_exposure": True,
-            "ae_polar_preset": settings.camera_ae_polar_preset,
-            "ae_exposure_value": settings.camera_ae_exposure_value,
-            "ae_aggressive_enabled": settings.camera_ae_aggressive_enabled,
-            "tuning_file": (
-                str(settings.camera_tuning_file)
-                if getattr(settings, "camera_tuning_file", None)
-                else None
-            ),
-            "auto_exposure_max_us": getattr(
-                settings, "camera_auto_exposure_max_us", 3_000_000
-            ),
-            "capture_timeout_sec": self._capture_timeout_sec,
-            "ae_flicker_mode": getattr(settings, "camera_ae_flicker_mode", "off"),
-            "noise_reduction_mode": getattr(
-                settings, "camera_noise_reduction_mode", "fast"
-            ),
-            "lores_enabled": bool(getattr(settings, "camera_lores_enabled", True)),
-            "lores_width": int(getattr(settings, "camera_lores_width", 320)),
-            "lores_height": int(getattr(settings, "camera_lores_height", 240)),
-            "lores_format": getattr(settings, "camera_lores_format", "YUV420"),
-            "rotation": settings.camera_rotation,
-            "hardware_transform": settings.camera_hardware_transform,
-            "v4l2_processing": settings.camera_v4l2_processing,
-            "v4l2_isp_input_device": settings.camera_v4l2_isp_input_device,
-            "v4l2_isp_output_device": settings.camera_v4l2_isp_output_device,
-            "v4l2_isp_timeout_sec": settings.camera_v4l2_isp_timeout_sec,
-            "flip_horizontal": bool(getattr(settings, "camera_flip_horizontal", False)),
-            "flip_vertical": bool(getattr(settings, "camera_flip_vertical", False)),
-            "sampling_mode": getattr(settings, "camera_sampling_mode", "native"),
-            "noise_reduction": 1,
-            "white_balance_mode": getattr(
-                settings, "camera_white_balance_mode", "auto"
-            ),
-            "white_balance_gain_r": getattr(
-                settings, "camera_white_balance_gain_r", 1.0
-            ),
-            "white_balance_gain_b": getattr(
-                settings, "camera_white_balance_gain_b", 1.0
-            ),
-            "contrast": 1.0,
-            "brightness": 0.0,
-            "saturation": 1.0,
-            "sharpness": 1.0,
-            "night_mode": bool(getattr(settings, "camera_night_mode", False)),
-            "color_mode": "color",
-        }
-        return {**base, **self._runtime_overrides}
+        return build_camera_config(
+            get_settings(), self._runtime_overrides, self._capture_timeout_sec
+        )
 
     def _create_camera_sync(self):
         from ogscope.platform.hardware.camera import create_camera
@@ -417,84 +210,20 @@ class CameraManager:
             )
         return None
 
-    def _encode_preview_jpeg_sync(
-        self, frame, *, quality: int | None = None, source_format: str | None = None
-    ) -> EncodedImage | None:
-        source_format = source_format or str(
-            getattr(self._camera, "output_pixel_format", None)
-            or getattr(self._camera, "pixel_format", None)
-            or "RGB888"
-        )
-        jpeg_quality = int(self._jpeg_quality if quality is None else quality)
-        try:
-            encoded = self._preview_encoder.encode_jpeg(
-                frame, quality=jpeg_quality, source_format=source_format
-            )
-            if encoded is not None:
-                return encoded
-        except Exception as exc:
-            self._logger.debug("预览编码失败 / Preview encode failed: %s", exc)
-        # TurboJPEG 或首选编码器异常时，当前帧回退 OpenCV；下次仍保留首选项便于热安装后生效
-        # Fall back to OpenCV for this frame if the preferred encoder fails.
-        try:
-            return OpenCVEncoder().encode_jpeg(
-                frame, quality=jpeg_quality, source_format=source_format
-            )
-        except Exception as exc:
-            self._logger.debug(
-                "OpenCV 回退编码失败 / OpenCV fallback encode failed: %s", exc
-            )
-            return None
-
-    def _read_frame_sync(self):
-        with self._read_lock:
-            if self._camera is None or not getattr(self._camera, "is_capturing", False):
-                return None
-            read_started = time.perf_counter()
-            try:
-                frame = self._camera.get_video_frame()
-            finally:
-                with self._frame_lock:
-                    self._camera_read_ms.append(
-                        (time.perf_counter() - read_started) * 1000.0
-                    )
-            if frame is not None:
-                now = time.monotonic()
-                self._capture_sequence += 1
-                self._last_capture_success_mono = now
-                self._has_successful_capture = True
-                self._capture_timestamps.append(now)
-                try:
-                    info = self._camera.get_camera_info()
-                except (
-                    Exception
-                ):  # Readiness can fall back to fresh frames / 就绪判断可降级为新帧证据。
-                    info = {}
-                duration = info.get("frame_duration_us") or info.get("exposure_us") or 0
-                if isinstance(duration, (int, float)) and 0 < duration <= 60_000_000:
-                    self._last_frame_duration_s = duration / 1_000_000
-                self.analysis_readiness.observe(self._capture_sequence, info)
-            return frame
-
     def _camera_is_fresh(self) -> bool:
         """判断运行中的相机是否仍有新鲜帧 / Check whether a running camera is still fresh."""
         if self._restart_required:
             return False
         if self._camera is None or not getattr(self._camera, "is_capturing", False):
             return False
-        if self._last_capture_success_mono <= 0:
+        if self._frames.health.last_success_mono <= 0:
             return False
         return (
-            time.monotonic() - self._last_capture_success_mono
+            time.monotonic() - self._frames.health.last_success_mono
         ) <= self._stale_timeout_sec
 
     def _has_consumers(self) -> bool:
-        return (
-            len(self._operation_leases)
-            + self._preview_consumers
-            + self._analysis_consumers
-            + self._recording_consumers
-        ) > 0
+        return self._ownership.active
 
     def _cancel_idle_shutdown(self) -> None:
         # Hardware shutdown already owns the lock; let it finish before reopening.
@@ -533,14 +262,14 @@ class CameraManager:
                 )
             if self._camera_is_fresh():
                 if start_grabber:
-                    await self._ensure_grabber_locked()
+                    await self._frames.start()
                 self._schedule_idle_shutdown()
                 return
             if self._camera is None:
                 self._health_error = None
                 self._restart_required = False
-                self._has_successful_capture = False
-                creation = self._submit_worker(None, self._create_camera_sync)
+                self._frames.health.has_frame = False
+                creation = self._resources.submit(None, self._create_camera_sync)
 
                 def retain_created_handle(done: asyncio.Future) -> None:
                     # 取消启动也不能遗失仍在创建的句柄 / Retain a late handle even if startup was cancelled.
@@ -561,7 +290,7 @@ class CameraManager:
                     raise RuntimeError(self._health_error)
             if not getattr(self._camera, "is_capturing", False):
                 self.analysis_readiness.reset()
-                ok = await self._run_worker(None, self._camera.start_capture)
+                ok = await self._resources.run(None, self._camera.start_capture)
                 self._check_accepting_work()
                 if not ok:
                     await self._invalidate_camera_locked(
@@ -579,7 +308,7 @@ class CameraManager:
                     )
                 ),
             )
-            probe_ok = await self._run_worker(
+            probe_ok = await self._resources.run(
                 None, self._probe_stream_health_sync, probe_budget
             )
             self._check_accepting_work()
@@ -589,57 +318,56 @@ class CameraManager:
                 )
                 raise RuntimeError(self._health_error or "相机无有效帧")
             self._health_error = None
-            self._consecutive_grab_failures = 0
+            self._frames.health.consecutive_failures = 0
             if start_grabber:
-                await self._ensure_grabber_locked()
+                await self._frames.start()
         self._schedule_idle_shutdown()
 
     async def acquire_preview_consumer(self) -> None:
         """注册预览消费者并启动共享编码 / Register a preview consumer."""
-        self._preview_consumers += 1
+        self._ownership.acquire("preview")
         try:
             await self.ensure_started(start_grabber=True)
         except (Exception, asyncio.CancelledError):
-            self._preview_consumers = max(0, self._preview_consumers - 1)
+            self._ownership.release("preview")
             raise
 
     async def release_preview_consumer(self) -> None:
         """释放预览消费者；最后一路离开时停止JPEG流水线 / Release preview consumer."""
-        self._preview_consumers = max(0, self._preview_consumers - 1)
-        if self._preview_consumers == 0 and not self._shutting_down:
+        self._ownership.release("preview")
+        if self._ownership.counts["preview"] == 0 and not self._shutting_down:
             async with self._control_lock:
-                await self._stop_grabber_locked()
-                with self._frame_lock:
-                    self._latest_jpeg = None
+                await self._frames.stop()
+                self._frames.clear_preview()
             self._schedule_idle_shutdown()
 
     async def acquire_analysis_consumer(self) -> None:
         """分析会话持有相机，直到结束 / Hold the camera for the analysis session."""
-        self._analysis_consumers += 1
+        self._ownership.acquire("analysis")
         try:
             await self.ensure_started()
         except (Exception, asyncio.CancelledError):
-            self._analysis_consumers = max(0, self._analysis_consumers - 1)
+            self._ownership.release("analysis")
             self._schedule_idle_shutdown()
             raise
 
     async def release_analysis_consumer(self) -> None:
         """结束分析后开始热驻留计时 / Start warm-idle timing after analysis ends."""
-        self._analysis_consumers = max(0, self._analysis_consumers - 1)
+        self._ownership.release("analysis")
         self._schedule_idle_shutdown()
 
     async def acquire_recording_consumer(self) -> None:
         """注册录像消费者 / Register a recording consumer."""
-        self._recording_consumers += 1
+        self._ownership.acquire("recording")
         try:
             await self.ensure_started()
         except (Exception, asyncio.CancelledError):
-            self._recording_consumers = max(0, self._recording_consumers - 1)
+            self._ownership.release("recording")
             raise
 
     async def release_recording_consumer(self) -> None:
         """释放录像消费者 / Release a recording consumer."""
-        self._recording_consumers = max(0, self._recording_consumers - 1)
+        self._ownership.release("recording")
         self._schedule_idle_shutdown()
 
     def update_operation_lease(
@@ -649,52 +377,10 @@ class CameraManager:
         release: bool = False,
         ttl_seconds: float = 60.0,
     ) -> dict[str, Any]:
-        """Bound task ownership without opening a fake preview / 用有界任务占用替代假预览保活。"""
-        now = time.monotonic()
-        if release:
-            self._operation_leases.pop(lease_id or "", None)
-            if not self._operation_leases and self._lease_expiry_task is not None:
-                self._lease_expiry_task.cancel()
-                self._lease_expiry_task = None
-            self._schedule_idle_shutdown()
-            return {"success": True, "released": True}
-        self._check_accepting_work()
-        if lease_id:
-            if self._operation_leases.get(lease_id, 0) <= now:
-                self._operation_leases.pop(lease_id, None)
-                self._schedule_idle_shutdown()
-                return {"success": False, "error": "camera_lease_expired"}
-        else:
-            if len(self._operation_leases) >= 8:
-                return {"success": False, "error": "camera_lease_limit"}
-            lease_id = uuid.uuid4().hex
-        ttl = max(10.0, min(120.0, float(ttl_seconds)))
-        self._operation_leases[lease_id] = now + ttl
-        self._cancel_idle_shutdown()
-        if self._lease_expiry_task is None or self._lease_expiry_task.done():
-            self._lease_expiry_task = self._spawn_background(
-                self._expire_operation_leases()
-            )
-        return {"success": True, "lease_id": lease_id, "ttl_seconds": ttl}
-
-    async def _expire_operation_leases(self) -> None:
-        """A disconnected owner cannot keep hardware awake forever / 失联持有者不能永久阻止休眠。"""
-        current = asyncio.current_task()
-        try:
-            while self._operation_leases:
-                await asyncio.sleep(
-                    max(0.01, min(self._operation_leases.values()) - time.monotonic())
-                )
-                now = time.monotonic()
-                self._operation_leases = {
-                    key: expiry
-                    for key, expiry in self._operation_leases.items()
-                    if expiry > now
-                }
-                self._schedule_idle_shutdown()
-        finally:
-            if self._lease_expiry_task is current:
-                self._lease_expiry_task = None
+        """占用规则由独立组件维护 / Delegate lease policy to its owner."""
+        return self._ownership.update_lease(
+            lease_id=lease_id, release=release, ttl_seconds=ttl_seconds
+        )
 
     def lifecycle_status(self) -> dict[str, Any]:
         """Expose ownership and readiness separately / 分别报告占用与分析就绪。"""
@@ -706,10 +392,10 @@ class CameraManager:
         return {
             "phase": phase,
             "idle_shutdown_seconds": self._idle_shutdown_sec,
-            "preview_consumers": self._preview_consumers,
-            "analysis_consumers": self._analysis_consumers,
-            "recording_consumers": self._recording_consumers,
-            "operation_consumers": len(self._operation_leases),
+            "preview_consumers": self._ownership.counts["preview"],
+            "analysis_consumers": self._ownership.counts["analysis"],
+            "recording_consumers": self._ownership.counts["recording"],
+            "operation_consumers": self._ownership.snapshot()["operation_consumers"],
             "analysis_readiness": self.analysis_readiness.snapshot(),
         }
 
@@ -717,7 +403,7 @@ class CameraManager:
         if self._shutting_down or self._has_consumers():
             return
         self._cancel_idle_shutdown()
-        self._idle_shutdown_task = self._spawn_background(
+        self._idle_shutdown_task = self._resources.spawn(
             self._idle_shutdown_after_delay()
         )
 
@@ -739,7 +425,7 @@ class CameraManager:
         """停止相机采集 / Stop camera capture."""
         if self._shutdown_complete:
             return
-        if self._executors_closed:
+        if self._resources.executors_closed:
             raise RuntimeError(
                 self._health_error or "相机服务已终止 / Camera runtime is shut down"
             )
@@ -760,14 +446,10 @@ class CameraManager:
             # 在生命周期锁内复核，避免空闲关闭与新消费者启动竞争。
             if current is self._idle_shutdown_task and self._has_consumers():
                 return
-            if not force and (
-                self._analysis_consumers
-                or self._operation_leases
-                or self._recording_consumers
-            ):
+            if not force and self._ownership.blocks_stop:
                 raise RuntimeError("Camera is in use / 相机仍被分析、校准或录像占用")
             self._idle_stop_in_progress = current is self._idle_shutdown_task
-            if not await self._stop_grabber_locked():
+            if not await self._frames.stop():
                 return
             if self._camera is None:
                 self._restart_required = False
@@ -845,24 +527,12 @@ class CameraManager:
         self._logger.critical("camera_restart_required reason=%s", reason)
 
     def _clear_camera_state_locked(self, *, health_error: str | None) -> None:
-        """清除已确认释放的相机状态 / Clear camera state only after confirmed release."""
+        """确认原生释放后才能清理设备及帧状态 / Clear device/frame state only after confirmed native release."""
         self._camera = None
-        self.analysis_readiness.reset()
         self._restart_required = False
         self._health_error = health_error
-        self._consecutive_grab_failures = 0
         self._stream_started_at = 0.0
-        self._last_capture_success_mono = 0.0
-        self._has_successful_capture = False
-        with self._frame_lock:
-            self._capture_epoch += 1
-            self._latest_raw_capture = None
-            self._latest_raw = None
-            self._latest_jpeg = None
-            self._stream_jpeg_variants.clear()
-            self._latest_ts = 0.0
-            self._latest_w = 0
-            self._latest_h = 0
+        self._frames.clear_after_close()
 
     async def _run_lifecycle_step_locked(
         self,
@@ -873,7 +543,7 @@ class CameraManager:
         """在读锁内限时执行生命周期步骤 / Run a bounded lifecycle step under the read lock."""
         try:
             result = await asyncio.wait_for(
-                self._run_worker(None, self._call_with_read_lock, fn),
+                self._resources.run(None, self._call_with_read_lock, fn),
                 timeout=max(0.05, float(timeout_sec)),
             )
             return bool(result), False
@@ -887,7 +557,7 @@ class CameraManager:
     async def pause_grabber(self) -> None:
         """暂停共享抓帧任务（保留采集）/ Pause shared frame grabber only."""
         async with self._control_lock:
-            await self._stop_grabber_locked()
+            await self._frames.stop()
 
     async def resume_grabber(self) -> None:
         """恢复共享抓帧任务 / Resume shared frame grabber."""
@@ -897,7 +567,7 @@ class CameraManager:
             if self._camera is not None and getattr(
                 self._camera, "is_capturing", False
             ):
-                await self._ensure_grabber_locked()
+                await self._frames.start()
 
     def _call_with_read_lock(self, fn: Callable[[], Any]) -> Any:
         """在读锁下执行阻塞操作，避免与抓帧并发 / Run blocking op under read lock."""
@@ -916,14 +586,14 @@ class CameraManager:
         async with self._control_lock:
             self._check_accepting_work()
             t0 = time.time()
-            if not await self._stop_grabber_locked():
+            if not await self._frames.stop():
                 raise RuntimeError(
                     self._health_error
                     or "相机抓帧任务未能停止 / Camera grabber did not stop"
                 )
             try:
                 result = await asyncio.wait_for(
-                    self._run_worker(None, self._call_with_read_lock, fn),
+                    self._resources.run(None, self._call_with_read_lock, fn),
                     timeout=timeout_sec,
                 )
                 return result
@@ -940,7 +610,7 @@ class CameraManager:
                     and self._camera is not None
                     and getattr(self._camera, "is_capturing", False)
                 ):
-                    await self._ensure_grabber_locked()
+                    await self._frames.start()
                 self._logger.info(
                     "camera_reconfigure_done op=%s cost_ms=%.2f",
                     operation_name,
@@ -952,7 +622,9 @@ class CameraManager:
         deadline = time.time() + max(0.1, float(timeout_sec))
         while time.time() < deadline:
             # 健康探测也复用读帧工作线程 / Health probes reuse the capture worker too.
-            frame = self._capture_executor.submit(self._read_frame_sync).result()
+            frame = self._resources.capture_executor.submit(
+                self._frames._read_frame_sync
+            ).result()
             if frame is not None:
                 return True
             time.sleep(0.05)
@@ -961,16 +633,8 @@ class CameraManager:
     async def _invalidate_camera_locked(self, reason: str) -> None:
         """标记相机离线并释放资源（需持有控制锁）/ Mark camera offline and release resources."""
         self._health_error = reason
-        current = asyncio.current_task()
-        if self._grabber_task and self._grabber_task is not current:
-            if not await self._stop_grabber_locked():
-                return
-        elif self._grabber_task is current:
-            self._grabber_task = None
-            # 当前循环不能等待自身，但必须收回预读帧再关闭相机。
-            # The loop cannot await itself, but must drain prefetched reads before closing the camera.
-            if not await self._drain_preview_workers_locked():
-                return
+        if self._frames.has_grabber and not await self._frames.stop():
+            return
         _, stop_timed_out = await self._run_lifecycle_step_locked(
             "stop", self._safe_stop_capture_sync, self._stop_timeout_sec
         )
@@ -986,244 +650,6 @@ class CameraManager:
             )
             return
         self._clear_camera_state_locked(health_error=reason)
-
-    async def _ensure_grabber_locked(self) -> None:
-        self._check_accepting_work()
-        if self._grabber_task and not self._grabber_task.done():
-            return
-        self._grabber_task = self._spawn_background(self._grabber_loop())
-
-    async def _stop_grabber_locked(self) -> bool:
-        if not self._grabber_task:
-            return await self._drain_preview_workers_locked()
-        task = self._grabber_task
-        if task is asyncio.current_task():
-            self._grabber_task = None
-            return await self._drain_preview_workers_locked()
-        task.cancel()
-        done, _ = await asyncio.wait({task}, timeout=2.0)
-        if not done:
-            self._mark_restart_required(
-                "抓帧任务未退出 / Capture task did not stop; service restart required"
-            )
-            return False
-        drained = await self._drain_preview_workers_locked()
-        self._grabber_task = None
-        return drained
-
-    async def _drain_preview_workers_locked(self) -> bool:
-        """关闭原生资源前收回所有工作线程 / Drain every worker before closing native resources."""
-        inflight = self._inflight_read_future
-        if inflight is not None and not inflight.done():
-            try:
-                # shield 防止 wait_for 取消仍在工作线程中收尾的读请求。
-                # shield keeps wait_for from cancelling the read that is draining in a worker thread.
-                await asyncio.wait_for(
-                    asyncio.shield(inflight), timeout=self._grabber_drain_timeout_sec
-                )
-            except asyncio.TimeoutError:
-                self._mark_restart_required(
-                    "相机抓帧线程未能在超时内退出，需要重启服务 / "
-                    "Camera read worker did not drain; service restart required"
-                )
-                self._grabber_task = None
-                return False
-            except Exception:
-                pass
-        if self._inflight_read_future is inflight:
-            self._inflight_read_future = None
-        encode = self._inflight_encode_future
-        if encode is not None and not encode.done():
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(encode), timeout=self._grabber_drain_timeout_sec
-                )
-            except asyncio.TimeoutError:
-                self._mark_restart_required(
-                    "编码线程未能退出 / Encoder worker did not drain"
-                )
-                self._grabber_task = None
-                return False
-            except Exception:
-                pass
-        self._inflight_encode_future = None
-        if self._shutting_down and self._worker_futures:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        *(asyncio.shield(f) for f in tuple(self._worker_futures)),
-                        return_exceptions=True,
-                    ),
-                    timeout=self._grabber_drain_timeout_sec,
-                )
-            except asyncio.TimeoutError:
-                self._mark_restart_required(
-                    "原生工作未完成 / Native workers did not drain; restart required"
-                )
-                return False
-        close_encoder = getattr(self._preview_encoder, "close", None)
-        if callable(close_encoder):
-            # 关闭操作排在已提交编码后面，避免释放使用中的硬件缓冲。
-            # Queue close after submitted encodes to avoid freeing buffers still in use.
-            closed = self._submit_worker(self._jpeg_executor, close_encoder)
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(closed), timeout=self._grabber_drain_timeout_sec
-                )
-            except asyncio.TimeoutError:
-                self._mark_restart_required(
-                    "硬件编码器关闭超时 / Hardware encoder close timed out"
-                )
-                self._grabber_task = None
-                return False
-            except (OSError, BufferError) as exc:
-                self._mark_restart_required(
-                    f"Hardware encoder close failed / 硬件编码器关闭失败: {exc}"
-                )
-                self._grabber_task = None
-                return False
-        self._grabber_task = None
-        return True
-
-    def _read_preview_frame_sync(self):
-        """在读帧完成时刻取时间，不使用晚到的编码时间 / Timestamp read completion, never delayed encoding completion."""
-        with self._frame_lock:
-            epoch = self._capture_epoch
-        frame = self._read_frame_sync()
-        # All reads run on the same capture executor / 所有读帧均使用同一个采集线程。
-        return CapturedFrame(
-            frame, self._capture_sequence, time.time(), time.monotonic(), epoch
-        )
-
-    async def reset_temporal_history(self, camera: Any) -> bool:
-        """Invalidate cached/in-flight frames and serialize the driver reset / 失效缓存及在途图像，串行重置驱动。"""
-        self._check_accepting_work()
-        with self._frame_lock:
-            self._capture_epoch += 1
-            self._reset_pending += 1
-            self._latest_raw = None
-            self._latest_raw_capture = None
-
-        def reset() -> bool:
-            try:
-                hook = getattr(camera, "begin_fresh_capture_epoch", None)
-                return bool(hook()) if callable(hook) else False
-            finally:
-                with self._frame_lock:
-                    # Also reject reads queued ahead of the reset / 同时拒绝排在重置前的读帧。
-                    self._capture_epoch += 1
-                    self._reset_pending -= 1
-                    self._latest_raw = None
-                    self._latest_raw_capture = None
-
-        return await asyncio.shield(self._submit_worker(self._capture_executor, reset))
-
-    async def _grabber_loop(self) -> None:
-        prefetched = None
-        try:
-            while True:
-                interval = 1.0 / float(max(1, self._target_fps))
-                t0 = time.time()
-                try:
-                    read_future = prefetched or self._submit_worker(
-                        self._capture_executor, self._read_preview_frame_sync
-                    )
-                    prefetched = None
-                    self._inflight_read_future = read_future
-                    try:
-                        captured = await asyncio.shield(read_future)
-                        frame, capture_completed_ts = captured.frame, captured.timestamp
-                    finally:
-                        if (
-                            read_future.done()
-                            and self._inflight_read_future is read_future
-                        ):
-                            self._inflight_read_future = None
-                    if frame is not None:
-                        # Timestamp the completed sensor read before JPEG work so cached raw
-                        # frames retain capture time rather than encoder completion time. /
-                        # 在 JPEG 编码前记录传感器读帧完成时刻，避免缓存 raw 帧误用编码完成时间。
-                        self._consecutive_grab_failures = 0
-                        if self._preview_pipeline_enabled:
-                            read_ms = (
-                                self._camera_read_ms[-1] if self._camera_read_ms else 0
-                            )
-                            jpeg_ms = (
-                                self._jpeg_encode_ms[-1] if self._jpeg_encode_ms else 0
-                            )
-                            if read_ms + jpeg_ms >= interval * 1000:
-                                # 最多预读一帧，不建立无界队列 / Prefetch at most one frame, never an unbounded queue.
-                                prefetched = self._submit_worker(
-                                    self._capture_executor,
-                                    self._read_preview_frame_sync,
-                                )
-                                self._inflight_read_future = prefetched
-                        encode_t0 = time.perf_counter()
-                        encode_future = self._submit_worker(
-                            self._jpeg_executor, self._encode_preview_jpeg_sync, frame
-                        )
-                        self._inflight_encode_future = encode_future
-                        encoded = await asyncio.shield(encode_future)
-                        if self._inflight_encode_future is encode_future:
-                            self._inflight_encode_future = None
-                        encode_ms = (time.perf_counter() - encode_t0) * 1000.0
-                        if encoded is None:
-                            self._jpeg_encode_failures += 1
-                            await asyncio.sleep(max(0.0, interval - (time.time() - t0)))
-                            continue
-                        jpeg = encoded.data
-                        h = int(getattr(frame, "shape", [0, 0])[0] or 0)
-                        w = int(getattr(frame, "shape", [0, 0])[1] or 0)
-                        with self._frame_lock:
-                            self._frame_id += 1
-                            # 默认不保留 raw，避免与 JPEG 双份常驻；需要时设 OGSCOPE_KEEP_RAW_CACHE=1
-                            # By default do not retain raw to avoid dual large buffers; set env to keep.
-                            current_epoch = (
-                                captured.epoch == self._capture_epoch
-                                and not self._reset_pending
-                            )
-                            self._latest_raw = (
-                                frame
-                                if self._keep_raw_cache and current_epoch
-                                else None
-                            )
-                            self._latest_raw_capture = (
-                                captured if self._latest_raw is not None else None
-                            )
-                            self._latest_jpeg = jpeg
-                            self._stream_jpeg_variants.clear()
-                            self._latest_ts = capture_completed_ts
-                            self._latest_w = w
-                            self._latest_h = h
-                            self._last_jpeg_encoder = encoded.encoder
-                            self._last_jpeg_source_format = encoded.source_format
-                        now_mono = time.monotonic()
-                        self._jpeg_timestamps.append(now_mono)
-                        self._jpeg_encode_ms.append(encode_ms)
-                    else:
-                        self._consecutive_grab_failures += 1
-                        if self._consecutive_grab_failures >= self._max_grab_failures:
-                            self._logger.warning(
-                                "连续抓帧失败，标记相机离线 / Consecutive grab failures, mark camera offline"
-                            )
-                            async with self._control_lock:
-                                await self._invalidate_camera_locked(
-                                    "相机数据流中断 / Camera stream lost"
-                                )
-                            return
-                except Exception as e:
-                    self._consecutive_grab_failures += 1
-                    self._logger.error(f"共享抓帧循环异常 / Shared grabber error: {e}")
-                    if self._consecutive_grab_failures >= self._max_grab_failures:
-                        async with self._control_lock:
-                            await self._invalidate_camera_locked(
-                                "相机数据流中断 / Camera stream lost"
-                            )
-                        return
-                spent = time.time() - t0
-                await asyncio.sleep(max(0.0, interval - spent))
-        except asyncio.CancelledError:
-            raise
 
     def get_camera_instance(self):
         """兼容接口：返回全局相机实例 / Compat accessor for global camera object."""
@@ -1257,7 +683,7 @@ class CameraManager:
         # 空闲相机不会持续抓帧；一次成功探测即可证明流已建立，实际使用时 ensure_started 会再次探测。
         # Idle cameras do not grab continuously; one successful probe proves stream setup,
         # while ensure_started re-probes before the next real consumer uses it.
-        has_successful_capture = self._has_successful_capture
+        has_successful_capture = self._frames.health.has_frame
         within_grace = (
             self._stream_started_at > 0
             and (time.time() - self._stream_started_at) <= self._probe_timeout_sec
@@ -1265,13 +691,13 @@ class CameraManager:
         offline = (
             self._restart_required
             or bool(self._health_error)
-            or self._consecutive_grab_failures >= self._max_grab_failures
+            or self._frames.offline
             or (capturing and not has_successful_capture and not within_grace)
         )
         if offline:
             reason = self._health_error
             if not reason:
-                if self._consecutive_grab_failures >= self._max_grab_failures:
+                if self._frames.offline:
                     reason = "相机数据流中断 / Camera stream lost"
                 else:
                     reason = "相机无有效帧 / Camera produces no frames"
@@ -1293,352 +719,9 @@ class CameraManager:
             "runtime_overrides": self._runtime_overrides,
         }
 
-    async def get_preview_frame(
-        self, since_id: int | None = None, wait_timeout_sec: float = 0.8
-    ) -> tuple[int, SharedFrame | None]:
-        """读取预览帧；如未更新则返回 304 / Get preview frame; return 304 if unchanged."""
-        await self.ensure_started(start_grabber=True)
-        deadline = time.time() + max(0.0, float(wait_timeout_sec))
-        while True:
-            with self._frame_lock:
-                if self._frame_id > 0 and self._latest_jpeg is not None:
-                    if since_id is not None and since_id == self._frame_id:
-                        return 304, None
-                    snap = SharedFrame(
-                        frame_id=self._frame_id,
-                        timestamp=self._latest_ts,
-                        raw_frame=self._latest_raw,
-                        jpeg_frame=self._latest_jpeg,
-                        width=self._latest_w,
-                        height=self._latest_h,
-                        source_format=self._last_jpeg_source_format,
-                    )
-                    return 200, snap
-            if time.time() >= deadline:
-                return 503, None
-            await asyncio.sleep(0.02)
-
-    async def get_raw_frame(self) -> tuple[Any, int, float]:
-        """读取分析帧 / Get frame for analysis."""
-        self._analysis_consumers += 1
-        try:
-            await self.ensure_started()
-            with self._frame_lock:
-                cached = self._latest_raw_capture
-                max_age = max(
-                    0.5, 2 / max(1, self._target_fps), 2 * self._last_frame_duration_s
-                )
-                if (
-                    cached is not None
-                    and not self._reset_pending
-                    and cached.epoch == self._capture_epoch
-                    and 0 <= time.monotonic() - cached.monotonic <= max_age
-                ):
-                    return cached.frame.copy(), cached.sequence, cached.timestamp
-            # Preserve identity before another preview read can advance the global counter.
-            # 在下一次预览读帧更新全局序号前保留当前图像身份。
-            captured = await self._run_worker(
-                self._capture_executor, self._read_preview_frame_sync
-            )
-            with self._frame_lock:
-                if (
-                    captured.frame is None
-                    or self._reset_pending
-                    or captured.epoch != self._capture_epoch
-                ):
-                    raise RuntimeError("No fresh frame available / 尚无新鲜图像")
-            return captured.frame, captured.sequence, captured.timestamp
-
-        finally:
-            self._analysis_consumers = max(0, self._analysis_consumers - 1)
-            self._schedule_idle_shutdown()
-
-    def get_current_capture_sequence(self) -> int:
-        """当前抓帧序号，只读、绝不触发新抓帧 / Current capture sequence,
-        read-only, never triggers a new capture.
-
-        用于分析会话启动时建立新鲜度基线：get_raw_frame() 在没有常驻 raw
-        缓存时（默认）会同步抓一整帧，可能要等到硬件抓帧循环当前正持有的
-        那次曝光完成之后再抓一次全新的——曝光越长这个等待就越长，实测能
-        把 analysis/start 拖到 8-10 秒以上，超过调用方的读超时，导致反复
-        "启动失败又重试"，会话永远撑不到真正解算一帧。后台抓帧循环本来就
-        在持续推进这个序号，只读它本身完全不需要等待任何硬件操作。
-        Used to establish a freshness baseline when an analysis session
-        starts. get_raw_frame() synchronously grabs a whole frame when
-        there is no resident raw cache (the default) - it can end up
-        waiting for whatever exposure the background grabber loop is
-        currently holding, then grabbing another fresh one after that;
-        longer exposures make this wait longer, and it was measured to
-        stretch analysis/start past 8-10 seconds, past the caller's own
-        read timeout, causing repeated start-failed-then-retry cycles that
-        never let a session live long enough to actually solve a frame.
-        The background grabber loop is already advancing this number on
-        its own, so reading it needs no hardware operation at all.
-        """
-        return self._capture_sequence
-
-    async def get_cached_frame_snapshot(self) -> SharedFrame | None:
-        """读取当前缓存帧快照（不触发 ensure）/ Read cached snapshot without ensure."""
-        with self._frame_lock:
-            if self._frame_id <= 0:
-                return None
-            return SharedFrame(
-                frame_id=self._frame_id,
-                timestamp=self._latest_ts,
-                raw_frame=self._latest_raw,
-                jpeg_frame=self._latest_jpeg,
-                width=self._latest_w,
-                height=self._latest_h,
-                source_format=self._last_jpeg_source_format,
-            )
-
-    def _encode_stream_jpeg_sync(self, snap: SharedFrame, quality: int) -> bytes | None:
-        """同一帧的 RAW 可用时优先使用，否则转码共享 JPEG；绝不重新抓帧。
-        Use the same frame's RAW when retained, otherwise transcode its shared JPEG;
-        never read the camera. A higher output quality cannot recover source JPEG detail.
-        JPEG 源的细节上限不因提高输出质量而恢复。
-        """
-        frame = snap.raw_frame
-        source_format = snap.source_format
-        if frame is None:
-            if snap.jpeg_frame is None:
-                return None
-            import cv2
-            import numpy as np
-
-            frame = cv2.imdecode(
-                np.frombuffer(snap.jpeg_frame, dtype=np.uint8), cv2.IMREAD_COLOR
-            )
-            source_format = "BGR888"
-        if frame is None:
-            return None
-        encode_variant = getattr(self._preview_encoder, "encode_variant", None)
-        if callable(encode_variant):
-            encoded = encode_variant(
-                frame, quality=quality, source_format=source_format
-            )
-        else:
-            encoded = self._encode_preview_jpeg_sync(
-                frame, quality=quality, source_format=source_format
-            )
-        return encoded.data if encoded is not None else None
-
-    async def _encode_and_cache_stream_jpeg(
-        self, snap: SharedFrame, quality: int
-    ) -> bytes | None:
-        key = (snap.frame_id, quality)
-        try:
-            self._check_accepting_work()
-            started = time.perf_counter()
-            encoded: bytes | None = await self._run_worker(
-                self._jpeg_executor, self._encode_stream_jpeg_sync, snap, quality
-            )
-            self._jpeg_variant_encode_ms.append(
-                (time.perf_counter() - started) * 1000.0
-            )
-            with self._frame_lock:
-                if (
-                    encoded is not None
-                    and len(encoded) <= _STREAM_JPEG_VARIANT_BYTE_LIMIT
-                    and snap.frame_id == self._frame_id
-                    and snap.jpeg_frame is self._latest_jpeg
-                ):
-                    while self._stream_jpeg_variants and (
-                        len(self._stream_jpeg_variants) >= _STREAM_JPEG_VARIANT_LIMIT
-                        or sum(map(len, self._stream_jpeg_variants.values()))
-                        + len(encoded)
-                        > _STREAM_JPEG_VARIANT_BYTE_LIMIT
-                    ):
-                        self._stream_jpeg_variants.pop(
-                            next(iter(self._stream_jpeg_variants))
-                        )
-                    self._stream_jpeg_variants[key] = encoded
-            return encoded
-        except Exception as exc:
-            self._logger.debug(
-                "共享 JPEG 转码失败 / Shared JPEG transcode failed: %s", exc
-            )
-            return None
-        finally:
-            self._stream_jpeg_tasks.pop(key, None)
-
-    async def get_stream_jpeg(self, snap: SharedFrame, quality: int) -> bytes | None:
-        """同帧同质量共享一次转码，断连不会取消其他消费者的编码。
-        Share one encode per frame/quality; a disconnect cannot cancel another consumer's work.
-        """
-        self._check_accepting_work()
-        quality = max(10, min(100, int(quality)))
-        if quality == self.preview_jpeg_quality:
-            return snap.jpeg_frame
-        key = (snap.frame_id, quality)
-        with self._frame_lock:
-            encoded = self._stream_jpeg_variants.get(key)
-        if encoded is not None:
-            return encoded
-        task = self._stream_jpeg_tasks.get(key)
-        if task is None:
-            task = self._spawn_background(
-                self._encode_and_cache_stream_jpeg(snap, quality)
-            )
-            self._stream_jpeg_tasks[key] = task
-        return await asyncio.shield(task)
-
-    async def encode_image(
-        self, raw_frame: Any, image_format: str = "jpeg", quality: int = 75
-    ) -> bytes | None:
-        """非预览编码也由同一线程池收尾 / Drain non-preview encodes through the same owned pool."""
-        self._check_accepting_work()
-        encoded: bytes | None = await self._run_worker(
-            self._jpeg_executor, self.encode_frame, raw_frame, image_format, quality
-        )
-        return encoded
-
-    @staticmethod
-    def encode_frame(
-        raw_frame: Any, image_format: str = "jpeg", quality: int = 75
-    ) -> bytes | None:
-        """将原始帧编码为图像字节 / Encode raw frame to image bytes."""
-        try:
-            if image_format.lower() == "png":
-                return OpenCVEncoder().encode_png(raw_frame, source_format="RGB888")
-            encoded = create_preview_encoder("auto").encode_jpeg(
-                raw_frame,
-                quality=int(max(10, min(100, quality))),
-                source_format="RGB888",
-            )
-            return encoded.data if encoded is not None else None
-        except Exception:
-            return None
-
     def update_runtime_overrides(self, updates: dict[str, Any]) -> None:
         """更新运行时覆盖参数（不落盘）/ Update runtime overrides (memory only)."""
         self._runtime_overrides.update(updates)
-
-    def set_preview_fps(self, fps: int) -> int:
-        """独立更新共享预览帧率 / Independently update shared preview FPS."""
-        self._target_fps = max(1, min(30, int(fps)))
-        return self._target_fps
-
-    @staticmethod
-    def _rate(values: deque[float], window_sec: float = 3.0) -> float:
-        now = time.monotonic()
-        recent = [v for v in values if now - v <= window_sec]
-        if len(recent) < 2:
-            return 0.0
-        span = recent[-1] - recent[0]
-        return 0.0 if span <= 0 else (len(recent) - 1) / span
-
-    async def stream_metrics(self) -> dict[str, Any]:
-        """返回预览运行指标 / Return preview runtime metrics."""
-        cam = self._camera
-        info: dict[str, Any] = {}
-        if cam is not None:
-            info = await asyncio.to_thread(cam.get_camera_info)
-        actual_capture_fps = self._rate(self._capture_timestamps)
-        actual_preview_fps = self._rate(self._jpeg_timestamps)
-        sensor_target_fps = float(info.get("fps", 0) or 0)
-        exposure_us = int(
-            info.get("actual_exposure_us", info.get("exposure_us", 0)) or 0
-        )
-        frame_duration_us = int(info.get("frame_duration_us", 0) or 0)
-        preview_target_fps = float(self.preview_target_fps)
-        effective_target_fps = (
-            min(sensor_target_fps, preview_target_fps)
-            if sensor_target_fps > 0
-            else preview_target_fps
-        )
-        throttle_reason = None
-        if actual_capture_fps > 0 and actual_capture_fps < effective_target_fps * 0.75:
-            # 按有效预览目标核对真实曝光/周期，不把主动限帧误报为处理瓶颈。
-            # Check duration against the effective target; intentional pacing is not a processing limit.
-            long_frame = max(exposure_us, frame_duration_us) > (
-                1_000_000.0 / (effective_target_fps * 0.75)
-            )
-            throttle_reason = (
-                "auto_exposure_long"
-                if bool(info.get("auto_exposure")) and long_frame
-                else "processing_limit"
-            )
-        elif actual_capture_fps > 0 and preview_target_fps < sensor_target_fps:
-            throttle_reason = "preview_rate_limit"
-        with self._frame_lock:
-            read_times = list(self._camera_read_ms)
-            variant_bytes = sum(map(len, self._stream_jpeg_variants.values()))
-        memory = self._memory_metrics()
-        return {
-            "sensor_target_fps": sensor_target_fps,
-            "preview_target_fps": int(self._target_fps),
-            "actual_capture_fps": round(actual_capture_fps, 2),
-            "actual_preview_fps": round(actual_preview_fps, 2),
-            "actual_exposure_us": exposure_us,
-            "frame_duration_us": frame_duration_us,
-            "preview_consumers": int(self._preview_consumers),
-            "analysis_consumers": int(self._analysis_consumers),
-            "recording_consumers": int(self._recording_consumers),
-            "jpeg_average_encode_ms": (
-                round(sum(self._jpeg_encode_ms) / len(self._jpeg_encode_ms), 2)
-                if self._jpeg_encode_ms
-                else 0.0
-            ),
-            "jpeg_cached_bytes": len(self._latest_jpeg or b""),
-            "camera_read_average_ms": (
-                round(sum(read_times) / len(read_times), 2) if read_times else 0.0
-            ),
-            "jpeg_variant_average_encode_ms": (
-                round(
-                    sum(self._jpeg_variant_encode_ms)
-                    / len(self._jpeg_variant_encode_ms),
-                    2,
-                )
-                if self._jpeg_variant_encode_ms
-                else 0.0
-            ),
-            "jpeg_variant_cached_bytes": variant_bytes,
-            "preview_encoder": self._last_jpeg_encoder,
-            "preview_encoder_requested": self._preview_encoder_requested,
-            "preview_pipeline_enabled": self._preview_pipeline_enabled,
-            "hardware_encoder_error": getattr(self._preview_encoder, "error", None),
-            "jpeg_encode_failures": int(self._jpeg_encode_failures),
-            "jpeg_source_format": self._last_jpeg_source_format,
-            "camera_driver": str(info.get("driver", "")),
-            "camera_backend": str(info.get("backend", "")),
-            "lores_enabled": bool(info.get("lores_enabled", False)),
-            "lores_available": bool(info.get("lores_available", False)),
-            "lores_width": int(info.get("lores_width", 0) or 0),
-            "lores_height": int(info.get("lores_height", 0) or 0),
-            "lores_format": str(info.get("lores_format", "")),
-            "throttle_reason": throttle_reason,
-            **memory,
-        }
-
-    @staticmethod
-    def _memory_metrics() -> dict[str, int]:
-        """读取轻量进程与CMA指标 / Read lightweight process and CMA metrics."""
-        rss_kb = 0
-        swap_kb = 0
-        cma_free_kb = 0
-        try:
-            with open(f"/proc/{os.getpid()}/status", encoding="utf-8") as status_file:
-                for line in status_file:
-                    if line.startswith("VmRSS:"):
-                        rss_kb = int(line.split()[1])
-                    elif line.startswith("VmSwap:"):
-                        swap_kb = int(line.split()[1])
-        except (OSError, ValueError, IndexError):
-            pass
-        try:
-            with open("/proc/meminfo", encoding="utf-8") as meminfo_file:
-                for line in meminfo_file:
-                    if line.startswith("CmaFree:"):
-                        cma_free_kb = int(line.split()[1])
-                        break
-        except (OSError, ValueError, IndexError):
-            pass
-        return {
-            "process_rss_kb": rss_kb,
-            "process_swap_kb": swap_kb,
-            "cma_free_kb": cma_free_kb,
-        }
 
     def get_runtime_overrides(self) -> dict[str, Any]:
         """读取运行时覆盖参数 / Read runtime overrides."""
@@ -1648,10 +731,80 @@ class CameraManager:
         """清空运行时覆盖参数 / Clear runtime overrides."""
         self._runtime_overrides.clear()
 
+    @property
+    def preview_jpeg_quality(self) -> int:
+        """共享预览编码质量 / Shared preview encoding quality."""
+        return self._frames.preview_jpeg_quality
+
+    @property
+    def preview_target_fps(self) -> int:
+        """共享预览目标帧率 / Shared preview target frame rate."""
+        return self._frames.preview_target_fps
+
+    async def get_preview_frame(
+        self, since_id: int | None = None, wait_timeout_sec: float = 0.8
+    ) -> tuple[int, SharedFrame | None]:
+        """取得设备后读取共享预览 / Acquire the device before reading shared preview."""
+        await self.ensure_started(start_grabber=True)
+        return await self._frames.get_preview_frame(since_id, wait_timeout_sec)
+
+    async def get_raw_frame(self) -> tuple[Any, int, float]:
+        """直读期间保持分析占用 / Hold analysis ownership during direct capture."""
+        self._ownership.acquire("analysis")
+        try:
+            await self.ensure_started()
+            return await self._frames.get_raw_frame()
+        finally:
+            self._ownership.release("analysis")
+            self._schedule_idle_shutdown()
+
+    async def reset_temporal_history(self, camera: Any) -> bool:
+        """时间域重置仍使用共享帧身份屏障 / Temporal reset preserves the shared frame identity barrier."""
+        return await self._frames.reset_temporal_history(camera)
+
+    def get_current_capture_sequence(self) -> int:
+        """只读取序号，不触发抓帧 / Read sequence without capturing."""
+        return self._frames.get_current_capture_sequence()
+
+    async def get_cached_frame_snapshot(self) -> SharedFrame | None:
+        """读取缓存，不唤醒相机 / Read cache without waking the camera."""
+        return await self._frames.get_cached_frame_snapshot()
+
+    async def get_stream_jpeg(self, snap: SharedFrame, quality: int) -> bytes | None:
+        """同帧质量变体仍由同一流水线编码 / Encode same-frame variants in one pipeline."""
+        return await self._frames.get_stream_jpeg(snap, quality)
+
+    async def encode_image(
+        self, raw_frame: Any, image_format: str = "jpeg", quality: int = 75
+    ) -> bytes | None:
+        """非预览编码同样受统一资源管理 / Non-preview encoding shares resource ownership."""
+        return await self._frames.encode_image(raw_frame, image_format, quality)
+
+    @staticmethod
+    def encode_frame(
+        raw_frame: Any, image_format: str = "jpeg", quality: int = 75
+    ) -> bytes | None:
+        """兼容纯图像编码入口 / Preserve the pure image encoding entry."""
+        return CameraFramePipeline.encode_frame(raw_frame, image_format, quality)
+
+    def set_preview_fps(self, fps: int) -> int:
+        """设置流水线节奏 / Set pipeline pacing."""
+        return self._frames.set_preview_fps(fps)
+
+    async def stream_metrics(self) -> dict[str, Any]:
+        """组合占用与流水线遥测 / Compose ownership and pipeline telemetry."""
+        return await self._frames.stream_metrics(
+            {
+                "preview_consumers": self._ownership.counts["preview"],
+                "analysis_consumers": self._ownership.counts["analysis"],
+                "recording_consumers": self._ownership.counts["recording"],
+            }
+        )
+
 
 _camera_manager = CameraManager()
 
 
 def get_camera_manager() -> CameraManager:
-    """获取全局相机管理器 / Get global camera manager."""
+    """获取同一设备协调器 / Get the shared device coordinator."""
     return _camera_manager

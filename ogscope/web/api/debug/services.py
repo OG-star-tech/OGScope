@@ -19,12 +19,9 @@ from ogscope.application.camera import (
     get_camera_control,
 )
 from ogscope.application.camera_control import i18n_payload
-from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
+from ogscope.domain.camera.media import CameraMediaCatalog
 from ogscope.domain.shared.filesystem import (
     DEV_CAPTURES_DIR,
-    IMAGE_EXTENSIONS,
-    VIDEO_EXTENSIONS,
-    dev_captures_storage_info,
     ensure_safe_basename,
 )
 
@@ -303,9 +300,9 @@ class DebugCameraService:
     @staticmethod
     async def get_preview(since_frame_id: int | None = None):
         """兼容入口复用预览 HTTP 适配 / Reuse preview HTTP adaptation from the compatibility entry."""
-        from ogscope.domain.camera.services import camera_domain_service
+        from ogscope.web.camera_http import camera_http_service
 
-        return await camera_domain_service.get_preview(since_frame_id=since_frame_id)
+        return await camera_http_service.get_preview(since_frame_id=since_frame_id)
 
     @staticmethod
     async def get_stream_frame_bytes(
@@ -1071,36 +1068,8 @@ class DebugFileService:
 
     @staticmethod
     async def get_files():
-        """获取拍摄文件列表 / Get shooting file list"""
-        try:
-            files = []
-            for file_path in DEBUG_CAPTURES_DIR.iterdir():
-                if file_path.is_file():
-                    suffix = file_path.suffix.lower()
-                    if suffix in IMAGE_EXTENSIONS or suffix in VIDEO_EXTENSIONS:
-                        files.append(
-                            {
-                                "name": file_path.name,
-                                "size": file_path.stat().st_size,
-                                "modified": datetime.fromtimestamp(
-                                    file_path.stat().st_mtime
-                                ).isoformat(),
-                                "type": (
-                                    "image" if suffix in IMAGE_EXTENSIONS else "video"
-                                ),
-                            }
-                        )
-
-            # 按修改时间排序（最新的在前） / Sort by modification time (newest first)
-            files.sort(key=lambda x: x["modified"], reverse=True)
-
-            return {
-                "files": files,
-                "storage": dev_captures_storage_info(DEBUG_CAPTURES_DIR),
-            }
-
-        except Exception as e:
-            raise Exception(f"获取文件列表失败: {str(e)}")
+        """Core 与 Dev 读取同一媒体目录规则 / Core and Dev share media catalog rules."""
+        return await CameraMediaCatalog(DEBUG_CAPTURES_DIR).get_files()
 
     @staticmethod
     async def create_export_archive() -> tuple[Path, str]:
@@ -1109,38 +1078,8 @@ class DebugFileService:
 
     @staticmethod
     async def get_file_info(filename: str):
-        """获取文件信息 / Get file information"""
-        safe_name = ensure_safe_basename(filename)
-        file_path = DEBUG_CAPTURES_DIR / safe_name
-        info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
-
-        if not file_path.exists():
-            raise Exception("文件不存在")
-
-        try:
-            suffix = file_path.suffix.lower()
-            file_type = "image" if suffix in IMAGE_EXTENSIONS else "video"
-
-            info = {
-                "filename": filename,
-                "size": file_path.stat().st_size,
-                "modified": datetime.fromtimestamp(
-                    file_path.stat().st_mtime
-                ).isoformat(),
-                "type": file_type,
-            }
-
-            # 读取拍摄信息；将 camera 内字段展开到顶层以兼容前端详情 / Read sidecar; flatten camera for UI
-            if info_path.exists():
-                with open(info_path, encoding="utf-8") as f:
-                    capture_info = json.load(f)
-                    if isinstance(capture_info, dict):
-                        merge_capture_sidecar_into_info(info, capture_info)
-
-            return info
-
-        except Exception as e:
-            raise Exception(f"获取文件信息失败: {str(e)}")
+        """读取共享媒体元数据 / Read shared media metadata."""
+        return await CameraMediaCatalog(DEBUG_CAPTURES_DIR).get_file_info(filename)
 
     @staticmethod
     async def delete_file(filename: str):

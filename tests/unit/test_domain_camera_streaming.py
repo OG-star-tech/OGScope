@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from ogscope.domain.camera import streaming as streaming_mod
 from ogscope.domain.camera.stream_limiter import MjpegStreamLimiter
+from ogscope.web import camera_streaming as streaming_mod
 
 
 class _FakeRequest:

@@ -451,10 +451,10 @@ def test_invalid_isp_parameters_are_rejected_before_native_controls(monkeypatch)
 @pytest.mark.asyncio
 async def test_preview_overlap_is_bounded_and_cancel_drains_workers():
     manager = CameraManager()
-    manager._preview_pipeline_enabled = True
-    manager._target_fps = 30
-    manager._jpeg_encode_ms.append(40)
-    manager._camera_read_ms.append(20)
+    manager._frames._preview_pipeline_enabled = True
+    manager._frames._target_fps = 30
+    manager._frames._jpeg_encode_ms.append(40)
+    manager._frames._camera_read_ms.append(20)
     encoding_started, release_encoding, second_read = Event(), Event(), Event()
     reads = []
 
@@ -469,27 +469,27 @@ async def test_preview_overlap_is_bounded_and_cancel_drains_workers():
         assert release_encoding.wait(2)
         return EncodedImage(bytes([int(frame[0, 0, 0])]), "test", "RGB888")
 
-    manager._read_frame_sync = read
-    manager._encode_preview_jpeg_sync = encode
-    manager._grabber_task = asyncio.create_task(manager._grabber_loop())
+    manager._frames._read_frame_sync = read
+    manager._frames._encode_preview_jpeg_sync = encode
+    manager._frames._grabber_task = asyncio.create_task(manager._frames._grabber_loop())
     try:
         assert await asyncio.to_thread(encoding_started.wait, 1)
         assert await asyncio.to_thread(second_read.wait, 1)
         assert reads == [1, 2]
-        stopped = asyncio.create_task(manager._stop_grabber_locked())
+        stopped = asyncio.create_task(manager._frames.stop())
         await asyncio.sleep(0)
         release_encoding.set()
         assert await stopped
-        assert manager._inflight_read_future is None
-        assert manager._inflight_encode_future is None
-        assert manager._latest_jpeg is None
+        assert manager._frames._inflight_read_future is None
+        assert manager._frames._inflight_encode_future is None
+        assert manager._frames._latest_jpeg is None
         assert reads == [1, 2]
     finally:
         release_encoding.set()
-        if manager._grabber_task:
-            await manager._stop_grabber_locked()
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        if manager._frames._grabber_task:
+            await manager._frames.stop()
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)
 
 
 def test_experimental_acceleration_defaults_are_off_and_invalid_policy_rejected():
@@ -521,12 +521,12 @@ async def test_preview_failure_drains_prefetch_before_camera_close(monkeypatch):
         return True, False
 
     async def fail_from_grabber():
-        manager._grabber_task = asyncio.current_task()
+        manager._frames._grabber_task = asyncio.current_task()
         await manager._invalidate_camera_locked("failed preview")
 
     monkeypatch.setattr(manager, "_run_lifecycle_step_locked", lifecycle_step)
-    manager._inflight_read_future = asyncio.get_running_loop().run_in_executor(
-        manager._capture_executor, read
+    manager._frames._inflight_read_future = asyncio.get_running_loop().run_in_executor(
+        manager._resources.capture_executor, read
     )
     try:
         assert await asyncio.to_thread(reading.wait, 1)
@@ -536,9 +536,9 @@ async def test_preview_failure_drains_prefetch_before_camera_close(monkeypatch):
         release.set()
         await invalidating
         assert lifecycle == ["stop", "close"]
-        assert manager._inflight_read_future is None
-        assert manager._grabber_task is None
+        assert manager._frames._inflight_read_future is None
+        assert manager._frames._grabber_task is None
     finally:
         release.set()
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)

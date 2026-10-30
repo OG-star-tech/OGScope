@@ -52,15 +52,15 @@ async def runtime_manager():
     manager = CameraManager()
     camera = Camera()
     manager.attach_camera_instance(camera)
-    manager._last_capture_success_mono = time.monotonic()
+    manager._frames.health.last_success_mono = time.monotonic()
     manager._idle_shutdown_sec = 120
     try:
         yield manager, camera
     finally:
-        if not manager._executors_closed:
+        if not manager._resources.executors_closed:
             await manager.shutdown()
-        manager._capture_executor.shutdown(wait=True)
-        manager._jpeg_executor.shutdown(wait=True)
+        manager._resources.capture_executor.shutdown(wait=True)
+        manager._resources.jpeg_executor.shutdown(wait=True)
 
 
 @pytest.mark.asyncio
@@ -83,8 +83,8 @@ async def test_stop_remains_reusable_but_terminal_close_is_idempotent(
     assert second.events == ["stop", "close"]
     assert manager.get_camera_instance() is None
     assert manager.lifecycle_status()["operation_consumers"] == 0
-    assert not manager._background_tasks
-    assert not manager._worker_futures
+    assert not manager._resources.background_tasks
+    assert not manager._resources.worker_futures
     for operation in (
         manager.ensure_started,
         manager.acquire_preview_consumer,
@@ -123,11 +123,11 @@ async def test_cancelled_request_keeps_native_work_until_shutdown_drains(
         monkeypatch.setattr(camera, "get_video_frame", blocked)
         request = asyncio.create_task(manager.get_raw_frame())
     elif work == "variant":
-        monkeypatch.setattr(manager, "_encode_stream_jpeg_sync", blocked)
+        monkeypatch.setattr(manager._frames, "_encode_stream_jpeg_sync", blocked)
         snap = SharedFrame(1, 0, None, b"jpeg", 4, 4)
         request = asyncio.create_task(manager.get_stream_jpeg(snap, 42))
     else:
-        monkeypatch.setattr(manager, "encode_frame", blocked)
+        monkeypatch.setattr(manager._frames, "encode_frame", blocked)
         request = asyncio.create_task(manager.encode_image(None, "png"))
     try:
         assert await asyncio.to_thread(entered.wait, 1)
@@ -138,12 +138,12 @@ async def test_cancelled_request_keeps_native_work_until_shutdown_drains(
         await asyncio.sleep(0.02)
         assert not closing.done()
         assert "close" not in camera.events
-        assert any(not future.done() for future in manager._worker_futures)
+        assert any(not future.done() for future in manager._resources.worker_futures)
         release.set()
         await closing
         assert camera.events == ["worker-done", "stop", "close"]
-        assert not manager._worker_futures
-        assert not manager._background_tasks
+        assert not manager._resources.worker_futures
+        assert not manager._resources.background_tasks
     finally:
         release.set()
 
@@ -210,7 +210,7 @@ async def test_terminal_timeout_retains_handle_and_never_claims_release(
         assert manager._restart_required
         assert camera.events == []
         release.set()
-        await asyncio.gather(*manager._worker_futures)
+        await asyncio.gather(*manager._resources.worker_futures)
         with pytest.raises(RuntimeError, match="incomplete"):
             await manager.shutdown()
         assert camera.events == []
@@ -261,7 +261,7 @@ async def test_shutdown_joins_late_warmup_handle_without_starting_capture(
         assert "start" not in camera.events
         assert camera.events[-1] == "close"
         assert manager.get_camera_instance() is None
-        assert not manager._background_tasks
+        assert not manager._resources.background_tasks
     finally:
         release.set()
 
@@ -413,8 +413,8 @@ async def test_terminal_shutdown_drains_active_preview_and_lease_timer(runtime_m
     await manager.shutdown()
     assert camera.events == ["stop", "close"]
     assert manager.lifecycle_status()["preview_consumers"] == 0
-    assert not manager._background_tasks
-    assert not manager._worker_futures
+    assert not manager._resources.background_tasks
+    assert not manager._resources.worker_futures
 
 
 @pytest.mark.asyncio
@@ -437,7 +437,7 @@ async def test_warmup_timeout_quarantines_handle_arriving_after_shutdown(
         with pytest.raises(RuntimeError, match="incomplete"):
             await manager.shutdown(timeout_sec=0.05)
         release.set()
-        await asyncio.gather(*manager._worker_futures)
+        await asyncio.gather(*manager._resources.worker_futures)
         assert manager.get_camera_instance() is camera
         assert manager._restart_required
         assert camera.events == []
