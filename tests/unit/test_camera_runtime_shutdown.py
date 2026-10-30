@@ -179,9 +179,13 @@ async def test_cancelling_shutdown_waiter_does_not_interrupt_native_close(
 
 @pytest.mark.asyncio
 async def test_terminal_timeout_retains_handle_and_never_claims_release(
-    runtime_manager, monkeypatch, caplog
+    runtime_manager, monkeypatch
 ):
     manager, camera = runtime_manager
+    from ogscope.application import camera_manager as implementation
+
+    receipt = Mock()
+    monkeypatch.setattr(implementation, "event_logger", SimpleNamespace(info=receipt))
     entered, release = threading.Event(), threading.Event()
 
     def blocked_read():
@@ -197,10 +201,11 @@ async def test_terminal_timeout_retains_handle_and_never_claims_release(
         with pytest.raises(asyncio.CancelledError):
             await request
         started = time.monotonic()
-        with caplog.at_level("INFO"), pytest.raises(RuntimeError, match="incomplete"):
+        with pytest.raises(RuntimeError, match="incomplete"):
             await manager.shutdown(timeout_sec=0.05)
         assert time.monotonic() - started < 0.5
-        assert "released=False" in caplog.text
+        assert receipt.call_args.args[1] is False
+        assert receipt.call_args.args[2] == 1
         assert manager.get_camera_instance() is camera
         assert manager._restart_required
         assert camera.events == []

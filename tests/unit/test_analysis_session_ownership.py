@@ -173,3 +173,17 @@ async def test_start_exception_does_not_leave_a_phantom_busy_session(
     monkeypatch.setattr(service, "_start_locked", original)
     assert (await service.start(owner_token="b"))["success"]
     await service.stop(force=True)
+
+
+def test_stopped_watchdog_from_closed_loop_does_not_break_stop(service):
+    """已结束的监护任务无需跨循环等待 / A finished watchdog needs no cross-loop join."""
+
+    async def create_finished_watchdog():
+        task = asyncio.create_task(asyncio.sleep(60))
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        service._ownership_watchdog = task
+
+    asyncio.run(create_finished_watchdog())
+    assert asyncio.run(service.stop(force=True))["success"]
+    assert service._ownership_watchdog is None

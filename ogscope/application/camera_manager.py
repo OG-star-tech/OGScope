@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable
 
+from loguru import logger as event_logger
+
 from ogscope.config import get_settings
 from ogscope.domain.camera.encoding import (
     EncodedImage,
@@ -273,8 +275,9 @@ class CameraManager:
             self._executors_closed = True
             self._capture_executor.shutdown(wait=False, cancel_futures=True)
             self._jpeg_executor.shutdown(wait=False, cancel_futures=True)
-            self._logger.info(
-                "camera_runtime_shutdown released=%s pending_workers=%s pending_tasks=%s",
+            # 退出回执使用产品日志通道，默认非开发模式也必须可见 / Emit receipts through product logging, including non-development mode.
+            event_logger.info(
+                "camera_runtime_shutdown released={} pending_workers={} pending_tasks={}",
                 self._shutdown_complete,
                 sum(not future.done() for future in self._worker_futures),
                 sum(not task.done() for task in self._background_tasks),
@@ -676,6 +679,7 @@ class CameraManager:
 
     async def _expire_operation_leases(self) -> None:
         """A disconnected owner cannot keep hardware awake forever / 失联持有者不能永久阻止休眠。"""
+        current = asyncio.current_task()
         try:
             while self._operation_leases:
                 await asyncio.sleep(
@@ -689,7 +693,7 @@ class CameraManager:
                 }
                 self._schedule_idle_shutdown()
         finally:
-            if self._lease_expiry_task is asyncio.current_task():
+            if self._lease_expiry_task is current:
                 self._lease_expiry_task = None
 
     def lifecycle_status(self) -> dict[str, Any]:
@@ -719,6 +723,7 @@ class CameraManager:
 
     async def _idle_shutdown_after_delay(self) -> None:
         """热驻留结束后释放相机 / Release camera after the warm-idle period."""
+        current = asyncio.current_task()
         try:
             if self._idle_shutdown_sec > 0:
                 await asyncio.sleep(self._idle_shutdown_sec)
@@ -727,7 +732,7 @@ class CameraManager:
         except asyncio.CancelledError:
             raise
         finally:
-            if asyncio.current_task() is self._idle_shutdown_task:
+            if current is self._idle_shutdown_task:
                 self._idle_shutdown_task = None
 
     async def stop(self, *, force: bool = False) -> None:
