@@ -68,7 +68,6 @@ class CameraManager:
             read_lock=self._read_lock,
             readiness=self.analysis_readiness,
             check_accepting_work=self._check_accepting_work,
-            is_closing=lambda: self._shutting_down,
             quarantine=self._mark_restart_required,
             invalidate=self._invalidate_from_pipeline,
         )
@@ -290,7 +289,9 @@ class CameraManager:
                     raise RuntimeError(self._health_error)
             if not getattr(self._camera, "is_capturing", False):
                 self.analysis_readiness.reset()
-                ok = await self._resources.run(None, self._camera.start_capture)
+                ok = await self._run_startup_step(
+                    "start", self._call_with_read_lock, self._camera.start_capture
+                )
                 self._check_accepting_work()
                 if not ok:
                     await self._invalidate_camera_locked(
@@ -308,8 +309,8 @@ class CameraManager:
                     )
                 ),
             )
-            probe_ok = await self._resources.run(
-                None, self._probe_stream_health_sync, probe_budget
+            probe_ok = await self._run_startup_step(
+                "probe", self._probe_stream_health_sync, probe_budget
             )
             self._check_accepting_work()
             if not probe_ok:
@@ -322,6 +323,17 @@ class CameraManager:
             if start_grabber:
                 await self._frames.start()
         self._schedule_idle_shutdown()
+
+    async def _run_startup_step(self, operation: str, fn: Callable, *args: Any) -> Any:
+        """取消启动等待后隔离句柄，原生工作仍由回执跟踪 / Fence cancelled startup while preserving its native completion receipt."""
+        try:
+            return await self._resources.run(None, fn, *args)
+        except asyncio.CancelledError:
+            self._mark_restart_required(
+                f"相机启动等待取消（{operation}），需要重启服务 / "
+                f"Camera startup wait cancelled ({operation}); service restart required"
+            )
+            raise
 
     async def acquire_preview_consumer(self) -> None:
         """注册预览消费者并启动共享编码 / Register a preview consumer."""
@@ -601,6 +613,13 @@ class CameraManager:
                 self._mark_restart_required(
                     f"相机重配置超时（{operation_name}），需要重启服务 / "
                     f"Camera reconfiguration timed out ({operation_name}); service restart required"
+                )
+                raise
+            except asyncio.CancelledError:
+                # 改参线程仍可能持有设备，不在 finally 中恢复抓帧 / Native reconfiguration may still own the device; do not resume capture.
+                self._mark_restart_required(
+                    f"相机重配置等待取消（{operation_name}），需要重启服务 / "
+                    f"Camera reconfiguration wait cancelled ({operation_name}); service restart required"
                 )
                 raise
             finally:
