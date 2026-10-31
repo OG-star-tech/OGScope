@@ -1,0 +1,33 @@
+name: Project independence
+
+on:
+  push:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  project-independence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 检查文件、提交与 PR 边界 / Check files, commits and PR metadata
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          args=(--event-file "$GITHUB_EVENT_PATH")
+          if [[ -n "${BASE_SHA}" && "${BASE_SHA}" != 0000000000000000000000000000000000000000 ]] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            args+=(--commit-range "${BASE_SHA}..HEAD")
+          else
+            args+=(--commit-range HEAD)
+          fi
+          python scripts/check_project_independence.py "${args[@]}"
