@@ -48,10 +48,13 @@ def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
     if row.get("frame") == "date":
         return None
 
-    # 北天极近似目标：RA 与当前中心相同，Dec=+90，减少 RA wrap 影响
-    # Approximate north celestial pole target with same RA and Dec=+90.
+    # 会话指定天极；旧客户端缺省仍使用北天极，不从画面推断。
+    # Select the session's pole; legacy callers default north, never infer from the image.
+    pole = row.get("target_pole", "north")
+    if pole not in ("north", "south"):
+        return None
     target_ra = ra_center
-    target_dec = 90.0
+    target_dec = -90.0 if pole == "south" else 90.0
     d_ra = target_ra - ra_center
     while d_ra > 180.0:
         d_ra -= 360.0
@@ -86,7 +89,7 @@ def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
     angular_sep_deg = math.degrees(math.acos(cos_ang))
 
     return {
-        "target_kind": "north_celestial_pole",
+        "target_kind": f"{pole}_celestial_pole",
         "target_frame": "catalog_j2000",
         "target_policy": "catalog_visual_v1",
         "corrections": {

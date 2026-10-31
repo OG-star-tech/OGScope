@@ -464,6 +464,7 @@ class CoreStartAnalysisRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    target_pole: Literal["north", "south"] = "north"
     hint_ra_deg: Optional[float] = None
     hint_dec_deg: Optional[float] = None
     fov_estimate: Optional[float] = None
@@ -490,6 +491,7 @@ class CoreAnalysisControlResponse(BaseModel):
     message: str = ""
     camera_preparation_supported: bool = False
     ownership_supported: bool = False
+    target_pole: Optional[Literal["north", "south"]] = None
     error_code: Optional[str] = None
 
 
