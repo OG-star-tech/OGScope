@@ -49,3 +49,10 @@ repos:
         language: system
         always_run: true
         stages: [commit-msg]
+      - id: project-independence-push
+        name: 推送历史独立性检查 / Push history independence
+        entry: python3 scripts/check_project_independence.py --commit-range HEAD
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
