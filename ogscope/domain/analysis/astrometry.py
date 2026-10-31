@@ -33,10 +33,10 @@ class RefractionOptions(BaseModel):
             self.pressure_hpa is None or self.temperature_c is None
         ):
             raise ValueError("Measured refraction requires pressure and temperature")
-        if self.mode != "measured" and (
-            self.pressure_hpa is not None or self.temperature_c is not None
-        ):
-            raise ValueError("Environmental measurements require measured mode")
+        if self.mode != "measured" and self.pressure_hpa is not None:
+            raise ValueError("Pressure measurements require measured mode")
+        if self.mode == "off" and self.temperature_c is not None:
+            raise ValueError("Temperature requires enabled refraction")
         return self
 
 
@@ -198,20 +198,24 @@ def _pixel_target(
     return width / 2 + float(delta[0]), height / 2 + float(delta[1])
 
 
-def _site(context: dict[str, Any]) -> dict[str, float] | None:
+def _site(context: dict[str, Any]) -> dict[str, float | None] | None:
     observer = context.get("observer") or {}
     if observer.get("latitude_deg") is None or observer.get("longitude_deg") is None:
         return None
     lat, lon, alt = (
         float(observer["latitude_deg"]),
         float(observer["longitude_deg"]),
-        float(observer.get("altitude_m") or 0),
+        (
+            float(observer["altitude_m"])
+            if observer.get("altitude_m") is not None
+            else None
+        ),
     )
     if (
-        not all(math.isfinite(v) for v in (lat, lon, alt))
+        not all(math.isfinite(v) for v in (lat, lon))
         or not -90 <= lat <= 90
         or not -180 <= lon <= 180
-        or not -500 <= alt <= 10000
+        or (alt is not None and (not math.isfinite(alt) or not -500 <= alt <= 10000))
     ):
         raise TargetUnavailable("observer_invalid")
     return {"latitude_deg": lat, "longitude_deg": lon, "altitude_m": alt}
@@ -260,6 +264,8 @@ def build_current_pole(
     ref = options.refraction
     if ref.mode != "off" and site is None:
         raise TargetUnavailable("refraction_requires_observer")
+    if ref.mode == "standard" and site["altitude_m"] is None:
+        raise TargetUnavailable("refraction_requires_altitude")
     pressure = (
         0.0
         if ref.mode == "off"
@@ -269,7 +275,7 @@ def build_current_pole(
             else 1013.25 * math.exp(-float(site["altitude_m"]) / 8434.5)
         )
     )
-    temperature = float(ref.temperature_c) if ref.mode == "measured" else 10.0
+    temperature = float(ref.temperature_c) if ref.temperature_c is not None else 10.0
     utc = erfa.dtf2d(
         "UTC",
         when.year,
@@ -286,7 +292,7 @@ def build_current_pole(
             0.0,
             math.radians(site["longitude_deg"]),
             math.radians(site["latitude_deg"]),
-            site["altitude_m"],
+            float(site["altitude_m"] or 0),
             0.0,
             0.0,
             pressure,
@@ -346,6 +352,20 @@ def build_current_pole(
         "refraction": {
             "mode": ref.mode,
             "pressure_hpa": pressure,
+            "pressure_source": (
+                "disabled"
+                if ref.mode == "off"
+                else "measured" if ref.mode == "measured" else "altitude_estimate"
+            ),
+            "temperature_source": (
+                "unused"
+                if ref.mode == "off"
+                else (
+                    "standard"
+                    if ref.temperature_c is None
+                    else "measured" if ref.mode == "measured" else "manual"
+                )
+            ),
             "temperature_c": temperature,
             "relative_humidity": ref.relative_humidity,
             "wavelength_um": ref.wavelength_um,
