@@ -39,6 +39,8 @@ Existing installation offsets and pole references lack astronomical provenance a
 
 Numerical references, independently generated star fields through the actual solver, consumer contract tests and physical mechanical-axis acceptance are separate verification layers. 标准数值、独立星图经真实解算器、消费方契约及实机机械极轴分别验收。
 
+See [reproducible pixel-loop acceptance](../testing/current-pole-virtual-acceptance.md) for the real Core/consumer state-machine test and its physical limits. 真实 Core 与消费方状态机的可复现图像闭环及物理边界见验收说明。
+
 ## Parallel integration / 并行集成
 
 OGScope #24 adds southern pole selection to the legacy guide. This change includes that additive selection contract and extends it to current-pole fits; reconcile #24 without restoring the legacy product default. OGScope #22 changes realtime capture scheduling: preserve its frame/time lifecycle and compute astronomy once per published solve. #24 的南北极选择与本次有重叠；#22 的采集生命周期须保留，禁止在读取结果时重算目标。
