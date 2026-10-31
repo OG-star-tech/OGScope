@@ -609,3 +609,29 @@ def test_core_openapi_contains_required_business_endpoints(client) -> None:
     }
     assert required.issubset(paths)
     assert all(path.startswith("/api/core/v1/") for path in paths)
+
+
+def test_current_policy_is_explicit_and_running_changes_conflict(client, monkeypatch):
+    """保留旧 v1，显式当前策略与冲突可验证 / Preserve v1 while making current policy and conflicts explicit."""
+    from ogscope.core.application import core_service
+    from ogscope.web.api.models.schemas import CoreStartAnalysisRequest
+
+    assert CoreStartAnalysisRequest().astronomy.policy == "catalog_visual_v1"
+    received = []
+
+    async def conflict(**kwargs):
+        received.append(kwargs)
+        return {
+            "success": False,
+            "session_id": "busy",
+            "error_code": "ANALYSIS_TARGET_CONFLICT",
+        }
+
+    monkeypatch.setattr(core_service.core_contract_service, "start_analysis", conflict)
+    response = client.post(
+        "/api/core/v1/analysis/start",
+        json={"target_pole": "south", "astronomy": {"policy": "current_pole_v1"}},
+    )
+    assert response.status_code == 409
+    assert received[0]["target_pole"] == "south"
+    assert received[0]["astronomy"].policy == "current_pole_v1"

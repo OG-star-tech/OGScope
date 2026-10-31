@@ -6,6 +6,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ogscope.domain.analysis.astrometry import AstronomyOptions
+
 
 class CameraSettings(BaseModel):
     """相机设置 / camera settings"""
@@ -248,6 +250,9 @@ class AnalysisSolveImageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input_name: str
+    target_pole: Literal["north", "south"] = "north"
+    astronomy: AstronomyOptions = Field(default_factory=AstronomyOptions)
+    observation_time_utc: Optional[str] = None
     hint_ra_deg: Optional[float] = None
     hint_dec_deg: Optional[float] = None
     fov_estimate: Optional[float] = None
@@ -399,6 +404,9 @@ class AnalysisSolveVideoFrameRequest(BaseModel):
 
     # 基本输入来源 / Basic input source
     source: Literal["camera", "file"]
+    target_pole: Literal["north", "south"] = "north"
+    astronomy: AstronomyOptions = Field(default_factory=AstronomyOptions)
+    observation_time_utc: Optional[str] = None
     input_name: Optional[str] = None
     frame_index: int = 0
     time_sec: Optional[float] = None
@@ -464,6 +472,12 @@ class CoreStartAnalysisRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    target_pole: Literal["north", "south"] = "north"
+    # 旧 v1 调用显式隔离；产品客户端必须请求当前策略 / Isolate old v1 calls; product clients request the current policy.
+    astronomy: AstronomyOptions = Field(
+        default_factory=lambda: AstronomyOptions(policy="catalog_visual_v1")
+    )
+
     hint_ra_deg: Optional[float] = None
     hint_dec_deg: Optional[float] = None
     fov_estimate: Optional[float] = None
@@ -491,6 +505,8 @@ class CoreAnalysisControlResponse(BaseModel):
     camera_preparation_supported: bool = False
     ownership_supported: bool = False
     error_code: Optional[str] = None
+    target_pole: Optional[Literal["north", "south"]] = None
+    astronomy: Optional[dict[str, Any]] = None
 
 
 class CoreAnalysisResultResponse(BaseModel):

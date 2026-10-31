@@ -42,6 +42,7 @@ import {
 import { drawSolveOverlay, drawSolveOverlayVideo, type SolveOverlay } from "@shared/drawOverlay";
 import { transcodeAviToMp4 } from "@shared/utils/transcode";
 import { useI18n } from "@shared/i18n/I18nProvider";
+import { AstronomySettings } from "./AstronomySettings";
 import { buildMetaCaptionRows } from "@shared/utils/metaCaption";
 import { formatDateTime, formatFileSize } from "@shared/utils/format";
 import {
@@ -2374,6 +2375,7 @@ export default function AnalysisLabApp() {
                     <ChevronDown className="h-4 w-4 shrink-0" />
                   </summary>
                   <div className="border-t border-outline-variant/15 p-3 pt-2">
+                    <AstronomySettings value={params} onChange={setParams} zh={locale === "zh"} />
                     <p className="mb-3 text-[10px] leading-relaxed text-on-surface-variant/90">
                       {t("params.blockSolveIntro")}
                     </p>

@@ -20,6 +20,13 @@ export type CentroidParams = {
 };
 
 export type SolveParams = {
+  target_pole?: "north" | "south";
+  observation_time_utc?: string;
+  astronomy?: {
+    policy?: "current_pole_v1" | "catalog_visual_v1";
+    refraction?: { mode: "off" | "standard" | "measured"; pressure_hpa?: number; temperature_c?: number; relative_humidity?: number; wavelength_um?: number };
+  };
+  solve_context?: { observer?: { latitude_deg?: number; longitude_deg?: number; altitude_m?: number; source?: string } };
   hint_ra_deg?: number | null;
   hint_dec_deg?: number | null;
   fov_estimate?: number | null;
