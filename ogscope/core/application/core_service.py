@@ -184,6 +184,7 @@ class CoreContractService:
     async def start_analysis(
         self,
         *,
+        target_pole: str = "north",
         hint_ra_deg: float | None = None,
         hint_dec_deg: float | None = None,
         fov_estimate: float | None = None,
@@ -198,6 +199,7 @@ class CoreContractService:
         )
         next_session_id = self._session.session_id if was_running else uuid.uuid4().hex
         result = await realtime_solve_service.start(
+            target_pole=target_pole,
             hint_ra_deg=hint_ra_deg,
             hint_dec_deg=hint_dec_deg,
             fov_estimate=fov_estimate,
@@ -218,13 +220,17 @@ class CoreContractService:
             "session_id": str(result.get("session_id") or self._session.session_id),
             "state": (
                 "running"
-                if success or was_running or result.get("error_code") == "ANALYSIS_BUSY"
+                if success
+                or was_running
+                or result.get("error_code")
+                in {"ANALYSIS_BUSY", "ANALYSIS_TARGET_CONFLICT"}
                 else "stopped"
             ),
             "error_code": result.get("error_code"),
             "ownership_supported": True,
             "message": result.get("message", ""),
             "camera_preparation_supported": True,
+            "target_pole": result.get("target_pole"),
         }
 
     async def get_analysis_result(

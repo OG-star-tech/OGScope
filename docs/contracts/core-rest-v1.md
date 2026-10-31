@@ -18,6 +18,7 @@
 
 - `POST /api/core/v1/analysis/start`
 - 请求体（可选）：
+  - `target_pole`：`north`（缺省，兼容旧客户端）或 `south`；由调用方选择并绑定分析会话，不能由解算赤纬推断。运行中换极返回 `success=false, error_code=ANALYSIS_TARGET_CONFLICT`，原会话继续运行；停止后重新启动才能更改。
   - `hint_ra_deg`
   - `hint_dec_deg`
   - `fov_estimate`
@@ -62,6 +63,8 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
 
 The successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation. 成功解算在投影数据有效时返回同一极轴目标。
+
+系统状态 `capabilities.polar_target_selection=true` 表示支持显式选择。启动响应回显 `target_pole`，每个解算结果也绑定该字段。引导的 `target_kind` 为 `north_celestial_pole` 或 `south_celestial_pole`，星库目标 Dec 分别为 +90° / −90°。调用方必须核对请求与响应的目标，未知能力或错极结果不得用于南天运动。半球扩展不改变星库坐标与精度口径，不声称当日真实极轴精度。
 
 - `target_policy=catalog_visual_v1`, `target_frame=catalog_j2000`: original catalog visual baseline; all `corrections` flags are false. 原始星库视觉基线，全部天文修正关闭。
 - `angular_sep_deg`: centre-to-target separation in degrees. 中心至目标的角距离（度）。
