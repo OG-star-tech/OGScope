@@ -145,3 +145,51 @@ async def test_lab_preparation_failure_never_calls_solver_and_releases_gate(
     color_solver.assert_not_called()
     manager.release_analysis_consumer.assert_awaited_once()
     analysis_service._leave_realtime_gate.assert_awaited_once_with("camera")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("clock_step", [0.0, 10.0])
+async def test_debug_exposure_metadata_is_frozen_before_slow_solve(
+    monkeypatch, color_solver, clock_step
+):
+    """解算期间的下一次曝光不得改变当前帧时刻 / Later exposure settings cannot retime the solved frame."""
+    from ogscope.core.realtime import realtime_solve_service
+    from ogscope.web.api.analysis import services
+
+    original_time = services.time.time
+    elapsed_step = [0.0]
+    monkeypatch.setattr(
+        services.time, "time", lambda: original_time() + elapsed_step[0]
+    )
+
+    monkeypatch.setattr(realtime_solve_service.state, "running", False)
+    monkeypatch.setattr(
+        "ogscope.web.api.debug.services.is_recording_active", lambda: False
+    )
+    info = {"actual_exposure_us": 1_000_000}
+    camera = SimpleNamespace(get_camera_info=lambda: info)
+    manager = SimpleNamespace(
+        get_raw_frame=AsyncMock(return_value=(_rgb_frame(), 7, 1_793_404_800.0)),
+        get_camera_instance=lambda: camera,
+        acquire_analysis_consumer=AsyncMock(),
+        release_analysis_consumer=AsyncMock(),
+    )
+    monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
+    monkeypatch.setattr(
+        "ogscope.domain.camera.readiness.wait_capture_ready", AsyncMock(return_value={})
+    )
+
+    def solve_while_camera_advances(*args, **kwargs):
+        info["actual_exposure_us"] = 9_000_000
+        elapsed_step[0] = clock_step
+        return {"status": "NO_MATCH"}
+
+    color_solver.side_effect = solve_while_camera_advances
+    result = await analysis_service.solve_video_frame(
+        AnalysisSolveVideoFrameRequest(source="camera")
+    )
+    assert result["result"]["capture_exposure_us"] == 1_000_000
+    assert result["result"]["observation_time_utc"] == "2026-10-30T23:59:59.500000Z"
+    assert result["result"].get("observation_time_error") == (
+        "acquisition_clock_changed" if clock_step else None
+    )

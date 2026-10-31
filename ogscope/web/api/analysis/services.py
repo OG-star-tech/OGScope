@@ -1369,6 +1369,8 @@ class AnalysisService:
                 - datetime.now(timezone.utc)
             ).total_seconds()
         t_total = time.perf_counter()
+        clock_anchor = (time.time(), time.monotonic())
+        capture_time: dict[str, Any] = {}
         t_open_decode_ms = None
         frame = None
         frame_id = None
@@ -1387,6 +1389,14 @@ class AnalysisService:
                 camera_preparation = await wait_capture_ready(manager)
                 t_decode = time.perf_counter()
                 frame, frame_id, frame_ts = await manager.get_raw_frame()
+                # 随取帧冻结曝光信息，禁止解算后读取下一帧参数 / Freeze exposure metadata with capture, before the camera advances during solving.
+                from ogscope.core.realtime.service import RealtimeSolveService
+
+                cam = manager.get_camera_instance()
+                info = cam.get_camera_info() if cam else {}
+                capture_time = RealtimeSolveService._capture_time_payload(
+                    frame_ts, info
+                )
                 t_open_decode_ms = (time.perf_counter() - t_decode) * 1000.0
             else:
                 if not body.input_name:
@@ -1451,12 +1461,14 @@ class AnalysisService:
                 timeout=hard_timeout_sec,
             )
             # 先绑定真实曝光时间，再计算目标 / Bind actual exposure time before computing the target.
-            if body.source == "camera" and frame_ts is not None:
-                from ogscope.core.realtime.service import RealtimeSolveService
-
-                cam = manager.get_camera_instance()
-                info = cam.get_camera_info() if cam else {}
-                row.update(RealtimeSolveService._capture_time_payload(frame_ts, info))
+            if body.source == "camera":
+                row.update(capture_time)
+                wall, mono = clock_anchor
+                if (
+                    row.get("observation_time_reference") != "source_utc"
+                    and abs((time.time() - wall) - (time.monotonic() - mono)) > 1.0
+                ):
+                    row["observation_time_error"] = "acquisition_clock_changed"
                 bind_exposure_time(row, clock_offset_s)
             # 二次分析与极轴引导 / Derived analysis and polar guide.
             self._attach_overlay_ext(
