@@ -313,3 +313,23 @@ def test_pole_vector_matches_sofa_iau2006_reference():
     # SOFA/ERFA t_xys06a at MJD(TT) 53736 / SOFA/ERFA 标准历元参考值。
     assert pole[0] == pytest.approx(0.5791308482835292617e-3, abs=1e-14)
     assert pole[1] == pytest.approx(0.4020580099454020310e-4, abs=1e-15)
+
+
+def test_unsynchronized_old_board_epoch_can_be_calibrated():
+    """校时前的板端日期仍可映射到真实曝光 UTC / Map a pre-sync board epoch to the trusted exposure UTC."""
+    from datetime import datetime, timezone
+
+    from ogscope.domain.analysis.astrometry import bind_exposure_time
+
+    target = datetime(2026, 10, 31, tzinfo=timezone.utc)
+    raw = {"observation_time_utc": "1970-01-01T00:00:00Z"}
+    bind_exposure_time(raw, target.timestamp())
+    assert raw["observation_time_utc"] == "2026-10-31T00:00:00Z"
+    row, context, _ = observed_field()
+    result = attach_polar_solution(
+        {**row, "observation_time_error": "acquisition_clock_changed"},
+        solve_context=context,
+    )
+    assert result["status"] == "MATCH_FOUND"
+    assert result["astronomy"]["reason"] == "acquisition_clock_changed"
+    assert "polar_guide" not in result["overlay_ext"]

@@ -134,3 +134,21 @@ def test_new_result_cannot_reuse_an_old_snapshot() -> None:
     service._apply_solve_result(_solve_result("NO_MATCH"), frame_id=8)
     assert service.get_solve_frame_snapshot() is None
     assert service.state.last_result["solve_frame"]["reason"] == "not_retained"
+
+
+def test_acquisition_clock_step_invalidates_target_but_preserves_match(monkeypatch):
+    """采集时钟跳变不伪造有效目标 / A capture-clock step cannot produce a valid target."""
+    from ogscope.core.realtime import service as realtime
+
+    service = RealtimeSolveService()
+    service._astrometry_clock_anchor = (100.0, 50.0)
+    monkeypatch.setattr(realtime.time, "time", lambda: 200.0)
+    monkeypatch.setattr(realtime.time, "monotonic", lambda: 51.0)
+    service._apply_solve_result(
+        _solve_result("MATCH_FOUND"),
+        capture_time={"observation_time_utc": "2026-10-31T00:00:00Z"},
+    )
+    assert service.state.last_result["status"] == "MATCH_FOUND"
+    assert (
+        service.state.last_result["astronomy"]["reason"] == "acquisition_clock_changed"
+    )
