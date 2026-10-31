@@ -20,6 +20,12 @@ from ogscope.algorithms.plate_solve import PlateSolver, SolveResult
 from ogscope.algorithms.plate_solve.sensor_context import attach_sensor_prediction
 from ogscope.algorithms.plate_solve.worker import run_solver_job
 from ogscope.config import effective_solver_max_stars, get_settings
+from ogscope.domain.analysis.astrometry import (
+    AstronomyOptions,
+    attach_polar_solution,
+    parse_utc,
+    plain_context,
+)
 from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.web.camera_shared import get_camera_manager
 
@@ -80,6 +86,9 @@ class RealtimeSolveService:
         self._fov_max_error: float | None = None
         self._solve_timeout_ms: int | None = None
         self._solve_context: Any | None = None
+        self._astronomy = AstronomyOptions()
+        self._astrometry_clock_offset_s = 0.0
+        self._astrometry_clock_anchor: tuple[float, float] | None = None
         self._snapshot_lock = threading.Lock()
         self._snapshot: SolveFrameSnapshot | None = None
         self._snapshot_encoder = create_preview_encoder(
@@ -182,7 +191,6 @@ class RealtimeSolveService:
 
     async def _start_locked(
         self,
-        target_pole: str = "north",
         hint_ra_deg: float | None = None,
         hint_dec_deg: float | None = None,
         fov_estimate: float | None = None,
@@ -190,14 +198,44 @@ class RealtimeSolveService:
         solve_timeout_ms: int | None = None,
         solve_context: Any | None = None,
         session_id: str | None = None,
+        target_pole: str = "north",
+        astronomy: Any | None = None,
     ) -> dict[str, Any]:
         """启动实时解算 / Start realtime solving"""
+        options = (
+            astronomy
+            if isinstance(astronomy, AstronomyOptions)
+            else AstronomyOptions.model_validate(astronomy or {})
+        )
+        context = plain_context(solve_context)
+        if target_pole not in {"north", "south"}:
+            raise ValueError("Unknown target pole")
         if self.state.running:
+
+            def observer(value):
+                return {
+                    k: v
+                    for k, v in (plain_context(value).get("observer") or {}).items()
+                    if k != "time_utc"
+                }
+
+            if (
+                target_pole != self.state.target_pole
+                or options != self._astronomy
+                or observer(context) != observer(self._solve_context)
+            ):
+                return {
+                    "success": False,
+                    "session_id": self.state.session_id,
+                    "error_code": "ANALYSIS_TARGET_CONFLICT",
+                    "message": "Stop before changing target policy or observer / 更改目标策略或地点前请停止分析",
+                }
             return {
                 "success": True,
                 "session_id": self.state.session_id,
                 "message": "实时解算已在运行 / Realtime solver already running",
                 "target_pole": self.state.target_pole,
+                "astronomy": self._astronomy.model_dump(),
             }
         if hint_ra_deg is not None:
             self._hint_ra = hint_ra_deg
@@ -206,7 +244,16 @@ class RealtimeSolveService:
         self._fov_estimate = fov_estimate
         self._fov_max_error = fov_max_error
         self._solve_timeout_ms = solve_timeout_ms
-        self._solve_context = solve_context
+        self._solve_context = context
+        self._astronomy = options
+        self._astrometry_clock_offset_s = 0.0
+        quality = context.get("quality") or {}
+        if quality.get("time_valid") is True and quality.get("time_fresh") is True:
+            trusted = parse_utc((context.get("observer") or {}).get("time_utc"))
+            self._astrometry_clock_offset_s = (
+                trusted - datetime.now(timezone.utc)
+            ).total_seconds()
+        self._astrometry_clock_anchor = (time.time(), time.monotonic())
         self.state = RealtimeState(
             running=True,
             session_id=str(session_id or uuid.uuid4().hex),
@@ -280,6 +327,7 @@ class RealtimeSolveService:
             "session_id": self.state.session_id,
             "message": "实时解算已启动 / Realtime solver started",
             "target_pole": self.state.target_pole,
+            "astronomy": self._astronomy.model_dump(),
         }
 
     async def stop(
@@ -670,7 +718,22 @@ class RealtimeSolveService:
             # 始终覆盖，防止新结果错误搭配旧图 / Always replace to prevent result/frame mixing.
             self._snapshot = snapshot
         attach_sensor_prediction(row, self._solve_context)
-        self.state.last_result = row
+        from ogscope.domain.analysis.astrometry import bind_exposure_time
+
+        if (
+            self._astrometry_clock_anchor
+            and row.get("observation_time_reference") != "source_utc"
+        ):
+            wall, mono = self._astrometry_clock_anchor
+            if abs((time.time() - wall) - (time.monotonic() - mono)) > 1.0:
+                row["observation_time_error"] = "acquisition_clock_changed"
+        bind_exposure_time(row, self._astrometry_clock_offset_s)
+        self.state.last_result = attach_polar_solution(
+            row,
+            astronomy=self._astronomy,
+            solve_context=self._solve_context,
+            target_pole=self.state.target_pole,
+        )
         # A later completed frame supersedes a transient capture/solve exception.
         # 后续完成的帧应清除瞬时采集或解算异常，避免上层永久看到旧错误。
         self.state.last_error = ""

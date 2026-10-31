@@ -31,3 +31,7 @@ The legacy `/api/alignment/start`, `stop` and `status` routes returned constant 
 Pair the new preparation capability and camera lease endpoint with consumers that wait before starting pose budgets. Old clients remain valid; new clients may fall back only on a missing endpoint and must report the reduced guarantee.
 
 配套更新等待曝光准备、持有任务租约的调用方。旧客户端仍可运行；新客户端仅在接口缺失时回退，并明确不能保证新能力生效。无 BSP 或控制器固件依赖。
+
+## Current pole / 当前极轴
+
+New product clients require `current_pole_target` and explicitly request `current_pole_v1`. Upgrade OGScope first; an old server is blocked before motion. Legacy Core v1 calls without the new policy retain their historical J2000 semantics. The current policy never falls back to a catalogue pole. 先升级 OGScope；新 ZenitAPA 在旧服务上停止运动。旧 v1 未声明策略请求保持原义，新产品必须显式请求当前极轴。 See [model and contract](current-pole-v1.md).

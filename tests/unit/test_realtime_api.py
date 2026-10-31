@@ -250,3 +250,33 @@ def test_realtime_solver_status_endpoints(client, monkeypatch, mock_plate_solve)
     stop_resp = client.post("/api/dev/debug/analysis/realtime/stop")
     assert stop_resp.status_code == 200
     assert stop_resp.json()["success"] is True
+
+
+def test_running_current_session_freezes_pole_policy_and_observer():
+    """运行会话不可被重复启动改变 / A repeated start cannot change the active target."""
+    from ogscope.core.realtime.service import RealtimeSolveService
+    from ogscope.domain.analysis.astrometry import AstronomyOptions
+
+    service = RealtimeSolveService()
+    service.state.running = True
+    service._solve_context = {"observer": {"latitude_deg": 40, "longitude_deg": 116}}
+    service._astronomy = AstronomyOptions()
+
+    async def exercise():
+        same = await service.start(solve_context=service._solve_context)
+        assert same["success"] and same["astronomy"]["policy"] == "current_pole_v1"
+        for changes in (
+            {"target_pole": "south"},
+            {"astronomy": {"refraction": {"mode": "standard"}}},
+            {"solve_context": {"observer": {"latitude_deg": 41, "longitude_deg": 116}}},
+        ):
+            result = await service.start(
+                **{**{"solve_context": service._solve_context}, **changes}
+            )
+            assert result["error_code"] == "ANALYSIS_TARGET_CONFLICT"
+        assert (
+            service.state.target_pole == "north"
+            and service._solve_context["observer"]["latitude_deg"] == 40
+        )
+
+    asyncio.run(exercise())
