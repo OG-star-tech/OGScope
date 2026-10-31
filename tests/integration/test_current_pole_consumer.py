@@ -14,7 +14,12 @@ import pytest
 consumer = pytest.importorskip("zenitapa.adapters.rest_ogscope.client")
 
 
-def test_real_core_handshake_publish_and_consumer_validation(client, monkeypatch):
+@pytest.mark.parametrize(
+    "refraction", [{"mode": "off"}, {"mode": "standard", "temperature_c": 0.0}]
+)
+def test_real_core_handshake_publish_and_consumer_validation(
+    client, monkeypatch, refraction
+):
     from zenitapa.domain.alignment.current_target import require_current_target
     from zenitapa.domain.alignment.observer import ObserverConfig
 
@@ -24,7 +29,12 @@ def test_real_core_handshake_publish_and_consumer_validation(client, monkeypatch
 
     row, context, _ = runpy.run_path(
         str(Path(__file__).parents[1] / "unit/test_current_pole_astrometry.py")
-    )["observed_field"](offset_deg=0.5)
+    )["observed_field"](
+        offset_deg=0.5,
+        refraction=refraction["mode"] != "off",
+        elevation_m=2000.0,
+        temperature_c=0.0,
+    )
     service = realtime.RealtimeSolveService()
     monkeypatch.setattr(core_service, "realtime_solve_service", service)
     monkeypatch.setattr(
@@ -48,7 +58,11 @@ def test_real_core_handshake_publish_and_consumer_validation(client, monkeypatch
 
     monkeypatch.setattr(adapter, "_json", transport)
     started = adapter.start_analysis(
-        {"solve_context": context, "owner_token": "contract-owner"}
+        {
+            "solve_context": context,
+            "owner_token": "contract-owner",
+            "astronomy": {"policy": "current_pole_v1", "refraction": refraction},
+        }
     )
     assert started["astronomy"]["policy"] == "current_pole_v1"
     solved = SolveResult(
@@ -87,6 +101,23 @@ def test_real_core_handshake_publish_and_consumer_validation(client, monkeypatch
     assert result["overlay_ext"]["polar_guide"]["angular_sep_deg"] == pytest.approx(
         0.5, abs=1e-5
     )
+    if refraction["mode"] == "standard":
+        assert result["astronomy"]["refraction"]["temperature_c"] == 0
+        assert result["astronomy"]["refraction"]["pressure_hpa"] == pytest.approx(
+            799.3, abs=0.1
+        )
+        changed = client.post(
+            "/api/core/v1/analysis/start",
+            json={
+                "solve_context": context,
+                "owner_token": "contract-owner",
+                "astronomy": {
+                    "policy": "current_pole_v1",
+                    "refraction": {"mode": "standard", "temperature_c": 20},
+                },
+            },
+        )
+        assert changed.status_code == 409
     original = copy.deepcopy(result)
     assert (
         adapter.get_analysis_result(owner_token="contract-owner")["result"] == original

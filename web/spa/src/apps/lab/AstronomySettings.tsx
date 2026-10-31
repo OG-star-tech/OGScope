@@ -31,9 +31,9 @@ export function AstronomySettings({ value, onChange, zh }: { value: SolveParams;
         </select></label>
         {refraction.mode === "measured" && <div className="grid grid-cols-2 gap-2">
           {numeric(zh ? "气压 / hPa" : "Pressure / hPa", refraction.pressure_hpa, (next) => onChange({ ...value, astronomy: { ...astronomy, refraction: { ...refraction, pressure_hpa: next } } }), 1, 1100)}
-          {numeric(zh ? "温度 / °C" : "Temperature / °C", refraction.temperature_c, (next) => onChange({ ...value, astronomy: { ...astronomy, refraction: { ...refraction, temperature_c: next } } }), -80, 60)}
         </div>}
-        {refraction.mode !== "off" && <p className="text-[10px] text-on-surface-variant">{zh ? "需要观测位置；高度低于 5° 时不提供折射目标。默认湿度 50%、波长 0.55 μm；标准模式温度 10°C，按海拔估算气压。" : "Location required; refraction targets below 5° are unavailable. Defaults: 50% humidity, 0.55 μm; standard mode uses 10°C and elevation-based pressure."}</p>}
+        {refraction.mode !== "off" && numeric(zh ? "环境气温 / °C（标准模式留空用 10°C）" : "Ambient temperature / °C (standard mode: blank = 10°C)", refraction.temperature_c, (next) => onChange({ ...value, astronomy: { ...astronomy, refraction: { ...refraction, temperature_c: next } } }), -80, 60)}
+        {refraction.mode !== "off" && <p className="text-[10px] text-on-surface-variant">{zh ? "需要观测位置；高度低于 5° 时不提供折射目标。默认湿度 50%、波长 0.55 μm；标准模式按有效海拔估算气压，气温可手填，留空用 10°C；海拔未知时不提供估算折射目标。" : "Location required; refraction targets below 5° are unavailable. Defaults: 50% humidity, 0.55 μm; standard mode estimates pressure from known elevation and uses the entered temperature or 10°C. Unknown elevation makes estimated refraction unavailable."}</p>}
       </>}
     </div>
   </details>;

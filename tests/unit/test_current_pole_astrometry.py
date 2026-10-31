@@ -11,7 +11,14 @@ from scipy.spatial.transform import Rotation
 from ogscope.domain.analysis.astrometry import AstronomyOptions, attach_polar_solution
 
 
-def observed_field(latitude=40.0, roll=37.0, refraction=False, offset_deg=0.0):
+def observed_field(
+    latitude=40.0,
+    roll=37.0,
+    refraction=False,
+    offset_deg=0.0,
+    elevation_m=0.0,
+    temperature_c=10.0,
+):
     """由已知物理姿态反向生成星库坐标，不调用产品几何 / Generate catalog matches from a known physical pose."""
     sign = 1 if latitude > 0 else -1
     lat = math.radians(latitude)
@@ -43,11 +50,11 @@ def observed_field(latitude=40.0, roll=37.0, refraction=False, offset_deg=0.0):
         0.0,
         math.radians(116),
         lat,
+        elevation_m,
         0.0,
         0.0,
-        0.0,
-        1013.25 if refraction else 0.0,
-        10.0,
+        1013.25 * math.exp(-elevation_m / 8434.5) if refraction else 0.0,
+        temperature_c,
         0.5,
         0.55,
     )
@@ -88,7 +95,7 @@ def observed_field(latitude=40.0, roll=37.0, refraction=False, offset_deg=0.0):
         "observer": {
             "latitude_deg": latitude,
             "longitude_deg": 116.0,
-            "altitude_m": 0.0,
+            "altitude_m": elevation_m,
         }
     }
     return row, context, attitude
@@ -333,3 +340,67 @@ def test_unsynchronized_old_board_epoch_can_be_calibrated():
     assert result["status"] == "MATCH_FOUND"
     assert result["astronomy"]["reason"] == "acquisition_clock_changed"
     assert "polar_guide" not in result["overlay_ext"]
+
+
+@pytest.mark.parametrize("latitude", [40.0, -40.0])
+@pytest.mark.parametrize("elevation", [0.0, 3000.0])
+@pytest.mark.parametrize("temperature", [None, 0.0, -15.0, 35.0])
+def test_estimated_pressure_and_optional_temperature_recover_physical_pose(
+    latitude, elevation, temperature
+):
+    """真实气象投影反解后仍指向物理极轴 / Recover the physical pole from weather-dependent star projections."""
+    row, context, _ = observed_field(
+        latitude=latitude,
+        refraction=True,
+        elevation_m=elevation,
+        temperature_c=10.0 if temperature is None else temperature,
+    )
+    result = attach_polar_solution(
+        row,
+        solve_context=context,
+        target_pole="south" if latitude < 0 else "north",
+        astronomy={"refraction": {"mode": "standard", "temperature_c": temperature}},
+    )
+    assert result["astronomy"]["status"] == "valid"
+    assert result["overlay_ext"]["polar_guide"]["angular_sep_deg"] * 3600 < 0.05
+    effective = result["astronomy"]["refraction"]
+    assert effective["temperature_c"] == (10.0 if temperature is None else temperature)
+    assert effective["temperature_source"] == (
+        "standard" if temperature is None else "manual"
+    )
+    assert effective["pressure_source"] == "altitude_estimate"
+    assert effective["pressure_hpa"] == pytest.approx(
+        710.0 if elevation else 1013.25, abs=0.1
+    )
+
+
+def test_unknown_altitude_is_not_sea_level_and_only_blocks_estimated_refraction():
+    """未知海拔保留原解算，禁止假装获得估算折射 / Unknown elevation preserves the solve but cannot provide estimated refraction."""
+    row, context, _ = observed_field()
+    del context["observer"]["altitude_m"]
+    off = attach_polar_solution(row, solve_context=context)
+    assert off["astronomy"]["status"] == "valid"
+    assert off["astronomy"]["observer"]["altitude_m"] is None
+    enabled = attach_polar_solution(
+        row, solve_context=context, astronomy={"refraction": {"mode": "standard"}}
+    )
+    assert enabled["status"] == "MATCH_FOUND"
+    assert enabled["astronomy"]["reason"] == "refraction_requires_altitude"
+    assert "polar_guide" not in enabled["overlay_ext"]
+    measured = attach_polar_solution(
+        row,
+        solve_context=context,
+        astronomy={
+            "refraction": {"mode": "measured", "pressure_hpa": 900, "temperature_c": 0}
+        },
+    )
+    assert measured["astronomy"]["status"] == "valid"
+    assert measured["astronomy"]["refraction"]["pressure_source"] == "measured"
+
+
+@pytest.mark.parametrize("temperature", [-81, 61, float("nan"), float("inf")])
+def test_estimated_refraction_rejects_invalid_temperature(temperature):
+    with pytest.raises(ValueError):
+        AstronomyOptions.model_validate(
+            {"refraction": {"mode": "standard", "temperature_c": temperature}}
+        )

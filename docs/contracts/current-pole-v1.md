@@ -23,6 +23,12 @@ Developer camera analysis freezes exposure metadata before solving, just as Core
 
 `astronomy.refraction.mode` is `off` (default), `standard`, or `measured`. Standard mode estimates pressure from altitude and declares its temperature/humidity assumptions. Measured mode requires pressure and temperature; humidity and wavelength defaults are explicit. Below 5 degrees, enabled refraction is unavailable. 折射默认关闭；标准模式明确标记海拔估压等假设；实测模式要求气压、温度；低于 5 度不提供已修正目标。
 
+Standard mode accepts optional `temperature_c` (-80…60°C). Omitted/null uses 10°C; zero is a real 0°C input. Pressure remains estimated from known site altitude, never from CPU temperature. The receipt distinguishes `pressure_source=altitude_estimate` from `measured`, and `temperature_source=standard|manual|measured|unused`. The requested values, including an explicit temperature, are frozen with the session and must match the consumer acknowledgement.
+标准模式允许手填环境气温（-80…60°C）；省略或 null 使用 10°C，0 表示实际填写 0°C。气压仍按有效地点海拔估算，不使用 CPU 温度；逐帧回执区分海拔估压、标准温度、手填温度和实测来源。请求参数与会话一起冻结，消费方须核对启动确认。
+
+Missing altitude stays unknown (`observer.altitude_m=null`), distinct from measured sea level (`0`). Requested standard refraction then returns `refraction_requires_altitude` without an actionable target. Refraction off remains usable; its geometric observer-height approximation is zero when altitude is unknown. Measured-pressure mode does not require an altitude estimate. Latitude/longitude and finite altitude bounds (-500…10000 m when supplied) are still validated.
+海拔缺失保持未知，与真实 0 米区分；开启标准折射时返回 `refraction_requires_altitude`，不输出可用于运动的目标。关闭折射仍可使用，未知海拔仅在几何计算中暂按零近似；实测气压模式无需估压海拔。地点及已提供海拔仍须通过有限数与范围校验。
+
 UT1−UTC is initially approximated as zero and polar motion is omitted, both reported in the result. Catalogue/proper-motion, lens calibration and atmospheric uncertainties remain outside numerical model validation. 初版明确记录 UT1 与 UTC 近似相等、未应用极移；星库自行、镜头及大气误差不能由数值测试替代验收。
 
 ## Failure and compatibility / 失败与兼容
