@@ -32,6 +32,7 @@ class CapabilitySnapshot:
             "analysis": self.analysis,
             "camera": self.camera,
             "network": self.network,
+            "polar_target_selection": True,
         }
 
 

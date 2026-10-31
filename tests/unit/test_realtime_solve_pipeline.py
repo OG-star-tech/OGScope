@@ -81,6 +81,18 @@ def test_completed_realtime_frame_clears_transient_error() -> None:
     assert service.state.last_error == ""
 
 
+def test_result_freezes_producing_pole_across_later_sessions() -> None:
+    """结果保存产出时的天极 / Results retain the producing session's pole."""
+    service = RealtimeSolveService()
+    service.state.target_pole = "south"
+    service._apply_solve_result(_solve_result("MATCH_FOUND"))
+    southern_result = service.state.last_result
+    service.state.target_pole = "north"
+    service._apply_solve_result(_solve_result("MATCH_FOUND"))
+    assert southern_result["target_pole"] == "south"
+    assert service.state.last_result["target_pole"] == "north"
+
+
 def test_analysis_event_carries_session_correlation() -> None:
     """结构化事件携带会话关联 ID / Structured events carry the session correlation ID."""
     service = RealtimeSolveService()

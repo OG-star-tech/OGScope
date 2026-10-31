@@ -37,6 +37,7 @@ class RealtimeState:
     started_mono: float = 0.0
     phase: str = "stopped"
     camera_preparation: dict[str, Any] = field(default_factory=dict)
+    target_pole: str = "north"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,12 +131,23 @@ class RealtimeSolveService:
     ) -> dict[str, Any]:
         """Acquire one analysis without replacing another caller / 获取分析，禁止替换其他调用者。"""
         async with self._control_lock:
+            requested_pole = options.get("target_pole", "north")
+            if requested_pole not in ("north", "south"):
+                raise ValueError("Invalid target pole / 无效的天极目标")
             if self.state.running and self._owner_token != owner_token:
                 return {
                     "success": False,
                     "session_id": self.state.session_id,
                     "error_code": "ANALYSIS_BUSY",
                     "message": "Analysis is in use / 分析正在被其他任务使用",
+                }
+            if self.state.running and self.state.target_pole != requested_pole:
+                return {
+                    "success": False,
+                    "session_id": self.state.session_id,
+                    "error_code": "ANALYSIS_TARGET_CONFLICT",
+                    "target_pole": self.state.target_pole,
+                    "message": "Stop analysis before changing its pole / 更改天极前须停止分析",
                 }
             if not self.state.running and self._task is not None:
                 # Finish the old camera release before publishing a new session.
@@ -170,6 +182,7 @@ class RealtimeSolveService:
 
     async def _start_locked(
         self,
+        target_pole: str = "north",
         hint_ra_deg: float | None = None,
         hint_dec_deg: float | None = None,
         fov_estimate: float | None = None,
@@ -184,6 +197,7 @@ class RealtimeSolveService:
                 "success": True,
                 "session_id": self.state.session_id,
                 "message": "实时解算已在运行 / Realtime solver already running",
+                "target_pole": self.state.target_pole,
             }
         if hint_ra_deg is not None:
             self._hint_ra = hint_ra_deg
@@ -198,6 +212,7 @@ class RealtimeSolveService:
             session_id=str(session_id or uuid.uuid4().hex),
             started_mono=time.monotonic(),
             phase="waking_camera",
+            target_pole=target_pole,
         )
         with self._snapshot_lock:
             # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
@@ -264,6 +279,7 @@ class RealtimeSolveService:
             "success": True,
             "session_id": self.state.session_id,
             "message": "实时解算已启动 / Realtime solver started",
+            "target_pole": self.state.target_pole,
         }
 
     async def stop(
@@ -625,6 +641,9 @@ class RealtimeSolveService:
     ) -> None:
         """写入解算结果 / Persist solve result"""
         row = solved.to_dict()
+        # Bind identity to the producing session, including later Core reads. /
+        # 目标身份绑定产出会话，后续 Core 读取也保持同一目标。
+        row["target_pole"] = self.state.target_pole
         if capture_time:
             # Optional additive Core fields keep old consumers compatible. /
             # 可选增量字段保持旧版 Core 消费方兼容。

@@ -38,6 +38,7 @@ async def core_start_analysis(
     """开始分析（Core 标准契约）/ Start analysis (Core contract)."""
     try:
         data = await core_contract_service.start_analysis(
+            target_pole=body.target_pole,
             hint_ra_deg=body.hint_ra_deg,
             hint_dec_deg=body.hint_dec_deg,
             fov_estimate=body.fov_estimate,
