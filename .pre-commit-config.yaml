@@ -33,3 +33,19 @@ repos:
       - id: mypy
         additional_dependencies: [types-all]
         args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: project-independence
+        name: 项目独立性检查 / Project independence
+        entry: python3 scripts/check_project_independence.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: project-independence-message
+        name: 提交信息独立性检查 / Commit message independence
+        entry: python3 scripts/check_project_independence.py --staged --message-file
+        language: system
+        always_run: true
+        stages: [commit-msg]

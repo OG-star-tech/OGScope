@@ -34,4 +34,4 @@ Pair the new preparation capability and camera lease endpoint with consumers tha
 
 ## Current pole / 当前极轴
 
-New product clients require `current_pole_target` and explicitly request `current_pole_v1`. Upgrade OGScope first; an old server is blocked before motion. Legacy Core v1 calls without the new policy retain their historical J2000 semantics. The current policy never falls back to a catalogue pole. 先升级 OGScope；新 external client 在旧服务上停止运动。旧 v1 未声明策略请求保持原义，新产品必须显式请求当前极轴。 See [model and contract](current-pole-v1.md).
+New product clients require `current_pole_target` and explicitly request `current_pole_v1`. Upgrade OGScope first; an old server is blocked before motion. Legacy Core v1 calls without the new policy retain their historical J2000 semantics. The current policy never falls back to a catalogue pole. 先升级 OGScope；不兼容的调用方应拒绝使用目标。旧 v1 未声明策略请求保持原义，新产品必须显式请求当前极轴。 See [model and contract](current-pole-v1.md).

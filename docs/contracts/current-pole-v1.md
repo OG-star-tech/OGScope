@@ -39,13 +39,13 @@ Consumers must negotiate `capabilities.current_pole_target`, verify start acknow
 
 ## Affected consumers / 影响范围
 
-Automatic alignment, blind first moves, verification, visual level/heading, mechanical pose fitting, consumer reference checks references, installation offsets, history and UI overlays must identify the target policy. 自动对准、盲移动、复核、视觉水平/航向、机械姿态拟合、极轴守护、安装补偿、历史与 UI 均须明确策略。
+Consumers must retain target policy, observer and frame identity whenever they use, store or display a target. 调用方使用、保存或显示目标时，必须保留策略、观测条件与帧身份。
 
-Existing installation offsets and pole references lack astronomical provenance and require explicit revalidation. Pure mechanical parameters are not automatically invalidated. 旧安装偏差及极轴参考需复验；纯机械参数不自动作废。
+Previously stored references without astronomical provenance require explicit revalidation before reuse. 缺少天文来源的历史参考在复用前需要明确重新验证。
 
 Numerical references, independently generated star fields through the actual solver, consumer contract tests and physical mechanical-axis acceptance are separate verification layers. 标准数值、独立星图经真实解算器、消费方契约及实机机械极轴分别验收。
 
-See [reproducible pixel-loop acceptance](../testing/current-pole-virtual-acceptance.md) for the real Core/consumer state-machine test and its physical limits. 真实 Core 与消费方状态机的可复现图像闭环及物理边界见验收说明。
+OGScope owns numerical, solver and Core API regressions. External applications own their integration suites, application workflows and physical acceptance. OGScope 维护数值、解算器与 Core API 回归；外部应用自行维护集成测试、业务流程及实机验收。
 
 ## Parallel integration / 并行集成
 

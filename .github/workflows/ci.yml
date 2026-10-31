@@ -58,6 +58,9 @@ jobs:
         assert not missing, f"Missing delivery files / 缺少交付文件: {sorted(missing)}"
         PY
 
+    - name: 检查发布包项目边界 / Check release package boundary
+      run: python scripts/check_project_independence.py --artifact dist/*.whl
+
     - name: 设置 Node.js
       uses: actions/setup-node@v4
       with:
