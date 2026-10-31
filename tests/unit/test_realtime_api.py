@@ -275,7 +275,7 @@ def test_running_current_session_freezes_pole_policy_and_observer():
             )
             assert result["error_code"] == "ANALYSIS_TARGET_CONFLICT"
         assert (
-            service._target_pole == "north"
+            service.state.target_pole == "north"
             and service._solve_context["observer"]["latitude_deg"] == 40
         )
 

@@ -63,3 +63,76 @@ def test_rotation_changes_vector_but_not_target_distance():
 )
 def test_invalid_or_transformed_solve_has_no_catalog_target(change):
     assert build_catalog_polar_guide({**solve(), **change}) is None
+
+
+@pytest.mark.parametrize(
+    "pole,dec,target", [("north", 89.0, 90.0), ("south", -89.0, -90.0)]
+)
+@pytest.mark.parametrize("roll", [0, 90, 180, 270])
+def test_explicit_pole_preserves_one_degree_error_and_signed_image_vector(
+    pole, dec, target, roll
+):
+    import math
+
+    raw = {**solve(), "target_pole": pole, "dec_deg": dec, "roll_deg": roll}
+    guide = build_catalog_polar_guide(raw)
+    assert guide["target_kind"] == f"{pole}_celestial_pole"
+    assert guide["target"]["dec_deg"] == target
+    assert guide["angular_sep_deg"] == pytest.approx(1)
+    assert guide["image_offset_deg"]["dx"] == pytest.approx(
+        -(target - dec) * math.sin(math.radians(roll))
+    )
+    assert guide["image_offset_deg"]["dy"] == pytest.approx(
+        -(target - dec) * math.cos(math.radians(roll))
+    )
+    assert guide["target_frame"] == "catalog_j2000"
+    assert not any(guide["corrections"].values())
+
+
+def test_legacy_target_does_not_follow_solve_hemisphere():
+    guide = build_catalog_polar_guide({**solve(), "dec_deg": -89})
+    assert guide["target_kind"] == "north_celestial_pole"
+    assert guide["angular_sep_deg"] == pytest.approx(179)
+    assert build_catalog_polar_guide({**solve(), "target_pole": "automatic"}) is None
+
+
+def test_core_repeated_reads_preserve_south_target(monkeypatch):
+    raw = attach_catalog_polar_guide({**solve(), "target_pole": "south", "dec_deg": -89})
+    monkeypatch.setattr(
+        "ogscope.core.application.core_service.realtime_solve_service.get_status",
+        AsyncMock(return_value={"running": False, "last_result": raw}),
+    )
+    service = CoreContractService()
+    first = asyncio.run(service.get_analysis_result())["result"]
+    second = asyncio.run(service.get_analysis_result())["result"]
+    assert first == second
+    assert first["overlay_ext"]["polar_guide"]["target"]["dec_deg"] == -90
+    assert (
+        AnalysisService._build_polar_guide(None, raw, astronomy={"policy": "catalog_visual_v1"}, target_pole="south")
+        == first["overlay_ext"]["polar_guide"]
+    )
+
+
+def test_running_session_rejects_target_change_without_stopping():
+    from ogscope.core.realtime.service import RealtimeSolveService
+
+    service = RealtimeSolveService()
+    service.state.running = True
+    service.state.session_id = "southern-session"
+    service.state.target_pole = "south"
+    result = asyncio.run(service.start(target_pole="north"))
+    assert result["success"] is False
+    assert result["error_code"] == "ANALYSIS_TARGET_CONFLICT"
+    assert service.state.running
+    assert service.state.target_pole == "south"
+
+
+def test_core_request_accepts_only_explicit_supported_poles():
+    from pydantic import ValidationError
+
+    from ogscope.web.api.models.schemas import CoreStartAnalysisRequest
+
+    assert CoreStartAnalysisRequest().target_pole == "north"
+    assert CoreStartAnalysisRequest(target_pole="south").target_pole == "south"
+    with pytest.raises(ValidationError):
+        CoreStartAnalysisRequest(target_pole="automatic")
