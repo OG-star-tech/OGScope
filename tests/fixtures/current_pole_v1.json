@@ -1,0 +1,166 @@
+{
+  "status": "MATCH_FOUND",
+  "observation_time_utc": "2026-10-31T00:00:00Z",
+  "ra_deg": 145.04522999667077,
+  "dec_deg": 89.63491903664615,
+  "roll_deg": 46.92327429964707,
+  "fov_deg": 13.0,
+  "tetra": {
+    "epoch_equinox": 2000.0,
+    "epoch_proper_motion": 2026.0,
+    "distortion": 0.0
+  },
+  "solve_frame": {
+    "session_id": "test",
+    "frame_id": 12
+  },
+  "solve_overlay": {
+    "frame_shape": [
+      720,
+      1280
+    ]
+  },
+  "overlay_ext": {
+    "polar_guide": {
+      "target_kind": "north_celestial_pole",
+      "target_pole": "north",
+      "target_frame": "observed_enu",
+      "target_policy": "current_pole_v1",
+      "corrections": {
+        "precession": true,
+        "nutation": true,
+        "aberration": true,
+        "refraction": false,
+        "solar_deflection": true,
+        "diurnal_aberration": true,
+        "polar_motion": false,
+        "proper_motion": false
+      },
+      "observation_time_utc": "2026-10-31T00:00:00Z",
+      "frame_center": {
+        "x": 640.0,
+        "y": 360.0,
+        "ra_deg": 145.04522999667077,
+        "dec_deg": 89.63491903664615,
+        "vector": [
+          2.990574297248231e-14,
+          0.7604059655999825,
+          0.6494480483302401
+        ],
+        "alt_deg": 40.50000000000425,
+        "az_deg": 2.2533658769684655e-12
+      },
+      "target": {
+        "x": 610.498647958676,
+        "y": 320.8503835424885,
+        "vector": [
+          0.0,
+          0.766044443118978,
+          0.6427876096865393
+        ],
+        "alt_deg": 39.99999999999999,
+        "az_deg": 0.0
+      },
+      "image_offset_deg": {
+        "dx": -0.30091238360545247,
+        "dy": -0.3993214263183911
+      },
+      "delta_px": {
+        "dx": -29.501352041324026,
+        "dy": -39.14961645751151
+      },
+      "angular_sep_deg": 0.5000000000042589
+    }
+  },
+  "astronomy": {
+    "status": "valid",
+    "policy": "current_pole_v1",
+    "target_pole": "north",
+    "model": "ERFA IAU2006/2000A",
+    "model_version": "2.0.1.5",
+    "observation_time_utc": "2026-10-31T00:00:00Z",
+    "time_source": "supplied_exposure_utc",
+    "observer": {
+      "latitude_deg": 40.0,
+      "longitude_deg": 116.0,
+      "altitude_m": 0.0
+    },
+    "corrections": {
+      "precession": true,
+      "nutation": true,
+      "aberration": true,
+      "refraction": false,
+      "solar_deflection": true,
+      "diurnal_aberration": true,
+      "polar_motion": false,
+      "proper_motion": false
+    },
+    "requested": {
+      "policy": "current_pole_v1",
+      "refraction": {
+        "mode": "off",
+        "pressure_hpa": null,
+        "temperature_c": null,
+        "relative_humidity": 0.5,
+        "wavelength_um": 0.55
+      }
+    },
+    "refraction": {
+      "mode": "off",
+      "pressure_hpa": 0.0,
+      "temperature_c": 10.0,
+      "relative_humidity": 0.5,
+      "wavelength_um": 0.55
+    },
+    "earth_orientation": {
+      "dut1_seconds": 0.0,
+      "dut1_source": "assumed",
+      "polar_motion_source": "omitted"
+    },
+    "catalog_epoch_equinox": 2000.0,
+    "catalog_epoch_proper_motion": 2026.0,
+    "attitude_method": "matched_stars",
+    "matched_stars": 36,
+    "fit_rmse_arcsec": 1.578441297101324e-07,
+    "fitted_fov_deg": 13.000000000192873,
+    "distortion": 0.0,
+    "camera_basis": "left_up_forward",
+    "pose_frame": "observed_enu",
+    "camera_to_local": [
+      [
+        0.7986355100472384,
+        -0.6018150231521215,
+        2.990574297248231e-14
+      ],
+      [
+        0.39084759224194504,
+        0.5186722733274186,
+        0.7604059655999825
+      ],
+      [
+        -0.45762373379258003,
+        -0.6072872061798935,
+        0.6494480483302401
+      ]
+    ],
+    "boresight_vector": [
+      2.990574297248231e-14,
+      0.7604059655999825,
+      0.6494480483302401
+    ],
+    "pole_vector": [
+      0.0,
+      0.766044443118978,
+      0.6427876096865393
+    ],
+    "physical_pole_j2000_vector": [
+      0.0026226120836657495,
+      2.9112986174677945e-05,
+      0.9999965605232312
+    ],
+    "solve_frame": {
+      "session_id": "test",
+      "frame_id": 12
+    }
+  }
+}

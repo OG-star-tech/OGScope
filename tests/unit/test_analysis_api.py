@@ -129,6 +129,7 @@ def test_analysis_solve_image_overlay_ext(
             "hint_dec_deg": 70.0,
             "overlay_topn_count": 2,
             "enable_polar_guide": True,
+            "astronomy": {"policy": "catalog_visual_v1"},
         },
     )
     assert resp.status_code == 200
@@ -370,6 +371,7 @@ def test_analysis_solve_video_frame_overlay_ext(
             "time_sec": 0.1,
             "overlay_topn_count": 2,
             "enable_polar_guide": True,
+            "astronomy": {"policy": "catalog_visual_v1"},
         },
     )
     assert resp.status_code == 200
@@ -427,6 +429,7 @@ def test_analysis_solve_frame_upload_endpoint(
         "solve_profile": "balanced",
         "overlay_topn_count": 2,
         "enable_polar_guide": True,
+        "astronomy": {"policy": "catalog_visual_v1"},
     }
     with image_path.open("rb") as f:
         resp = client.post(
