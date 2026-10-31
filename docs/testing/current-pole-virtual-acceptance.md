@@ -36,5 +36,23 @@ The test exposed a consumer snapshot omission: target policy, pole and astronomy
 Astropy ICRS→AltAz provides the forward projection while OGScope fits transformed matched stars; both share ERFA standards. Ideal synthetic sub-arcsecond residuals do not establish physical accuracy. Camera acquisition/preparation, leases, real scheduling, network latency, lens distortion and mechanical error are outside this test. The guard's final realignment callback is recorded, not a second alignment run.
 正向投影和产品姿态拟合采用不同路径，但共享 ERFA 底层；理想残差不代表实机精度。真实采集、曝光准备、租约、调度、网络、镜头畸变及机械误差不在此测试内；守护最终重对准回调仅记录请求，未再次运行对准。
 
-Real-sky acceptance is deferred because of weather. Board runtime/health acceptance remains separate; keep the paired PRs in Draft until their required acceptance is complete. Full southern search/preposition acceptance remains with the southern-workflow PR.
-天气原因暂缓真实星空验收；板端运行与健康检查独立进行，配套 PR 保持草稿。完整南半球搜索和预定位仍由南半球流程 PR 验收。
+Real-sky acceptance is deferred because of weather. The bounded board checks below do not replace physical-axis or endurance acceptance; keep the paired PRs in Draft. Full southern search/preposition acceptance remains with the southern-workflow PR.
+天气原因暂缓真实星空验收；下述板端检查不能替代实机极轴与耐久验收，配套 PR 保持草稿。完整南半球搜索和预定位仍由南半球流程 PR 验收。
+
+## Native board acceptance / 原生板端验收
+
+Validated the application code at OGScope `17d79f4` and ZenitAPA `a2ea91d` on a Raspberry Pi Compute Module 0, aarch64 Python 3.12.12. Both complete packages were selected with boot-scoped service overrides on writable data; the read-only system image was preserved.
+在 CM0、aarch64 Python 3.12.12 上验证上述配套代码；完整包通过数据分区与本次启动有效的服务覆盖运行，保留只读系统镜像。
+
+- Both services became healthy; the delegated sensor socket responded; the new current-pole capability and consumer default were active. Four live Core contract tests passed. Wrong-owner stop was rejected, changing pole within a session returned HTTP 409, and physical daylight capture returned `TOO_FEW` with exposure UTC corrected using the trusted session reference.
+  双服务健康、传感器 UDS 正常，新能力与默认目标生效；4 项真实 Core 契约通过。错误调用者不能停止会话，运行中换极返回 409，日间物理采集如实返回星点不足并正确换算 UTC。
+- Twenty complete-model rendered fields passed native Tetra matching, Core result construction, current-pole fitting and the native ZenitAPA consumer/planner. Maximum pose/ALT/AZ errors were 1.483/1.264/1.860 arcsec. Five legacy mean-date controls retained the expected model mismatch. This image replay used isolated processes, not the physical camera or a running motor loop.
+  20 组完整模型星图通过原生板解、Core 结果构造、目标拟合及消费规划，最大姿态/ALT/AZ 误差分别为 1.483/1.264/1.860 角秒；5 组旧平历元对照保留模型差异。图像回放使用隔离进程，不是物理相机或真实电机闭环。
+- Pure current-pole calculation, excluding plate solving and transport: 50 timed samples per mode, median 22.0 ms with refraction off and 25.5 ms with standard refraction; p95 25.8/35.0 ms. These measurements are not a long-duration throughput guarantee.
+  单独天文计算每模式 50 次，关闭/标准折射中位耗时 22.0/25.5 毫秒，p95 为 25.8/35.0 毫秒；不包含板解和传输，不代表长时间吞吐保证。
+
+The image lacked `pyerfa`; acceptance used the lockfile-verified aarch64 2.0.1.5 wheel in an isolated dependency directory. Formal BSP/OTA packaging must include it. Existing BSP NumPy 1.26.4 is below the project's declared `>=2,<3` range; SciPy 1.14.1 and Pydantic 2.7.4 satisfy their declared ranges. Native compatibility here does not certify a lockfile-equivalent release. The image also lacked `curl`, making `doctor.sh` report HTTP failures; independent HTTP and UDS checks passed. These are packaging follow-ups, not reasons to disable target validity checks.
+镜像缺少 `pyerfa`，本次在隔离依赖目录使用与锁文件散列一致的 ARM 2.0.1.5 wheel，正式 BSP/OTA 必须纳入。原镜像 NumPy 1.26.4 低于项目声明的 `>=2,<3`；SciPy 1.14.1 和 Pydantic 2.7.4 符合各自声明范围。本次原生兼容结果不能替代锁定依赖发布验收。镜像还缺少 `curl`，导致 doctor 脚本误报 HTTP 失败；独立 HTTP/UDS 验证通过。这些打包问题不能通过关闭目标有效性检查绕过。
+
+After acceptance, both services were restored to their original source/static selectors and became healthy. Temporary service overrides were removed; persistent environment and calibration/settings hashes were unchanged. ALT/AZ positions were unchanged and no motor command, controller firmware update or system-clock adjustment was performed.
+验收后双服务已恢复原代码及静态资源选择并通过健康检查，临时服务覆盖已移除，持久环境与校准/设置文件散列未变。ALT/AZ 位置未变，未执行电机命令、控制器固件升级或系统时钟调整。
