@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ogscope.core.application.core_service import CoreContractService
-from ogscope.domain.analysis.polar_guide import build_catalog_polar_guide
+from ogscope.domain.analysis.polar_guide import (
+    attach_catalog_polar_guide,
+    build_catalog_polar_guide,
+)
 from ogscope.web.api.analysis.services import AnalysisService
 
 
@@ -28,10 +31,17 @@ def test_core_and_developer_return_identical_target_without_mutating_raw(monkeyp
     original = copy.deepcopy(raw)
     monkeypatch.setattr(
         "ogscope.core.application.core_service.realtime_solve_service.get_status",
-        AsyncMock(return_value={"running": True, "last_result": raw}),
+        AsyncMock(
+            return_value={
+                "running": True,
+                "last_result": attach_catalog_polar_guide(raw),
+            }
+        ),
     )
     core = asyncio.run(CoreContractService().get_analysis_result())["result"]
-    dev = AnalysisService._build_polar_guide(None, raw)
+    dev = AnalysisService._build_polar_guide(
+        None, raw, astronomy={"policy": "catalog_visual_v1"}
+    )
     assert core["overlay_ext"]["polar_guide"] == dev
     assert dev["angular_sep_deg"] * 3600 == pytest.approx(504, abs=0.001)
     assert not any(dev["corrections"].values())
@@ -87,7 +97,7 @@ def test_legacy_target_does_not_follow_solve_hemisphere():
 
 
 def test_core_repeated_reads_preserve_south_target(monkeypatch):
-    raw = {**solve(), "target_pole": "south", "dec_deg": -89}
+    raw = attach_catalog_polar_guide({**solve(), "target_pole": "south", "dec_deg": -89})
     monkeypatch.setattr(
         "ogscope.core.application.core_service.realtime_solve_service.get_status",
         AsyncMock(return_value={"running": False, "last_result": raw}),
@@ -98,7 +108,7 @@ def test_core_repeated_reads_preserve_south_target(monkeypatch):
     assert first == second
     assert first["overlay_ext"]["polar_guide"]["target"]["dec_deg"] == -90
     assert (
-        AnalysisService._build_polar_guide(None, raw)
+        AnalysisService._build_polar_guide(None, raw, astronomy={"policy": "catalog_visual_v1"}, target_pole="south")
         == first["overlay_ext"]["polar_guide"]
     )
 

@@ -6,7 +6,9 @@ import math
 from typing import Any
 
 
-def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
+def build_catalog_polar_guide(
+    row: dict[str, Any], *, target_pole: str | None = None
+) -> dict[str, Any] | None:
     """构建极轴引导向量 / Build polar guide vector from solve center."""
     overlay = row.get("solve_overlay")
     if not isinstance(overlay, dict):
@@ -50,11 +52,13 @@ def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
 
     # 会话指定天极；旧客户端缺省仍使用北天极，不从画面推断。
     # Select the session's pole; legacy callers default north, never infer from the image.
-    pole = row.get("target_pole", "north")
-    if pole not in ("north", "south"):
-        return None
+    target_pole = (
+        target_pole if target_pole is not None else row.get("target_pole", "north")
+    )
     target_ra = ra_center
-    target_dec = -90.0 if pole == "south" else 90.0
+    if target_pole not in {"north", "south"}:
+        return None
+    target_dec = 90.0 if target_pole == "north" else -90.0
     d_ra = target_ra - ra_center
     while d_ra > 180.0:
         d_ra -= 360.0
@@ -89,7 +93,8 @@ def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
     angular_sep_deg = math.degrees(math.acos(cos_ang))
 
     return {
-        "target_kind": f"{pole}_celestial_pole",
+        "target_kind": f"{target_pole}_celestial_pole",
+        "target_pole": target_pole,
         "target_frame": "catalog_j2000",
         "target_policy": "catalog_visual_v1",
         "corrections": {
@@ -111,11 +116,13 @@ def build_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def attach_catalog_polar_guide(row: dict[str, Any]) -> dict[str, Any]:
+def attach_catalog_polar_guide(
+    row: dict[str, Any], *, target_pole: str | None = None
+) -> dict[str, Any]:
     """Copy a successful solve with its authoritative target / 为成功解算副本附加权威目标。"""
     if row.get("status") != "MATCH_FOUND":
         return row
-    guide = build_catalog_polar_guide(row)
+    guide = build_catalog_polar_guide(row, target_pole=target_pole)
     ext = dict(row.get("overlay_ext") or {})
     if guide is None:
         ext.pop("polar_guide", None)

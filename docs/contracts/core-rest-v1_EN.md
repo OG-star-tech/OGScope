@@ -4,7 +4,7 @@
 
 `POST /api/core/v1/analysis/start` accepts `target_pole: north | south` (default north for legacy clients). System status advertises `capabilities.polar_target_selection=true`. The start response and each produced solve echo the selected pole. An active session rejects a different pole with `success=false, error_code=ANALYSIS_TARGET_CONFLICT` without stopping the existing session; stop and restart to change targets.
 
-The shared guide returns `target_kind=north_celestial_pole | south_celestial_pole` and catalog Dec +90° / −90°. Consumers must verify the requested identity before southern motion. The catalog_visual_v1 / catalog_j2000 policy and correction flags are unchanged; this extension does not establish physical alignment precision to the pole of date.
+Both policies preserve `target_kind=north_celestial_pole | south_celestial_pole`. Consumers must verify the requested pole and policy before motion in either hemisphere. Explicit legacy `catalog_visual_v1` retains catalog Dec +90° / −90° and unchanged correction flags. Product clients use `current_pole_v1` as described below; software contract checks do not establish physical alignment precision.
 
 English | [中文](core-rest-v1.md)
 
@@ -68,14 +68,13 @@ A normal `MATCH_FOUND` result is authoritative and is never overturned by scene 
 
 ### Shared visual alignment target
 
-A successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation:
+Product clients request `astronomy: {policy: "current_pole_v1", refraction: {mode: "off"}}` and `target_pole: "north" | "south"`. The response echoes the frozen policy and pole. Changing policy, pole or observer during a session returns HTTP 409 (`ANALYSIS_TARGET_CONFLICT`). 产品调用必须显式请求当前极轴策略；会话冻结策略、半球与地点，运行中变更返回 409。
 
-- `target_policy: "catalog_visual_v1"`, `target_frame: "catalog_j2000"`.
-- `corrections` explicitly reports precession, nutation, aberration and refraction as `false`.
-- `angular_sep_deg` is the center-to-target angular distance in degrees; `image_offset_deg.{dx,dy}` is the signed image-plane offset in degrees, x right and y down. Roll already includes image orientation; consumers must not rotate it again.
-- Existing `frame_center`, `target`, and `delta_px` remain available for overlays.
+`capabilities.current_pole_target` and `polar_target_selection` advertise support. Each successful solve returns `astronomy` validity, exposure UTC, effective corrections, observer and fitted camera attitude. A valid current target appears in `overlay_ext.polar_guide`, in `observed_enu` with a site or `cirs` without one. 原始星库解算保持不变，当前目标与实际修正另行输出；条件不足时仅保留原始解算，禁止运动。
 
-Alignment consumers must use this supplied target for motion, verification and display. Missing or incompatible targets must block motion rather than silently reconstructing a different target. This adds no user-facing target-source selector.
+Read [current-pole-v1](current-pole-v1.md) for model, refraction, provenance, camera-axis and consumer validation rules. `angular_sep_deg` is the centre-to-target distance; `image_offset_deg.dx/dy` is right/down positive. 所有消费方复用该目标，不得另算岁差章动或重复旋转画面。
+
+For backward compatibility only, old Core v1 requests omitting `astronomy` retain `catalog_visual_v1` (fixed J2000 pole, all corrections false). New product clients must negotiate current-pole support and never silently use this legacy path. 仅未声明策略的旧 v1 请求保留历史语义；新产品入口不允许退回旧目标。 Developer analysis defaults to the current pole.
 
 ### 3) Stop Analysis
 

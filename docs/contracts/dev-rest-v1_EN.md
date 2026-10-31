@@ -76,3 +76,7 @@ This document describes OGScope **developer-domain** APIs (internal). They are *
 
 - The developer domain may iterate and refactor; stability across major revisions is not guaranteed.
 - Customer integrations must rely only on `core/v1` and its versioning policy.
+
+## Astronomy / 天文目标
+
+Image, upload and single-frame analysis accept `astronomy`, `target_pole`, `solve_context` and `observation_time_utc`. The default is `current_pole_v1`, refraction off. Files require their actual exposure UTC; live camera frames use acquisition time. A missing time/site never silently produces a J2000 replacement. 图像、上传及单帧接口共用当前极轴计算；文件提供真实拍摄时间，相机绑定曝光时刻；条件不足时显示不可用原因。 See [current-pole-v1](current-pole-v1.md).
