@@ -14,11 +14,12 @@ import pytest
 consumer = pytest.importorskip("zenitapa.adapters.rest_ogscope.client")
 
 
+@pytest.mark.parametrize("latitude", [40.0, -40.0])
 @pytest.mark.parametrize(
     "refraction", [{"mode": "off"}, {"mode": "standard", "temperature_c": 0.0}]
 )
 def test_real_core_handshake_publish_and_consumer_validation(
-    client, monkeypatch, refraction
+    client, monkeypatch, refraction, latitude
 ):
     from zenitapa.domain.alignment.current_target import require_current_target
     from zenitapa.domain.alignment.observer import ObserverConfig
@@ -30,6 +31,7 @@ def test_real_core_handshake_publish_and_consumer_validation(
     row, context, _ = runpy.run_path(
         str(Path(__file__).parents[1] / "unit/test_current_pole_astrometry.py")
     )["observed_field"](
+        latitude=latitude,
         offset_deg=0.5,
         refraction=refraction["mode"] != "off",
         elevation_m=2000.0,
@@ -94,7 +96,7 @@ def test_real_core_handshake_publish_and_consumer_validation(
     result = adapter.get_analysis_result(owner_token="contract-owner")["result"]
     assert (
         require_current_target(
-            result, ObserverConfig(latitude_deg=40, longitude_deg=116)
+            result, ObserverConfig(latitude_deg=latitude, longitude_deg=116)
         )["alignment_target_mode"]
         == "ogscope_current_pole"
     )
@@ -118,11 +120,93 @@ def test_real_core_handshake_publish_and_consumer_validation(
             },
         )
         assert changed.status_code == 409
+    from dataclasses import replace
+    from unittest.mock import Mock
+    from zenitapa.domain.alignment.calibration import load_alignment_production_settings
+    from zenitapa.domain.alignment.session import AlignmentSession
+    from zenitapa.domain.alignment.polar_target import PolarTargetError
+
+    movement = Mock()
+    downstream = AlignmentSession(
+        ogscope=Mock(),
+        read_position=Mock(),
+        read_movement=Mock(),
+        goto_target=movement,
+        stop_goto=Mock(),
+        prod_settings=replace(
+            load_alignment_production_settings(),
+            target_mode="ogscope_current_pole",
+            refraction_enabled=refraction["mode"] != "off",
+        ),
+    )
+    downstream._correction_observer = ObserverConfig(
+        latitude_deg=latitude, longitude_deg=116, elevation_m=2000, source="manual"
+    )
+    pole = "north" if latitude > 0 else "south"
+    downstream._set(target_pole=pole)
+    downstream._validate_analysis_target(started)
+    downstream._solve_for_alignment({"result": result})
+    receipt = downstream.snapshot().target_contract
+    assert (
+        receipt["expected_pole"]
+        == receipt["acknowledged_pole"]
+        == receipt["result_pole"]
+        == pole
+    )
+    assert (
+        receipt["result_session_id"] == receipt["session_id"] == started["session_id"]
+    )
+    assert receipt["frame_id"] == 12 and receipt["target_policy"] == "current_pole_v1"
+    wrong = copy.deepcopy(result)
+    wrong["target_pole"] = "south" if pole == "north" else "north"
+    with pytest.raises(PolarTargetError):
+        downstream._solve_for_alignment({"result": wrong})
+    assert downstream.snapshot().target_pole == pole
+    movement.assert_not_called()
+    from zenitapa.application.system_debug_service import SystemDebugApplicationService
+    from zenitapa.domain.alignment import apply_service, correction
+    from zenitapa.domain.alignment.calibration import load_alignment_settings
+
+    debug = SystemDebugApplicationService(Mock(), Mock(), Mock())
+    live_context = copy.deepcopy(context)
+    live_context["observer"]["source"] = "observer_manual"
+    live_context["quality"] = {"location_authorized": True}
+    debug._solve_context_provider = lambda: live_context
+    debug._debug_analysis = Mock()
+    debug._debug_analysis.read.return_value = {"result": result}
+    debug.mount_position = lambda: {
+        "valid": True,
+        "altitude_deg": abs(latitude) + 0.5,
+        "azimuth_deg": 0 if latitude > 0 else 180,
+    }
+    config = replace(load_alignment_settings(), auto_apply_enabled=True)
+    monkeypatch.setattr(correction, "load_alignment_settings", lambda: config)
+    monkeypatch.setattr(apply_service, "load_alignment_settings", lambda: config)
+    dispatch = Mock(return_value={"apply_status": "applied"})
+    monkeypatch.setattr(apply_service, "apply_mount_correction", dispatch)
+    apply_service.reset_live_apply_state()
+    plan = debug.alignment_plan()
+    assert plan["ready"], plan
+    applied = debug.alignment_apply(source="live")
+    assert applied["ready"], applied
+    dispatch.assert_called_once()
+    assert applied["planned_alt_delta_deg"] == pytest.approx(
+        plan["planned_alt_delta_deg"]
+    )
+    for rejected_result, authorized in ((wrong, True), (result, False)):
+        debug._debug_analysis.read.return_value = {"result": rejected_result}
+        live_context["quality"]["location_authorized"] = authorized
+        assert debug.alignment_plan()["blocked"]
+        assert debug.alignment_apply(source="live")["blocked"]
+        dispatch.assert_called_once()
+    apply_service.reset_live_apply_state()
     original = copy.deepcopy(result)
     assert (
         adapter.get_analysis_result(owner_token="contract-owner")["result"] == original
     )
-    service.state.last_result["astronomy"]["target_pole"] = "south"
+    service.state.last_result["astronomy"]["target_pole"] = (
+        "south" if latitude > 0 else "north"
+    )
     with pytest.raises(RuntimeError, match="mismatch"):
         adapter.get_analysis_result(owner_token="contract-owner")
     assert adapter.stop_analysis(

@@ -611,6 +611,32 @@ def test_core_openapi_contains_required_business_endpoints(client) -> None:
     assert all(path.startswith("/api/core/v1/") for path in paths)
 
 
+@pytest.mark.parametrize("pole", ["north", "south"])
+def test_core_start_forwards_and_acknowledges_explicit_pole(client, monkeypatch, pole):
+    """REST 透传并回执所选天极 / REST forwards and acknowledges the selected pole."""
+    from unittest.mock import AsyncMock
+
+    from ogscope.web.api.core import routes
+
+    start = AsyncMock(
+        return_value={
+            "success": True,
+            "session_id": "selected",
+            "state": "running",
+            "target_pole": pole,
+        }
+    )
+    monkeypatch.setattr(routes.core_contract_service, "start_analysis", start)
+    response = client.post("/api/core/v1/analysis/start", json={"target_pole": pole})
+    assert response.status_code == 200
+    assert response.json()["target_pole"] == pole
+    assert start.call_args.kwargs["target_pole"] == pole
+    assert (
+        client.post(
+            "/api/core/v1/analysis/start", json={"target_pole": "automatic"}
+        ).status_code
+        == 422
+    )
 def test_current_policy_is_explicit_and_running_changes_conflict(client, monkeypatch):
     """保留旧 v1，显式当前策略与冲突可验证 / Preserve v1 while making current policy and conflicts explicit."""
     from ogscope.core.application import core_service

@@ -43,6 +43,7 @@ class RealtimeState:
     started_mono: float = 0.0
     phase: str = "stopped"
     camera_preparation: dict[str, Any] = field(default_factory=dict)
+    target_pole: str = "north"
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +87,6 @@ class RealtimeSolveService:
         self._solve_timeout_ms: int | None = None
         self._solve_context: Any | None = None
         self._astronomy = AstronomyOptions()
-        self._target_pole = "north"
         self._astrometry_clock_offset_s = 0.0
         self._astrometry_clock_anchor: tuple[float, float] | None = None
         self._snapshot_lock = threading.Lock()
@@ -140,12 +140,23 @@ class RealtimeSolveService:
     ) -> dict[str, Any]:
         """Acquire one analysis without replacing another caller / 获取分析，禁止替换其他调用者。"""
         async with self._control_lock:
+            requested_pole = options.get("target_pole", "north")
+            if requested_pole not in ("north", "south"):
+                raise ValueError("Invalid target pole / 无效的天极目标")
             if self.state.running and self._owner_token != owner_token:
                 return {
                     "success": False,
                     "session_id": self.state.session_id,
                     "error_code": "ANALYSIS_BUSY",
                     "message": "Analysis is in use / 分析正在被其他任务使用",
+                }
+            if self.state.running and self.state.target_pole != requested_pole:
+                return {
+                    "success": False,
+                    "session_id": self.state.session_id,
+                    "error_code": "ANALYSIS_TARGET_CONFLICT",
+                    "target_pole": self.state.target_pole,
+                    "message": "Stop analysis before changing its pole / 更改天极前须停止分析",
                 }
             if not self.state.running and self._task is not None:
                 # Finish the old camera release before publishing a new session.
@@ -209,7 +220,7 @@ class RealtimeSolveService:
                 }
 
             if (
-                target_pole != self._target_pole
+                target_pole != self.state.target_pole
                 or options != self._astronomy
                 or observer(context) != observer(self._solve_context)
             ):
@@ -223,7 +234,7 @@ class RealtimeSolveService:
                 "success": True,
                 "session_id": self.state.session_id,
                 "message": "实时解算已在运行 / Realtime solver already running",
-                "target_pole": self._target_pole,
+                "target_pole": self.state.target_pole,
                 "astronomy": self._astronomy.model_dump(),
             }
         if hint_ra_deg is not None:
@@ -234,7 +245,7 @@ class RealtimeSolveService:
         self._fov_max_error = fov_max_error
         self._solve_timeout_ms = solve_timeout_ms
         self._solve_context = context
-        self._astronomy, self._target_pole = options, target_pole
+        self._astronomy = options
         self._astrometry_clock_offset_s = 0.0
         quality = context.get("quality") or {}
         if quality.get("time_valid") is True and quality.get("time_fresh") is True:
@@ -248,6 +259,7 @@ class RealtimeSolveService:
             session_id=str(session_id or uuid.uuid4().hex),
             started_mono=time.monotonic(),
             phase="waking_camera",
+            target_pole=target_pole,
         )
         with self._snapshot_lock:
             # 新会话不能看到上一轮的图像 / A new session must not expose an older frame.
@@ -314,7 +326,7 @@ class RealtimeSolveService:
             "success": True,
             "session_id": self.state.session_id,
             "message": "实时解算已启动 / Realtime solver started",
-            "target_pole": self._target_pole,
+            "target_pole": self.state.target_pole,
             "astronomy": self._astronomy.model_dump(),
         }
 
@@ -677,6 +689,9 @@ class RealtimeSolveService:
     ) -> None:
         """写入解算结果 / Persist solve result"""
         row = solved.to_dict()
+        # Bind identity to the producing session, including later Core reads. /
+        # 目标身份绑定产出会话，后续 Core 读取也保持同一目标。
+        row["target_pole"] = self.state.target_pole
         if capture_time:
             # Optional additive Core fields keep old consumers compatible. /
             # 可选增量字段保持旧版 Core 消费方兼容。
@@ -717,7 +732,7 @@ class RealtimeSolveService:
             row,
             astronomy=self._astronomy,
             solve_context=self._solve_context,
-            target_pole=self._target_pole,
+            target_pole=self.state.target_pole,
         )
         # A later completed frame supersedes a transient capture/solve exception.
         # 后续完成的帧应清除瞬时采集或解算异常，避免上层永久看到旧错误。

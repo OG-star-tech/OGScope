@@ -274,6 +274,7 @@ class PixelLoop:
             capture_time={
                 "observation_time_utc": self.clock.utc().isoformat(),
                 "observation_time_reference": "source_utc",
+                "capture_source": "virtual_sky", "capture_is_synthetic": True,
             },
         )
         self.service.state.frame_count += 1

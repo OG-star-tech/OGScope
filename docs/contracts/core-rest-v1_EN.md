@@ -1,5 +1,11 @@
 # Core REST Contract v1
 
+## Explicit polar target
+
+`POST /api/core/v1/analysis/start` accepts `target_pole: north | south` (default north for legacy clients). System status advertises `capabilities.polar_target_selection=true`. The start response and each produced solve echo the selected pole. An active session rejects a different pole with `success=false, error_code=ANALYSIS_TARGET_CONFLICT` without stopping the existing session; stop and restart to change targets.
+
+Both policies preserve `target_kind=north_celestial_pole | south_celestial_pole`. Consumers must verify the requested pole and policy before motion in either hemisphere. Explicit legacy `catalog_visual_v1` retains catalog Dec +90° / −90° and unchanged correction flags. Product clients use `current_pole_v1` as described below; software contract checks do not establish physical alignment precision.
+
 English | [中文](core-rest-v1.md)
 
 This document defines the **minimal stable REST surface** for callers integrating with OGScope.
