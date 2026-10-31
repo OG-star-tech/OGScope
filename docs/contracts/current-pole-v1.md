@@ -17,6 +17,8 @@ Catalogue equinox must be explicitly 2000.0; positions are treated as ICRS-orien
 
 UTC is the exposure midpoint, never the result retrieval time. External trusted clocks may calibrate the acquisition clock once at session start; a source-authoritative exposure timestamp is never shifted. File analysis requires an explicit observation time. UTC 使用曝光中点；可信外部时钟可在会话开始时校准采集时钟，来源权威时间不得二次偏移；文件解算必须提供拍摄时间。
 
+Developer camera analysis freezes exposure metadata before solving, just as Core does. A wall-clock step relative to the monotonic clock makes the target unavailable; a later camera exposure must not retime an earlier image. 开发相机入口与 Core 一样在解算前冻结曝光信息；系统时钟跳变时目标不可用，后续曝光参数不得改写旧图像时刻。
+
 `solve_context.observer` supplies latitude, longitude and altitude; time quality is declared in `solve_context.quality`. Without a site, current-pole image guidance is available in CIRS; local attitude is unavailable. 缺少地点时可以生成 CIRS 下的当日极轴图像引导，但不得声称已有当地姿态。
 
 `astronomy.refraction.mode` is `off` (default), `standard`, or `measured`. Standard mode estimates pressure from altitude and declares its temperature/humidity assumptions. Measured mode requires pressure and temperature; humidity and wavelength defaults are explicit. Below 5 degrees, enabled refraction is unavailable. 折射默认关闭；标准模式明确标记海拔估压等假设；实测模式要求气压、温度；低于 5 度不提供已修正目标。
