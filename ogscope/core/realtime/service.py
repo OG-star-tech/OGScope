@@ -88,6 +88,7 @@ class RealtimeSolveService:
         self._astronomy = AstronomyOptions()
         self._target_pole = "north"
         self._astrometry_clock_offset_s = 0.0
+        self._astrometry_clock_anchor: tuple[float, float] | None = None
         self._snapshot_lock = threading.Lock()
         self._snapshot: SolveFrameSnapshot | None = None
         self._snapshot_encoder = create_preview_encoder(
@@ -241,6 +242,7 @@ class RealtimeSolveService:
             self._astrometry_clock_offset_s = (
                 trusted - datetime.now(timezone.utc)
             ).total_seconds()
+        self._astrometry_clock_anchor = (time.time(), time.monotonic())
         self.state = RealtimeState(
             running=True,
             session_id=str(session_id or uuid.uuid4().hex),
@@ -703,6 +705,13 @@ class RealtimeSolveService:
         attach_sensor_prediction(row, self._solve_context)
         from ogscope.domain.analysis.astrometry import bind_exposure_time
 
+        if (
+            self._astrometry_clock_anchor
+            and row.get("observation_time_reference") != "source_utc"
+        ):
+            wall, mono = self._astrometry_clock_anchor
+            if abs((time.time() - wall) - (time.monotonic() - mono)) > 1.0:
+                row["observation_time_error"] = "acquisition_clock_changed"
         bind_exposure_time(row, self._astrometry_clock_offset_s)
         self.state.last_result = attach_polar_solution(
             row,

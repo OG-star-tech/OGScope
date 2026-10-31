@@ -86,8 +86,14 @@ def bind_exposure_time(row: dict[str, Any], offset_seconds: float) -> None:
         return
     original = row["observation_time_utc"]
     try:
-        corrected = parse_utc(original) + timedelta(seconds=offset_seconds)
-    except TargetUnavailable:
+        # 未同步板端可以从旧日期启动，校验修正后的时刻 / An unsynchronized board may boot at an old epoch; validate the corrected time.
+        raw_time = datetime.fromisoformat(str(original).replace("Z", "+00:00"))
+        if raw_time.tzinfo is None:
+            return
+        corrected = parse_utc(
+            (raw_time + timedelta(seconds=offset_seconds)).isoformat()
+        )
+    except (ValueError, TypeError, OverflowError):
         return
     row.update(
         board_observation_time_utc=original,
@@ -218,6 +224,8 @@ def build_current_pole(
     target_pole: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """原始匹配星点到物理极轴，禁止二次修正 / Raw matches to the physical pole, once."""
+    if row.get("observation_time_error"):
+        raise TargetUnavailable(str(row["observation_time_error"]))
     when = parse_utc(row.get("observation_time_utc"))
     quality = context.get("quality") or {}
     if quality.get("time_valid") is False or quality.get("time_fresh") is False:
