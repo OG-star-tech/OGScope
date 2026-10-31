@@ -37,7 +37,8 @@ PyTurboJPEG = ">=1.7,<2"
 # picamera2 = "^0.3.0"       # 树莓派 MIPI 相机支持 (仅Linux)
 # 备选: opencv-python (用于图像处理)
 
-# 天文计算（astropy/skyfield 等可在接入算法后再加入）/ Add astrometry libs when wired in
+# 标准天文模型 / Standard astronomical models
+pyerfa = ">=2.0.1.5,<3"
 
 # SPI 屏幕支持 (仅Linux)
 # spidev = "^3.6"            # 仅Linux系统

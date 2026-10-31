@@ -360,11 +360,17 @@ class AnalysisService:
         n = max(1, int(topn_count))
         return labels[:n]
 
-    def _build_polar_guide(self, row: dict[str, Any]) -> dict[str, Any] | None:
+    def _build_polar_guide(
+        self, row: dict[str, Any], **options: Any
+    ) -> dict[str, Any] | None:
         """Share the Core target calculation / 与 Core 共用目标计算。"""
-        from ogscope.domain.analysis.polar_guide import build_catalog_polar_guide
+        from ogscope.domain.analysis.astrometry import attach_polar_solution
 
-        return build_catalog_polar_guide(row)
+        return (
+            attach_polar_solution(row, **options)
+            .get("overlay_ext", {})
+            .get("polar_guide")
+        )
 
     def _attach_overlay_ext(
         self,
@@ -372,6 +378,10 @@ class AnalysisService:
         *,
         overlay_topn_count: int | None = None,
         enable_polar_guide: bool | None = None,
+        astronomy: Any | None = None,
+        solve_context: Any | None = None,
+        target_pole: str = "north",
+        observation_time_utc: str | None = None,
     ) -> None:
         """为解算结果附加 overlay_ext（Top-N 标注与极轴引导）/ Attach overlay_ext to solve row."""
         topn = (
@@ -389,12 +399,22 @@ class AnalysisService:
             overlay_ext["labels_topn"] = self._build_topn_labels(row, topn_count=topn)
         except Exception:
             overlay_ext["labels_topn"] = []
-        if enable_polar:
-            try:
-                overlay_ext["polar_guide"] = self._build_polar_guide(row)
-            except Exception:
-                overlay_ext["polar_guide"] = None
         row["overlay_ext"] = overlay_ext
+        from ogscope.domain.analysis.astrometry import attach_polar_solution
+
+        if observation_time_utc and not row.get("observation_time_utc"):
+            row["observation_time_utc"] = observation_time_utc
+            row["observation_time_reference"] = "source_utc"
+        row.update(
+            attach_polar_solution(
+                row,
+                astronomy=astronomy,
+                solve_context=solve_context,
+                target_pole=target_pole,
+            )
+        )
+        if not enable_polar:
+            row["overlay_ext"].pop("polar_guide", None)
 
     def _centroid_params_from_payload(
         self, payload: CentroidParamsPayload | None
@@ -743,14 +763,18 @@ class AnalysisService:
             row["solve_profile"] = effective_profile
         # 默认精简 raw，大字段仅在 detail_level==full 时返回 / Drop heavy raw unless client asks for full detail.
         detail_level = getattr(body, "detail_level", None) or "summary"
-        if row and detail_level != "full":
-            row.pop("tetra", None)
         if row:
             self._attach_overlay_ext(
                 row,
                 overlay_topn_count=getattr(body, "overlay_topn_count", None),
                 enable_polar_guide=getattr(body, "enable_polar_guide", None),
+                astronomy=body.astronomy,
+                solve_context=body.solve_context,
+                target_pole=body.target_pole,
+                observation_time_utc=body.observation_time_utc,
             )
+            if detail_level != "full":
+                row.pop("tetra", None)
             self._lab.update_last_solve(
                 source.name,
                 self._metrics_from_solve_row(row),
@@ -1018,6 +1042,10 @@ class AnalysisService:
                 row,
                 overlay_topn_count=overlay_topn_count,
                 enable_polar_guide=enable_polar_guide,
+                astronomy=solve_params.astronomy,
+                solve_context=solve_params.solve_context,
+                target_pole=solve_params.target_pole,
+                observation_time_utc=solve_params.observation_time_utc,
             )
             row["solve_profile"] = effective_profile
             row["t_backend_total_ms"] = round(
@@ -1326,6 +1354,20 @@ class AnalysisService:
             gate_skip["input_name"] = body.input_name or ""
             return gate_skip
 
+        from ogscope.domain.analysis.astrometry import (
+            bind_exposure_time,
+            parse_utc,
+            plain_context,
+        )
+
+        context = plain_context(body.solve_context)
+        quality = context.get("quality") or {}
+        clock_offset_s = 0.0
+        if quality.get("time_valid") is True and quality.get("time_fresh") is True:
+            clock_offset_s = (
+                parse_utc((context.get("observer") or {}).get("time_utc"))
+                - datetime.now(timezone.utc)
+            ).total_seconds()
         t_total = time.perf_counter()
         t_open_decode_ms = None
         frame = None
@@ -1408,11 +1450,23 @@ class AnalysisService:
                 loop.run_in_executor(self._solver_executor, _run),
                 timeout=hard_timeout_sec,
             )
-            # 二次分析与极轴引导（失败降级，不影响基础解算）
+            # 先绑定真实曝光时间，再计算目标 / Bind actual exposure time before computing the target.
+            if body.source == "camera" and frame_ts is not None:
+                from ogscope.core.realtime.service import RealtimeSolveService
+
+                cam = manager.get_camera_instance()
+                info = cam.get_camera_info() if cam else {}
+                row.update(RealtimeSolveService._capture_time_payload(frame_ts, info))
+                bind_exposure_time(row, clock_offset_s)
+            # 二次分析与极轴引导 / Derived analysis and polar guide.
             self._attach_overlay_ext(
                 row,
                 overlay_topn_count=getattr(body, "overlay_topn_count", None),
                 enable_polar_guide=getattr(body, "enable_polar_guide", None),
+                astronomy=body.astronomy,
+                solve_context=body.solve_context,
+                target_pole=body.target_pole,
+                observation_time_utc=body.observation_time_utc,
             )
             if t_open_decode_ms is not None:
                 row["t_open_decode_ms"] = round(t_open_decode_ms, 3)
@@ -1445,6 +1499,10 @@ class AnalysisService:
                         "available": False,
                         "reason": "not_retained",
                     }
+            if row.get("astronomy", {}).get("status") == "valid":
+                row["astronomy"]["solve_frame"] = (
+                    dict(row.get("solve_frame") or {}) or None
+                )
             return {
                 "success": True,
                 "input_name": body.input_name or "",

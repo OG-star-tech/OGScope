@@ -51,6 +51,7 @@ async def test_debug_camera_analysis_converts_rgb_and_preserves_snapshot(
     original = rgb.copy()
     manager = SimpleNamespace(
         get_raw_frame=AsyncMock(return_value=(rgb, 7, 12.5)),
+        get_camera_instance=lambda: None,
         acquire_analysis_consumer=AsyncMock(),
         release_analysis_consumer=AsyncMock(),
     )

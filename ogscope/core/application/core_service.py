@@ -191,6 +191,8 @@ class CoreContractService:
         solve_timeout_ms: int | None = None,
         solve_context: Any | None = None,
         owner_token: str | None = None,
+        target_pole: str = "north",
+        astronomy: Any | None = None,
     ) -> dict[str, Any]:
         """开始实时分析 / Start realtime analysis."""
         was_running = self._session.running and bool(
@@ -206,6 +208,8 @@ class CoreContractService:
             solve_context=solve_context,
             session_id=next_session_id,
             owner_token=owner_token,
+            target_pole=target_pole,
+            astronomy=astronomy,
         )
         success = bool(result.get("success", True))
         self._session.running = success or was_running
@@ -225,6 +229,8 @@ class CoreContractService:
             "ownership_supported": True,
             "message": result.get("message", ""),
             "camera_preparation_supported": True,
+            "target_pole": result.get("target_pole"),
+            "astronomy": result.get("astronomy"),
         }
 
     async def get_analysis_result(
@@ -236,10 +242,7 @@ class CoreContractService:
         )
         running = bool(status.get("running", False))
         last_result = status.get("last_result")
-        if isinstance(last_result, dict):
-            from ogscope.domain.analysis.polar_guide import attach_catalog_polar_guide
-
-            last_result = attach_catalog_polar_guide(last_result)
+        # 目标与姿态在采集帧发布时绑定；读取时不得重新计算 / Bind once on publication, never recompute on retrieval.
         state = "running" if running else "stopped"
         if not running and last_result:
             state = "completed"
