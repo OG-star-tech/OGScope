@@ -15,6 +15,8 @@ export function SolveFooterSummary({
   t: (key: string, vars?: Record<string, string | number>) => string;
   roundTripMs: number | null;
 }) {
+  const { locale } = useI18n();
+  const astronomy = result?.astronomy as { status?: string; policy?: string; reason?: string; refraction?: { mode?: string }; fit_rmse_arcsec?: number } | undefined;
   const s = parseSolveResult(result ?? undefined);
   const ext = result?.overlay_ext as { polar_guide?: { angular_sep_deg?: number; corrections?: Record<string, boolean> } } | undefined;
   const guide = ext?.polar_guide;
@@ -24,6 +26,9 @@ export function SolveFooterSummary({
   }
   return (
     <div className="mt-2 space-y-2 text-[10px]">
+      {astronomy && <p className="text-xs text-on-surface-variant">{astronomy.status === "valid"
+        ? (locale === "zh" ? `当前极轴 · 折射：${astronomy.refraction?.mode === "off" ? "关闭" : astronomy.refraction?.mode === "measured" ? "实测参数" : "标准估计"}` : `Current pole · Refraction: ${astronomy.refraction?.mode}`)
+        : (locale === "zh" ? `极轴目标不可用：${astronomy.reason}` : `Polar target unavailable: ${astronomy.reason}`)}</p>}
       {guide && <div className="rounded border border-outline-variant/25 p-3 text-sm">
         <div className="text-on-surface-variant">{t("lab.target.error")}</div>
         <strong className="text-xl tabular-nums">{formatArcsec(guide.angular_sep_deg, 3600)}</strong>

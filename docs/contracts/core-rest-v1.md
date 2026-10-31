@@ -62,15 +62,13 @@ Core 实时分析运行时，开发者相机单帧解算返回 `SKIPPED_BUSY`，
 
 常规 `MATCH_FOUND` 是权威结果，不会被后续画面分类推翻。只有常规解算失败且存在独立结构证据时，OGScope 才会过滤与证据重合的过密/共线候选并重试一次；过滤最多移除本次候选池的 35%。
 
-The successful solve includes `result.overlay_ext.polar_guide` when projection metadata is valid. Core and the developer overlay use the same calculation. 成功解算在投影数据有效时返回同一极轴目标。
+Product clients request `astronomy: {policy: "current_pole_v1", refraction: {mode: "off"}}` and `target_pole: "north" | "south"`. The response echoes the frozen policy and pole. Changing policy, pole or observer during a session returns HTTP 409 (`ANALYSIS_TARGET_CONFLICT`). 产品调用必须显式请求当前极轴策略；会话冻结策略、半球与地点，运行中变更返回 409。
 
-系统状态 `capabilities.polar_target_selection=true` 表示支持显式选择。启动响应回显 `target_pole`，每个解算结果也绑定该字段。引导的 `target_kind` 为 `north_celestial_pole` 或 `south_celestial_pole`，星库目标 Dec 分别为 +90° / −90°。调用方必须核对请求与响应的目标，未知能力或错极结果不得用于南天运动。半球扩展不改变星库坐标与精度口径，不声称当日真实极轴精度。
+`capabilities.current_pole_target` and `polar_target_selection` advertise support. Each successful solve returns `astronomy` validity, exposure UTC, effective corrections, observer and fitted camera attitude. A valid current target appears in `overlay_ext.polar_guide`, in `observed_enu` with a site or `cirs` without one. 原始星库解算保持不变，当前目标与实际修正另行输出；条件不足时仅保留原始解算，禁止运动。
 
-- `target_policy=catalog_visual_v1`, `target_frame=catalog_j2000`: original catalog visual baseline; all `corrections` flags are false. 原始星库视觉基线，全部天文修正关闭。
-- `angular_sep_deg`: centre-to-target separation in degrees. 中心至目标的角距离（度）。
-- `image_offset_deg.dx/dy`: signed image error in degrees, x right / y down, already accounting for the solved image orientation. 图像误差（度），右/下为正，已包含解算画面方向。
-- Missing guide means the target is unavailable; motion consumers must not substitute a different local target. 缺少目标时不得自行换用其他目标运动。
-- Existing raw RA/Dec/Roll and exact-frame identifiers retain their meanings. 原始解算及精确帧标识语义不变。
+Read [current-pole-v1](current-pole-v1.md) for model, refraction, provenance, camera-axis and consumer validation rules. `angular_sep_deg` is the centre-to-target distance; `image_offset_deg.dx/dy` is right/down positive. 所有消费方复用该目标，不得另算岁差章动或重复旋转画面。
+
+For backward compatibility only, old Core v1 requests omitting `astronomy` retain `catalog_visual_v1` (fixed J2000 pole, all corrections false). New product clients must negotiate current-pole support and never silently use this legacy path. 仅未声明策略的旧 v1 请求保留历史语义；新产品入口不允许退回旧目标。 Developer analysis defaults to the current pole.
 
 ### 2.1) Get Exact Solve Frame
 
