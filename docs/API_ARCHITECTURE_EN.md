@@ -35,7 +35,7 @@ ogscope/
 │       ├── system/routes.py      # Dev system: /api/dev/system/*
 │       ├── network/routes.py     # Network APIs
 │       ├── camera/routes.py      # Camera base APIs
-│       └── ...                   # alignment, models, etc.
+│       └── models/               # 请求与响应模型 / Request and response models
 ├── domain/
 │   ├── camera/
 │   ├── analysis/
@@ -44,8 +44,11 @@ ogscope/
 │   └── shared/
 ├── core/
 │   └── application/core_service.py # core/v1 orchestration
-└── adapters/                     # Boundary adapters (lazy / compat)
+├── application/camera.py         # 相机实例组合 / Camera runtime composition
+└── platform/adapters/            # 边界适配 / Boundary adapters
 ```
+
+Public camera ports live in `domain/camera/runtime.py`, with one shared Core/Dev instance bound by `application/camera.py`. Shared controls live in `application/camera_control.py`, with legacy Web Debug forwarding. The manager coordinates ownership, frame pipeline and resource components; the old Web module forwards legacy imports. Camera Domain has no HTTP/Web Debug dependency. Web owns preview/MJPEG adaptation, Core and Dev share neutral media reads, and Dev retains media mutations and preset persistence. See the [API inventory](contracts/api-inventory.md), [Core v1 freeze](contracts/core-v1-freeze.md) and [implemented boundaries and remaining migration](development/camera-runtime-migration.md).
 
 ## 2) Design rules (mandatory)
 

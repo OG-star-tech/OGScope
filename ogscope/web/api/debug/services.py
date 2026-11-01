@@ -4,7 +4,6 @@
 
 import asyncio
 import json
-import logging
 import os
 import tempfile
 import time
@@ -13,25 +12,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import HTTPException
-
-from ogscope.domain.camera.sidecar import merge_capture_sidecar_into_info
+from ogscope.application.camera import (
+    get_camera_capture as get_camera_manager,
+)
+from ogscope.application.camera import (
+    get_camera_control,
+)
+from ogscope.application.camera_control import i18n_payload
+from ogscope.domain.camera.media import CameraMediaCatalog
 from ogscope.domain.shared.filesystem import (
     DEV_CAPTURES_DIR,
-    IMAGE_EXTENSIONS,
-    VIDEO_EXTENSIONS,
-    dev_captures_storage_info,
     ensure_safe_basename,
 )
-from ogscope.web.camera_shared import get_camera_manager
 
 # 兼容旧命名，测试与遗留调用仍可能引用 / Backward-compatible alias.
 DEBUG_CAPTURES_DIR = DEV_CAPTURES_DIR
 
-# 全局变量存储相机状态（相机单例在 CameraManager）/ Global state (camera singleton lives in CameraManager).
-is_recording = False
-recording_task = None
-recording_state_lock: Optional[asyncio.Lock] = None
 # 录制会话元数据（用于停止时写入侧车） / Recording session metadata (for sidecar on stop)
 recording_stem: Optional[str] = None
 recording_t0_mono: Optional[float] = None
@@ -39,9 +35,6 @@ recording_fps_value: float = 15.0
 recording_media_filename: Optional[str] = None
 recording_codec_fourcc: str = "MJPG"
 recording_container: str = "AVI"
-# 焦点会话只锁定会影响星点轮廓的运行时参数，结束时恢复 / Focus session restores runtime imaging controls.
-focus_session_snapshot: Optional[dict[str, Any]] = None
-focus_session_state_lock: Optional[asyncio.Lock] = None
 
 _CAMERA_ENV_KEY_MAP = {
     "width": "OGSCOPE_CAMERA_WIDTH",
@@ -60,10 +53,6 @@ _CAMERA_ENV_KEY_MAP = {
     "ae_flicker_mode": "OGSCOPE_CAMERA_AE_FLICKER_MODE",
     "noise_reduction_mode": "OGSCOPE_CAMERA_NOISE_REDUCTION_MODE",
 }
-
-# 串行化 ensure/start，避免并发 to_thread 竞争；与阻塞相机调用分离出事件循环
-# Serialize ensure/start; offload blocking camera calls from asyncio event loop.
-_camera_ensure_lock = asyncio.Lock()
 
 
 def _build_debug_capture_archive() -> tuple[Path, str]:
@@ -91,37 +80,9 @@ def _build_debug_capture_archive() -> tuple[Path, str]:
         raise
 
 
-def _get_recording_state_lock() -> asyncio.Lock:
-    """懒加载录制状态锁 / Lazy-init lock for recording state."""
-    global recording_state_lock
-    if recording_state_lock is None:
-        recording_state_lock = asyncio.Lock()
-    return recording_state_lock
-
-
-def _get_focus_session_state_lock() -> asyncio.Lock:
-    """懒加载焦点会话锁 / Lazy-init focus-session lock."""
-    global focus_session_state_lock
-    if focus_session_state_lock is None:
-        focus_session_state_lock = asyncio.Lock()
-    return focus_session_state_lock
-
-
 def is_recording_active() -> bool:
     """是否正在录制 / Whether recording is active."""
-    return bool(is_recording)
-
-
-def i18n_payload(
-    message_key: str, message: str, message_params: Optional[dict[str, Any]] = None
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "message_key": message_key,
-        "message": message,
-    }
-    if message_params:
-        payload["message_params"] = message_params
-    return payload
+    return bool(get_camera_control().recording)
 
 
 def _persist_env_updates(updates: dict[str, Any]) -> Path:
@@ -271,47 +232,18 @@ class DebugCameraService:
 
     @staticmethod
     async def get_camera_status():
-        """获取调试相机状态 / Get debug camera status"""
-        camera = await asyncio.to_thread(get_camera_instance)
-        _attach_manager_camera_if_needed(camera)
-        status = await get_camera_manager().status()
-        if not status.get("connected"):
-            return {
-                "connected": False,
-                "streaming": False,
-                "recording": is_recording,
-                "error": status.get("error") or "相机未初始化",
-                "configured_backend": status.get("configured_backend"),
-                "lifecycle": get_camera_manager().lifecycle_status(),
-            }
-        return {
-            "lifecycle": get_camera_manager().lifecycle_status(),
-            "connected": bool(status.get("connected")),
-            "streaming": bool(status.get("streaming")),
-            "recording": is_recording,
-            "info": status.get("info", {}),
-            "configured_backend": status.get("configured_backend"),
-            "runtime_overrides": status.get("runtime_overrides", {}),
-        }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().get_camera_status()
 
     @staticmethod
     async def get_runtime_overrides():
-        """获取运行时预览覆盖参数 / Get runtime preview overrides."""
-        manager = get_camera_manager()
-        return {"runtime_overrides": manager.get_runtime_overrides()}
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().get_runtime_overrides()
 
     @staticmethod
     async def clear_runtime_overrides():
-        """清空运行时预览覆盖参数 / Clear runtime preview overrides."""
-        manager = get_camera_manager()
-        manager.clear_runtime_overrides()
-        return {
-            "success": True,
-            **i18n_payload(
-                "server.runtimeOverridesCleared",
-                "运行时预览参数已清空",
-            ),
-        }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().clear_runtime_overrides()
 
     @staticmethod
     async def apply_runtime_overrides_as_defaults():
@@ -352,74 +284,25 @@ class DebugCameraService:
 
     @staticmethod
     async def start_camera():
-        """启动调试相机 / Start the debug camera"""
-        camera = await asyncio.to_thread(get_camera_instance)
-        _attach_manager_camera_if_needed(camera)
-        await get_camera_manager().ensure_started()
-        return {"success": True, **i18n_payload("server.cameraStarted", "相机启动成功")}
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().start_camera()
 
     @staticmethod
     async def ensure_camera_streaming():
-        """确保相机已采集并刷新预览（分析台与 /api/camera 共用单例，避免重复打开设备）/ Ensure capture + preview; shared singleton for lab and /api/camera."""
-        camera = await asyncio.to_thread(get_camera_instance)
-        _attach_manager_camera_if_needed(camera)
-        await get_camera_manager().ensure_started()
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().ensure_camera_streaming()
 
     @staticmethod
     async def stop_camera():
-        """停止调试相机 / Stop debugging camera"""
-        camera = await asyncio.to_thread(get_camera_instance)
-        _attach_manager_camera_if_needed(camera)
-        if focus_session_snapshot is not None:
-            await DebugCameraService.stop_focus_session()
-        manager = get_camera_manager()
-        ownership = manager.lifecycle_status()
-        from ogscope.core.realtime import realtime_solve_service
-
-        if (
-            realtime_solve_service.state.running
-            or ownership["analysis_consumers"]
-            or ownership["operation_consumers"]
-            or ownership["recording_consumers"]
-        ):
-            return {
-                "success": False,
-                "message": "Camera is in use; stop its task first / 相机正在使用，请先停止分析、校准或录像任务",
-            }
-        try:
-            await manager.stop()
-        except RuntimeError as exc:
-            return {"success": False, "message": str(exc)}
-        return {"success": True, **i18n_payload("server.cameraStopped", "相机停止成功")}
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().stop_camera()
 
     @staticmethod
     async def get_preview(since_frame_id: int | None = None):
-        """获取调试相机预览 / Get debug camera preview"""
-        from fastapi.responses import Response
+        """兼容入口复用预览 HTTP 适配 / Reuse preview HTTP adaptation from the compatibility entry."""
+        from ogscope.web.camera_http import camera_http_service
 
-        manager = get_camera_manager()
-        code, frame = await manager.get_preview_frame(since_frame_id)
-        if code == 304:
-            return Response(status_code=304)
-        if code != 200 or frame is None or frame.jpeg_frame is None:
-            # 预览仅消费共享 JPEG 缓存，避免触发 raw 抓取与二次编码导致内存尖峰
-            # Preview consumes shared JPEG cache only; avoid raw grab + re-encode spikes.
-            raise HTTPException(
-                status_code=503,
-                detail="暂无预览帧，请稍后重试 / No preview frame yet, retry shortly",
-            )
-        return Response(
-            content=frame.jpeg_frame,
-            media_type="image/jpeg",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "X-Frame-Id": str(frame.frame_id),
-                "X-Frame-Ts": str(frame.timestamp),
-                "X-Frame-Width": str(frame.width),
-                "X-Frame-Height": str(frame.height),
-            },
-        )
+        return await camera_http_service.get_preview(since_frame_id=since_frame_id)
 
     @staticmethod
     async def get_stream_frame_bytes(
@@ -428,37 +311,10 @@ class DebugCameraService:
         *,
         since_frame_id: int | None = None,
     ) -> tuple[int, bytes | None, int]:
-        """读取共享流帧并编码 / Read shared frame and encode.
-
-        返回 (code, data, snap_frame_id)。snap_frame_id 供 MJPEG 循环写入 since_frame_id，
-        在共享缓存未前进时返回 304 以避免 PNG/自定义质量下的疯狂同步抓帧。
-        Returns (code, data, snap_frame_id). snap_frame_id is fed back as since_frame_id for
-        the MJPEG loop; returns 304 when the shared cache has not advanced to avoid sync grabs.
-        """
-        manager = get_camera_manager()
-        await manager.ensure_started()
-        snap = await manager.get_cached_frame_snapshot()
-        if snap is None:
-            return 503, None, 0
-
-        fmt = image_format.lower()
-        q = int(max(10, min(100, int(quality))))
-        if since_frame_id is not None and since_frame_id == snap.frame_id:
-            return 304, None, snap.frame_id
-
-        if fmt == "jpeg":
-            # 质量变体仍来自同一共享帧，不因客户端质量不同额外抓 RAW。
-            # Quality variants use the same shared frame, never an extra camera read.
-            encoded = await manager.get_stream_jpeg(snap, q)
-            return (200 if encoded is not None else 500), encoded, snap.frame_id
-
-        raw, _fid, _ts = await manager.get_raw_frame()
-        encoded = await asyncio.to_thread(manager.encode_frame, raw, image_format, q)
-        if encoded is None:
-            return 500, None, snap.frame_id
-        snap2 = await manager.get_cached_frame_snapshot()
-        sid = int(snap2.frame_id) if snap2 is not None else int(snap.frame_id)
-        return 200, encoded, sid
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().get_stream_frame_bytes(
+            image_format, quality, since_frame_id=since_frame_id
+        )
 
     @staticmethod
     async def capture_image():
@@ -551,58 +407,23 @@ class DebugCameraService:
 
     @staticmethod
     async def set_rotation(rotation: int):
-        """设置图像旋转角度 / Set image rotation angle"""
-        camera = get_camera_instance()
-        if not camera:
-            raise Exception("相机未初始化")
-
-        if camera.set_rotation(rotation):
-            get_camera_manager().update_runtime_overrides({"rotation": int(rotation)})
-            return {
-                "success": True,
-                **i18n_payload(
-                    "server.rotationSet",
-                    f"旋转角度设置为: {rotation}度",
-                    {"rotation": rotation},
-                ),
-            }
-        else:
-            raise Exception("设置旋转角度失败")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_rotation(rotation)
 
     @staticmethod
     async def set_mirror(flip_horizontal: bool, flip_vertical: bool):
-        """设置水平/垂直镜像（采集管线内，与解算一致）/ Set mirror in capture pipeline."""
-        camera = get_camera_instance()
-        if not camera:
-            raise Exception("相机未初始化")
-        if not hasattr(camera, "set_flip"):
-            raise Exception("相机不支持镜像设置")
-        fh = bool(flip_horizontal)
-        fv = bool(flip_vertical)
-        if camera.set_flip(fh, fv):
-            get_camera_manager().update_runtime_overrides(
-                {"flip_horizontal": fh, "flip_vertical": fv}
-            )
-            return {
-                "success": True,
-                "flip_horizontal": fh,
-                "flip_vertical": fv,
-                **i18n_payload(
-                    "server.mirrorSet",
-                    f"镜像: 水平={'开' if fh else '关'}, 垂直={'开' if fv else '关'}",
-                    {"flip_horizontal": fh, "flip_vertical": fv},
-                ),
-            }
-        raise Exception("设置镜像失败")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_mirror(flip_horizontal, flip_vertical)
 
     @staticmethod
     async def start_recording():
         """开始录制视频 / Start recording video"""
-        global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
-        async with _get_recording_state_lock():
-            if is_recording:
+        control = get_camera_control()
+        async with control.recording_state_lock:
+            if control.recording:
                 raise Exception("已在录制中")
             try:
                 from ogscope.web.api.analysis.services import analysis_service
@@ -663,13 +484,13 @@ class DebugCameraService:
                 recording_media_filename = f"{stem}.avi"
                 recording_codec_fourcc = str(chosen_codec or "MJPG")
                 recording_container = str(chosen_container or "AVI")
-                is_recording = True
+                control.recording = True
 
                 async def record_video():
                     nonlocal video_writer
                     try:
                         mgr = get_camera_manager()
-                        while is_recording:
+                        while control.recording:
                             try:
                                 image, _, _ = await mgr.get_raw_frame()
                             except RuntimeError:
@@ -684,7 +505,7 @@ class DebugCameraService:
                     finally:
                         video_writer.release()
 
-                recording_task = asyncio.create_task(record_video())
+                control.recording_task = asyncio.create_task(record_video())
                 return {
                     "success": True,
                     "filename": f"{stem}.avi",
@@ -700,11 +521,12 @@ class DebugCameraService:
     @staticmethod
     async def stop_recording():
         """停止录制视频 / Stop recording video"""
-        global is_recording, recording_task, recording_stem, recording_t0_mono, recording_fps_value
+        global recording_stem, recording_t0_mono, recording_fps_value
         global recording_media_filename, recording_codec_fourcc, recording_container
 
-        async with _get_recording_state_lock():
-            if not is_recording:
+        control = get_camera_control()
+        async with control.recording_state_lock:
+            if not control.recording:
                 raise Exception("未在录制中")
 
             stem = recording_stem
@@ -714,25 +536,7 @@ class DebugCameraService:
             codec_fourcc = recording_codec_fourcc
             container = recording_container
 
-            is_recording = False
-
-            if recording_task:
-                try:
-                    # 最多等待短时间优雅结束，避免停止录制长时间卡住 / Wait briefly for graceful stop.
-                    await asyncio.wait_for(recording_task, timeout=2.0)
-                except asyncio.TimeoutError:
-                    recording_task.cancel()
-                    try:
-                        await asyncio.wait_for(recording_task, timeout=1.0)
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(
-                            "停止录制时等待录制任务取消异常: %s", e
-                        )
-                except asyncio.CancelledError:
-                    pass
-                recording_task = None
+            await control.finish_recording_task()
 
             if stem:
                 media_filename = media_filename or f"{stem}.avi"
@@ -770,190 +574,18 @@ class DebugCameraService:
 
     @staticmethod
     async def set_size(width: int, height: int):
-        """仅切换分辨率（宽高），不影响当前帧率；必要时重启预览抓取 / Only switches the resolution (width and height) without affecting the current frame rate; restart preview capture if necessary"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        # 验证输入参数 / Validate input parameters
-        if width <= 0 or height <= 0:
-            raise Exception("分辨率参数无效")
-
-        # 检查当前分辨率是否相同 / Check if the current resolutions are the same
-        info = camera.get_camera_info()
-        current_width = info.get("output_width", info.get("width", 0))
-        current_height = info.get("output_height", info.get("height", 0))
-
-        if current_width == width and current_height == height:
-            return {
-                "success": True,
-                "info": info,
-                **i18n_payload("server.resolutionUnchanged", "分辨率未变化"),
-            }
-
-        try:
-            success = await get_camera_manager().reconfigure_camera(
-                "set_resolution",
-                lambda: camera.set_resolution(int(width), int(height)),
-                timeout_sec=10.0,
-            )
-            if not success:
-                raise Exception("相机设置分辨率失败")
-        except asyncio.TimeoutError:
-            raise Exception("设置分辨率超时，请重试")
-        except Exception as e:
-            raise Exception(f"设置分辨率失败: {str(e)}")
-
-        # 校验是否已生效（以相机报告的尺寸为准） / Verify whether the verification has taken effect (subject to the size reported by the camera)
-        info = camera.get_camera_info()
-        # 在supersample模式下，检查output_width和output_height / In supersample mode, check output_width and output_height
-        if info.get("sampling_mode") == "supersample":
-            applied = int(info.get("output_width", 0)) == int(width) and int(
-                info.get("output_height", 0)
-            ) == int(height)
-        else:
-            applied = int(info.get("width", 0)) == int(width) and int(
-                info.get("height", 0)
-            ) == int(height)
-
-        if not applied:
-            # 如果设置未生效，记录警告但不抛出异常 / If the setting does not take effect, log a warning but do not throw an exception
-            current_res = f"{info.get('width', 0)}x{info.get('height', 0)}"
-            if info.get("sampling_mode") == "supersample":
-                current_res = (
-                    f"{info.get('output_width', 0)}x{info.get('output_height', 0)}"
-                )
-            logging.getLogger(__name__).warning(
-                f"分辨率设置可能未完全生效，当前分辨率: {current_res}"
-            )
-
-        get_camera_manager().update_runtime_overrides(
-            {"width": int(width), "height": int(height)}
-        )
-        return {
-            "success": True,
-            "info": info,
-            **i18n_payload("server.resolutionUpdated", "分辨率已更新"),
-        }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_size(width, height)
 
     @staticmethod
     async def set_sampling_mode(mode: str):
-        """切换采样模式（supersample | native | crop）"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        # 验证输入参数 / Validate input parameters
-        if mode not in ["supersample", "native", "crop"]:
-            raise Exception(f"不支持的采样模式: {mode}")
-
-        try:
-            ok = await get_camera_manager().reconfigure_camera(
-                "set_sampling_mode",
-                lambda: camera.set_sampling_mode(mode),
-                timeout_sec=10.0,
-            )
-            if not ok:
-                raise Exception("相机设置采样模式失败")
-        except Exception as e:
-            raise Exception(f"设置采样模式失败: {str(e)}")
-
-        # 验证设置是否生效 / Verify whether the settings take effect
-        info = camera.get_camera_info()
-        current_mode = info.get("sampling_mode", "unknown")
-        requested_mode = mode
-        if requested_mode == "supersample" and current_mode == "native":
-            # 在高分辨率场景下会自动降级为 native，这是预期行为 / In high-resolution scenarios, it is expected to automatically downgrade to native.
-            pass
-        elif current_mode != requested_mode:
-            raise Exception(f"采样模式设置未生效，当前模式: {current_mode}")
-
-        get_camera_manager().update_runtime_overrides({"sampling_mode": mode})
-        return {
-            "success": True,
-            "info": info,
-            "requested_mode": requested_mode,
-            "effective_mode": current_mode,
-            **i18n_payload(
-                "server.samplingModeSet",
-                f"采样模式请求为 {requested_mode}，实际生效为 {current_mode}",
-                {"requested_mode": requested_mode, "effective_mode": current_mode},
-            ),
-        }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_sampling_mode(mode)
 
     @staticmethod
     async def set_fps(fps: int):
-        """仅设置帧率，尽量不影响当前预览 / Only set the frame rate and try not to affect the current preview"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        # 验证输入参数 / Validate input parameters
-        if fps <= 0 or fps > 60:
-            raise Exception(f"帧率参数无效: {fps} (应在1-60之间)")
-
-        try:
-            ok = False
-            if hasattr(camera, "set_fps"):
-                ok = await get_camera_manager().reconfigure_camera(
-                    "set_fps",
-                    lambda: camera.set_fps(int(fps)),
-                    timeout_sec=10.0,
-                )
-            else:
-                info = camera.get_camera_info()
-                ok = await get_camera_manager().reconfigure_camera(
-                    "set_fps_by_set_resolution",
-                    lambda: camera.set_resolution(
-                        info.get("width", 640), info.get("height", 360), int(fps)
-                    ),
-                    timeout_sec=10.0,
-                )
-
-            if not ok:
-                raise Exception("相机设置帧率失败")
-
-            # 验证设置是否生效 / Verify whether the settings take effect
-            info = camera.get_camera_info()
-            current_fps = info.get("fps", 0)
-            if current_fps != int(fps):
-                # 如果设置未生效，尝试重新设置一次 / If the setting does not take effect, try setting it again
-                try:
-                    if hasattr(camera, "set_fps"):
-                        ok = await get_camera_manager().reconfigure_camera(
-                            "retry_set_fps",
-                            lambda: camera.set_fps(int(fps)),
-                            timeout_sec=10.0,
-                        )
-                    else:
-                        ok = await get_camera_manager().reconfigure_camera(
-                            "retry_set_fps_by_set_resolution",
-                            lambda: camera.set_resolution(
-                                info.get("width", 640),
-                                info.get("height", 360),
-                                int(fps),
-                            ),
-                            timeout_sec=10.0,
-                        )
-                    if ok:
-                        info = camera.get_camera_info()
-                        current_fps = info.get("fps", 0)
-                except Exception:
-                    pass
-
-                if current_fps != int(fps):
-                    raise Exception(f"帧率设置未生效，当前帧率: {current_fps}")
-
-            get_camera_manager().update_runtime_overrides({"fps": int(fps)})
-            return {
-                "success": True,
-                "info": info,
-                **i18n_payload(
-                    "server.fpsSet", f"帧率设置为 {int(fps)}", {"fps": int(fps)}
-                ),
-            }
-        except Exception as e:
-            raise Exception(f"设置帧率失败: {str(e)}")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_fps(fps)
 
     # ==================== 内部：预览抓取器 ==================== / ==================== Internal: Preview Grabber ====================
     @staticmethod
@@ -971,251 +603,23 @@ class DebugCameraService:
 
     @staticmethod
     async def set_auto_exposure_mode(enabled: bool):
-        """仅切换自动曝光模式 / Toggle auto-exposure mode only"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        if not hasattr(camera, "set_auto_exposure"):
-            raise Exception("当前相机不支持自动曝光切换")
-
-        applied = await get_camera_manager().reconfigure_camera(
-            "set_auto_exposure",
-            lambda: camera.set_auto_exposure(bool(enabled)),
-            timeout_sec=10.0,
-        )
-        if not applied:
-            raise Exception("设置自动曝光模式失败")
-
-        get_camera_manager().update_runtime_overrides({"auto_exposure": bool(enabled)})
-        return {
-            "success": True,
-            **i18n_payload("server.autoExposureUpdated", "曝光模式已更新"),
-            "auto_exposure": bool(enabled),
-        }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_auto_exposure_mode(enabled)
 
     @staticmethod
     async def update_settings(settings: dict[str, Any]):
-        """更新调试相机设置 / Update debug camera settings"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        try:
-            # 整组设置在同一个相机事务中执行，避免与 capture_request 并发访问 libcamera。
-            # Apply the full settings batch in one camera transaction to avoid racing capture_request.
-            def _apply_settings_sync() -> bool:
-                auto_exposure = settings.get(
-                    "autoExposure", getattr(camera, "auto_exposure", False)
-                )
-                if "autoExposure" in settings:
-                    if not hasattr(camera, "set_auto_exposure"):
-                        raise Exception("当前相机驱动不支持自动曝光")
-                    if not camera.set_auto_exposure(bool(auto_exposure)):
-                        raise Exception("设置自动曝光模式失败")
-
-                if not auto_exposure and "exposure" in settings:
-                    camera.set_exposure(settings["exposure"])
-
-                if (
-                    not auto_exposure
-                    and "gain" in settings
-                    and "digitalGain" in settings
-                ):
-                    camera.set_gain(settings["gain"], settings.get("digitalGain", 1.0))
-                elif not auto_exposure and "gain" in settings:
-                    camera.set_gain(settings["gain"])
-
-                if any(
-                    key in settings
-                    for key in ["contrast", "brightness", "saturation", "sharpness"]
-                ) and hasattr(camera, "set_image_enhancement"):
-                    camera.set_image_enhancement(
-                        settings.get("contrast", 1.0),
-                        settings.get("brightness", 0.0),
-                        settings.get("saturation", 1.0),
-                        settings.get("sharpness", 1.0),
-                    )
-
-                if "noiseReductionMode" in settings and hasattr(
-                    camera, "set_noise_reduction_mode"
-                ):
-                    camera.set_noise_reduction_mode(settings["noiseReductionMode"])
-                elif "noiseReduction" in settings and hasattr(
-                    camera, "set_noise_reduction"
-                ):
-                    camera.set_noise_reduction(settings["noiseReduction"])
-
-                if "aeFlickerMode" in settings and hasattr(
-                    camera, "set_ae_flicker_mode"
-                ):
-                    camera.set_ae_flicker_mode(settings["aeFlickerMode"])
-                if (
-                    "autoExposureMaxUs" in settings
-                    and settings["autoExposureMaxUs"]
-                    and hasattr(camera, "set_auto_exposure_max_us")
-                ):
-                    camera.set_auto_exposure_max_us(settings["autoExposureMaxUs"])
-
-                if "whiteBalanceMode" in settings and hasattr(
-                    camera, "set_white_balance"
-                ):
-                    camera.set_white_balance(
-                        settings["whiteBalanceMode"],
-                        settings.get("whiteBalanceGainR", 1.0),
-                        settings.get("whiteBalanceGainB", 1.0),
-                    )
-
-                if "colorMode" in settings and hasattr(camera, "set_color_mode"):
-                    camera.set_color_mode(settings["colorMode"])
-                return True
-
-            logging.getLogger(__name__).info(
-                "camera_settings_apply fields=%s", ",".join(sorted(settings))
-            )
-            await get_camera_manager().reconfigure_camera(
-                "update_settings", _apply_settings_sync, timeout_sec=10.0
-            )
-
-            overrides: dict[str, Any] = {}
-            if "exposure" in settings:
-                overrides["exposure_us"] = settings["exposure"]
-            if "gain" in settings:
-                overrides["analogue_gain"] = settings["gain"]
-            if "digitalGain" in settings:
-                overrides["digital_gain"] = settings["digitalGain"]
-            if "autoExposure" in settings:
-                overrides["auto_exposure"] = bool(settings["autoExposure"])
-            if "noiseReductionMode" in settings:
-                overrides["noise_reduction_mode"] = settings["noiseReductionMode"]
-            elif "noiseReduction" in settings:
-                # 兼容旧控制台数值降噪 / Compat numeric NR control from legacy console.
-                level = int(settings.get("noiseReduction") or 0)
-                overrides["noise_reduction_mode"] = (
-                    "off" if level <= 0 else "fast" if level <= 2 else "high_quality"
-                )
-            if "aeFlickerMode" in settings:
-                overrides["ae_flicker_mode"] = settings["aeFlickerMode"]
-            if "autoExposureMaxUs" in settings:
-                overrides["auto_exposure_max_us"] = settings["autoExposureMaxUs"]
-            if "colorMode" in settings:
-                overrides["color_mode"] = settings["colorMode"]
-            if "whiteBalanceMode" in settings:
-                overrides["white_balance_mode"] = settings["whiteBalanceMode"]
-                overrides["white_balance_gain_r"] = settings.get(
-                    "whiteBalanceGainR", 1.0
-                )
-                overrides["white_balance_gain_b"] = settings.get(
-                    "whiteBalanceGainB", 1.0
-                )
-            if overrides:
-                get_camera_manager().update_runtime_overrides(overrides)
-
-            return {
-                "success": True,
-                **i18n_payload("server.cameraSettingsUpdated", "相机设置已更新"),
-                "settings": settings,
-            }
-        except Exception as e:
-            raise Exception(f"更新设置失败: {str(e)}")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().update_settings(settings)
 
     @staticmethod
     async def start_focus_session() -> dict[str, Any]:
-        """锁定曝光/增益并关闭降噪，保存可恢复快照 / Lock imaging controls with a restorable snapshot."""
-        global focus_session_snapshot
-        async with _get_focus_session_state_lock():
-            if focus_session_snapshot is not None:
-                return {
-                    "success": True,
-                    "active": True,
-                    "already_active": True,
-                    "locked": focus_session_snapshot["locked"],
-                }
-
-            camera = get_camera_instance()
-            if not camera or not camera.is_initialized:
-                raise Exception("相机未初始化")
-            info = (
-                camera.get_camera_info() if hasattr(camera, "get_camera_info") else {}
-            )
-            snapshot_settings = {
-                "autoExposure": bool(getattr(camera, "auto_exposure", False)),
-                "exposure": int(getattr(camera, "exposure_us", 10_000)),
-                "gain": float(getattr(camera, "analogue_gain", 1.0)),
-                "digitalGain": float(getattr(camera, "digital_gain", 1.0)),
-                "noiseReductionMode": str(
-                    getattr(camera, "noise_reduction_mode", "fast")
-                ),
-            }
-            locked = {
-                "autoExposure": False,
-                "exposure": max(
-                    1,
-                    int(
-                        info.get("actual_exposure_us") or snapshot_settings["exposure"]
-                    ),
-                ),
-                "gain": max(
-                    0.1,
-                    float(
-                        info.get("actual_analogue_gain") or snapshot_settings["gain"]
-                    ),
-                ),
-                "digitalGain": max(
-                    0.1,
-                    float(
-                        info.get("actual_digital_gain")
-                        or snapshot_settings["digitalGain"]
-                    ),
-                ),
-                "noiseReductionMode": "off",
-            }
-            runtime_overrides = get_camera_manager().get_runtime_overrides()
-            await DebugCameraService.update_settings(locked)
-            focus_session_snapshot = {
-                "settings": snapshot_settings,
-                "runtime_overrides": runtime_overrides,
-                "locked": locked,
-            }
-            return {
-                "success": True,
-                "active": True,
-                "already_active": False,
-                "locked": locked,
-            }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().start_focus_session()
 
     @staticmethod
     async def stop_focus_session() -> dict[str, Any]:
-        """恢复焦点会话前的相机参数 / Restore camera controls from before focus mode."""
-        global focus_session_snapshot
-        async with _get_focus_session_state_lock():
-            snapshot = focus_session_snapshot
-            if snapshot is None:
-                return {"success": True, "active": False, "restored": False}
-
-            camera = get_camera_instance()
-            restored = bool(camera and camera.is_initialized)
-            if restored:
-                restore_settings = snapshot["settings"]
-                if restore_settings["autoExposure"]:
-                    # 先恢复手动基线，再重新开启 AE；否则批量设置会按 AE 语义跳过曝光/增益。
-                    # Restore the manual baseline before re-enabling AE; AE batches skip exposure/gain.
-                    await DebugCameraService.update_settings(
-                        {**restore_settings, "autoExposure": False}
-                    )
-                    await DebugCameraService.update_settings({"autoExposure": True})
-                else:
-                    await DebugCameraService.update_settings(restore_settings)
-            manager = get_camera_manager()
-            manager.clear_runtime_overrides()
-            manager.update_runtime_overrides(snapshot["runtime_overrides"])
-            focus_session_snapshot = None
-            return {
-                "success": True,
-                "active": False,
-                "restored": restored,
-                "restored_settings": snapshot["settings"],
-            }
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().stop_focus_session()
 
     @staticmethod
     async def reset_camera():
@@ -1283,29 +687,8 @@ class DebugCameraService:
 
     @staticmethod
     async def set_white_balance(mode: str, gain_r: float = 1.0, gain_b: float = 1.0):
-        """设置白平衡 / Set white balance"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        if camera.set_white_balance(mode, gain_r, gain_b):
-            get_camera_manager().update_runtime_overrides(
-                {
-                    "white_balance_mode": mode,
-                    "white_balance_gain_r": float(gain_r),
-                    "white_balance_gain_b": float(gain_b),
-                }
-            )
-            return {
-                "success": True,
-                **i18n_payload(
-                    "server.whiteBalanceSet",
-                    f"白平衡模式设置为: {mode}",
-                    {"mode": mode},
-                ),
-            }
-        else:
-            raise Exception("设置白平衡失败")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_white_balance(mode, gain_r, gain_b)
 
     @staticmethod
     async def set_image_enhancement(
@@ -1484,41 +867,8 @@ class DebugCameraService:
 
     @staticmethod
     async def set_color_mode(color_mode: str):
-        """设置颜色模式 / Set color mode"""
-        camera = get_camera_instance()
-        if not camera or not camera.is_initialized:
-            raise Exception("相机未初始化")
-
-        if color_mode not in ["color", "mono"]:
-            raise Exception("不支持的颜色模式，只支持 'color' 或 'mono'")
-
-        try:
-            if hasattr(camera, "set_color_mode"):
-                success = await get_camera_manager().reconfigure_camera(
-                    "set_color_mode",
-                    lambda: camera.set_color_mode(color_mode),
-                    timeout_sec=10.0,
-                )
-                if success:
-                    get_camera_manager().update_runtime_overrides(
-                        {"color_mode": color_mode}
-                    )
-                    mode_name = "彩色" if color_mode == "color" else "黑白"
-                    return {
-                        "success": True,
-                        **i18n_payload(
-                            "server.colorModeSwitched",
-                            f"颜色模式已切换为{mode_name}模式",
-                            {"mode": mode_name},
-                        ),
-                        "color_mode": color_mode,
-                    }
-                else:
-                    raise Exception("相机不支持颜色模式切换")
-            else:
-                raise Exception("相机驱动不支持颜色模式切换")
-        except Exception as e:
-            raise Exception(f"设置颜色模式失败: {str(e)}")
+        """兼容入口转发到共享控制服务 / Forward the compatibility entry to shared controls."""
+        return await get_camera_control().set_color_mode(color_mode)
 
 
 class DebugPresetService:
@@ -1718,36 +1068,8 @@ class DebugFileService:
 
     @staticmethod
     async def get_files():
-        """获取拍摄文件列表 / Get shooting file list"""
-        try:
-            files = []
-            for file_path in DEBUG_CAPTURES_DIR.iterdir():
-                if file_path.is_file():
-                    suffix = file_path.suffix.lower()
-                    if suffix in IMAGE_EXTENSIONS or suffix in VIDEO_EXTENSIONS:
-                        files.append(
-                            {
-                                "name": file_path.name,
-                                "size": file_path.stat().st_size,
-                                "modified": datetime.fromtimestamp(
-                                    file_path.stat().st_mtime
-                                ).isoformat(),
-                                "type": (
-                                    "image" if suffix in IMAGE_EXTENSIONS else "video"
-                                ),
-                            }
-                        )
-
-            # 按修改时间排序（最新的在前） / Sort by modification time (newest first)
-            files.sort(key=lambda x: x["modified"], reverse=True)
-
-            return {
-                "files": files,
-                "storage": dev_captures_storage_info(DEBUG_CAPTURES_DIR),
-            }
-
-        except Exception as e:
-            raise Exception(f"获取文件列表失败: {str(e)}")
+        """Core 与 Dev 读取同一媒体目录规则 / Core and Dev share media catalog rules."""
+        return await CameraMediaCatalog(DEBUG_CAPTURES_DIR).get_files()
 
     @staticmethod
     async def create_export_archive() -> tuple[Path, str]:
@@ -1756,38 +1078,8 @@ class DebugFileService:
 
     @staticmethod
     async def get_file_info(filename: str):
-        """获取文件信息 / Get file information"""
-        safe_name = ensure_safe_basename(filename)
-        file_path = DEBUG_CAPTURES_DIR / safe_name
-        info_path = DEBUG_CAPTURES_DIR / f"{file_path.stem}.txt"
-
-        if not file_path.exists():
-            raise Exception("文件不存在")
-
-        try:
-            suffix = file_path.suffix.lower()
-            file_type = "image" if suffix in IMAGE_EXTENSIONS else "video"
-
-            info = {
-                "filename": filename,
-                "size": file_path.stat().st_size,
-                "modified": datetime.fromtimestamp(
-                    file_path.stat().st_mtime
-                ).isoformat(),
-                "type": file_type,
-            }
-
-            # 读取拍摄信息；将 camera 内字段展开到顶层以兼容前端详情 / Read sidecar; flatten camera for UI
-            if info_path.exists():
-                with open(info_path, encoding="utf-8") as f:
-                    capture_info = json.load(f)
-                    if isinstance(capture_info, dict):
-                        merge_capture_sidecar_into_info(info, capture_info)
-
-            return info
-
-        except Exception as e:
-            raise Exception(f"获取文件信息失败: {str(e)}")
+        """读取共享媒体元数据 / Read shared media metadata."""
+        return await CameraMediaCatalog(DEBUG_CAPTURES_DIR).get_file_info(filename)
 
     @staticmethod
     async def delete_file(filename: str):

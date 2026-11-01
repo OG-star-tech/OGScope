@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from ogscope.core.application import core_contract_service
-from ogscope.domain.camera.streaming import build_camera_mjpeg_stream
 from ogscope.domain.shared.filesystem import ensure_safe_basename
 from ogscope.web.api.models.schemas import (
     CoreAnalysisControlResponse,
@@ -23,6 +22,7 @@ from ogscope.web.api.models.schemas import (
     CoreVideoDetailResponse,
     CoreVideoListResponse,
 )
+from ogscope.web.camera_streaming import build_camera_mjpeg_stream
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

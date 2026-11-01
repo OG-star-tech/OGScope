@@ -223,9 +223,9 @@ async def test_reset_camera_temporal_history_calls_the_driver_hook_when_present(
             return True
 
     monkeypatch.setattr(
-        camera_services_module.DebugCameraService,
+        camera_services_module.get_camera_runtime().capture,
         "get_camera_instance",
-        staticmethod(lambda: _CameraWithHook()),
+        lambda: _CameraWithHook(),
     )
 
     service = core_service.CoreContractService()
@@ -250,9 +250,9 @@ async def test_reset_camera_temporal_history_reports_noop_driver_as_not_applied(
             return False
 
     monkeypatch.setattr(
-        camera_services_module.DebugCameraService,
+        camera_services_module.get_camera_runtime().capture,
         "get_camera_instance",
-        staticmethod(lambda: _CameraWithNoopHook()),
+        lambda: _CameraWithNoopHook(),
     )
 
     result = await core_service.CoreContractService().reset_camera_temporal_history()
@@ -274,9 +274,9 @@ async def test_reset_camera_temporal_history_tolerates_a_driver_without_the_hook
         pass
 
     monkeypatch.setattr(
-        camera_services_module.DebugCameraService,
+        camera_services_module.get_camera_runtime().capture,
         "get_camera_instance",
-        staticmethod(lambda: _CameraWithoutHook()),
+        lambda: _CameraWithoutHook(),
     )
 
     service = core_service.CoreContractService()

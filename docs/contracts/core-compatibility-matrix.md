@@ -26,6 +26,10 @@ The legacy `/api/alignment/start`, `stop` and `status` routes returned constant 
 - New keys must be optional/additive.
 - Breaking changes must publish a new path version (for example `/v2/`).
 
+内部迁移由 [Core v1 冻结基线](core-v1-freeze.md)保护；新增字段也需显式审阅 schema 差异，不能直接覆盖快照。两种运行角色使用相同 Core 契约。
+
+The [Core v1 freeze baseline](core-v1-freeze.md) protects internal migration. Even additive fields require explicit schema-diff review rather than blind snapshot replacement. Both runtime roles share the same Core contract.
+
 ## Exposure preparation / 曝光准备
 
 Pair the new preparation capability and camera lease endpoint with consumers that wait before starting pose budgets. Old clients remain valid; new clients may fall back only on a missing endpoint and must report the reduced guarantee.

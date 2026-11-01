@@ -55,7 +55,9 @@ async def test_debug_camera_analysis_converts_rgb_and_preserves_snapshot(
         acquire_analysis_consumer=AsyncMock(),
         release_analysis_consumer=AsyncMock(),
     )
-    monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
+    monkeypatch.setattr(
+        "ogscope.application.camera.get_camera_capture", lambda: manager
+    )
     snapshot = MagicMock(return_value={"available": True, "frame_id": 7})
     monkeypatch.setattr(
         type(analysis_service), "_encode_debug_solve_snapshot", snapshot
@@ -133,7 +135,9 @@ async def test_lab_preparation_failure_never_calls_solver_and_releases_gate(
     manager = SimpleNamespace(
         acquire_analysis_consumer=AsyncMock(), release_analysis_consumer=AsyncMock()
     )
-    monkeypatch.setattr("ogscope.web.camera_shared.get_camera_manager", lambda: manager)
+    monkeypatch.setattr(
+        "ogscope.application.camera.get_camera_capture", lambda: manager
+    )
     monkeypatch.setattr(
         "ogscope.domain.camera.readiness.wait_capture_ready",
         AsyncMock(side_effect=RuntimeError("CAMERA_NOT_READY")),

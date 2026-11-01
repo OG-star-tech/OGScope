@@ -32,8 +32,7 @@ const APP_CONSTANTS = {
     // API端点 / API endpoint
     API_ENDPOINTS: {
         CAMERA_PREVIEW: '/api/dev/debug/camera/preview',
-        ALIGNMENT_STATUS: '/api/alignment/status',
-        SYSTEM_INFO: '/api/system/info'
+        SYSTEM_INFO: '/api/dev/system/info'
     },
     
     // 事件类型 / event type

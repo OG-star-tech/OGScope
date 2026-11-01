@@ -10,14 +10,16 @@
 
 - OGScope 仅提供稳定 REST 契约，不承诺调用方私有实现细节。
 - 新增字段保持向后兼容，不删除既有稳定字段。
-- 错误语义以 HTTP 状态码 + `detail` 文本表达。
+- 参数或运行异常使用 HTTP 错误与 `detail`；业务忙碌/所有权拒绝仍可返回 HTTP 200，调用方必须检查 `success`、`error_code` 或 `applied.busy`。
+
+当前 14 条路径、18 个 schema 已建立[重构冻结基线](core-v1-freeze.md)。内部迁移不得改变请求默认值、校验边界、响应字段或现有失败语义；增量扩展必须显式审阅基线差异。
 
 ## Endpoints
 
 ### 1) Start Analysis
 
 - `POST /api/core/v1/analysis/start`
-- 请求体（可选）：
+- 请求体必需，可发送 `{}`；以下字段均可选：
   - `hint_ra_deg`
   - `hint_dec_deg`
   - `fov_estimate`
