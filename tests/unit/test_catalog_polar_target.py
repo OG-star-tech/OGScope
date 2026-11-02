@@ -97,7 +97,9 @@ def test_legacy_target_does_not_follow_solve_hemisphere():
 
 
 def test_core_repeated_reads_preserve_south_target(monkeypatch):
-    raw = attach_catalog_polar_guide({**solve(), "target_pole": "south", "dec_deg": -89})
+    raw = attach_catalog_polar_guide(
+        {**solve(), "target_pole": "south", "dec_deg": -89}
+    )
     monkeypatch.setattr(
         "ogscope.core.application.core_service.realtime_solve_service.get_status",
         AsyncMock(return_value={"running": False, "last_result": raw}),
@@ -108,7 +110,9 @@ def test_core_repeated_reads_preserve_south_target(monkeypatch):
     assert first == second
     assert first["overlay_ext"]["polar_guide"]["target"]["dec_deg"] == -90
     assert (
-        AnalysisService._build_polar_guide(None, raw, astronomy={"policy": "catalog_visual_v1"}, target_pole="south")
+        AnalysisService._build_polar_guide(
+            None, raw, astronomy={"policy": "catalog_visual_v1"}, target_pole="south"
+        )
         == first["overlay_ext"]["polar_guide"]
     )
 

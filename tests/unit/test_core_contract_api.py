@@ -637,6 +637,8 @@ def test_core_start_forwards_and_acknowledges_explicit_pole(client, monkeypatch,
         ).status_code
         == 422
     )
+
+
 def test_current_policy_is_explicit_and_running_changes_conflict(client, monkeypatch):
     """保留旧 v1，显式当前策略与冲突可验证 / Preserve v1 while making current policy and conflicts explicit."""
     from ogscope.core.application import core_service
