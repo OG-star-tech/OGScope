@@ -222,7 +222,10 @@ class CoreContractService:
             "session_id": str(result.get("session_id") or self._session.session_id),
             "state": (
                 "running"
-                if success or was_running or result.get("error_code") == "ANALYSIS_BUSY"
+                if success
+                or was_running
+                or result.get("error_code")
+                in {"ANALYSIS_BUSY", "ANALYSIS_TARGET_CONFLICT"}
                 else "stopped"
             ),
             "error_code": result.get("error_code"),

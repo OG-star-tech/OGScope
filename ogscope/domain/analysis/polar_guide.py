@@ -7,7 +7,7 @@ from typing import Any
 
 
 def build_catalog_polar_guide(
-    row: dict[str, Any], *, target_pole: str = "north"
+    row: dict[str, Any], *, target_pole: str | None = None
 ) -> dict[str, Any] | None:
     """构建极轴引导向量 / Build polar guide vector from solve center."""
     overlay = row.get("solve_overlay")
@@ -50,8 +50,11 @@ def build_catalog_polar_guide(
     if row.get("frame") == "date":
         return None
 
-    # 北天极近似目标：RA 与当前中心相同，Dec=+90，减少 RA wrap 影响
-    # Approximate north celestial pole target with same RA and Dec=+90.
+    # 会话指定天极；旧客户端缺省仍使用北天极，不从画面推断。
+    # Select the session's pole; legacy callers default north, never infer from the image.
+    target_pole = (
+        target_pole if target_pole is not None else row.get("target_pole", "north")
+    )
     target_ra = ra_center
     if target_pole not in {"north", "south"}:
         return None
@@ -114,7 +117,7 @@ def build_catalog_polar_guide(
 
 
 def attach_catalog_polar_guide(
-    row: dict[str, Any], *, target_pole: str = "north"
+    row: dict[str, Any], *, target_pole: str | None = None
 ) -> dict[str, Any]:
     """Copy a successful solve with its authoritative target / 为成功解算副本附加权威目标。"""
     if row.get("status") != "MATCH_FOUND":

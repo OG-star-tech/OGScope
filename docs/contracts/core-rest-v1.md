@@ -18,6 +18,7 @@
 
 - `POST /api/core/v1/analysis/start`
 - 请求体（可选）：
+  - `target_pole`：`north`（缺省，兼容旧客户端）或 `south`；由调用方选择并绑定分析会话，不能由解算赤纬推断。运行中换极返回 `success=false, error_code=ANALYSIS_TARGET_CONFLICT`，原会话继续运行；停止后重新启动才能更改。
   - `hint_ra_deg`
   - `hint_dec_deg`
   - `fov_estimate`
