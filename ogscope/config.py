@@ -145,6 +145,15 @@ class Settings(BaseSettings):
         default=True,
         description="启动时配置媒体链路 / Configure the media pipeline on startup",
     )
+    camera_v4l2_sensor_auto_detect: bool = Field(
+        default=True,
+        description=(
+            "按媒体图中实际探测到的传感器（任一受支持的传感器）选择实体、格式与 Bayer 排列；"
+            "关闭时使用下列配置值 / Pick the entity, formats and Bayer order of the "
+            "sensor that probed (any supported sensor) from the media graph; when off, "
+            "the values below apply"
+        ),
+    )
     camera_v4l2_sensor_entity: str = Field(
         default="imx327 10-001a",
         description="Media Controller 传感器实体 / Media-controller sensor entity",

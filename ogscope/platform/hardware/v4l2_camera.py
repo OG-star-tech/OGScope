@@ -14,7 +14,6 @@ from typing import Any
 
 import numpy as np
 
-from ogscope.camera_optics import IMX327_16MM_F14_OPTICS
 from ogscope.domain.camera.ae_diagnostics import (
     AutoExposureTraceLimits,
     AutoExposureTraceRecorder,
@@ -30,6 +29,12 @@ from ogscope.domain.camera.white_balance import (
     BAYER_CHANNELS,
     COLOR_PIPELINE_VERSION,
     RawAutoWhiteBalance,
+)
+from ogscope.platform.hardware.camera_sensors import (
+    IMX327_PROFILE,
+    SensorProfile,
+    detect_sensor,
+    profile_for_entity,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,7 +103,6 @@ class V4L2RawCamera:
         self._hardware_flips = (False, False)
         self._original_sensor_flips: dict[str, int] | None = None
         self._transform_error: str | None = None
-        self.driver_name = "v4l2-imx327-software-ae"
         self.backend_name = "opencv/v4l2-raw"
         self.output_pixel_format = "RGB888"
         self.device = str(config.get("device", "/dev/video0"))
@@ -108,6 +112,20 @@ class V4L2RawCamera:
             config.get("v4l2_configure_media_pipeline", True)
         )
         self.sensor_entity = str(config.get("v4l2_sensor_entity", "imx327 10-001a"))
+        # 按媒体图中实际探测到的传感器配置 RAW 链路；关闭时只用配置值。
+        # Configure the RAW pipeline for the sensor that actually probed, as
+        # the media graph shows it; when off, only the configured values apply.
+        self.sensor_auto_detect = bool(config.get("v4l2_sensor_auto_detect", True))
+        self.sensor_profile: SensorProfile = (
+            profile_for_entity(self.sensor_entity) or IMX327_PROFILE
+        )
+        self.driver_name = self._driver_name_for(self.sensor_profile)
+        self._sensor_detection: dict[str, Any] = {
+            "enabled": self.sensor_auto_detect,
+            "state": "pending",
+            "entity": self.sensor_entity,
+            "model": self.sensor_profile.model,
+        }
         self.receiver_entity = str(config.get("v4l2_receiver_entity", "unicam"))
         self.sensor_pad = int(config.get("v4l2_sensor_pad", 0))
         self.receiver_sink_pad = int(config.get("v4l2_receiver_sink_pad", 0))
@@ -862,9 +880,61 @@ class V4L2RawCamera:
         capture.release()
         return None
 
+    @staticmethod
+    def _driver_name_for(profile: SensorProfile) -> str:
+        return f"v4l2-{profile.model.lower()}-software-ae"
+
+    def _detect_sensor(self) -> None:
+        """采用实际探测到的传感器配置 / Adopt the profile of the probed sensor."""
+        if not self.sensor_auto_detect:
+            self._sensor_detection.update(state="disabled")
+            return
+        detected = detect_sensor(self.media_device)
+        if detected is None:
+            self._sensor_detection.update(state="configured")
+            return
+        profile = detected.profile
+        # 配置写的就是这个传感器：保留全部配置（格式、模式），只取实际实体与子设备。
+        # 换了传感器：配置不适用，改用该传感器的配置档。
+        # The configuration is for this sensor: keep all of it (formats,
+        # mode) and take only the actual entity and subdev. Another sensor:
+        # the configuration does not apply, use that sensor's profile.
+        configured_for_it = profile_for_entity(self.sensor_entity) is profile
+        self.sensor_profile = profile
+        self.sensor_entity = detected.entity
+        if detected.subdev:
+            self.sensor_subdev = detected.subdev
+        if not configured_for_it:
+            self.media_bus_format = profile.media_bus_format
+            self.pixel_format = profile.pixel_format
+            self.bit_depth = profile.bit_depth
+            self.white_level = (1 << self.bit_depth) - 1
+            self.bayer_pattern = profile.bayer_pattern
+            self.active_width = profile.active_width
+            self.active_height = profile.active_height
+            self.capture_width = self.active_width
+            self.capture_height = self.active_height
+            self.gain_db_per_step = profile.gain_db_per_step
+        self.driver_name = self._driver_name_for(profile)
+        self._sensor_detection.update(
+            state="detected",
+            entity=detected.entity,
+            model=profile.model,
+            subdev=self.sensor_subdev,
+            settings="configured" if configured_for_it else "sensor_profile",
+        )
+        logger.info(
+            "检测到传感器 %s（%s）/ Detected sensor %s (%s)",
+            profile.model,
+            detected.entity,
+            profile.model,
+            detected.entity,
+        )
+
     def initialize(self) -> bool:
         """初始化 RAW 抓帧和软件 AE / Initialize RAW capture and software AE."""
         try:
+            self._detect_sensor()
             if not self._configure_media_pipeline():
                 return False
             if not self._discover_control_ranges():
@@ -886,6 +956,7 @@ class V4L2RawCamera:
                 {
                     "driver": self.driver_name,
                     "device": self.device,
+                    "sensor": self._sensor_detection,
                     "sensor_subdev": self.sensor_subdev,
                     "media_device": self.media_device,
                     "media_pipeline": self._media_pipeline,
@@ -1735,7 +1806,7 @@ class V4L2RawCamera:
         optics_height = (
             self.active_height if self.sampling_mode == "supersample" else self.height
         )
-        optics = IMX327_16MM_F14_OPTICS.describe_capture(
+        optics = self.sensor_profile.optics.describe_capture(
             capture_width_px=optics_width,
             capture_height_px=optics_height,
             sampling_mode=self.sampling_mode,
@@ -1784,7 +1855,8 @@ class V4L2RawCamera:
                 "vertical_flip": self._hardware_flips[1],
                 "error": self._transform_error,
             },
-            "sensor": "IMX327",
+            "sensor": self.sensor_profile.model,
+            "sensor_detection": dict(self._sensor_detection),
             "optics": optics,
             "capabilities": {
                 "driver": caps.driver,

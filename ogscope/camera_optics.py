@@ -146,5 +146,24 @@ IMX327_16MM_F14_OPTICS = CameraOpticsProfile(
     calibrated_focal_length_mm=16.277273749463617,
 )
 
+# SC230AI 与 IMX327 像元同为 2.9 µm、记录区同为 1920x1080，配同一镜头视场相同；
+# 标定焦距沿用 IMX327 的标定值，直到有 SC230AI 自己的星图标定。
+# The SC230AI has the IMX327's 2.9 µm pitch and 1920x1080 recording area, so
+# with the same lens it sees the same field; it keeps the IMX327's calibrated
+# focal length until the SC230AI has its own from solved star fields.
+SC230AI_16MM_F14_OPTICS = CameraOpticsProfile(
+    profile_id="sc230ai-16mm-f1.4-ircut-v1",
+    sensor_model="SC230AI",
+    sensor_pixel_pitch_um=2.9,
+    sensor_recording_width_px=1920,
+    sensor_recording_height_px=1080,
+    lens_focal_length_mm=16.0,
+    lens_aperture_f_number=1.4,
+    lens_resolution_rating_mp=5.0,
+    lens_mount="M12",
+    ir_cut_filter=True,
+    calibrated_focal_length_mm=IMX327_16MM_F14_OPTICS.calibrated_focal_length_mm,
+)
+
 DEFAULT_EFFECTIVE_FOV_WIDTH_DEG = 13.01
 DEFAULT_EFFECTIVE_FOV_HEIGHT_DEG = 7.34

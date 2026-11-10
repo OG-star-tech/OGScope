@@ -76,6 +76,7 @@ _CATALOG_SECTIONS: tuple[
             "camera_v4l2_sensor_subdev",
             "camera_v4l2_media_device",
             "camera_v4l2_configure_media_pipeline",
+            "camera_v4l2_sensor_auto_detect",
             "camera_v4l2_sensor_entity",
             "camera_v4l2_receiver_entity",
             "camera_v4l2_sensor_pad",
