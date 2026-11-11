@@ -11,6 +11,7 @@ sensor takes one more entry in SENSOR_PROFILES.
 
 from __future__ import annotations
 
+import glob
 import logging
 import re
 import subprocess
@@ -84,6 +85,7 @@ class DetectedSensor:
     profile: SensorProfile
     entity: str
     subdev: str | None
+    media_device: str
 
 
 _ENTITY_RE = re.compile(r"^- entity \d+: (?P<name>.+?) \(\d+ pads?")
@@ -129,17 +131,19 @@ def profile_for_entity(entity: str) -> SensorProfile | None:
     return next((p for p in SENSOR_PROFILES if driver in p.entity_names), None)
 
 
-def detect_sensor(
-    media_device: str,
-    run: Callable[..., subprocess.CompletedProcess] | None = None,
-) -> DetectedSensor | None:
-    """读出媒体图中实际探测到的已知传感器 / Return the known sensor that probed.
+def media_devices() -> list[str]:
+    """本机的媒体设备，按编号排序 / This system's media devices, by number."""
 
-    没有媒体图、没有传感器或传感器未知时返回 None，调用方保留配置值。
-    Returns None without a media graph, without a sensor or for an unknown
-    one; the caller then keeps its configured values.
-    """
-    runner = run or subprocess.run
+    def _number(path: str) -> int:
+        digits = re.sub(r"\D", "", path)
+        return int(digits) if digits else 0
+
+    return sorted(glob.glob("/dev/media*"), key=_number)
+
+
+def _read_graph(
+    media_device: str, runner: Callable[..., subprocess.CompletedProcess]
+) -> str | None:
     try:
         result = runner(
             ["media-ctl", "-d", media_device, "-p"],
@@ -150,26 +154,57 @@ def detect_sensor(
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         logger.warning(
-            "读取媒体图失败，保留配置的传感器 / Media graph unreadable, "
-            "keeping the configured sensor: %s",
+            "读取媒体图 %s 失败 / Media graph %s unreadable: %s",
+            media_device,
+            media_device,
             exc,
         )
         return None
     if result.returncode != 0:
         logger.warning(
-            "读取媒体图失败，保留配置的传感器 / Media graph unreadable, "
-            "keeping the configured sensor: %s",
+            "读取媒体图 %s 失败 / Media graph %s unreadable: %s",
+            media_device,
+            media_device,
             (result.stderr or "").strip() or f"media-ctl exit {result.returncode}",
         )
         return None
-    for entity, node in parse_sensor_entities(result.stdout or ""):
-        profile = profile_for_entity(entity)
-        if profile is not None:
-            return DetectedSensor(profile=profile, entity=entity, subdev=node)
-        logger.warning(
-            "未知传感器 %s，保留配置的传感器 / Unknown sensor %s, keeping the "
-            "configured sensor",
-            entity,
-            entity,
-        )
+    return result.stdout or ""
+
+
+def detect_sensor(
+    media_device: str,
+    run: Callable[..., subprocess.CompletedProcess] | None = None,
+    candidates: list[str] | None = None,
+) -> DetectedSensor | None:
+    """读出实际探测到的已知传感器 / Return the known sensor that probed.
+
+    先查配置的媒体设备，再查本机其他媒体设备：媒体设备编号取决于驱动探测顺序，
+    其他驱动（如 ISP）可能先占用配置的编号。
+    The configured media device is read first, then this system's other
+    media devices: media device numbers follow the drivers' probe order, and
+    another driver (an ISP, say) can take the configured number first.
+
+    都没有已知传感器时返回 None，调用方保留配置值。
+    Returns None when none has a known sensor; the caller then keeps its
+    configured values.
+    """
+    runner = run or subprocess.run
+    others = media_devices() if candidates is None else candidates
+    for device in [media_device, *(d for d in others if d != media_device)]:
+        graph = _read_graph(device, runner)
+        if graph is None:
+            continue
+        for entity, node in parse_sensor_entities(graph):
+            profile = profile_for_entity(entity)
+            if profile is not None:
+                return DetectedSensor(
+                    profile=profile, entity=entity, subdev=node, media_device=device
+                )
+            logger.warning(
+                "%s 上的未知传感器 %s / Unknown sensor %s on %s",
+                device,
+                entity,
+                entity,
+                device,
+            )
     return None

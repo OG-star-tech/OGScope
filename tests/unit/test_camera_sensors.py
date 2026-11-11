@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 
+from ogscope.platform.hardware import camera_sensors
 from ogscope.platform.hardware.camera_sensors import (
     IMX327_PROFILE,
     SC230AI_PROFILE,
@@ -53,6 +54,21 @@ SC230AI_GRAPH = (
 )
 
 
+# 一个 ISP 的媒体图：没有传感器 / An ISP's media graph: no sensor
+ISP_GRAPH = """\
+Device topology
+- entity 1: bcm2835_isp0-output0 (1 pad, 1 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video13
+"""
+
+
+@pytest.fixture(autouse=True)
+def _no_other_media_devices(monkeypatch):
+    """测试中不扫描本机的媒体设备 / Do not scan this machine's media devices."""
+    monkeypatch.setattr(camera_sensors, "media_devices", lambda: [])
+
+
 def _media_ctl(stdout: str, returncode: int = 0):
     calls: list[list[str]] = []
 
@@ -95,6 +111,63 @@ def test_detection_reads_the_configured_media_device() -> None:
     assert calls == [["media-ctl", "-d", "/dev/media3", "-p"]]
     assert found is not None and found.profile is SC230AI_PROFILE
     assert found.entity == "sc230ai 10-0030" and found.subdev == "/dev/v4l-subdev2"
+    assert found.media_device == "/dev/media3"
+
+
+def _graphs(by_device: dict[str, str]):
+    calls: list[str] = []
+
+    def _run(command: list[str], **_kwargs) -> subprocess.CompletedProcess:
+        device = command[2]
+        calls.append(device)
+        return subprocess.CompletedProcess(command, 0, by_device.get(device, ""), "")
+
+    return _run, calls
+
+
+@pytest.mark.unit
+def test_the_sensor_is_found_on_whichever_media_device_has_it(monkeypatch) -> None:
+    # ISP 先探测并占用了 media0/media1 / The ISPs probed first and took
+    # media0 and media1
+    monkeypatch.setattr(
+        camera_sensors,
+        "media_devices",
+        lambda: ["/dev/media0", "/dev/media1", "/dev/media2"],
+    )
+    run, calls = _graphs(
+        {
+            "/dev/media0": ISP_GRAPH,
+            "/dev/media1": ISP_GRAPH,
+            "/dev/media2": IMX327_GRAPH,
+        }
+    )
+    found = detect_sensor("/dev/media0", run=run)
+    assert found is not None and found.media_device == "/dev/media2"
+    assert calls == ["/dev/media0", "/dev/media1", "/dev/media2"]
+
+
+@pytest.mark.unit
+def test_the_configured_media_device_is_read_first(monkeypatch) -> None:
+    monkeypatch.setattr(
+        camera_sensors, "media_devices", lambda: ["/dev/media0", "/dev/media2"]
+    )
+    run, calls = _graphs({"/dev/media0": SC230AI_GRAPH, "/dev/media2": IMX327_GRAPH})
+    found = detect_sensor("/dev/media2", run=run)
+    assert found.profile is IMX327_PROFILE and calls == ["/dev/media2"]
+
+
+@pytest.mark.unit
+def test_the_camera_follows_the_sensor_to_its_media_device(monkeypatch) -> None:
+    monkeypatch.setattr(
+        camera_sensors, "media_devices", lambda: ["/dev/media0", "/dev/media2"]
+    )
+    run, _ = _graphs({"/dev/media0": ISP_GRAPH, "/dev/media2": IMX327_GRAPH})
+    monkeypatch.setattr(subprocess, "run", run)
+    camera = V4L2RawCamera({"v4l2_media_device": "/dev/media0"})
+    camera._detect_sensor()
+    assert camera.media_device == "/dev/media2"
+    assert camera.sensor_subdev == "/dev/v4l-subdev1"
+    assert camera.get_camera_info()["sensor_detection"]["media_device"] == "/dev/media2"
 
 
 @pytest.mark.unit

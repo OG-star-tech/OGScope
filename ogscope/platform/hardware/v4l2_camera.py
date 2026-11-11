@@ -902,6 +902,7 @@ class V4L2RawCamera:
         configured_for_it = profile_for_entity(self.sensor_entity) is profile
         self.sensor_profile = profile
         self.sensor_entity = detected.entity
+        self.media_device = detected.media_device
         if detected.subdev:
             self.sensor_subdev = detected.subdev
         if not configured_for_it:
@@ -921,6 +922,7 @@ class V4L2RawCamera:
             entity=detected.entity,
             model=profile.model,
             subdev=self.sensor_subdev,
+            media_device=self.media_device,
             settings="configured" if configured_for_it else "sensor_profile",
         )
         logger.info(
