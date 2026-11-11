@@ -160,6 +160,7 @@ class CameraManager:
             "v4l2_configure_media_pipeline": (
                 settings.camera_v4l2_configure_media_pipeline
             ),
+            "v4l2_sensor_auto_detect": settings.camera_v4l2_sensor_auto_detect,
             "v4l2_sensor_entity": settings.camera_v4l2_sensor_entity,
             "v4l2_receiver_entity": settings.camera_v4l2_receiver_entity,
             "v4l2_sensor_pad": settings.camera_v4l2_sensor_pad,
