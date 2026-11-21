@@ -31,9 +31,9 @@ gh api "repos/${REPO}/branches/main/protection" -X PUT \
   -f restrictions=null \
   -f allow_force_pushes=false \
   -f allow_deletions=false \
-  -F 'required_status_checks[contexts][]=test (3.10)' \
-  -F 'required_status_checks[contexts][]=test (3.11)' \
   -F 'required_status_checks[contexts][]=test (3.12)' \
+  -F 'required_status_checks[contexts][]=test (3.13)' \
+  -F 'required_status_checks[contexts][]=test (3.14)' \
   -F 'required_status_checks[contexts][]=lint' \
   -F 'required_status_checks[contexts][]=require-develop-source' \
   2>/dev/null || {
@@ -54,9 +54,9 @@ gh api "repos/${REPO}/branches/develop/protection" -X PUT \
   -f restrictions=null \
   -f allow_force_pushes=false \
   -f allow_deletions=false \
-  -F 'required_status_checks[contexts][]=test (3.10)' \
-  -F 'required_status_checks[contexts][]=test (3.11)' \
   -F 'required_status_checks[contexts][]=test (3.12)' \
+  -F 'required_status_checks[contexts][]=test (3.13)' \
+  -F 'required_status_checks[contexts][]=test (3.14)' \
   -F 'required_status_checks[contexts][]=lint' \
   2>/dev/null || {
   echo "⚠️  develop 保护需在 GitHub UI 或 Rulesets 中启用 Require PR（feature/fix → develop）"

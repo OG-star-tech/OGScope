@@ -47,13 +47,13 @@
 - **处理器**: Raspberry Pi Zero 2W (ARM Cortex-A53)
 - **相机**: IMX327 传感器 (1920x1080)
 - **显示**: 2.4寸 SPI LCD (240x320)
-- **软件**: Python 3.10+ + FastAPI
+- **软件**: Python 3.12+ + FastAPI
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.12+
 - Poetry 1.2+
 - Raspberry Pi Zero 2W (Raspberry Pi OS)
 

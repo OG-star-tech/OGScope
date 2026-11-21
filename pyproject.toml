@@ -16,12 +16,12 @@ include = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.12"
 
 # Web 框架 - FastAPI
-fastapi = "^0.109.0"
+fastapi = ">=0.135.3,<1"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
-python-multipart = "^0.0.9"  # 文件上传支持
+python-multipart = ">=0.0.31,<0.1"  # 文件上传支持
 jinja2 = "^3.1.3"            # 模板引擎
 websockets = "^12.0"         # WebSocket 支持
 aiofiles = "^23.2.1"         # 异步文件操作
@@ -29,7 +29,7 @@ aiofiles = "^23.2.1"         # 异步文件操作
 # 图像处理
 numpy = ">=2,<3"
 opencv-python-headless = ">=4.12,<5"
-pillow = ">=10,<13"
+pillow = ">=13,<14"
 scipy = ">=1.10,<1.17"
 PyTurboJPEG = ">=1.7,<2"
 
@@ -68,14 +68,14 @@ spidev = { version = "^3.6", markers = "sys_platform == 'linux'" }
 
 [tool.poetry.group.dev.dependencies]
 # 测试
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
-pytest-cov = "^4.1.0"
+pytest = "^9.0.3"
+pytest-asyncio = "^1.0.0"
+pytest-cov = "^7.0.0"
 pytest-mock = "^3.12.0"
-httpx = "^0.26.0"            # FastAPI 测试客户端
+httpx = ">=0.28.1,<1"       # FastAPI 测试客户端
 
 # 代码质量
-black = "^24.1.0"
+black = "^26.10.1"
 ruff = "^0.2.0"
 mypy = "^1.8.0"
 pre-commit = "^3.6.0"
@@ -127,7 +127,7 @@ ignore = [
 
 [tool.black]
 line-length = 88
-target-version = ['py310']
+target-version = ['py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -145,7 +145,7 @@ extend-exclude = '''
 '''
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false  # 逐步启用
