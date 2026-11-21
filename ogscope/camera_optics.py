@@ -165,5 +165,25 @@ SC230AI_16MM_F14_OPTICS = CameraOpticsProfile(
     calibrated_focal_length_mm=IMX327_16MM_F14_OPTICS.calibrated_focal_length_mm,
 )
 
+# SC235HAI 像元 2.8 µm，比 IMX327 小，同一镜头下视场约小 3.4%；标定焦距属于镜头，
+# 沿用 IMX327 的标定值，直到有 SC235HAI 自己的星图标定。
+# The SC235HAI's 2.8 µm pitch is smaller than the IMX327's, so with the same
+# lens it sees a field about 3.4% narrower; the calibrated focal length
+# belongs to the lens and stays the IMX327's until the SC235HAI has its own
+# from solved star fields.
+SC235HAI_16MM_F14_OPTICS = CameraOpticsProfile(
+    profile_id="sc235hai-16mm-f1.4-ircut-v1",
+    sensor_model="SC235HAI",
+    sensor_pixel_pitch_um=2.8,
+    sensor_recording_width_px=1920,
+    sensor_recording_height_px=1080,
+    lens_focal_length_mm=16.0,
+    lens_aperture_f_number=1.4,
+    lens_resolution_rating_mp=5.0,
+    lens_mount="M12",
+    ir_cut_filter=True,
+    calibrated_focal_length_mm=IMX327_16MM_F14_OPTICS.calibrated_focal_length_mm,
+)
+
 DEFAULT_EFFECTIVE_FOV_WIDTH_DEG = 13.01
 DEFAULT_EFFECTIVE_FOV_HEIGHT_DEG = 7.34

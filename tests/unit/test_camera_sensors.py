@@ -10,6 +10,7 @@ from ogscope.platform.hardware import camera_sensors
 from ogscope.platform.hardware.camera_sensors import (
     IMX327_PROFILE,
     SC230AI_PROFILE,
+    SC235HAI_PROFILE,
     detect_sensor,
     parse_sensor_entities,
     profile_for_entity,
@@ -52,6 +53,9 @@ SC230AI_GRAPH = (
     .replace("SRGGB12_1X12/1280x720", "SBGGR10_1X10/1920x1080")
     .replace("/dev/v4l-subdev1", "/dev/v4l-subdev2")
 )
+
+# 换接 SC235HAI 时：与 SC230AI 同在 0x30 / With an SC235HAI, at the SC230AI's 0x30
+SC235HAI_GRAPH = SC230AI_GRAPH.replace("sc230ai 10-0030", "sc235hai 10-0030")
 
 
 # 一个 ISP 的媒体图：没有传感器 / An ISP's media graph: no sensor
@@ -97,6 +101,7 @@ def test_only_sensor_entities_are_read_from_the_graph() -> None:
         ("imx327 10-001a", IMX327_PROFILE),
         ("imx290 10-001a", IMX327_PROFILE),
         ("sc230ai 10-0030", SC230AI_PROFILE),
+        ("sc235hai 10-0030", SC235HAI_PROFILE),
         ("ov5647 10-0036", None),
     ],
 )
@@ -196,6 +201,29 @@ def test_the_camera_adopts_the_sc230ai_it_finds(monkeypatch) -> None:
     assert info["sensor"] == "SC230AI"
     assert info["sensor_detection"]["state"] == "detected"
     assert info["optics"]["sensor"]["model"] == "SC230AI"
+
+
+@pytest.mark.unit
+def test_the_camera_adopts_the_sc235hai_it_finds(monkeypatch) -> None:
+    run, _ = _media_ctl(SC235HAI_GRAPH)
+    monkeypatch.setattr(subprocess, "run", run)
+    camera = V4L2RawCamera({})
+    camera._detect_sensor()
+    assert camera.sensor_profile is SC235HAI_PROFILE
+    assert camera.sensor_entity == "sc235hai 10-0030"
+    assert (camera.media_bus_format, camera.pixel_format, camera.bayer_pattern) == (
+        "SBGGR10_1X10",
+        "BG10",
+        "BGGR",
+    )
+    assert (camera.active_width, camera.active_height) == (1920, 1080)
+    assert camera.gain_db_per_step == 0.3
+    assert camera.driver_name == "v4l2-sc235hai-software-ae"
+    info = camera.get_camera_info()
+    assert info["sensor"] == "SC235HAI"
+    # 像元 2.8 µm，不是 SC230AI 的 2.9 µm / 2.8 µm pixels, not the SC230AI's 2.9 µm
+    assert info["optics"]["sensor"]["model"] == "SC235HAI"
+    assert info["optics"]["sensor"]["pixel_pitch_um"] == 2.8
 
 
 @pytest.mark.unit
