@@ -16,7 +16,7 @@
 ### 软件
 
 - Raspberry Pi OS Lite 64-bit（Debian/apt 系）
-- Python 3.10+
+- Python 3.12+
 - Git
 - 首次安装时可访问 apt、PyPI 和 GitHub
 

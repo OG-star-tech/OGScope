@@ -16,7 +16,7 @@ Use this guide for a first installation and basic validation on a Raspberry Pi Z
 ### Software
 
 - Raspberry Pi OS Lite 64-bit (Debian/apt based)
-- Python 3.10+
+- Python 3.12+
 - Git
 - Access to apt, PyPI, and GitHub during first installation
 

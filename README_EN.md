@@ -44,13 +44,13 @@ English | [中文](README.md)
 - **Processor**: Raspberry Pi Zero 2W (ARM Cortex-A53)
 - **Camera**: IMX327 sensor (1920x1080)
 - **Display**: 2.4" SPI LCD (240x320)
-- **Software**: Python 3.10+ + FastAPI
+- **Software**: Python 3.12+ + FastAPI
 
 ## Quick Start
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.12+
 - Poetry 1.2+
 - Raspberry Pi Zero 2W (Raspberry Pi OS)
 

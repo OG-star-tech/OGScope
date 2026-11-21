@@ -11,8 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 与 pyproject.toml 中 python = "^3.10" 一致 / Match Poetry python constraint
-        python-version: ["3.10", "3.11", "3.12"]
+        # 与 pyproject.toml 中 python = "^3.12" 一致 / Match Poetry python constraint
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
     - name: 设置 Python
       uses: actions/setup-python@v4
       with:
-        python-version: "3.10"
+        python-version: "3.12"
 
     - name: 安装 Poetry
       uses: snok/install-poetry@v1
