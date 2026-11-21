@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
+import pytest
 
 from ogscope.algorithms.plate_solve.solver import SolveResult
-from ogscope.core.realtime.service import RealtimeSolveService, SolveFrameSnapshot
+from ogscope.camera_optics import SC235HAI_16MM_F14_OPTICS
+from ogscope.core.realtime import service as service_module
+from ogscope.core.realtime.service import (
+    RealtimeSolveService,
+    SolveFrameSnapshot,
+    camera_fov_deg,
+)
 
 
 def _solve_result(status: str, *, structural: bool = False) -> SolveResult:
@@ -163,4 +171,120 @@ def test_acquisition_clock_step_invalidates_target_but_preserves_match(monkeypat
     assert service.state.last_result["status"] == "MATCH_FOUND"
     assert (
         service.state.last_result["astronomy"]["reason"] == "acquisition_clock_changed"
+    )
+
+
+# -- 视场估计：相机给出的视场 / The FOV estimate: the camera's field ------------------
+
+
+def _camera_info(width: float | None) -> dict:
+    """相机信息，带有效视场 / Camera info with an effective field."""
+    if width is None:
+        return {}
+    return {"optics": {"effective_fov_deg": {"width": width, "height": 7.09}}}
+
+
+@pytest.mark.parametrize(
+    "info, fov",
+    [
+        (_camera_info(12.57), 12.57),
+        (_camera_info(13), 13.0),
+        ({}, None),
+        ({"optics": None}, None),
+        ({"optics": {"effective_fov_deg": {"width": "12.57"}}}, None),
+        (_camera_info(0.0), None),
+        (_camera_info(float("nan")), None),
+        (_camera_info(True), None),
+        (None, None),
+    ],
+)
+def test_camera_fov_is_the_effective_width_or_nothing(info, fov) -> None:
+    """只接受有效的数值宽度 / Only a valid numeric width counts."""
+    assert camera_fov_deg(info) == fov
+
+
+def test_the_fov_estimate_prefers_the_request_then_the_camera() -> None:
+    """请求 > 相机 > 设置 / Request, then camera, then the setting."""
+    service = RealtimeSolveService()
+    settings_fov = service.solver.fov_deg
+    assert service._fov_estimate_for(_camera_info(12.57)) == (12.57, "camera")
+    assert service._fov_estimate_for({}) == (settings_fov, "settings")
+    service._fov_estimate = 11.0
+    assert service._fov_estimate_for(_camera_info(12.57)) == (11.0, "request")
+
+
+def test_a_frame_is_solved_from_the_estimate_given() -> None:
+    """给定估计传给解算器 / The given estimate reaches the solver."""
+    service = RealtimeSolveService()
+    service.solver = MagicMock()
+    service._solve_frame_sync(np.zeros((8, 8, 3), dtype=np.uint8), 12.57)
+    assert service.solver.solve_from_bgr_frame.call_args.kwargs["fov_estimate"] == 12.57
+
+
+def test_the_result_says_where_the_estimate_came_from() -> None:
+    """结果记录视场起点 / The result records the starting field."""
+    service = RealtimeSolveService()
+    service._apply_solve_result(
+        _solve_result("MATCH_FOUND"), fov_estimate=(12.5654, "camera")
+    )
+    assert service.state.last_result["fov_estimate_deg"] == 12.565
+    assert service.state.last_result["fov_estimate_source"] == "camera"
+
+
+class _SC235HAICamera:
+    """给出 SC235HAI 光学的相机 / A camera reporting the SC235HAI's optics."""
+
+    is_capturing = True
+
+    def get_camera_info(self) -> dict:
+        optics = SC235HAI_16MM_F14_OPTICS.describe_capture(
+            capture_width_px=1280, capture_height_px=720, sampling_mode="native"
+        )
+        return {"optics": optics}
+
+
+class _Manager:
+    """逐帧给出新帧 / Hands out a new frame each time."""
+
+    def __init__(self) -> None:
+        self.camera = _SC235HAICamera()
+        self.frame_id = 0
+
+    def get_camera_instance(self):
+        return self.camera
+
+    async def get_raw_frame(self):
+        self.frame_id += 1
+        return np.zeros((720, 1280, 3), dtype=np.uint8), self.frame_id, time.time()
+
+
+@pytest.mark.asyncio
+async def test_live_solves_start_from_the_fitted_sensors_field(monkeypatch) -> None:
+    """实时解算从相机给出的视场开始，而非 13.01° 设置 /
+    Live solves start from the camera's field, not the 13.01° setting."""
+    service = RealtimeSolveService()
+    service._analysis_interval_sec = 0.0
+    service.state.running = True
+
+    def solve(**kwargs):
+        service.state.running = False
+        return _solve_result("MATCH_FOUND")
+
+    service.solver = MagicMock()
+    service.solver.fov_deg = 13.01
+    service.solver.solve_from_bgr_frame.side_effect = solve
+
+    async def inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "run_solver_job", inline)
+    monkeypatch.setattr(service, "_should_retain_snapshot", lambda solved: False)
+
+    await service._run_loop(_Manager())
+
+    fov = service.solver.solve_from_bgr_frame.call_args.kwargs["fov_estimate"]
+    assert fov == pytest.approx(12.57, abs=0.005)
+    assert service.state.last_result["fov_estimate_source"] == "camera"
+    assert service.state.last_result["fov_estimate_deg"] == pytest.approx(
+        12.57, abs=0.005
     )

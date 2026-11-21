@@ -47,6 +47,7 @@
   - `result: object | null`
     - `observation_time_utc`：可选，当前图像曝光中点 UTC；天文坐标换算应优先使用该时刻
     - `capture_completed_at_utc`、`capture_exposure_us`：可选抓帧诊断字段
+    - `fov_estimate_deg`、`fov_estimate_source`：可选，本次解算起点的水平视场及来源：`request`（`analysis/start` 的 `fov_estimate`）、`camera`（相机 `info.optics.effective_fov_deg`，默认）或 `settings`（相机未给出时的 `solver_fov_deg`）；`fov_deg` 仍是解算得到的视场
     - `centroid_quality`：可选提星与遮挡回退诊断；`strategy`、`normal_status`、`fallback_attempted`、`fallback_status` 描述实际采用的路径
       - `scene` 仅在常规解算失败后分析；`has_structural_evidence` 只表示发现大亮区或长结构边缘，星点密度本身不构成遮挡证据
       - `metrics.filter_limited=true` 表示过滤达到保守上限，剩余候选已放行；调用方不得把该开发诊断转换为用户错误

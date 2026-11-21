@@ -493,8 +493,11 @@ class Settings(BaseSettings):
     solver_fov_deg: float = Field(
         default=DEFAULT_EFFECTIVE_FOV_WIDTH_DEG,
         description=(
-            "当前 IMX327 1280x720 + 16mm 镜头的有效水平视场(度) / "
-            "Effective horizontal FOV for the current IMX327 1280x720 + 16mm capture"
+            "相机未给出视场时的水平视场估计(度)；默认为 IMX327 1280x720 + 16mm 镜头。"
+            "相机实时解算从相机给出的 info.optics.effective_fov_deg 开始 / "
+            "Horizontal FOV estimate (deg) when the camera gives none; the default "
+            "is the IMX327 at 1280x720 behind the 16 mm lens. Live camera solves "
+            "start from the camera's info.optics.effective_fov_deg"
         ),
     )
     solver_max_stars: int = Field(default=80, description="用于解算的最大星点数量")

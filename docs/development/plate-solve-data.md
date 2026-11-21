@@ -35,6 +35,9 @@
 
 应用配置项见 `ogscope/config.py`：`plate_solve_dir`、`solver_tetra_database_path`、`solver_fov_deg`、`solver_fov_max_error_deg`、`solver_timeout_ms`。
 
+相机实时解算的视场估计取相机给出的 `info.optics.effective_fov_deg.width`（随传感器像元、采集模式与旋转变化，如 SC235HAI 的 2.8 µm 像元比 IMX327 窄约 3.4%）；调用方在 `analysis/start` 给出 `fov_estimate` 时以其为准；相机未给出视场时才用 `solver_fov_deg`。结果中的 `fov_estimate_deg` 与 `fov_estimate_source`（`request` / `camera` / `settings`）记录本次解算的起点。
+Live camera solves start from the field the camera gives, `info.optics.effective_fov_deg.width` (it follows the sensor's pixels, the capture mode and the rotation: the SC235HAI's 2.8 µm pixels see about 3.4% less than the IMX327). A `fov_estimate` given to `analysis/start` wins; `solver_fov_deg` applies only when the camera gives no field. `fov_estimate_deg` and `fov_estimate_source` (`request` / `camera` / `settings`) in the result record where the solve started.
+
 **systemd** 部署时：将 `WorkingDirectory` 设为项目根，并确保 `data/plate_solve/default_database.npz` 存在或环境变量指向设备上可读路径。
 
 ## 4. 版本与备份 / Versioning and backup
@@ -54,7 +57,7 @@
 |------|-----------|------|
 | `DATABASE_ERROR` / 无法加载 | `.npz` 缺失或路径错误 | 检查文件与 `OGSCOPE_SOLVER_TETRA_DATABASE_PATH` |
 | `TOO_FEW` | 检出星点 &lt; 4 | 曝光/阈值、减少云与前景光 |
-| `NO_MATCH` / `TIMEOUT` | FOV 与库不匹配、假星多 | 调整 `solver_fov_deg`、星点提取、`solve_timeout_ms` |
+| `NO_MATCH` / `TIMEOUT` | FOV 与库不匹配、假星多 | 核对结果中的 `fov_estimate_deg` 与相机的 `effective_fov_deg`；调整星点提取、`solve_timeout_ms`（`solver_fov_deg` 仅在相机未给出视场时生效） |
 | 窄视场长期失败 | 默认库偏 10°–30° 一类 | 使用 `generate_database` 生成匹配 FOV 的库 |
 
 ## 7. 性能提示 / Performance
