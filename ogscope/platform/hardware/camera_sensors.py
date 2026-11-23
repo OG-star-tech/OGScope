@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from ogscope.camera_optics import (
     IMX327_16MM_F14_OPTICS,
     SC230AI_16MM_F14_OPTICS,
+    SC235HAI_16MM_F14_OPTICS,
     CameraOpticsProfile,
 )
 
@@ -75,7 +76,27 @@ SC230AI_PROFILE = SensorProfile(
     optics=SC230AI_16MM_F14_OPTICS,
 )
 
-SENSOR_PROFILES: tuple[SensorProfile, ...] = (IMX327_PROFILE, SC230AI_PROFILE)
+SC235HAI_PROFILE = SensorProfile(
+    model="SC235HAI",
+    entity_names=("sc235hai",),
+    media_bus_format="SBGGR10_1X10",
+    pixel_format="BG10",
+    bit_depth=10,
+    bayer_pattern="BGGR",
+    # 驱动只有 1080p 模式，与 SC230AI 相同；增益同样按 0.3 dB 一档
+    # The driver has only a 1080p mode, like the SC230AI's; its gain also
+    # counts in 0.3 dB steps
+    active_width=1920,
+    active_height=1080,
+    gain_db_per_step=0.3,
+    optics=SC235HAI_16MM_F14_OPTICS,
+)
+
+SENSOR_PROFILES: tuple[SensorProfile, ...] = (
+    IMX327_PROFILE,
+    SC230AI_PROFILE,
+    SC235HAI_PROFILE,
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import threading
 import time
 import uuid
@@ -28,6 +29,25 @@ from ogscope.domain.analysis.astrometry import (
 )
 from ogscope.domain.camera.encoding import OpenCVEncoder, create_preview_encoder
 from ogscope.web.camera_shared import get_camera_manager
+
+
+def camera_fov_deg(camera_info: Any) -> float | None:
+    """相机为当前帧给出的水平视场 / The horizontal field the camera gives for its frames.
+
+    取 info.optics.effective_fov_deg.width：按当前传感器像元、采集模式、裁切与旋转
+    以产品标定焦距算出，正是送去解算的那一帧的宽度视场。缺失或无效时返回 None。
+    From info.optics.effective_fov_deg.width: the fitted sensor's pixels, the
+    capture mode, crop and rotation through the product-calibrated focal
+    length - the width of exactly the frame handed to the solver. None when
+    missing or invalid.
+    """
+    optics = camera_info.get("optics") if isinstance(camera_info, dict) else None
+    effective = optics.get("effective_fov_deg") if isinstance(optics, dict) else None
+    width = effective.get("width") if isinstance(effective, dict) else None
+    if isinstance(width, bool) or not isinstance(width, (int, float)):
+        return None
+    width = float(width)
+    return width if math.isfinite(width) and 0.0 < width < 180.0 else None
 
 
 @dataclass(slots=True)
@@ -517,9 +537,11 @@ class RealtimeSolveService:
                 )
                 if use_fullsolve:
                     solve_started = time.monotonic()
+                    fov_estimate, fov_source = self._fov_estimate_for(camera_info)
                     solved = await run_solver_job(
                         self._solve_frame_sync,
                         frame,
+                        fov_estimate,
                     )
                     snapshot: SolveFrameSnapshot | None = None
                     snapshot_attempted = self._should_retain_snapshot(solved)
@@ -543,6 +565,7 @@ class RealtimeSolveService:
                         frame_id=frame_id,
                         snapshot=snapshot,
                         snapshot_attempted=snapshot_attempted,
+                        fov_estimate=(fov_estimate, fov_source),
                     )
                     self.state.fullsolve_count += 1
                     self._log_event(
@@ -550,6 +573,9 @@ class RealtimeSolveService:
                         frame_count=self.state.frame_count,
                         fullsolve_count=self.state.fullsolve_count,
                         status=solved.status,
+                        fov_estimate_deg=round(fov_estimate, 3),
+                        fov_estimate_source=fov_source,
+                        fov_deg=solved.fov_deg,
                         detected_stars=solved.detected_stars,
                         matches=solved.matches,
                         t_solve_ms=solved.t_solve_ms,
@@ -597,9 +623,28 @@ class RealtimeSolveService:
             json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
         )
 
+    def _fov_estimate_for(self, camera_info: Any) -> tuple[float, str]:
+        """本帧解算的视场估计及来源 / This frame's FOV estimate and where it came from.
+
+        调用方显式给出的估计优先；否则用相机给出的视场（随传感器像元与采集模式变化，
+        如 SC235HAI 的 2.8 µm 像元比 IMX327 窄约 3.4%）；相机未给出时才用
+        solver_fov_deg 设置。
+        An estimate the caller gave wins; otherwise the field the camera gives
+        (it follows the sensor's pixels and the capture mode: the SC235HAI's
+        2.8 µm pixels see about 3.4% less than the IMX327); the solver_fov_deg
+        setting only when the camera gives none.
+        """
+        if self._fov_estimate is not None:
+            return float(self._fov_estimate), "request"
+        camera = camera_fov_deg(camera_info)
+        if camera is not None:
+            return camera, "camera"
+        return float(self.solver.fov_deg), "settings"
+
     def _solve_frame_sync(
         self,
         frame: Any,
+        fov_estimate: float | None = None,
     ) -> SolveResult:
         """同步解算单帧（线程池中调用）/ Sync solve for one frame."""
         # 相机输出 RGB；解算器接收 BGR 副本，原帧仍供精确快照使用。
@@ -615,7 +660,9 @@ class RealtimeSolveService:
             hint_ra_deg=self._hint_ra,
             hint_dec_deg=self._hint_dec,
             solve_source="realtime",
-            fov_estimate=self._fov_estimate,
+            fov_estimate=(
+                fov_estimate if fov_estimate is not None else self._fov_estimate
+            ),
             fov_max_error=self._fov_max_error,
             solve_timeout_ms=self._solve_timeout_ms,
         )
@@ -686,9 +733,16 @@ class RealtimeSolveService:
         frame_id: int | None = None,
         snapshot: SolveFrameSnapshot | None = None,
         snapshot_attempted: bool = False,
+        fov_estimate: tuple[float, str] | None = None,
     ) -> None:
         """写入解算结果 / Persist solve result"""
         row = solved.to_dict()
+        if fov_estimate is not None:
+            # 解算起点的视场及来源（request / camera / settings），可选增量字段。
+            # The FOV the solve started from and its source (request / camera /
+            # settings): optional additive fields.
+            row["fov_estimate_deg"] = round(float(fov_estimate[0]), 3)
+            row["fov_estimate_source"] = fov_estimate[1]
         # Bind identity to the producing session, including later Core reads. /
         # 目标身份绑定产出会话，后续 Core 读取也保持同一目标。
         row["target_pole"] = self.state.target_pole

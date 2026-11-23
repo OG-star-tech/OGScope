@@ -53,6 +53,7 @@ upstream consumers should ignore results from an older session.
   - `result: object | null`
     - `observation_time_utc`: optional exposure-midpoint UTC for the current frame; astronomical coordinate conversion should prefer it
     - `capture_completed_at_utc`, `capture_exposure_us`: optional capture diagnostics
+    - `fov_estimate_deg`, `fov_estimate_source`: optional; the horizontal FOV the solve started from and its source: `request` (`fov_estimate` of `analysis/start`), `camera` (the camera's `info.optics.effective_fov_deg`, the default) or `settings` (`solver_fov_deg` when the camera gives none); `fov_deg` is still the solved field
     - `centroid_quality`: optional extraction and obstruction-fallback diagnostics; `strategy`, `normal_status`, `fallback_attempted`, and `fallback_status` describe the path actually used
       - `scene` is analyzed only after a normal solve failure; `has_structural_evidence` requires a large bright region or long structural edges, and star density alone is never obstruction evidence
       - `metrics.filter_limited=true` means filtering reached its conservative cap and retained the remaining candidates; callers must not turn this developer diagnostic into a user error
