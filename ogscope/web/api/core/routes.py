@@ -181,7 +181,25 @@ async def core_camera_lease(body: CoreCameraLeaseRequest) -> dict:
 
 @router.post("/core/v1/camera/start", response_model=CoreCameraControlResponse)
 async def core_camera_start() -> CoreCameraControlResponse:
-    """启动相机（Core 标准契约）/ Start camera (Core contract)."""
+    """启动相机（Core 标准契约）/ Start camera (Core contract).
+
+    相机故障只能靠重启服务恢复时，显式启动（重试）会重启本服务：答复 503，
+    随后进程退出，systemd 重新启动。/ When the camera fault needs a service
+    restart, an explicit start (a retry) restarts this service: it answers 503,
+    then the process exits and systemd starts it again.
+    """
+    from ogscope.web.camera_shared import get_camera_manager
+
+    manager = get_camera_manager()
+    if manager.restart_required:
+        manager.restart_service()
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "相机服务正在重启以恢复相机，约半分钟后重试 / The camera service "
+                "is restarting to recover the camera; try again in about half a minute"
+            ),
+        )
     try:
         data = await core_contract_service.start_camera()
         return CoreCameraControlResponse(**data)

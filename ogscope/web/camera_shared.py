@@ -653,6 +653,28 @@ class CameraManager:
             self._logger.warning("关闭相机资源异常 / Failed to close camera: %s", e)
             return False
 
+    @property
+    def restart_required(self) -> bool:
+        """相机故障只能靠重启服务恢复 / The camera fault needs a service restart."""
+        return self._restart_required
+
+    def restart_service(self, *, delay_sec: float = 0.5) -> None:
+        """重启服务以恢复相机：稍后以非零状态退出，systemd 重新启动 / Restart the
+        service to recover the camera: exit non-zero shortly, and systemd starts it
+        again (``Restart=on-failure``).
+
+        只在显式启动相机（重试）时调用，预览的自动重连不会触发。卡住的读帧线程可能
+        阻止正常退出，因此直接 ``os._exit``；内核随进程回收 V4L2 句柄。
+        Called only for an explicit camera start (a retry), never by a preview's
+        automatic reconnect. A stuck read worker could hold up a graceful exit, so
+        ``os._exit``; the kernel releases the V4L2 handles with the process.
+        """
+        self._logger.critical(
+            "camera_service_restart reason=%s",
+            self._health_error or "camera restart required",
+        )
+        asyncio.get_running_loop().call_later(delay_sec, os._exit, 75)
+
     def _mark_restart_required(self, reason: str) -> None:
         """标记不可在进程内恢复的相机故障 / Mark a camera fault unsafe for in-process recovery."""
         self._restart_required = True
@@ -826,6 +848,13 @@ class CameraManager:
         """关闭原生资源前收回所有工作线程 / Drain every worker before closing native resources."""
         inflight = self._inflight_read_future
         if inflight is not None and not inflight.done():
+            # 读帧可能仍在等待一帧结算后的新帧（长曝光时远超排空预算）：让它在当前
+            # 这帧之后放弃。/ The read may still be waiting for a frame newer than a
+            # settle, far beyond the drain budget at long exposures: let it give up
+            # after the frame under way.
+            abort_read = getattr(self._camera, "abort_read", None)
+            if callable(abort_read):
+                abort_read()
             try:
                 # shield 防止 wait_for 取消仍在工作线程中收尾的读请求。
                 # shield keeps wait_for from cancelling the read that is draining in a worker thread.

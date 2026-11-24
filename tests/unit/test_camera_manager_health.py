@@ -276,3 +276,39 @@ async def test_reconfigure_timeout_marks_restart_required_and_stops_grabber() ->
     assert manager._restart_required is True
     assert manager._grabber_task is None
     await asyncio.sleep(0.1)
+
+
+class _BlockedReadCamera(_FrameCamera):
+    """读帧卡在等待新帧，直到被 abort_read 放弃 / A read stuck waiting for a
+    fresh frame until abort_read gives it up."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        import threading
+
+        self.is_capturing = True
+        self.aborted = threading.Event()
+
+    def blocked_read(self):
+        self.aborted.wait(timeout=5.0)
+        return None
+
+    def abort_read(self) -> None:
+        self.aborted.set()
+
+
+@pytest.mark.asyncio
+async def test_drain_aborts_a_read_waiting_for_a_fresh_frame() -> None:
+    """排空先让进行中的读帧放弃，不必等满长曝光的预算，也无需重启服务。
+    The drain first makes the read under way give up, so it neither waits out a
+    long exposure's budget nor needs a service restart."""
+    manager = CameraManager()
+    camera = _BlockedReadCamera()
+    manager._camera = camera
+    manager._grabber_drain_timeout_sec = 1.0
+    manager._inflight_read_future = asyncio.get_running_loop().run_in_executor(
+        None, camera.blocked_read
+    )
+    assert await manager._drain_preview_workers_locked() is True
+    assert camera.aborted.is_set()
+    assert manager.restart_required is False
