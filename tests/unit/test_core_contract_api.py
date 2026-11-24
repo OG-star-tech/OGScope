@@ -663,3 +663,29 @@ def test_current_policy_is_explicit_and_running_changes_conflict(client, monkeyp
     assert response.status_code == 409
     assert received[0]["target_pole"] == "south"
     assert received[0]["astronomy"].policy == "current_pole_v1"
+
+
+def test_core_camera_start_restarts_the_service_when_the_camera_needs_it(
+    client, monkeypatch
+):
+    """相机需要重启服务时，显式启动（重试）会重启服务并答复 503。
+    When the camera needs a service restart, an explicit start (a retry) restarts
+    the service and answers 503."""
+    from ogscope.core.application import core_service
+    from ogscope.web.camera_shared import get_camera_manager
+
+    manager = get_camera_manager()
+    restarts: list[bool] = []
+    monkeypatch.setattr(manager, "_restart_required", True)
+    monkeypatch.setattr(manager, "restart_service", lambda **_: restarts.append(True))
+
+    async def must_not_start():
+        raise AssertionError("no camera start while a restart is required")
+
+    monkeypatch.setattr(
+        core_service.core_contract_service, "start_camera", must_not_start
+    )
+    response = client.post("/api/core/v1/camera/start")
+    assert response.status_code == 503
+    assert "restarting" in response.json()["detail"]
+    assert restarts == [True]

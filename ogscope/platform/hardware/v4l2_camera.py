@@ -97,6 +97,9 @@ class V4L2RawCamera:
     def __init__(self, config: dict[str, Any]):
         self.config = config
         self._isp = None
+        # abort_read() 递增，进行中的 _read_fresh 随之放弃 / abort_read() bumps it; a
+        # _read_fresh under way then gives up.
+        self._read_abort_epoch = 0
         self._isp_mode = str(config.get("v4l2_processing", "software"))
         self._isp_error: str | None = None
         self.requires_service_restart = False
@@ -1545,6 +1548,14 @@ class V4L2RawCamera:
             logger.error("V4L2 抓帧失败 / V4L2 capture failed: %s", exc)
             return None
 
+    def abort_read(self) -> None:
+        """让进行中的读帧在当前帧后放弃 / Make the read under way give up after its
+        current frame: the camera is being stopped, and waiting for a frame newer
+        than a settle could outlast the stop's budget. Later reads are unaffected.
+        相机正在停止，等待结算后的新帧可能超过停止预算；之后的读帧不受影响。
+        """
+        self._read_abort_epoch += 1
+
     def _read_fresh(self, capture: Any) -> tuple[bool, Any]:
         """跳过结算前开始曝光的排队帧 / Skip queued frames whose exposure began
         before the last settle.
@@ -1573,7 +1584,8 @@ class V4L2RawCamera:
             + 3.0 * (period_s + exposure_s)
         )
         dropped = 0
-        while self.is_capturing:
+        epoch = self._read_abort_epoch
+        while self.is_capturing and epoch == self._read_abort_epoch:
             asked = time.monotonic()
             if not capture.grab():
                 return False, None

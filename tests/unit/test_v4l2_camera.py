@@ -1440,3 +1440,51 @@ def test_repeated_start_preserves_idle_freshness_tracking():
     assert camera.start_capture()
     assert camera._last_capture_completed_mono == 12.0
     assert camera.is_within_fresh_capture_epoch()
+
+
+class _OldFramesCapture:
+    """只交出结算前排队旧帧的抓帧替身 / Capture double that only yields frames
+    queued before the settle (no timestamps, each grab waits briefly)."""
+
+    def __init__(self) -> None:
+        self.grabs = 0
+
+    def grab(self) -> bool:
+        import time
+
+        self.grabs += 1
+        time.sleep(0.02)
+        return True
+
+    def get(self, _property: int) -> float:
+        return 0.0
+
+    def retrieve(self):
+        return True, np.zeros((120, 160), dtype=np.uint16)
+
+
+@pytest.mark.unit
+def test_abort_read_makes_a_fresh_read_give_up_after_the_current_frame() -> None:
+    """停止相机时，等待结算后新帧的读帧应在当前帧后放弃，而非等满超时。
+    Stopping the camera makes a read waiting for a frame newer than a settle give
+    up after the frame under way instead of running to its deadline."""
+    import threading
+    import time
+
+    camera = _ready_camera(capture_timeout_sec=8.0)
+    camera._fresh_after_mono = time.monotonic() + 3600.0  # every frame is old
+    capture = _OldFramesCapture()
+    result: list[object] = []
+    reader = threading.Thread(target=lambda: result.append(camera._read_fresh(capture)))
+    started = time.monotonic()
+    reader.start()
+    time.sleep(0.15)
+    camera.abort_read()
+    reader.join(timeout=2.0)
+    assert not reader.is_alive()
+    assert result == [(False, None)]
+    assert time.monotonic() - started < 1.0
+    # 之后的读帧不受影响 / Later reads are unaffected.
+    camera._fresh_after_mono = 0.0
+    ok, _frame = camera._read_fresh(capture)
+    assert ok is True
